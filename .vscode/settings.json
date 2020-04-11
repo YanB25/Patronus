@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "*.p4": "c",
+        "cstdint": "cpp"
+    }
+}
