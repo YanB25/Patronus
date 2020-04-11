@@ -33,8 +33,7 @@ private:
   void dirThread();
 
   void sendData2App(const RawMessage *m);
-  void sendAck2AppByPassSwitch(const RawMessage *, RawMessageType type,
-                               uint64_t value = 0);
+
 };
 
 #endif /* __DIRECTORY_H__ */

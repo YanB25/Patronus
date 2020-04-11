@@ -23,20 +23,13 @@ struct ExchangeMeta {
 
   ExPerThread appTh[MAX_APP_THREAD];
   ExPerThread dirTh[NR_DIRECTORY];
-  // ExPerThread cacheTh[NR_CACHE_AGENT];
 
   uint32_t appUdQpn[MAX_APP_THREAD];
   uint32_t dirUdQpn[NR_DIRECTORY];
-  // uint32_t cacheUdQpn[NR_CACHE_AGENT];
 
   uint32_t appRcQpn2dir[MAX_APP_THREAD][NR_DIRECTORY];
-  // uint32_t appRcQpn2cache[MAX_APP_THREAD][NR_CACHE_AGENT];
 
-  // uint32_t dirRcQpn2cache[NR_DIRECTORY][NR_CACHE_AGENT];
   uint32_t dirRcQpn2app[NR_DIRECTORY][MAX_APP_THREAD];
-
-  // uint32_t cacheRcQpn2dir[NR_CACHE_AGENT][NR_DIRECTORY];
-  // uint32_t cacheRcQpn2app[NR_CACHE_AGENT][MAX_APP_THREAD];
 
 } __attribute__((packed));
 

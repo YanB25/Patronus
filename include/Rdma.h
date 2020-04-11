@@ -3,15 +3,15 @@
 
 #define forceinline inline __attribute__((always_inline))
 
+#include <assert.h>
+#include <cstring>
 #include <infiniband/verbs.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <stdint.h>
-#include <cstring>
-#include <assert.h>
 
-#include <string>
 #include <list>
+#include <string>
 
 #include "Debug.h"
 
@@ -21,28 +21,28 @@
 #define PSN 3185
 
 struct RdmaContext {
-    uint8_t devIndex;
-    uint8_t port;
-    int gidIndex;
+  uint8_t devIndex;
+  uint8_t port;
+  int gidIndex;
 
-    ibv_context *ctx;
-    ibv_pd *pd;
+  ibv_context *ctx;
+  ibv_pd *pd;
 
-    uint16_t lid;
-    union ibv_gid gid;
+  uint16_t lid;
+  union ibv_gid gid;
 
-    RdmaContext() : ctx(NULL), pd(NULL) {}
+  RdmaContext() : ctx(NULL), pd(NULL) {}
 };
 
 struct Region {
-    uint64_t source;
-    uint32_t size;
+  uint64_t source;
+  uint32_t size;
 
-    uint64_t dest;
+  uint64_t dest;
 };
 
 //// Resource.cpp
-bool createContext(RdmaContext *context, uint8_t port = 1, int gidIndex = 3,
+bool createContext(RdmaContext *context, uint8_t port = 1, int gidIndex = 1,
                    uint8_t devIndex = 0);
 bool destoryContext(RdmaContext *context);
 
@@ -76,13 +76,13 @@ int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc);
 int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc);
 
 bool rdmaSend(ibv_qp *qp, uint64_t source, uint64_t size, uint32_t lkey,
-              ibv_ah *ah, uint32_t remoteQPN, int32_t imm = -1,
-              bool isSignaled = false);
+              ibv_ah *ah, uint32_t remoteQPN, bool isSignaled = false);
 
 bool rdmaSend(ibv_qp *qp, uint64_t source, uint64_t size, uint32_t lkey,
               int32_t imm = -1);
 
-bool rdmaReceive(ibv_qp *qp, uint64_t source, uint64_t size, uint32_t lkey, uint64_t wr_id = 0);
+bool rdmaReceive(ibv_qp *qp, uint64_t source, uint64_t size, uint32_t lkey,
+                 uint64_t wr_id = 0);
 bool rdmaReceive(ibv_srq *srq, uint64_t source, uint64_t size, uint32_t lkey);
 bool rdmaReceive(ibv_exp_dct *dct, uint64_t source, uint64_t size,
                  uint32_t lkey);
@@ -148,9 +148,5 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 //// Utility.cpp
 void rdmaQueryQueuePair(ibv_qp *qp);
 void checkDctSupported(struct ibv_context *ctx);
-
-//// FlowSteering.cpp
-void steeringWithMacUdp(ibv_qp *qp, RdmaContext *ctx, const uint8_t mac[6],
-                        uint16_t dstPort, uint16_t srcPort);
 
 #endif

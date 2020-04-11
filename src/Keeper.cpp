@@ -67,36 +67,6 @@ void Keeper::serverEnter() {
   memcached_return rc;
   uint64_t serverNum;
 
-  {
-    myIP = getIP();
-
-    std::ifstream host("../host");
-
-    bool findMe = false;
-    if (!host) {
-      Debug::notifyError("host file is not exist!");
-    } else {
-      std::string ip, mac, port;
-
-      int k = 0;
-      while (std::getline(host, ip, ' ')) {
-        std::getline(host, mac, ' ');
-        std::getline(host, port);
-
-        if (ip == myIP) {
-          myPort = std::stoi(port.c_str());
-          findMe = true;
-          // myNodeID = k;
-        }
-
-        k++;
-      }
-    }
-    if (!findMe) {
-      Debug::notifyError("host file is not contain me! [%s]", myIP.c_str());
-    }
-  }
-
   while (true) {
     rc = memcached_increment(memc, SERVER_NUM_KEY, strlen(SERVER_NUM_KEY), 1,
                              &serverNum);
@@ -104,7 +74,7 @@ void Keeper::serverEnter() {
 
       myNodeID = serverNum - 1;
 
-      printf("I am servers %d : %s\n", myNodeID, myIP.c_str());
+      printf("I am servers %d\n", myNodeID);
       return;
     }
     fprintf(stderr, "Server %d Counld't incr value and get ID: %s, retry...\n",
@@ -115,12 +85,6 @@ void Keeper::serverEnter() {
 
 void Keeper::serverConnect() {
 
-  // for (size_t k = 0; k < maxServer; ++k) {
-  //   if (k != myNodeID) {
-  //     connectNode(k);
-  //     printf("I connect server %zu\n", k);
-  //   }
-  // }
   size_t l;
   uint32_t flags;
   memcached_return rc;

@@ -82,7 +82,7 @@ static inline void fillSgeWr(ibv_sge &sg, ibv_exp_send_wr &wr, uint64_t source,
 // for UD and DC
 bool rdmaSend(ibv_qp *qp, uint64_t source, uint64_t size, uint32_t lkey,
               ibv_ah *ah, uint32_t remoteQPN /* remote dct_number */,
-              int32_t imm, bool isSignaled) {
+              bool isSignaled) {
 
   struct ibv_sge sg;
   struct ibv_send_wr wr;

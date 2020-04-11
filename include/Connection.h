@@ -13,15 +13,9 @@ struct RemoteConnection {
 
     uint32_t dsmRKey[NR_DIRECTORY];
     uint32_t dirMessageQPN[NR_DIRECTORY];
-    // ibv_ah *cacheToDirAh[NR_CACHE_AGENT][NR_DIRECTORY];
     ibv_ah *appToDirAh[MAX_APP_THREAD][NR_DIRECTORY];
 
-    // cache agent
     uint64_t cacheBase;
-
-    // uint32_t cacheRKey[NR_CACHE_AGENT];
-    // uint32_t cacheMessageQPN[NR_CACHE_AGENT];
-    // ibv_ah *dirToCacheAh[NR_DIRECTORY][NR_CACHE_AGENT];
 
     // app thread
     uint32_t appRKey[MAX_APP_THREAD];

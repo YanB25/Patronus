@@ -10,7 +10,6 @@ Directory::Directory(DirectoryConnection *dCon, RemoteConnection *remoteInfo,
     : dCon(dCon), remoteInfo(remoteInfo), machineNR(machineNR), dirID(dirID),
       nodeID(nodeID), dirTh(nullptr) {
 
-
   { // chunck alloctor
     GlobalAddress dsm_start;
     uint64_t per_directory_dsm_size = dCon->dsmSize / NR_DIRECTORY;
@@ -26,7 +25,7 @@ Directory::~Directory() { delete chunckAlloc; }
 
 void Directory::dirThread() {
 
-  bindCore(12 - dirID);
+  // bindCore(12 - dirID);
   Debug::notifyInfo("dir %d launch!\n", dirID);
 
   while (true) {
@@ -36,6 +35,13 @@ void Directory::dirThread() {
     switch (int(wc.opcode)) {
     case IBV_WC_RECV: // control message
     {
+      auto *m = (RawMessage *)dCon->message->getMessage();
+      printf("recv %d, [%d, %d]\n", m->num, m->node_id, m->app_id);
+
+  
+      RawMessage *send = (RawMessage *)dCon->message->getSendPool();
+      send->num = 666;
+      dCon->sendMessage2App(send, m->node_id, m->app_id);
 
       break;
     }
@@ -52,28 +58,8 @@ void Directory::dirThread() {
   }
 }
 
-void Directory::sendData2App(const RawMessage *m) {
-
-
-  rdmaWrite(dCon->data2app[m->appID][m->nodeID],
-            (uint64_t)dCon->dsmPool, m->destAddr,
-            1024, dCon->dsmLKey,
-            remoteInfo[m->nodeID].appRKey[m->appID], 11, true, 0);
-
-  dirSendDataCounter++;
-}
-
-void Directory::sendAck2AppByPassSwitch(const RawMessage *from_message,
-                                        RawMessageType type, uint64_t value) {
-  dirSendControlCounter++;
-
-  RawMessage *m = (RawMessage *)dCon->message->getSendPool();
-  memcpy(m, from_message, sizeof(RawMessage));
-
-  m->qpn = dCon->message->getQPN();
-  m->mtype = type;
-  m->is_app_req = 0;
-  m->destAddr = value;
-
-  dCon->sendMessage(m);
-}
+// void Directory::sendData2App(const RawMessage *m) {
+//   rdmaWrite(dCon->data2app[m->appID][m->nodeID], (uint64_t)dCon->dsmPool,
+//             m->destAddr, 1024, dCon->dsmLKey,
+//             remoteInfo[m->nodeID].appRKey[m->appID], 11, true, 0);
+// }
