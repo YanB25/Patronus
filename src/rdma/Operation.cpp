@@ -360,6 +360,36 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
   return true;
 }
 
+bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
+                        uint64_t compare, uint64_t swap, uint32_t lkey,
+                        uint32_t remoteRKey, uint64_t mask) {
+  struct ibv_sge sg;
+  struct ibv_exp_send_wr wr;
+  struct ibv_exp_send_wr *wrBad;
+
+  fillSgeWr(sg, wr, source, 8, lkey);
+
+  wr.exp_opcode = IBV_EXP_WR_EXT_MASKED_ATOMIC_CMP_AND_SWP;
+  wr.exp_send_flags = IBV_EXP_SEND_SIGNALED | IBV_EXP_SEND_EXT_ATOMIC_INLINE;
+ 
+  wr.ext_op.masked_atomics.log_arg_sz = 3;
+  wr.ext_op.masked_atomics.remote_addr = dest;
+  wr.ext_op.masked_atomics.rkey = remoteRKey;
+
+  auto &op = wr.ext_op.masked_atomics.wr_data.inline_data.op.cmp_swap;
+  op.compare_val = compare;
+  op.swap_val = swap;
+
+  op.compare_mask = mask;
+  op.swap_mask = mask;
+
+  if (ibv_exp_post_send(qp, &wr, &wrBad)) {
+    Debug::notifyError("Send with ATOMIC_CMP_AND_SWP failed.");
+    return false;
+  }
+  return true;
+}
+
 // DC
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,

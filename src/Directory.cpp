@@ -14,7 +14,7 @@ Directory::Directory(DirectoryConnection *dCon, RemoteConnection *remoteInfo,
     GlobalAddress dsm_start;
     uint64_t per_directory_dsm_size = dCon->dsmSize / NR_DIRECTORY;
     dsm_start.nodeID = nodeID;
-    dsm_start.addr = per_directory_dsm_size * dirID;
+    dsm_start.offset = per_directory_dsm_size * dirID;
     chunckAlloc = new GlobalAllocator(dsm_start, per_directory_dsm_size);
   }
 

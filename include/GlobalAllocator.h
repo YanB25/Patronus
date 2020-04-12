@@ -38,7 +38,7 @@ public:
 
     if (bitmap[bitmap_tail] == false) {
       bitmap[bitmap_tail] = true;
-      res.addr += bitmap_tail * define::kChunkSize;
+      res.offset += bitmap_tail * define::kChunkSize;
 
       bitmap_tail++;
     } else {
@@ -50,7 +50,7 @@ public:
   }
 
   void free_chunk(const GlobalAddress &addr) {
-    bitmap[(addr.addr - start.addr) / define::kChunkSize] = false;
+    bitmap[(addr.offset - start.offset) / define::kChunkSize] = false;
   }
 
 private:

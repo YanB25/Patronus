@@ -21,6 +21,25 @@ public:
   uint16_t getMyNodeID() { return myNodeID; }
   uint16_t getMyThreadID() { return thread_id; }
 
+  // RDMA operations
+  // buffer is registered memory
+  void read(char *buffer, GlobalAddress gaddr, size_t size);
+  void read_sync(char *buffer, GlobalAddress gaddr, size_t size);
+
+  void write(const char *buffer, GlobalAddress gaddr, size_t size);
+  void write_sync(const char *buffer, GlobalAddress gaddr, size_t size);
+
+  void cas(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+           uint64_t *rdma_buffer);
+  bool cas_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                uint64_t *rdma_buffer);
+
+  void cas_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+           uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
+  bool cas_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
+
+  // Memcached operations for sync
   size_t Put(uint64_t key, const void *value, size_t count) {
 
     std::string k = std::string("gam-") + std::to_string(key);
@@ -50,6 +69,7 @@ private:
 
   static thread_local int thread_id;
   static thread_local ThreadConnection *iCon;
+  static thread_local char *rdma_buffer;
 
   uint64_t baseAddr;
   uint32_t myNodeID;
@@ -63,6 +83,8 @@ private:
 
 public:
   void barrier(const std::string &ss) { keeper->barrier(ss); }
+
+  char *get_rdma_buffer() { return rdma_buffer; }
 
   void rpc_call_dir(const RawMessage &m, uint16_t node_id,
                     uint16_t dir_id = 0) {

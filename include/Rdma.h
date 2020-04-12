@@ -113,6 +113,10 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,
                         uint32_t remoteRKey, ibv_ah *ah,
                         uint32_t remoteDctNumber);
+bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
+                        uint64_t compare, uint64_t swap, uint32_t lkey,
+                        uint32_t remoteRKey, uint64_t mask = ~(0ull)); 
+                      
 
 //// Batch.cpp
 bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,

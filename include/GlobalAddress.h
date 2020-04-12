@@ -6,23 +6,26 @@
 
 class GlobalAddress {
 public:
-  uint64_t addr;
-  uint8_t nodeID;
+  uint64_t nodeID: 16;
+  uint64_t offset : 48;
+
 
   static GlobalAddress Null() {
     static GlobalAddress zero{0, 0};
     return zero;
-  }
+  };
 } __attribute__((packed));
+
+static_assert(sizeof(GlobalAddress) == sizeof(uint64_t), "XXX");
 
 inline GlobalAddress GADD(const GlobalAddress &addr, int off) {
   auto ret = addr;
-  ret.addr += off;
+  ret.offset += off;
   return ret;
 }
 
 inline bool operator==(const GlobalAddress &lhs, const GlobalAddress &rhs) {
-  return (lhs.nodeID == rhs.nodeID) && (lhs.addr == rhs.addr);
+  return (lhs.nodeID == rhs.nodeID) && (lhs.offset == rhs.offset);
 }
 
 inline bool operator!=(const GlobalAddress &lhs, const GlobalAddress &rhs) {
@@ -30,7 +33,7 @@ inline bool operator!=(const GlobalAddress &lhs, const GlobalAddress &rhs) {
 }
 
 inline std::ostream &operator<<(std::ostream &os, const GlobalAddress &obj) {
-  os << "[" << (int)obj.nodeID << ", " << obj.addr << "]";
+  os << "[" << (int)obj.nodeID << ", " << obj.offset << "]";
   return os;
 }
 

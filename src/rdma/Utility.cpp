@@ -37,7 +37,8 @@ void checkDctSupported(struct ibv_context *ctx) {
     struct ibv_exp_device_attr dattr;
 
     dattr.comp_mask = IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS |
-                      IBV_EXP_DEVICE_DC_RD_REQ | IBV_EXP_DEVICE_DC_RD_RES;
+                      IBV_EXP_DEVICE_DC_RD_REQ | IBV_EXP_DEVICE_DC_RD_RES |
+                      IBV_EXP_DEVICE_ATTR_EXT_ATOMIC_ARGS;
     int err = ibv_exp_query_device(ctx, &dattr);
     if (err) {
         printf("couldn't query device extended attributes\n");
@@ -61,6 +62,11 @@ void checkDctSupported(struct ibv_context *ctx) {
             printf("no report on max responder rdma/atomic resources\n");
             assert(false);
         }
+
+        //  if (!(dattr.comp_mask & IBV_EXP_DEVICE_ATTR_MASKED_ATOMICS)) {
+        //     printf("no report on extended atomic\n");
+        //     assert(false);
+        // } 
     }
     printf("Success\n");
 }
