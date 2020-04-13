@@ -77,7 +77,10 @@ bool createContext(RdmaContext *context, uint8_t port, int gidIndex,
   context->pd = pd;
   context->lid = portAttr.lid;
 
-  //   checkDctSupported(ctx);
+  // check device memory support
+  if (kMaxDeviceMemorySize == 0) {
+    checkDctSupported(ctx);
+  }
 
   return true;
 
@@ -121,9 +124,6 @@ bool destoryContext(RdmaContext *context) {
 
 ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx) {
 
-  // register the memory buffer
-  // Debug::notifyInfo("Register Memory Region");
-
   ibv_mr *mr = NULL;
   mr = ibv_reg_mr(ctx->pd, (void *)mm, mmSize,
                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
@@ -132,6 +132,51 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx) {
   if (!mr) {
     Debug::notifyError("Memory registration failed");
   }
+
+  return mr;
+}
+
+ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize,
+                                 RdmaContext *ctx) {
+
+  /* Device memory allocation request */
+  struct ibv_exp_alloc_dm_attr dm_attr;
+  memset(&dm_attr, 0, sizeof(dm_attr));
+  dm_attr.length = mmSize;
+  struct ibv_exp_dm *dm = ibv_exp_alloc_dm(ctx->ctx, &dm_attr);
+  if (!dm) {
+    Debug::notifyError("Allocate on-chip memory failed");
+    return nullptr;
+  }
+
+  /* Device memory registration as memory region */
+  struct ibv_exp_reg_mr_in mr_in;
+  memset(&mr_in, 0, sizeof(mr_in));
+  mr_in.pd = ctx->pd, mr_in.addr = (void *)mm, mr_in.length = mmSize,
+  mr_in.exp_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                     IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
+  mr_in.create_flags = 0;
+  mr_in.dm = dm;
+  mr_in.comp_mask = IBV_EXP_REG_MR_DM;
+  struct ibv_mr *mr = ibv_exp_reg_mr(&mr_in);
+  if (!mr) {
+    Debug::notifyError("Memory registration failed");
+    return nullptr;
+  }
+
+  // init zero
+  char *buffer = (char *)malloc(mmSize);
+  memset(buffer, 0, mmSize);
+
+  struct ibv_exp_memcpy_dm_attr cpy_attr;
+  memset(&cpy_attr, 0, sizeof(cpy_attr));
+  cpy_attr.memcpy_dir = IBV_EXP_DM_CPY_TO_DEVICE;
+  cpy_attr.host_addr = (void *)buffer;
+  cpy_attr.length = mmSize;
+  cpy_attr.dm_offset = 0;
+  ibv_exp_memcpy_dm(dm, &cpy_attr);
+
+  free(buffer);
 
   return mr;
 }

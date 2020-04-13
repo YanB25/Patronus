@@ -20,6 +20,8 @@
 #define UD_PKEY 0x11111111
 #define PSN 3185
 
+extern int kMaxDeviceMemorySize; 
+
 struct RdmaContext {
   uint8_t devIndex;
   uint8_t port;
@@ -47,6 +49,8 @@ bool createContext(RdmaContext *context, uint8_t port = 1, int gidIndex = 1,
 bool destoryContext(RdmaContext *context);
 
 ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx);
+ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize,
+                                 RdmaContext *ctx);
 
 bool createQueuePair(ibv_qp **qp, ibv_qp_type mode, ibv_cq *cq,
                      RdmaContext *context, uint32_t qpsMaxDepth = 128,
@@ -114,9 +118,8 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint32_t remoteRKey, ibv_ah *ah,
                         uint32_t remoteDctNumber);
 bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
-                        uint64_t compare, uint64_t swap, uint32_t lkey,
-                        uint32_t remoteRKey, uint64_t mask = ~(0ull)); 
-                      
+                            uint64_t compare, uint64_t swap, uint32_t lkey,
+                            uint32_t remoteRKey, uint64_t mask = ~(0ull));
 
 //// Batch.cpp
 bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,

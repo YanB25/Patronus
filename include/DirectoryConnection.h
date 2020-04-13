@@ -18,11 +18,15 @@ struct DirectoryConnection {
   ibv_qp **data2app[MAX_APP_THREAD];
 
   ibv_mr *dsmMR;
-
   void *dsmPool;
-  uint64_t dsmSize; // Bytes
-
+  uint64_t dsmSize;
   uint32_t dsmLKey;
+
+  ibv_mr *lockMR;
+  void *lockPool; // address on-chip
+  uint64_t lockSize;
+  uint32_t lockLKey;
+
   RemoteConnection *remoteInfo;
 
   DirectoryConnection(uint16_t dirID, void *dsmPool, uint64_t dsmSize,

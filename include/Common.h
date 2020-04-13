@@ -53,11 +53,18 @@ inline int bits_in(std::uint64_t u) {
 }
 
 namespace define {
+
 constexpr uint64_t MB = 1024ull * 1024;
 constexpr uint64_t GB = 1024ull * MB;
 constexpr uint16_t kCacheLineSize = 64;
 
-constexpr uint64_t kChunkSize = MB * 32; // MB
+// for remote allocate
+constexpr uint64_t kChunkSize = MB * 32; 
+
+// lock on-chip memory
+constexpr uint64_t kLockStartAddr = 0;
+constexpr uint64_t kLockChipMemSize = 4096;
+
 } // namespace define
 
 static inline unsigned long long asm_rdtsc(void) {
