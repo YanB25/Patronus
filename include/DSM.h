@@ -35,9 +35,28 @@ public:
                 uint64_t *rdma_buffer);
 
   void cas_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-           uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
-  bool cas_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                 uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
+  bool cas_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                     uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
+
+  // for on-chip device memory
+  void read_dm(char *buffer, GlobalAddress gaddr, size_t size);
+  void read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size);
+
+  void write_dm(const char *buffer, GlobalAddress gaddr, size_t size);
+  void write_dm_sync(const char *buffer, GlobalAddress gaddr, size_t size);
+
+  void cas_dm(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+              uint64_t *rdma_buffer);
+  bool cas_dm_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                   uint64_t *rdma_buffer);
+
+  void cas_dm_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                   uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
+  bool cas_dm_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                        uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
+
+  void poll_rdma_cq(int count = 1);
 
   // Memcached operations for sync
   size_t Put(uint64_t key, const void *value, size_t count) {

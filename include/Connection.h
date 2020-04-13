@@ -15,7 +15,12 @@ struct RemoteConnection {
     uint32_t dirMessageQPN[NR_DIRECTORY];
     ibv_ah *appToDirAh[MAX_APP_THREAD][NR_DIRECTORY];
 
+    // cache
     uint64_t cacheBase;
+
+    // lock memory
+    uint64_t lockBase;
+    uint32_t lockRKey[NR_DIRECTORY];
 
     // app thread
     uint32_t appRKey[MAX_APP_THREAD];

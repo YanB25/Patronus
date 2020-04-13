@@ -119,7 +119,7 @@ void DSM::cas(GlobalAddress gaddr, uint64_t equal, uint64_t val,
 }
 
 bool DSM::cas_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-uint64_t *rdma_buffer) {
+                   uint64_t *rdma_buffer) {
   cas(gaddr, equal, val, rdma_buffer);
   ibv_wc wc;
   pollWithCQ(iCon->cq, 1, &wc);
@@ -128,18 +128,84 @@ uint64_t *rdma_buffer) {
 }
 
 void DSM::cas_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-              uint64_t *rdma_buffer, uint64_t mask) {
+                   uint64_t *rdma_buffer, uint64_t mask) {
   rdmaCompareAndSwapMask(iCon->data[0][gaddr.nodeID], (uint64_t)rdma_buffer,
-                     remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset, equal,
-                     val, iCon->cacheLKey, remoteInfo[gaddr.nodeID].dsmRKey[0],
-                     mask);
+                         remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset, equal,
+                         val, iCon->cacheLKey,
+                         remoteInfo[gaddr.nodeID].dsmRKey[0], mask);
 }
 
 bool DSM::cas_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-uint64_t *rdma_buffer, uint64_t mask) {
+                        uint64_t *rdma_buffer, uint64_t mask) {
   cas_mask(gaddr, equal, val, rdma_buffer, mask);
   ibv_wc wc;
   pollWithCQ(iCon->cq, 1, &wc);
 
   return (equal & mask) == (*rdma_buffer & mask);
+}
+
+void DSM::read_dm(char *buffer, GlobalAddress gaddr, size_t size) {
+  rdmaRead(iCon->data[0][gaddr.nodeID], (uint64_t)buffer,
+           remoteInfo[gaddr.nodeID].lockBase + gaddr.offset, size,
+           iCon->cacheLKey, remoteInfo[gaddr.nodeID].lockRKey[0]);
+}
+
+void DSM::read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size) {
+  read_dm(buffer, gaddr, size);
+
+  ibv_wc wc;
+  pollWithCQ(iCon->cq, 1, &wc);
+}
+
+void DSM::write_dm(const char *buffer, GlobalAddress gaddr, size_t size) {
+
+  rdmaWrite(iCon->data[0][gaddr.nodeID], (uint64_t)buffer,
+            remoteInfo[gaddr.nodeID].lockBase + gaddr.offset, size,
+            iCon->cacheLKey, remoteInfo[gaddr.nodeID].lockRKey[0]);
+}
+
+void DSM::write_dm_sync(const char *buffer, GlobalAddress gaddr, size_t size) {
+  write_dm(buffer, gaddr, size);
+
+  ibv_wc wc;
+  pollWithCQ(iCon->cq, 1, &wc);
+}
+
+void DSM::cas_dm(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                 uint64_t *rdma_buffer) {
+  rdmaCompareAndSwap(iCon->data[0][gaddr.nodeID], (uint64_t)rdma_buffer,
+                     remoteInfo[gaddr.nodeID].lockBase + gaddr.offset, equal,
+                     val, iCon->cacheLKey,
+                     remoteInfo[gaddr.nodeID].lockRKey[0]);
+}
+
+bool DSM::cas_dm_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                   uint64_t *rdma_buffer) {
+  cas_dm(gaddr, equal, val, rdma_buffer);
+  ibv_wc wc;
+  pollWithCQ(iCon->cq, 1, &wc);
+
+  return equal == *rdma_buffer;
+}
+
+void DSM::cas_dm_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                      uint64_t *rdma_buffer, uint64_t mask) {
+  rdmaCompareAndSwapMask(iCon->data[0][gaddr.nodeID], (uint64_t)rdma_buffer,
+                         remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
+                         equal, val, iCon->cacheLKey,
+                         remoteInfo[gaddr.nodeID].lockRKey[0], mask);
+}
+
+bool DSM::cas_dm_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
+                           uint64_t *rdma_buffer, uint64_t mask) {
+  cas_dm_mask(gaddr, equal, val, rdma_buffer, mask);
+  ibv_wc wc;
+  pollWithCQ(iCon->cq, 1, &wc);
+
+  return (equal & mask) == (*rdma_buffer & mask);
+}
+
+void DSM::poll_rdma_cq(int count) {
+  ibv_wc wc;
+  pollWithCQ(iCon->cq, count, &wc);
 }

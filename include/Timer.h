@@ -24,7 +24,7 @@ public:
       uint64_t ns = ns_all / loop;
 
       if (ns < 1000) {
-        printf("%lxns per loop\n", ns);
+        printf("%ldns per loop\n", ns);
       } else {
         printf("%lfus per loop\n", ns * 1.0 / 1000);
       }
