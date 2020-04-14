@@ -108,6 +108,8 @@ static void mehcached_zipf_init(struct zipf_gen_state *state, uint64_t n,
 static void mehcached_zipf_init_copy(struct zipf_gen_state *state,
                                      const struct zipf_gen_state *src_state,
                                      uint64_t rand_seed) {
+
+    (void)mehcached_zipf_init_copy;
     assert(rand_seed < (1UL << 48));
     memcpy(state, src_state, sizeof(struct zipf_gen_state));
     // state->rand_state[0] = (unsigned short)(rand_seed >> 0);
@@ -117,6 +119,7 @@ static void mehcached_zipf_init_copy(struct zipf_gen_state *state,
 }
 
 static void mehcached_zipf_change_n(struct zipf_gen_state *state, uint64_t n) {
+    (void)mehcached_zipf_change_n;
     state->n = n;
 }
 
@@ -176,6 +179,9 @@ static uint64_t mehcached_zipf_next(struct zipf_gen_state *state) {
 }
 
 static void mehcached_test_zipf(double theta) {
+
+    (void)(mehcached_test_zipf);
+
     double zetan = 0.;
     const uint64_t n = 1000000UL;
     uint64_t i;

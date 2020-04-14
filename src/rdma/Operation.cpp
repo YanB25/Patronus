@@ -169,7 +169,7 @@ bool rdmaReceive(ibv_exp_dct *dct, uint64_t source, uint64_t size,
 
 // for RC & UC
 bool rdmaRead(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t size,
-              uint32_t lkey, uint32_t remoteRKey, uint64_t wrID) {
+              uint32_t lkey, uint32_t remoteRKey, bool signal, uint64_t wrID) {
   struct ibv_sge sg;
   struct ibv_send_wr wr;
   struct ibv_send_wr *wrBad;
@@ -178,7 +178,9 @@ bool rdmaRead(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t size,
 
   wr.opcode = IBV_WR_RDMA_READ;
 
-  wr.send_flags = IBV_SEND_SIGNALED;
+  if (signal) {
+    wr.send_flags = IBV_SEND_SIGNALED;
+  }
 
   wr.wr.rdma.remote_addr = dest;
   wr.wr.rdma.rkey = remoteRKey;
@@ -338,7 +340,7 @@ bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
 // for RC & UC
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,
-                        uint32_t remoteRKey) {
+                        uint32_t remoteRKey, bool signal) {
   struct ibv_sge sg;
   struct ibv_send_wr wr;
   struct ibv_send_wr *wrBad;
@@ -346,7 +348,10 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
   fillSgeWr(sg, wr, source, 8, lkey);
 
   wr.opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
-  wr.send_flags = IBV_SEND_SIGNALED;
+
+  if (signal) {
+    wr.send_flags = IBV_SEND_SIGNALED;
+  }
 
   wr.wr.atomic.remote_addr = dest;
   wr.wr.atomic.rkey = remoteRKey;
@@ -361,8 +366,8 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
 }
 
 bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
-                        uint64_t compare, uint64_t swap, uint32_t lkey,
-                        uint32_t remoteRKey, uint64_t mask) {
+                            uint64_t compare, uint64_t swap, uint32_t lkey,
+                            uint32_t remoteRKey, uint64_t mask, bool singal) {
   struct ibv_sge sg;
   struct ibv_exp_send_wr wr;
   struct ibv_exp_send_wr *wrBad;
@@ -370,8 +375,12 @@ bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
   fillSgeWr(sg, wr, source, 8, lkey);
 
   wr.exp_opcode = IBV_EXP_WR_EXT_MASKED_ATOMIC_CMP_AND_SWP;
-  wr.exp_send_flags = IBV_EXP_SEND_SIGNALED | IBV_EXP_SEND_EXT_ATOMIC_INLINE;
- 
+  wr.exp_send_flags = IBV_EXP_SEND_EXT_ATOMIC_INLINE;
+
+  if (singal) {
+     wr.exp_send_flags |= IBV_EXP_SEND_SIGNALED;
+  }
+
   wr.ext_op.masked_atomics.log_arg_sz = 3;
   wr.ext_op.masked_atomics.remote_addr = dest;
   wr.ext_op.masked_atomics.rkey = remoteRKey;

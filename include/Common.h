@@ -29,7 +29,7 @@
 #define RAW_RECV_CQ_COUNT 128
 
 // { app thread
-#define MAX_APP_THREAD 16
+#define MAX_APP_THREAD 24
 
 #define APP_MESSAGE_NR 96
 
@@ -63,7 +63,7 @@ constexpr uint64_t kChunkSize = MB * 32;
 
 // lock on-chip memory
 constexpr uint64_t kLockStartAddr = 0;
-constexpr uint64_t kLockChipMemSize = 4096;
+constexpr uint64_t kLockChipMemSize = 128 * 1024;
 
 } // namespace define
 

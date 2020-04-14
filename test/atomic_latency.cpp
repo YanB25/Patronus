@@ -6,6 +6,8 @@
 
 int main() {
 
+  bindCore(0);
+
   DSMConfig config;
   config.machineNR = 2;
   DSM *dsm = DSM::getInstance(config);

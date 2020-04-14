@@ -23,36 +23,41 @@ public:
 
   // RDMA operations
   // buffer is registered memory
-  void read(char *buffer, GlobalAddress gaddr, size_t size);
+  void read(char *buffer, GlobalAddress gaddr, size_t size, bool signal = true);
   void read_sync(char *buffer, GlobalAddress gaddr, size_t size);
 
-  void write(const char *buffer, GlobalAddress gaddr, size_t size);
+  void write(const char *buffer, GlobalAddress gaddr, size_t size,
+             bool signal = true);
   void write_sync(const char *buffer, GlobalAddress gaddr, size_t size);
 
   void cas(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-           uint64_t *rdma_buffer);
+           uint64_t *rdma_buffer, bool signal = true);
   bool cas_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                 uint64_t *rdma_buffer);
 
   void cas_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-                uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
+                uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
+                bool signal = true);
   bool cas_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                      uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
 
   // for on-chip device memory
-  void read_dm(char *buffer, GlobalAddress gaddr, size_t size);
+  void read_dm(char *buffer, GlobalAddress gaddr, size_t size,
+               bool signal = true);
   void read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size);
 
-  void write_dm(const char *buffer, GlobalAddress gaddr, size_t size);
+  void write_dm(const char *buffer, GlobalAddress gaddr, size_t size,
+                bool signal = true);
   void write_dm_sync(const char *buffer, GlobalAddress gaddr, size_t size);
 
   void cas_dm(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-              uint64_t *rdma_buffer);
+              uint64_t *rdma_buffer, bool signal = true);
   bool cas_dm_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                    uint64_t *rdma_buffer);
 
   void cas_dm_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-                   uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
+                   uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
+                   bool signal = true);
   bool cas_dm_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                         uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
 

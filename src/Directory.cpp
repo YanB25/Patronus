@@ -29,6 +29,7 @@ void Directory::dirThread() {
   Debug::notifyInfo("dir %d launch!\n", dirID);
 
   while (true) {
+    sleep(1000);
     struct ibv_wc wc;
     pollWithCQ(dCon->cq, 1, &wc);
 

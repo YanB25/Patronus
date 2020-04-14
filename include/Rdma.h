@@ -92,7 +92,7 @@ bool rdmaReceive(ibv_exp_dct *dct, uint64_t source, uint64_t size,
                  uint32_t lkey);
 
 bool rdmaRead(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t size,
-              uint32_t lkey, uint32_t remoteRKey, uint64_t wrID = 0);
+              uint32_t lkey, uint32_t remoteRKey, bool signal = true, uint64_t wrID = 0);
 bool rdmaRead(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t size,
               uint32_t lkey, uint32_t remoteRKey, ibv_ah *ah,
               uint32_t remoteDctNumber);
@@ -112,14 +112,15 @@ bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
 
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,
-                        uint32_t remoteRKey);
+                        uint32_t remoteRKey, bool signal = true);
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,
                         uint32_t remoteRKey, ibv_ah *ah,
                         uint32_t remoteDctNumber);
 bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
                             uint64_t compare, uint64_t swap, uint32_t lkey,
-                            uint32_t remoteRKey, uint64_t mask = ~(0ull));
+                            uint32_t remoteRKey, uint64_t mask = ~(0ull),
+                            bool signal = true);
 
 //// Batch.cpp
 bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
