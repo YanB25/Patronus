@@ -1,160 +1,7 @@
-/*
-   Copyright (c) 2018, UNIST. All rights reserved.  The license is a free
-   non-exclusive, non-transferable license to reproduce, use, modify and display
-   the source code version of the Software, with or without modifications solely
-   for non-commercial research, educational or evaluation purposes. The license
-   does not entitle Licensee to technical support, telephone assistance,
-   enhancements or updates to the Software. All rights, title to and ownership
-   interest in the Software, including all intellectual property rights therein
-   shall remain in UNIST. 
-*/
+#ifndef _BTREE_PAGE_H_
+#define _BTREE_PAGE_H_
 
-#include <unistd.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <time.h>
-#include <stdlib.h>
-#include <math.h>
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <string.h>
-#include <cassert>
-#include <climits>
-#include <future>
-#include <mutex>
-
-#define PAGESIZE 512
-
-#define CPU_FREQ_MHZ (1994)
-#define DELAY_IN_NS (1000)
-#define CACHE_LINE_SIZE 64 
-#define QUERY_NUM 25
-
-#define IS_FORWARD(c) (c % 2 == 0)
-
-using entry_key_t = int64_t;
-
-pthread_mutex_t print_mtx;
-
-static inline void cpu_pause()
-{
-  __asm__ volatile ("pause" ::: "memory");
-}
-static inline unsigned long read_tsc(void)
-{
-  unsigned long var;
-  unsigned int hi, lo;
-
-  asm volatile ("rdtsc" : "=a" (lo), "=d" (hi));
-  var = ((unsigned long long int) hi << 32) | lo;
-
-  return var;
-}
-
-unsigned long write_latency_in_ns=0;
-unsigned long long search_time_in_insert=0;
-unsigned int gettime_cnt= 0;
-unsigned long long clflush_time_in_insert=0;
-unsigned long long update_time_in_insert=0;
-int clflush_cnt = 0;
-int node_cnt=0;
-
-using namespace std;
-
-inline void mfence()
-{
-  asm volatile("mfence":::"memory");
-}
-
-inline void clflush(char *data, int len)
-{
-  volatile char *ptr = (char *)((unsigned long)data &~(CACHE_LINE_SIZE-1));
-  mfence();
-  for(; ptr<data+len; ptr+=CACHE_LINE_SIZE){
-    unsigned long etsc = read_tsc() + 
-      (unsigned long)(write_latency_in_ns*CPU_FREQ_MHZ/1000);
-    asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
-    while (read_tsc() < etsc) cpu_pause();
-    //++clflush_cnt;
-  }
-  mfence();
-}
-
-class page;
-
-class btree{
-  private:
-    int height;
-    char* root;
-
-  public:
-
-    btree();
-    void setNewRoot(char *);
-    void getNumberOfNodes();
-    void btree_insert(entry_key_t, char*);
-    void btree_insert_internal(char *, entry_key_t, char *, uint32_t);
-    void btree_delete(entry_key_t);
-    void btree_delete_internal
-      (entry_key_t, char *, uint32_t, entry_key_t *, bool *, page **);
-    char *btree_search(entry_key_t);
-    void btree_search_range(entry_key_t, entry_key_t, unsigned long *); 
-    void printAll();
-
-    friend class page;
-};
-
-class header{
-  private:
-    page* leftmost_ptr;         // 8 bytes
-    page* sibling_ptr;          // 8 bytes
-    uint32_t level;             // 4 bytes
-    uint8_t switch_counter;     // 1 bytes
-    uint8_t is_deleted;         // 1 bytes
-    int16_t last_index;         // 2 bytes
-    std::mutex *mtx;            // 8 bytes
-    entry_key_t highest;        // 8 bytes
-    uint64_t dummy[1];          // 24 bytes
-
-    friend class page;
-    friend class btree;
-
-  public:
-    header() {
-      mtx = new std::mutex();
-
-      leftmost_ptr = NULL;  
-      sibling_ptr = NULL;
-      switch_counter = 0;
-      last_index = -1;
-      is_deleted = false;
-    }
-
-    ~header() {
-      delete mtx;
-    }
-};
-
-class entry{ 
-  private:
-    entry_key_t key; // 8 bytes
-    char* ptr; // 8 bytes
-
-  public :
-    entry(){
-      key = LONG_MAX;
-      ptr = NULL;
-    }
-
-    friend class page;
-    friend class btree;
-};
-
-const int cardinality = (PAGESIZE-sizeof(header))/sizeof(entry);
-const int count_in_line = CACHE_LINE_SIZE / sizeof(entry);
-
-class page{
+class page {
   private:
     header hdr;  // header in persistent memory, 64 bytes
     entry records[cardinality]; // slots in persistent memory, 16 bytes * n
@@ -177,7 +24,6 @@ class page{
 
       hdr.last_index = 0;
 
-      clflush((char*)this, sizeof(page));
     }
 
     void *operator new(size_t size) {
@@ -230,15 +76,8 @@ class page{
           records[i].key = records[i + 1].key;
           records[i].ptr = records[i + 1].ptr;
 
-          // flush
           uint64_t records_ptr = (uint64_t)(&records[i]);
-          int remainder = records_ptr % CACHE_LINE_SIZE;
-          bool do_flush = (remainder == 0) ||
-            ((((int)(remainder + sizeof(entry)) / CACHE_LINE_SIZE) == 1) &&
-             ((remainder + sizeof(entry)) % CACHE_LINE_SIZE) != 0);
-          if(do_flush) {
-            clflush((char *)records_ptr, CACHE_LINE_SIZE);
-          }
+          // int remainder = records_ptr % CACHE_LINE_SIZE;
         }
       }
 
@@ -284,7 +123,6 @@ class page{
           if(hdr.level > 0) {
             if(num_entries_before == 1 && !hdr.sibling_ptr) {
               bt->root = (char *)hdr.leftmost_ptr;
-              clflush((char *)&(bt->root), sizeof(char *));
 
               hdr.is_deleted = 1;
             }
@@ -374,10 +212,9 @@ class page{
             } 
 
             left_sibling->records[m].ptr = nullptr;
-            clflush((char *)&(left_sibling->records[m].ptr), sizeof(char *));
 
             left_sibling->hdr.last_index = m - 1;
-            clflush((char *)&(left_sibling->hdr.last_index), sizeof(int16_t));
+           
 
             parent_key = records[0].key; 
           }
@@ -393,13 +230,12 @@ class page{
             parent_key = left_sibling->records[m].key; 
 
             hdr.leftmost_ptr = (page*)left_sibling->records[m].ptr; 
-            clflush((char *)&(hdr.leftmost_ptr), sizeof(page *));
-
+       
             left_sibling->records[m].ptr = nullptr;
-            clflush((char *)&(left_sibling->records[m].ptr), sizeof(char *));
+           
 
             left_sibling->hdr.last_index = m - 1;
-            clflush((char *)&(left_sibling->hdr.last_index), sizeof(int16_t));
+        
           }
 
           if(left_sibling == ((page *)bt->root)) {
@@ -413,7 +249,7 @@ class page{
         }
         else{ // from leftmost case
           hdr.is_deleted = 1;
-          clflush((char *)&(hdr.is_deleted), sizeof(uint8_t));
+       
 
           page* new_sibling = new page(hdr.level); 
           new_sibling->hdr.mtx->lock();
@@ -433,10 +269,10 @@ class page{
                   &new_sibling_cnt, false); 
             } 
 
-            clflush((char *)(new_sibling), sizeof(page));
+      
 
             left_sibling->hdr.sibling_ptr = new_sibling;
-            clflush((char *)&(left_sibling->hdr.sibling_ptr), sizeof(page *));
+          
 
             parent_key = new_sibling->records[0].key; 
           }
@@ -456,10 +292,10 @@ class page{
               new_sibling->insert_key(records[i].key, records[i].ptr,
                   &new_sibling_cnt, false); 
             } 
-            clflush((char *)(new_sibling), sizeof(page));
+          
 
             left_sibling->hdr.sibling_ptr = new_sibling;
-            clflush((char *)&(left_sibling->hdr.sibling_ptr), sizeof(page *));
+      
           }
 
           if(left_sibling == ((page *)bt->root)) {
@@ -476,7 +312,7 @@ class page{
       }
       else {
         hdr.is_deleted = 1;
-        clflush((char *)&(hdr.is_deleted), sizeof(uint8_t));
+      
 
         if(hdr.leftmost_ptr)
           left_sibling->insert_key(deleted_key_from_parent, 
@@ -487,7 +323,7 @@ class page{
         }
 
         left_sibling->hdr.sibling_ptr = hdr.sibling_ptr;
-        clflush((char *)&(left_sibling->hdr.sibling_ptr), sizeof(page *));
+       
       }
 
       if(with_lock) {
@@ -514,17 +350,11 @@ class page{
 
           array_end->ptr = (char*)NULL;
 
-          if(flush) {
-            clflush((char*) this, CACHE_LINE_SIZE);
-          }
         }
         else {
-          int i = *num_entries - 1, inserted = 0, to_flush_cnt = 0;
+          int i = *num_entries - 1, inserted = 0;
           records[*num_entries+1].ptr = records[*num_entries].ptr; 
-          if(flush) {
-            if((uint64_t)&(records[*num_entries+1].ptr) % CACHE_LINE_SIZE == 0) 
-              clflush((char*)&(records[*num_entries+1].ptr), sizeof(char*));
-          }
+          
 
           // FAST
           for(i = *num_entries - 1; i >= 0; i--) {
@@ -532,28 +362,11 @@ class page{
               records[i+1].ptr = records[i].ptr;
               records[i+1].key = records[i].key;
 
-              if(flush) {
-                uint64_t records_ptr = (uint64_t)(&records[i+1]);
-
-                int remainder = records_ptr % CACHE_LINE_SIZE;
-                bool do_flush = (remainder == 0) || 
-                  ((((int)(remainder + sizeof(entry)) / CACHE_LINE_SIZE) == 1) 
-                   && ((remainder+sizeof(entry))%CACHE_LINE_SIZE)!=0);
-                if(do_flush) {
-                  clflush((char*)records_ptr,CACHE_LINE_SIZE);
-                  to_flush_cnt = 0;
-                }
-                else
-                  ++to_flush_cnt;
-              }
             }
             else{
               records[i+1].ptr = records[i].ptr;
               records[i+1].key = key;
               records[i+1].ptr = ptr;
-
-              if(flush)
-                clflush((char*)&records[i+1],sizeof(entry));
               inserted = 1;
               break;
             }
@@ -562,8 +375,6 @@ class page{
             records[0].ptr =(char*) hdr.leftmost_ptr;
             records[0].key = key;
             records[0].ptr = ptr;
-            if(flush)
-              clflush((char*) &records[0], sizeof(entry)); 
           }
         }
 
@@ -636,21 +447,19 @@ class page{
           }
 
           sibling->hdr.sibling_ptr = hdr.sibling_ptr;
-          clflush((char *)sibling, sizeof(page));
+        
 
           hdr.sibling_ptr = sibling;
-          clflush((char*) &hdr, sizeof(hdr));
-
+         
           // set to NULL
           if(IS_FORWARD(hdr.switch_counter))
             hdr.switch_counter += 2;
           else
             ++hdr.switch_counter;
           records[m].ptr = NULL;
-          clflush((char*) &records[m], sizeof(entry));
 
           hdr.last_index = m - 1;
-          clflush((char *)&(hdr.last_index), sizeof(int16_t));
+     
 
           num_entries = hdr.last_index + 1;
 
@@ -942,179 +751,5 @@ class page{
     }
 };
 
-/*
- * class btree
- */
-btree::btree(){
-  root = (char*)new page();
-  height = 1;
-}
 
-void btree::setNewRoot(char *new_root) {
-  this->root = (char*)new_root;
-  clflush((char*)&(this->root),sizeof(char*));
-  ++height;
-}
-
-char *btree::btree_search(entry_key_t key){
-  page* p = (page*)root;
-
-  while(p->hdr.leftmost_ptr != NULL) {
-    p = (page *)p->linear_search(key);
-  }
-
-  page *t;
-  while((t = (page *)p->linear_search(key)) == p->hdr.sibling_ptr) {
-    p = t;
-    if(!p) {
-      break;
-    }
-  }
-
-  if(!t || (char *)t != (char *)key) {
-    printf("NOT FOUND %lu, t = %x\n", key, t);
-    return NULL;
-  }
-
-  return (char *)t;
-}
-
-// insert the key in the leaf node
-void btree::btree_insert(entry_key_t key, char* right){ //need to be string
-  page* p = (page*)root;
-
-  while(p->hdr.leftmost_ptr != NULL) {
-    p = (page*)p->linear_search(key);
-  }
-
-  if(!p->store(this, NULL, key, right, true, true)) { // store 
-    btree_insert(key, right);
-  }
-}
-
-// store the key into the node at the given level 
-void btree::btree_insert_internal
-(char *left, entry_key_t key, char *right, uint32_t level) {
-  if(level > ((page *)root)->hdr.level)
-    return;
-
-  page *p = (page *)this->root;
-
-  while(p->hdr.level > level) 
-    p = (page *)p->linear_search(key);
-
-  if(!p->store(this, NULL, key, right, true, true)) {
-    btree_insert_internal(left, key, right, level);
-  }
-}
-
-void btree::btree_delete(entry_key_t key) {
-  page* p = (page*)root;
-
-  while(p->hdr.leftmost_ptr != NULL){
-    p = (page*) p->linear_search(key);
-  }
-
-  page *t;
-  while((t = (page *)p->linear_search(key)) == p->hdr.sibling_ptr) {
-    p = t;
-    if(!p)
-      break;
-  }
-
-  if(p) {
-    if(!p->remove(this, key)) {
-      btree_delete(key);
-    }
-  }
-  else {
-    printf("not found the key to delete %lu\n", key);
-  }
-}
-
-void btree::btree_delete_internal
-(entry_key_t key, char *ptr, uint32_t level, entry_key_t *deleted_key, 
- bool *is_leftmost_node, page **left_sibling) {
-  if(level > ((page *)this->root)->hdr.level)
-    return;
-
-  page *p = (page *)this->root;
-
-  while(p->hdr.level > level) {
-    p = (page *)p->linear_search(key);
-  }
-
-  p->hdr.mtx->lock();
-
-  if((char *)p->hdr.leftmost_ptr == ptr) {
-    *is_leftmost_node = true;
-    p->hdr.mtx->unlock();
-    return;
-  }
-
-  *is_leftmost_node = false;
-
-  for(int i=0; p->records[i].ptr != NULL; ++i) {
-    if(p->records[i].ptr == ptr) {
-      if(i == 0) {
-        if((char *)p->hdr.leftmost_ptr != p->records[i].ptr) {
-          *deleted_key = p->records[i].key;
-          *left_sibling = p->hdr.leftmost_ptr;
-          p->remove(this, *deleted_key, false, false);
-          break;
-        }
-      }
-      else {
-        if(p->records[i - 1].ptr != p->records[i].ptr) {
-          *deleted_key = p->records[i].key;
-          *left_sibling = (page *)p->records[i - 1].ptr;
-          p->remove(this, *deleted_key, false, false);
-          break;
-        }
-      }
-    }
-  }
-
-  p->hdr.mtx->unlock();
-}
-
-// Function to search keys from "min" to "max"
-void btree::btree_search_range
-(entry_key_t min, entry_key_t max, unsigned long *buf) {
-  page *p = (page *)root;
-
-  while(p) {
-    if(p->hdr.leftmost_ptr != NULL) {
-      // The current page is internal
-      p = (page *)p->linear_search(min);
-    }
-    else {
-      // Found a leaf
-      p->linear_search_range(min, max, buf);
-
-      break;
-    }
-  }
-}
-
-void btree::printAll(){
-  pthread_mutex_lock(&print_mtx);
-  int total_keys = 0;
-  page *leftmost = (page *)root;
-  printf("root: %x\n", root);
-  do {
-    page *sibling = leftmost;
-    while(sibling) {
-      if(sibling->hdr.level == 0) {
-        total_keys += sibling->hdr.last_index + 1;
-      }
-      sibling->print();
-      sibling = sibling->hdr.sibling_ptr;
-    }
-    printf("-----------------------------------------\n");
-    leftmost = leftmost->hdr.leftmost_ptr;
-  } while(leftmost);
-
-  printf("total number of keys: %d\n", total_keys);
-  pthread_mutex_unlock(&print_mtx);
-}
+#endif
