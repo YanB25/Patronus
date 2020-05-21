@@ -5,27 +5,27 @@ pthread_mutex_t print_mtx;
 /*
  * class btree
  */
-btree::btree() {
-  root = (char *)new page();
+btree::btree(){
+  root = (char*)new page();
   height = 1;
 }
 
 void btree::setNewRoot(char *new_root) {
-  this->root = (char *)new_root;
+  this->root = (char*)new_root;
   ++height;
 }
 
-char *btree::btree_search(entry_key_t key) {
-  page *p = (page *)root;
+char *btree::btree_search(entry_key_t key){
+  page* p = (page*)root;
 
-  while (p->hdr.leftmost_ptr != NULL) {
+  while(p->hdr.leftmost_ptr != NULL) {
     p = (page *)p->linear_search(key);
   }
 
   page *t;
-  while ((t = (page *)p->linear_search(key)) == p->hdr.sibling_ptr) {
+  while((t = (page *)p->linear_search(key)) == p->hdr.sibling_ptr) {
     p = t;
-    if (!p) {
+    if(!p) {
       break;
     }
   }
@@ -34,73 +34,75 @@ char *btree::btree_search(entry_key_t key) {
 }
 
 // insert the key in the leaf node
-void btree::btree_insert(entry_key_t key, char *right) { // need to be string
-  page *p = (page *)root;
+void btree::btree_insert(entry_key_t key, char* right) { //need to be string
+  page* p = (page*)root;
 
-  while (p->hdr.leftmost_ptr != NULL) {
-    p = (page *)p->linear_search(key);
+  while(p->hdr.leftmost_ptr != NULL) {
+    p = (page*)p->linear_search(key);
+    assert(p != nullptr);
   }
 
-  if (!p->store(this, NULL, key, right, true)) { // store
+  if(!p->store(this, NULL, key, right)) { // store 
     btree_insert(key, right);
   }
 }
 
-// store the key into the node at the given level
-void btree::btree_insert_internal(char *left, entry_key_t key, char *right,
-                                  uint32_t level) {
-  if (level > ((page *)root)->hdr.level)
+// store the key into the node at the given level 
+void btree::btree_insert_internal
+(char *left, entry_key_t key, char *right, uint32_t level) {
+  if(level > ((page *)root)->hdr.level)
     return;
 
   page *p = (page *)this->root;
 
-  while (p->hdr.level > level) {
+  while(p->hdr.level > level) {
     p = (page *)p->linear_search(key);
   }
-
-  if (!p->store(this, NULL, key, right, true)) {
+ 
+  if(!p->store(this, NULL, key, right)) {
     btree_insert_internal(left, key, right, level);
   }
 }
 
 void btree::btree_delete(entry_key_t key) {
-  page *p = (page *)root;
+  page* p = (page*)root;
 
-  while (p->hdr.leftmost_ptr != NULL) {
-    p = (page *)p->linear_search(key);
+  while(p->hdr.leftmost_ptr != NULL){
+    p = (page*) p->linear_search(key);
   }
 
   page *t;
-  while ((t = (page *)p->linear_search(key)) == p->hdr.sibling_ptr) {
+  while((t = (page *)p->linear_search(key)) == p->hdr.sibling_ptr) {
     p = t;
-    if (!p)
+    if(!p)
       break;
   }
 
-  if (p) {
-    if (!p->remove(this, key)) {
+  if(p) {
+    if(!p->remove(this, key)) {
       btree_delete(key);
     }
-  } else {
+  }
+  else {
     printf("not found the key to delete %lu\n", key);
   }
 }
 
-void btree::btree_delete_internal(entry_key_t key, char *ptr, uint32_t level,
-                                  entry_key_t *deleted_key,
-                                  bool *is_leftmost_node, page **left_sibling) {
-  if (level > ((page *)this->root)->hdr.level)
+void btree::btree_delete_internal
+(entry_key_t key, char *ptr, uint32_t level, entry_key_t *deleted_key, 
+ bool *is_leftmost_node, page **left_sibling) {
+  if(level > ((page *)this->root)->hdr.level)
     return;
 
   page *p = (page *)this->root;
 
-  while (p->hdr.level > level) {
+  while(p->hdr.level > level) {
     p = (page *)p->linear_search(key);
   }
 
   p->hdr.mtx->lock();
 
-  if ((char *)p->hdr.leftmost_ptr == ptr) {
+  if((char *)p->hdr.leftmost_ptr == ptr) {
     *is_leftmost_node = true;
     p->hdr.mtx->unlock();
     return;
@@ -108,17 +110,18 @@ void btree::btree_delete_internal(entry_key_t key, char *ptr, uint32_t level,
 
   *is_leftmost_node = false;
 
-  for (int i = 0; p->records[i].ptr != NULL; ++i) {
-    if (p->records[i].ptr == ptr) {
-      if (i == 0) {
-        if ((char *)p->hdr.leftmost_ptr != p->records[i].ptr) {
+  for(int i=0; p->records[i].ptr != NULL; ++i) {
+    if(p->records[i].ptr == ptr) {
+      if(i == 0) {
+        if((char *)p->hdr.leftmost_ptr != p->records[i].ptr) {
           *deleted_key = p->records[i].key;
           *left_sibling = p->hdr.leftmost_ptr;
           p->remove(this, *deleted_key, false, false);
           break;
         }
-      } else {
-        if (p->records[i - 1].ptr != p->records[i].ptr) {
+      }
+      else {
+        if(p->records[i - 1].ptr != p->records[i].ptr) {
           *deleted_key = p->records[i].key;
           *left_sibling = (page *)p->records[i - 1].ptr;
           p->remove(this, *deleted_key, false, false);
@@ -132,15 +135,16 @@ void btree::btree_delete_internal(entry_key_t key, char *ptr, uint32_t level,
 }
 
 // Function to search keys from "min" to "max"
-void btree::btree_search_range(entry_key_t min, entry_key_t max,
-                               unsigned long *buf) {
+void btree::btree_search_range
+(entry_key_t min, entry_key_t max, unsigned long *buf) {
   page *p = (page *)root;
 
-  while (p) {
-    if (p->hdr.leftmost_ptr != NULL) {
+  while(p) {
+    if(p->hdr.leftmost_ptr != NULL) {
       // The current page is internal
       p = (page *)p->linear_search(min);
-    } else {
+    }
+    else {
       // Found a leaf
       p->linear_search_range(min, max, buf);
 
@@ -149,15 +153,15 @@ void btree::btree_search_range(entry_key_t min, entry_key_t max,
   }
 }
 
-void btree::printAll() {
+void btree::printAll(){
   pthread_mutex_lock(&print_mtx);
   int total_keys = 0;
   page *leftmost = (page *)root;
   printf("root: %x\n", root);
   do {
     page *sibling = leftmost;
-    while (sibling) {
-      if (sibling->hdr.level == 0) {
+    while(sibling) {
+      if(sibling->hdr.level == 0) {
         total_keys += sibling->hdr.last_index + 1;
       }
       sibling->print();
@@ -165,7 +169,7 @@ void btree::printAll() {
     }
     printf("-----------------------------------------\n");
     leftmost = leftmost->hdr.leftmost_ptr;
-  } while (leftmost);
+  } while(leftmost);
 
   printf("total number of keys: %d\n", total_keys);
   pthread_mutex_unlock(&print_mtx);

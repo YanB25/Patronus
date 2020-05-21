@@ -26,11 +26,19 @@
 #include <time.h>
 #include <unistd.h>
 #include <vector>
+#include <limits>
+
+inline void mfence() { asm volatile("mfence" ::: "memory"); }
+
+inline void compiler_barrier() { asm volatile("" ::: "memory"); }
 
 #define PAGESIZE 512
 #define IS_FORWARD(c) (c % 2 == 0)
 using entry_key_t = int64_t;
 extern pthread_mutex_t print_mtx;
+
+const entry_key_t kKeyMin = std::numeric_limits<entry_key_t>::min();
+const entry_key_t kKeyMax = std::numeric_limits<entry_key_t>::max();
 
 class page;
 class btree {
@@ -65,8 +73,8 @@ private:
   uint8_t is_deleted;     // 1 bytes
   int16_t last_index;     // 2 bytes
   std::mutex *mtx;        // 8 bytes
+  entry_key_t lowest;     // 8 bytes
   entry_key_t highest;    // 8 bytes
-  uint64_t dummy[1];      // 8 bytes
 
   friend class page;
   friend class btree;
