@@ -3,7 +3,7 @@
 
 #include "Common.h"
 
-#define SIGNAL_BATCH 15
+#define SIGNAL_BATCH 31
 
 class Message;
 

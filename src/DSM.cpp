@@ -58,7 +58,7 @@ void DSM::registerThread() {
 
   iCon->message->initRecv();
   iCon->message->initSend();
-  rdma_buffer = (char *)cache.data + thread_id * 1 * define::MB;
+  rdma_buffer = (char *)cache.data + thread_id * 12 * define::MB;
 }
 
 void DSM::initRDMAConnection() {

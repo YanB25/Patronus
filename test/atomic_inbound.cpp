@@ -4,6 +4,11 @@
 
 #include <thread>
 
+
+/*
+./restartMemc.sh && /usr/local/openmpi/bin/mpiexec --allow-run-as-root -hostfile ./host  -np 9 ./atomic_inbound 9 4 0 0 8
+*/
+
 const int kMaxTestThread = 24;
 const int kBucketPerThread = 32;
 
@@ -16,6 +21,8 @@ int node_nr, my_node;
 int thread_nr;
 double kZipfan = 0;
 uint64_t cas_sleep_ns = 0;
+int kPacketSize = 16;
+
 
 void send_cas(int node_id, int thread_id) {
   bindCore(thread_id);
@@ -110,8 +117,7 @@ void send_skew_cas(int node_id, int thread_id) {
 
 void send_write(int node_id, int thread_id) {
 
-  const int kPacketSize = 64;
-  const int kDifferLocation = 32;
+  const int kDifferLocation = 256;
 
   bindCore(thread_id);
   dsm->registerThread();
@@ -124,7 +130,6 @@ void send_write(int node_id, int thread_id) {
   gaddr.nodeID = node_nr - 1;
 
   memset(buffer, 0, buffer_size);
-  gaddr.offset = 0;
   const uint64_t offset_start =
       node_id * (thread_nr * buffer_size) + buffer_size * thread_id;
   printf("[%lx %lx)\n", offset_start, offset_start + buffer_size);
@@ -138,7 +143,7 @@ void send_write(int node_id, int thread_id) {
     int kTh = sendCounter % kDifferLocation;
     gaddr.offset = kTh * kPacketSize;
 
-    dsm->read(buffer + gaddr.offset, gaddr, kPacketSize,
+    dsm->write(buffer + gaddr.offset, gaddr, kPacketSize,
              (sendCounter & SIGNAL_BATCH) == 0);
 
     ++sendCounter;
@@ -148,7 +153,7 @@ void send_write(int node_id, int thread_id) {
 
 void read_args(int argc, char **argv) {
   if (argc < 3) {
-    fprintf(stderr, "Usage: ./atomic_inbound node_nr thread_nr [zipfan] [cas cap]\n");
+    fprintf(stderr, "Usage: ./atomic_inbound node_nr thread_nr [zipfan] [cas cap] packet_size\n");
     exit(-1);
   }
 
@@ -163,8 +168,12 @@ void read_args(int argc, char **argv) {
     cas_sleep_ns = std::atoi(argv[4]);
   }
 
-  printf("node_nr [%d], thread_nr [%d], zipfan [%.3f], cas sleep ns [%ld]\n",
-   node_nr, thread_nr, kZipfan, cas_sleep_ns);
+  if (argc >= 6) {
+    kPacketSize = std::atoi(argv[5]);
+  }
+
+  printf("node_nr [%d], thread_nr [%d], zipfan [%.3f], cas sleep ns [%ld], packsize [%d]\n",
+   node_nr, thread_nr, kZipfan, cas_sleep_ns, kPacketSize);
 }
 
 int main(int argc, char **argv) {
@@ -186,12 +195,8 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < thread_nr; ++i) {
     // th[i] = std::thread(send_cas, dsm->getMyNodeID(), i);
-     th[i] = std::thread(send_skew_cas, dsm->getMyNodeID(), i);
-    // if (dsm->getMyNodeID() == 0) {
-    //      th[i] = std::thread(send_skew_cas, dsm->getMyNodeID(), i);
-    // } else {
-    //   th[i] = std::thread(send_write, dsm->getMyNodeID(), i);
-    // }
+    //  th[i] = std::thread(send_skew_cas, dsm->getMyNodeID(), i);
+    th[i] = std::thread(send_write, dsm->getMyNodeID(), i);
       
   }
 
@@ -213,8 +218,14 @@ int main(int argc, char **argv) {
       write_tp += tp_write_counter[i][0];
       tp_write_counter[i][0] = 0;
     }
-    printf("node %d, cas tp %.2lf, data tp %.2lf\n", dsm->getMyNodeID(),
-           tp * 1.0 / (1.0 * ns / 1000 / 1000 / 1000),
-           write_tp * 1.0 / (1.0 * ns / 1000 / 1000 / 1000));
+
+    double atomic_tp = tp * 1.0 / (1.0 * ns / 1000 / 1000 / 1000);
+    double data_tp = write_tp * 1.0 / (1.0 * ns / 1000 / 1000 / 1000);
+    printf("node %d, cas tp %.2lf, data tp %.2lf, all data %.2lf\n",
+    dsm->getMyNodeID(),
+    atomic_tp,
+    data_tp,
+    data_tp * (node_nr - 1)
+    );
   }
 }

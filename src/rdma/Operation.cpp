@@ -248,6 +248,7 @@ bool rdmaWrite(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t size,
 
   if (ibv_post_send(qp, &wr, &wrBad) != 0) {
     Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");
+    sleep(10);
     return false;
   }
   return true;
