@@ -40,17 +40,31 @@ public:
   inline int count() { return hdr.last_index + 1; }
 
   inline bool remove_key(entry_key_t key) {
-    // Set the switch_counter
-    if (IS_FORWARD(hdr.switch_counter))
-      ++hdr.switch_counter;
+
+    hdr.mtx->lock();
+
+    if (key >= hdr.highest) {
+      hdr.mtx->unlock();
+      return hdr.sibling_ptr->remove_key(key);
+    } else if (key < hdr.lowest) {
+      assert(false);
+
+      hdr.mtx->unlock();
+      return 0;
+    }
 
     bool shift = false;
-    int i;
-    for (i = 0; records[i].ptr != NULL; ++i) {
+    int cnt = count();
+
+    for (int i = 0; i < cnt; ++i) {
       if (!shift && records[i].key == key) {
+        shift = true;
+
+        hdr.switch_counter++;
+        compiler_barrier();
+
         records[i].ptr =
             (i == 0) ? (char *)hdr.leftmost_ptr : records[i - 1].ptr;
-        shift = true;
       }
 
       if (shift) {
@@ -63,19 +77,19 @@ public:
 
     if (shift) {
       --hdr.last_index;
+
+      hdr.switch_counter++;
+      compiler_barrier();
     }
-    return shift;
+
+    hdr.mtx->unlock();
+    return true;
   }
 
   bool remove(btree *bt, entry_key_t key, bool only_rebalance = false,
               bool with_lock = true) {
-    hdr.mtx->lock();
 
-    bool ret = remove_key(key);
-
-    hdr.mtx->unlock();
-
-    return ret;
+    return remove_key(key);
   }
 
   inline void insert_key(entry_key_t key, char *ptr, int *num_entries,
@@ -133,7 +147,7 @@ public:
     // Compare this key with the first key of the sibling
     if (key >= hdr.highest) { // internal node
 
-      hdr.mtx->unlock(); // Unlock the write lock
+      hdr.mtx->unlock(); // Ulock the write lock
       assert(hdr.sibling_ptr != nullptr);
       return hdr.sibling_ptr->store(bt, NULL, key, right, invalid_sibling);
     }
@@ -143,14 +157,26 @@ public:
     hdr.switch_counter++;
     compiler_barrier();
 
+    if (hdr.leftmost_ptr == NULL) {
+      for (int i = 0; i < num_entries; ++i) {
+        if (records[i].key == key) {
+          records[i].ptr = right;
+
+          compiler_barrier();
+          hdr.switch_counter++;
+          hdr.mtx->unlock();
+          return this;
+        }
+      }
+    }
+
     // FAST
     if (num_entries < cardinality - 1) {
       insert_key(key, right, &num_entries);
 
-      hdr.mtx->unlock(); // Unlock the write lock
-
       compiler_barrier();
       hdr.switch_counter++;
+      hdr.mtx->unlock();
       return this;
     } else { // FAIR
       // overflow
@@ -166,7 +192,7 @@ public:
           sibling->insert_key(records[i].key, records[i].ptr, &sibling_cnt,
                               false);
         }
-        
+
         sibling->hdr.lowest = records[m].key;
         sibling->hdr.highest = hdr.highest;
         hdr.highest = records[m].key;
@@ -211,16 +237,19 @@ public:
         // printf("%p -- %p\n", this, sibling);
         bt->setNewRoot((char *)new_root);
 
+        compiler_barrier();
+        hdr.switch_counter++;
         hdr.mtx->unlock(); // Unlock the write lock
 
       } else {
+
+        compiler_barrier();
+        hdr.switch_counter++;
         hdr.mtx->unlock(); // Unlock the write lock
         bt->btree_insert_internal(NULL, split_key, (char *)sibling,
                                   hdr.level + 1);
       }
 
-      compiler_barrier();
-      hdr.switch_counter++;
       return ret;
     }
   }
@@ -345,7 +374,6 @@ public:
       }
     }
   }
-
 };
 
 #endif

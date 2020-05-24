@@ -82,54 +82,8 @@ void btree::btree_delete(entry_key_t key) {
     if (!p->remove(this, key)) {
       btree_delete(key);
     }
-  } else {
-    printf("not found the key to delete %lu\n", key);
   }
-}
-
-void btree::btree_delete_internal(entry_key_t key, char *ptr, uint32_t level,
-                                  entry_key_t *deleted_key,
-                                  bool *is_leftmost_node, page **left_sibling) {
-  if (level > ((page *)this->root)->hdr.level)
-    return;
-
-  page *p = (page *)this->root;
-
-  while (p->hdr.level > level) {
-    p = (page *)p->linear_search(key);
-  }
-
-  p->hdr.mtx->lock();
-
-  if ((char *)p->hdr.leftmost_ptr == ptr) {
-    *is_leftmost_node = true;
-    p->hdr.mtx->unlock();
-    return;
-  }
-
-  *is_leftmost_node = false;
-
-  for (int i = 0; p->records[i].ptr != NULL; ++i) {
-    if (p->records[i].ptr == ptr) {
-      if (i == 0) {
-        if ((char *)p->hdr.leftmost_ptr != p->records[i].ptr) {
-          *deleted_key = p->records[i].key;
-          *left_sibling = p->hdr.leftmost_ptr;
-          p->remove(this, *deleted_key, false, false);
-          break;
-        }
-      } else {
-        if (p->records[i - 1].ptr != p->records[i].ptr) {
-          *deleted_key = p->records[i].key;
-          *left_sibling = (page *)p->records[i - 1].ptr;
-          p->remove(this, *deleted_key, false, false);
-          break;
-        }
-      }
-    }
-  }
-
-  p->hdr.mtx->unlock();
+  
 }
 
 // Function to search keys from "min" to "max"
