@@ -93,13 +93,12 @@ public:
       int i = *num_entries - 1, inserted = 0;
       records[*num_entries + 1].ptr = records[*num_entries].ptr;
 
-      // FAST
       for (i = *num_entries - 1; i >= 0; i--) {
         if (key < records[i].key) {
           records[i + 1].ptr = records[i].ptr;
           records[i + 1].key = records[i].key;
         } else {
-          records[i + 1].ptr = records[i].ptr;
+          // records[i + 1].ptr = records[i].ptr;
           records[i + 1].key = key;
           records[i + 1].ptr = ptr;
           inserted = 1;
@@ -107,7 +106,7 @@ public:
         }
       }
       if (inserted == 0) {
-        records[0].ptr = (char *)hdr.leftmost_ptr;
+        // records[0].ptr = (char *)hdr.leftmost_ptr;
         records[0].key = key;
         records[0].ptr = ptr;
       }
