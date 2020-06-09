@@ -31,7 +31,7 @@ void Directory::dirThread() {
   while (true) {
     struct ibv_wc wc;
     pollWithCQ(dCon->cq, 1, &wc);
- printf("DD\n");
+
     switch (int(wc.opcode)) {
     case IBV_WC_RECV: // control message
     {
@@ -57,7 +57,6 @@ void Directory::dirThread() {
 
 void Directory::process_message(const RawMessage *m) {
    
-  printf("BB\n");
   RawMessage *send = nullptr;
   switch (m->type) {
   case RpcType::MALLOC: {

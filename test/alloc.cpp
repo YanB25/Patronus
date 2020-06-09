@@ -11,7 +11,7 @@ int main() {
   dsm->registerThread();
 
   for (int i = 0; i < 102; i++) {
-     std::cout << dsm->alloc(233) << std::endl;
+     std::cout << dsm->alloc(1024*1024) << std::endl;
   }
 
   while (true)

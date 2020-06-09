@@ -124,7 +124,6 @@ public:
     buffer->node_id = myNodeID;
     buffer->app_id = thread_id;
 
-    printf("%d %d\n", node_id, dir_id);
     iCon->sendMessage2Dir(buffer, node_id, dir_id);
   }
 
@@ -149,7 +148,6 @@ inline GlobalAddress DSM::alloc(size_t size) {
     RawMessage m;
     m.type = RpcType::MALLOC;
 
-    printf("HH\n");
     this->rpc_call_dir(m, next_target_node, next_target_dir_id);
     local_allocator.set_chunck(rpc_wait()->addr);
 
@@ -157,7 +155,7 @@ inline GlobalAddress DSM::alloc(size_t size) {
       next_target_node = (next_target_node + 1) % conf.machineNR;
       next_target_dir_id = 0;
     }
-    
+
     // retry
     addr = local_allocator.malloc(size, need_chunk);
   }
@@ -165,7 +163,5 @@ inline GlobalAddress DSM::alloc(size_t size) {
   return addr;
 }
 
-inline void DSM::free(GlobalAddress addr) {
-  local_allocator.free(addr);
-}
+inline void DSM::free(GlobalAddress addr) { local_allocator.free(addr); }
 #endif /* __DSM_H__ */

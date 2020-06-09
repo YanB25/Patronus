@@ -47,7 +47,7 @@ public:
   char *getMessage();
   char *getSendPool();
 
-  uint16_t getQPN() { return message->qp_num; }
+  uint32_t getQPN() { return message->qp_num; }
 };
 
 #endif /* __ABSTRACTMESSAGECONNECTION_H__ */
