@@ -44,7 +44,7 @@ void send_write(int node_id, int thread_id) {
 
     gaddr.offset = kTh * kPacketSize;
 
-    dsm->write(buffer + gaddr.offset, gaddr, kPacketSize,
+    dsm->read(buffer + gaddr.offset, gaddr, kPacketSize,
              (sendCounter & SIGNAL_BATCH) == 0);
 
     ++sendCounter;

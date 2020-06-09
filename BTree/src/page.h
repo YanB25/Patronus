@@ -77,9 +77,9 @@ public:
 
     if (shift) {
       --hdr.last_index;
-
-      hdr.switch_counter++;
+      
       compiler_barrier();
+      hdr.switch_counter++; 
     }
 
     hdr.mtx->unlock();
