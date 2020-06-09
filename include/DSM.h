@@ -8,6 +8,7 @@
 #include "Connection.h"
 #include "DSMKeeper.h"
 #include "GlobalAddress.h"
+#include "LocalAllocator.h"
 
 class DSMKeeper;
 class Directory;
@@ -94,6 +95,7 @@ private:
   static thread_local int thread_id;
   static thread_local ThreadConnection *iCon;
   static thread_local char *rdma_buffer;
+  static thread_local LocalAllocator local_allocator;
 
   uint64_t baseAddr;
   uint32_t myNodeID;
@@ -110,6 +112,9 @@ public:
 
   char *get_rdma_buffer() { return rdma_buffer; }
 
+  GlobalAddress alloc(size_t size);
+  void free(GlobalAddress addr);
+
   void rpc_call_dir(const RawMessage &m, uint16_t node_id,
                     uint16_t dir_id = 0) {
 
@@ -119,6 +124,7 @@ public:
     buffer->node_id = myNodeID;
     buffer->app_id = thread_id;
 
+    printf("%d %d\n", node_id, dir_id);
     iCon->sendMessage2Dir(buffer, node_id, dir_id);
   }
 
@@ -130,4 +136,36 @@ public:
   }
 };
 
+inline GlobalAddress DSM::alloc(size_t size) {
+
+  thread_local int next_target_node =
+      (getMyThreadID() + getMyNodeID()) % conf.machineNR;
+  thread_local int next_target_dir_id =
+      (getMyThreadID() + getMyNodeID()) % NR_DIRECTORY;
+
+  bool need_chunk = false;
+  auto addr = local_allocator.malloc(size, need_chunk);
+  if (need_chunk) {
+    RawMessage m;
+    m.type = RpcType::MALLOC;
+
+    printf("HH\n");
+    this->rpc_call_dir(m, next_target_node, next_target_dir_id);
+    local_allocator.set_chunck(rpc_wait()->addr);
+
+    if (++next_target_dir_id == NR_DIRECTORY) {
+      next_target_node = (next_target_node + 1) % conf.machineNR;
+      next_target_dir_id = 0;
+    }
+    
+    // retry
+    addr = local_allocator.malloc(size, need_chunk);
+  }
+
+  return addr;
+}
+
+inline void DSM::free(GlobalAddress addr) {
+  local_allocator.free(addr);
+}
 #endif /* __DSM_H__ */

@@ -2,10 +2,13 @@
 #define __RAWMESSAGECONNECTION_H__
 
 #include "AbstractMessageConnection.h"
+#include "GlobalAddress.h"
 
 #include <thread>
 
 enum RpcType : uint8_t {
+  MALLOC,
+  FREE,
   NOP,
 };
 
@@ -14,8 +17,8 @@ struct RawMessage {
   
   uint16_t node_id;
   uint16_t app_id;
-  int num;
 
+  GlobalAddress addr; // for malloc
 } __attribute__((packed));
 
 class RawMessageConnection : public AbstractMessageConnection {

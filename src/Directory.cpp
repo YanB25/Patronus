@@ -25,24 +25,20 @@ Directory::~Directory() { delete chunckAlloc; }
 
 void Directory::dirThread() {
 
-  // bindCore(12 - dirID);
+  bindCore(23 - dirID);
   Debug::notifyInfo("dir %d launch!\n", dirID);
 
   while (true) {
-    sleep(1000);
     struct ibv_wc wc;
     pollWithCQ(dCon->cq, 1, &wc);
-
+ printf("DD\n");
     switch (int(wc.opcode)) {
     case IBV_WC_RECV: // control message
     {
+     
       auto *m = (RawMessage *)dCon->message->getMessage();
-      printf("recv %d, [%d, %d]\n", m->num, m->node_id, m->app_id);
 
-  
-      RawMessage *send = (RawMessage *)dCon->message->getSendPool();
-      send->num = 666;
-      dCon->sendMessage2App(send, m->node_id, m->app_id);
+      process_message(m);
 
       break;
     }
@@ -56,6 +52,28 @@ void Directory::dirThread() {
     default:
       assert(false);
     }
+  }
+}
+
+void Directory::process_message(const RawMessage *m) {
+   
+  printf("BB\n");
+  RawMessage *send = nullptr;
+  switch (m->type) {
+  case RpcType::MALLOC: {
+
+    send = (RawMessage *)dCon->message->getSendPool();
+
+    send->addr = chunckAlloc->alloc_chunck();
+    break;
+  }
+
+  default:
+    assert(false);
+  }
+
+  if (send) {
+    dCon->sendMessage2App(send, m->node_id, m->app_id);
   }
 }
 

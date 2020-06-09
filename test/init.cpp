@@ -11,17 +11,17 @@ int main() {
   dsm->registerThread();
 
   if (dsm->getMyNodeID() == 0) {
-    // RawMessage m;
+    RawMessage m;
     // m.num = 111;
 
-    // dsm->rpc_call_dir(m, 1);
+    dsm->rpc_call_dir(m, 1);
 
     GlobalAddress gaddr;
     gaddr.nodeID = 1;
     gaddr.offset = 8;
 
     auto *buffer = dsm->get_rdma_buffer();
-    char *s = "hello, world";
+    char s[] = "hello, world";
     int size = strlen(s);
     memcpy(buffer, s, size);
 

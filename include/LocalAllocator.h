@@ -18,26 +18,21 @@ public:
     cur = GlobalAddress::Null();
   }
 
-  GlobalAddress malloc(size_t size, bool &need_chunck, bool align) {
-    
+  GlobalAddress malloc(size_t size, bool &need_chunck, bool align = false) {
+
     if (align) {
-      // auto pre = cur.addr;
-      // cur.addr = ((cur.addr + DSM_CACHE_LINE_SIZE - 1) >> DSM_CACHE_LINE_WIDTH) << DSM_CACHE_LINE_WIDTH;
-      // assert(cur.addr - pre <= 4096);
-      if (cur.addr % DSM_CACHE_LINE_SIZE != 0) {
-        cur.addr = (cur.addr / DSM_CACHE_LINE_SIZE + 1) * DSM_CACHE_LINE_SIZE;
-      }
     }
 
     GlobalAddress res = cur;
-    if (log_heads.empty() || (cur.addr + size > head.addr + define::kChunkSize)) {
-        need_chunck = true;
+    if (log_heads.empty() ||
+        (cur.offset + size > head.offset + define::kChunkSize)) {
+      need_chunck = true;
     } else {
-        need_chunck = false;
-        cur.addr += size;
+      need_chunck = false;
+      cur.offset += size;
     }
 
-    assert(res.addr + size <= 40 * define::GB);
+    // assert(res.addr + size <= 40 * define::GB);
 
     return res;
   }

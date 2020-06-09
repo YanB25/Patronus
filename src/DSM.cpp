@@ -10,6 +10,7 @@
 thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
 thread_local char *DSM::rdma_buffer = nullptr;
+thread_local LocalAllocator DSM::local_allocator;
 
 DSM *DSM::getInstance(const DSMConfig &conf) {
   static DSM *dsm = nullptr;

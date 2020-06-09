@@ -34,6 +34,8 @@ private:
 
   void sendData2App(const RawMessage *m);
 
+  void process_message(const RawMessage *m);
+
 };
 
 #endif /* __DIRECTORY_H__ */
