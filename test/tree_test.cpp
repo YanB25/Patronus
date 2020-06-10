@@ -11,6 +11,9 @@ int main() {
 
   auto tree = new Tree(dsm);
 
+  
+  Value v;
+  tree->search(1, v);
 
   while (true)
     ;

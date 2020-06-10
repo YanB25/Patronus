@@ -42,6 +42,9 @@ DSM::DSM(const DSMConfig &conf)
     *(char *)i = 0;
   }
 
+  // clear up first chunk
+  memset((char *)baseAddr, 0, define::kChunkSize);
+
   initRDMAConnection();
 
   for (int i = 0; i < NR_DIRECTORY; ++i) {

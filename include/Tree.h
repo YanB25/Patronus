@@ -9,17 +9,18 @@ class Tree {
 
     Tree(DSM *dsm, uint16_t tree_id = 0);
 
-    void put(const Key &k, const Value &v);
-    void get(const Key &k, Value &v);
+    void insert(const Key &k, const Value &v);
+    void search(const Key &k, Value &v);
     void del(const Key &k);
     
     private:
 
     DSM *dsm;
     uint64_t tree_id;
-    GlobalAddress root_pointer; // the address which stores root pointer;
+    GlobalAddress root_ptr_ptr; // the address which stores root pointer;
 
-    GlobalAddress get_root_pointer();
+    GlobalAddress get_root_ptr_ptr();
+    GlobalAddress get_root_ptr();
     
 };
 

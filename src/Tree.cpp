@@ -8,7 +8,7 @@ Tree::Tree(DSM *dsm, uint16_t tree_id): dsm(dsm),
 tree_id(tree_id) {
     assert(dsm->is_register());
 
-    root_pointer = get_root_pointer();
+    root_ptr_ptr = get_root_ptr_ptr();
 
     if (dsm->getMyNodeID()) {
         std::cout << "Header size: " << sizeof(Header) << std::endl;
@@ -28,7 +28,7 @@ tree_id(tree_id) {
     dsm->write_sync(page_buffer, root_addr, kLeafPageSize);
     
     auto cas_buffer = (dsm->get_rbuf()).get_cas_buffer();
-    bool res = dsm->cas_sync(root_pointer, 0, root_addr.val, cas_buffer);
+    bool res = dsm->cas_sync(root_ptr_ptr, 0, root_addr.val, cas_buffer);
     if (res) {
         std::cout << "Tree root pointer value" << root_addr << std::endl;
     } else {
@@ -37,7 +37,7 @@ tree_id(tree_id) {
 
 }
 
-GlobalAddress Tree::get_root_pointer() {
+GlobalAddress Tree::get_root_ptr_ptr() {
     GlobalAddress addr;
     addr.nodeID = 0;
     addr.offset = define::kRootPointerStoreOffest 
@@ -46,12 +46,26 @@ GlobalAddress Tree::get_root_pointer() {
     return addr;
 }
 
-void Tree::put(const Key &k, const Value &v) {
+ GlobalAddress Tree::get_root_ptr() {
+    auto page_buffer = (dsm->get_rbuf()).get_page_buffer();
+    dsm->read_sync(page_buffer, root_ptr_ptr, sizeof(GlobalAddress));
+    GlobalAddress root_ptr = *(GlobalAddress *)page_buffer;
+    
+    std::cout << "root ptr " << root_ptr << std::endl;
+
+    return root_ptr;
+ }
+
+void Tree::insert(const Key &k, const Value &v) {
 assert(dsm->is_register());  
+
 }
 
-void Tree::get(const Key &k, Value &v) {
-assert(dsm->is_register());  
+void Tree::search(const Key &k, Value &v) {
+assert(dsm->is_register());
+
+
+
 }
 
 void Tree::del(const Key &k) {
