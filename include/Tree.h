@@ -3,6 +3,17 @@
 
 #include "DSM.h"
 
+
+struct SearchResult {
+    bool is_leaf;
+    uint8_t level;
+    GlobalAddress slibing;
+    GlobalAddress next_level;
+    Value val;
+};
+
+class InternalPage;
+class LeafPage;
 class Tree {
 
     public:
@@ -10,7 +21,7 @@ class Tree {
     Tree(DSM *dsm, uint16_t tree_id = 0);
 
     void insert(const Key &k, const Value &v);
-    void search(const Key &k, Value &v);
+    bool search(const Key &k, Value &v);
     void del(const Key &k);
     
     private:
@@ -21,6 +32,13 @@ class Tree {
 
     GlobalAddress get_root_ptr_ptr();
     GlobalAddress get_root_ptr();
+    
+
+    void page_search(GlobalAddress page_addr, const Key &k, 
+    SearchResult &result);
+    void internal_page_search(InternalPage *page, const Key &k, SearchResult &result);
+    void leaf_page_search(LeafPage *page, const Key &k, SearchResult &result);
+
     
 };
 
@@ -35,12 +53,15 @@ private:
 
   friend class InternalPage;
   friend class LeafPage;
+  friend class Tree;
 
 public:
   Header() {
     leftmost_ptr = GlobalAddress::Null();
     sibling_ptr = GlobalAddress::Null();
     last_index = -1;
+    lowest = kKeyMin;
+    highest = kKeyMax;
   }
 } __attribute__ ((packed));;
 
@@ -78,7 +99,11 @@ private:
   uint8_t front_version;
   Header hdr;                
   InternalEntry records[kInternalCardinality];
+
+  uint8_t padding[12];
   uint8_t rear_version;
+  
+  friend class Tree;
 
 public:
   // this is called when tree grows
@@ -90,9 +115,6 @@ public:
     records[1].ptr = GlobalAddress::Null();
 
     hdr.last_index = 0;
-
-    hdr.lowest = kKeyMin;
-    hdr.highest = kKeyMax;
   }
 
   
@@ -103,16 +125,17 @@ private:
   uint8_t front_version;
   Header hdr;                
   LeafEntry records[kLeafCardinality];
+
+  uint8_t padding[8];
   uint8_t rear_version;
+
+  friend class Tree;
 
 public:
 
   LeafPage(uint32_t level = 0) {
     hdr.level = level;
     records[0].value = kValueNull;
-
-    hdr.lowest = kKeyMin;
-    hdr.highest = kKeyMax;
 
     front_version = 0;
     rear_version = 0;

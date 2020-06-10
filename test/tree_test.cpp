@@ -13,7 +13,9 @@ int main() {
 
   
   Value v;
-  tree->search(1, v);
+  auto res = tree->search(1, v);
+
+  std::cout << "search result: " << res << std::endl;
 
   while (true)
     ;
