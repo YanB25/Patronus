@@ -108,6 +108,8 @@ private:
   Directory *dirAgent[NR_DIRECTORY];
 
 public:
+
+  bool is_register() { return thread_id != -1;}
   void barrier(const std::string &ss) { keeper->barrier(ss); }
 
   char *get_rdma_buffer() { return rdma_buffer; }

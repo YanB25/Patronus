@@ -61,6 +61,10 @@ constexpr uint16_t kCacheLineSize = 64;
 // for remote allocate
 constexpr uint64_t kChunkSize = MB * 32; 
 
+// for store root pointer
+constexpr uint64_t kRootPointerStoreOffest = kChunkSize / 2;
+static_assert(kRootPointerStoreOffest % sizeof(uint64_t) == 0, "XX");
+
 // lock on-chip memory
 constexpr uint64_t kLockStartAddr = 0;
 constexpr uint64_t kLockChipMemSize = 128 * 1024;
