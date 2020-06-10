@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <bitset>
+#include <limits>
 
 #include "Debug.h"
 #include "HugePageAlloc.h"
@@ -76,5 +77,16 @@ static inline unsigned long long asm_rdtsc(void) {
   __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
   return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
 }
+
+
+// For Tree
+using Key = uint64_t;
+using Value = uint64_t;
+constexpr Key kKeyMin = std::numeric_limits<Key>::min();
+constexpr Key kKeyMax = std::numeric_limits<Key>::max();
+constexpr Value kValueNull = 0;
+constexpr uint32_t kInternalPageSize = 512;
+constexpr uint32_t kLeafPageSize = 512;
+
 
 #endif /* __COMMON_H__ */

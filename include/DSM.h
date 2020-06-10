@@ -9,6 +9,7 @@
 #include "DSMKeeper.h"
 #include "GlobalAddress.h"
 #include "LocalAllocator.h"
+#include "RdmaBuffer.h"
 
 class DSMKeeper;
 class Directory;
@@ -96,6 +97,7 @@ private:
   static thread_local ThreadConnection *iCon;
   static thread_local char *rdma_buffer;
   static thread_local LocalAllocator local_allocator;
+  static thread_local RdmaBuffer rbuf;
 
   uint64_t baseAddr;
   uint32_t myNodeID;
@@ -113,6 +115,7 @@ public:
   void barrier(const std::string &ss) { keeper->barrier(ss); }
 
   char *get_rdma_buffer() { return rdma_buffer; }
+  const RdmaBuffer &get_rbuf() { return rbuf; }
 
   GlobalAddress alloc(size_t size);
   void free(GlobalAddress addr);

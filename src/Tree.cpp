@@ -2,6 +2,8 @@
 
 #include <iostream>
 
+#include "RdmaBuffer.h"
+
 Tree::Tree(DSM *dsm, uint16_t tree_id): dsm(dsm), 
 tree_id(tree_id) {
     assert(dsm->is_register());
@@ -18,6 +20,20 @@ tree_id(tree_id) {
         std::cout << "Leaf per Page: " << kLeafCardinality << std::endl;
     }
 
+// try to init tree and install root pointer.
+    auto page_buffer = (dsm->get_rbuf()).get_page_buffer();
+    auto root_addr = dsm->alloc(kLeafPageSize);
+    auto root_page = new (page_buffer) LeafPage;
+
+    dsm->write_sync(page_buffer, root_addr, kLeafPageSize);
+    
+    auto cas_buffer = (dsm->get_rbuf()).get_cas_buffer();
+    bool res = dsm->cas_sync(root_pointer, 0, root_addr.val, cas_buffer);
+    if (res) {
+        std::cout << "Tree root pointer value" << root_addr << std::endl;
+    } else {
+        std::cout << "fail\n";
+    }
 
 }
 
@@ -25,7 +41,7 @@ GlobalAddress Tree::get_root_pointer() {
     GlobalAddress addr;
     addr.nodeID = 0;
     addr.offset = define::kRootPointerStoreOffest 
-    + sizeof(uint64_t) * tree_id;
+    + sizeof(GlobalAddress) * tree_id;
 
     return addr;
 }

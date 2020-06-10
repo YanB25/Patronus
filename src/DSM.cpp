@@ -11,6 +11,7 @@ thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
 thread_local char *DSM::rdma_buffer = nullptr;
 thread_local LocalAllocator DSM::local_allocator;
+thread_local RdmaBuffer DSM::rbuf;
 
 DSM *DSM::getInstance(const DSMConfig &conf) {
   static DSM *dsm = nullptr;
@@ -60,6 +61,7 @@ void DSM::registerThread() {
   iCon->message->initRecv();
   iCon->message->initSend();
   rdma_buffer = (char *)cache.data + thread_id * 12 * define::MB;
+  rbuf.set_buffer(rdma_buffer);
 }
 
 void DSM::initRDMAConnection() {

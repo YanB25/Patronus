@@ -2,17 +2,6 @@
 #define _TREE_H_
 
 #include "DSM.h"
-#include <limits>
-
-
-using Key = uint64_t;
-using Value = uint64_t;
-constexpr Key kKeyMin = std::numeric_limits<Key>::min();
-constexpr Key kKeyMax = std::numeric_limits<Key>::max();
-constexpr Value kValueNull = 0;
-constexpr uint32_t kInternalPageSize = 512;
-constexpr uint32_t kLeafPageSize = 512;
-
 
 class Tree {
 
@@ -24,7 +13,6 @@ class Tree {
     void get(const Key &k, Value &v);
     void del(const Key &k);
     
-
     private:
 
     DSM *dsm;
