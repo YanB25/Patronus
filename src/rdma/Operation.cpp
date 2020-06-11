@@ -12,6 +12,7 @@ int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc) {
 
   if (count < 0) {
     Debug::notifyError("Poll Completion failed.");
+    sleep(5);
     return -1;
   }
 
@@ -19,6 +20,7 @@ int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc) {
     Debug::notifyError("Failed status %s (%d) for wr_id %d",
                        ibv_wc_status_str(wc->status), wc->status,
                        (int)wc->wr_id);
+    sleep(5);
     return -1;
   }
 
@@ -282,6 +284,7 @@ bool rdmaWrite(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t size,
 
   if (ibv_exp_post_send(qp, &wr, &wrBad) != 0) {
     Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");
+    sleep(5);
     return false;
   }
   return true;
@@ -361,6 +364,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
 
   if (ibv_post_send(qp, &wr, &wrBad)) {
     Debug::notifyError("Send with ATOMIC_CMP_AND_SWP failed.");
+    sleep(5);
     return false;
   }
   return true;
@@ -379,7 +383,7 @@ bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
   wr.exp_send_flags = IBV_EXP_SEND_EXT_ATOMIC_INLINE;
 
   if (singal) {
-     wr.exp_send_flags |= IBV_EXP_SEND_SIGNALED;
+    wr.exp_send_flags |= IBV_EXP_SEND_SIGNALED;
   }
 
   wr.ext_op.masked_atomics.log_arg_sz = 3;

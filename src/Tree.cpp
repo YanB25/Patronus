@@ -36,7 +36,7 @@ void Tree::print_verbose() {
   constexpr int kInternalHdrOffset = STRUCT_OFFSET(InternalPage, hdr);
   static_assert(kLeafHdrOffset == kInternalHdrOffset, "XXX");
 
-  if (dsm->getMyNodeID()) {
+  if (dsm->getMyNodeID() == 0) {
     std::cout << "Header size: " << sizeof(Header) << std::endl;
     std::cout << "Internal Page size: " << sizeof(InternalPage) << " ["
               << kInternalPageSize << "]" << std::endl;
@@ -326,8 +326,7 @@ retry:
     sibling->hdr.sibling_ptr = page->hdr.sibling_ptr;
     page->hdr.sibling_ptr = sibling_addr;
 
-    dsm->write(sibling_buf, sibling_addr, kInternalPageSize,
-               false); // aysnc
+    dsm->write_sync(sibling_buf, sibling_addr, kInternalPageSize);
   }
 
   dsm->write_sync(page_buffer, page_addr, kInternalPageSize);
@@ -456,8 +455,7 @@ retry:
     sibling->hdr.sibling_ptr = page->hdr.sibling_ptr;
     page->hdr.sibling_ptr = sibling_addr;
 
-    dsm->write(sibling_buf, sibling_addr, kLeafPageSize,
-               false); // aysnc
+    dsm->write_sync(sibling_buf, sibling_addr, kLeafPageSize);
   }
 
   dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
