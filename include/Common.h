@@ -17,6 +17,8 @@
 #include "Statistics.h"
 #include "WRLock.h"
 
+#define STRUCT_OFFSET(type, field) (char *)&((type *)(0))->field - (char *)((type *)(0))
+
 
 #define MAX_MACHINE 8
 
@@ -69,6 +71,9 @@ static_assert(kRootPointerStoreOffest % sizeof(uint64_t) == 0, "XX");
 // lock on-chip memory
 constexpr uint64_t kLockStartAddr = 0;
 constexpr uint64_t kLockChipMemSize = 128 * 1024;
+
+// number of locks
+constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
 
 } // namespace define
 

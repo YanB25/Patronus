@@ -32,12 +32,18 @@ class Tree {
 
     GlobalAddress get_root_ptr_ptr();
     GlobalAddress get_root_ptr();
+
+    void print_verbose();
     
 
     void page_search(GlobalAddress page_addr, const Key &k, 
     SearchResult &result);
     void internal_page_search(InternalPage *page, const Key &k, SearchResult &result);
     void leaf_page_search(LeafPage *page, const Key &k, SearchResult &result);
+
+    void internal_page_store(GlobalAddress page_addr, const Key &k, const Value &v, GlobalAddress root, int level);
+    void leaf_page_store(GlobalAddress page_addr, const Key &k, const Value &v, 
+    GlobalAddress root, int level);
 
     
 };
@@ -143,6 +149,9 @@ public:
 
 
 }  __attribute__ ((packed));
+
+
+
 
 
 #endif // _TREE_H_
