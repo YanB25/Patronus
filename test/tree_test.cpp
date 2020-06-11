@@ -18,14 +18,34 @@ int main() {
   }
 
 
-  for (uint64_t i = 1; i < 32; ++i) {
+  for (uint64_t i = 1; i < 10240; ++i) {
     tree->insert(i, i * 2);
   }
 
-  for (uint64_t i = 1; i < 32; ++i) {
-    auto res = tree->search(i, v);
-    std::cout << "search result:  " << res << " v: " << v << std::endl;
+  for (uint64_t i = 10240 - 1; i >= 1; --i) {
+    tree->insert(i, i * 3);
   }
+
+  for (uint64_t i = 1; i < 10240; ++i) {
+    auto res = tree->search(i, v);
+    assert(res && v == i * 3);
+    // std::cout << "search result:  " << res << " v: " << v << std::endl;
+  }
+
+  for (uint64_t i = 10240 - 1; i >= 1; --i) {
+    tree->del(i);
+  }
+
+  for (uint64_t i = 1; i < 10240; ++i) {
+    auto res = tree->search(i, v);
+    assert(!res);
+    // std::cout << "search result:  " << res << " v: " << v << std::endl;
+  }
+
+  auto res = tree->search(23333, v);
+  assert(!res);
+
+  printf("Hello\n");
 
   while (true)
     ;

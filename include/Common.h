@@ -75,6 +75,9 @@ constexpr uint64_t kLockChipMemSize = 128 * 1024;
 // number of locks
 constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
 
+// level of tree
+constexpr uint64_t kMaxLevelOfTree = 12;
+
 } // namespace define
 
 static inline unsigned long long asm_rdtsc(void) {
