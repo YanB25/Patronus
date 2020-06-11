@@ -14,6 +14,7 @@ class RdmaBuffer {
     uint64_t *cas_buffer;
     uint64_t *unlock_buffer;
     char *page_buffer;
+    char *sibling_buffer;
     char *entry_buffer;
 
     public:
@@ -29,7 +30,8 @@ class RdmaBuffer {
         cas_buffer = (uint64_t *)buffer;
         unlock_buffer = (uint64_t *)((char *)cas_buffer + sizeof(uint64_t));
         page_buffer = (char *)unlock_buffer + sizeof(uint64_t);
-        entry_buffer = (char *)page_buffer + std::max(kLeafPageSize, kInternalPageSize);
+        sibling_buffer = (char *)page_buffer + std::max(kLeafPageSize, kInternalPageSize);
+        entry_buffer = (char *)sibling_buffer + std::max(kLeafPageSize, kInternalPageSize);
     }
 
     uint64_t *get_cas_buffer() const {
@@ -42,6 +44,10 @@ class RdmaBuffer {
 
     char *get_page_buffer() const {
         return page_buffer;
+    }
+
+    char *get_sibling_buffer() const {
+        return sibling_buffer;
     }
 
     char *get_entry_buffer() const {

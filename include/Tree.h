@@ -2,6 +2,7 @@
 #define _TREE_H_
 
 #include "DSM.h"
+#include <iostream>
 
 
 struct SearchResult {
@@ -69,6 +70,14 @@ public:
     lowest = kKeyMin;
     highest = kKeyMax;
   }
+
+  void debug() {
+    std::cout << "leftmost=" << leftmost_ptr << ", "
+    << "sibling=" << sibling_ptr << ", " 
+    << "level=" << level << ","
+    << "cnt=" << last_index + 1 << ","
+    << "range=[" << lowest << " - " << highest << "]";
+  }
 } __attribute__ ((packed));;
 
 class InternalEntry {
@@ -123,6 +132,23 @@ public:
     hdr.last_index = 0;
   }
 
+   InternalPage(uint32_t level = 0) {
+    hdr.level = level;
+    records[0].ptr = GlobalAddress::Null();
+
+    front_version = 0;
+    rear_version = 0;
+  }
+
+  void debug() {
+    std::cout << "InternalPage@ ";
+    hdr.debug();
+    std::cout << "version: [" <<  (int)front_version << ", " << 
+    (int)rear_version << "]" << std::endl;
+  }
+
+
+
   
 }  __attribute__ ((packed));
 
@@ -145,6 +171,13 @@ public:
 
     front_version = 0;
     rear_version = 0;
+  }
+
+    void debug() {
+    std::cout << "LeafPage@ ";
+    hdr.debug();
+    std::cout << "version: [" <<  (int)front_version << ", " << 
+    (int)rear_version << "]" << std::endl;
   }
 
 

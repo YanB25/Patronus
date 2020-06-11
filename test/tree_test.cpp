@@ -11,24 +11,21 @@ int main() {
 
   auto tree = new Tree(dsm);
 
-  if (dsm->getMyNodeID() != 0) {
-      while (true);
-  }
-
-  
   Value v;
 
-  tree->insert(dsm->getMyNodeID() + 1, (dsm->getMyNodeID() + 1) * 2);
+  if (dsm->getMyNodeID() != 0) {
+    while(true);
+  }
 
-  sleep(3);
 
+  for (uint64_t i = 1; i < 32; ++i) {
+    tree->insert(i, i * 2);
+  }
 
-  v = 0;
-  auto res = tree->search(1, v);
-  std::cout << "search result:  " << res << " v: " << v << std::endl;
-
-  res = tree->search(2, v);
-  std::cout << "search result:  " << res << " v: " << v << std::endl;
+  for (uint64_t i = 1; i < 32; ++i) {
+    auto res = tree->search(i, v);
+    std::cout << "search result:  " << res << " v: " << v << std::endl;
+  }
 
   while (true)
     ;

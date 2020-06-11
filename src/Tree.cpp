@@ -59,7 +59,7 @@ GlobalAddress Tree::get_root_ptr_ptr() {
     return addr;
 }
 
- GlobalAddress Tree::get_root_ptr() {
+GlobalAddress Tree::get_root_ptr() {
     auto page_buffer = (dsm->get_rbuf()).get_page_buffer();
     dsm->read_sync(page_buffer, root_ptr_ptr, sizeof(GlobalAddress));
     GlobalAddress root_ptr = *(GlobalAddress *)page_buffer;
@@ -178,8 +178,12 @@ re_read:
 }
 
 void Tree::internal_page_search(InternalPage *page, const Key &k, SearchResult &result) {
-       printf("Internal page\n");
-       auto cnt = page->hdr.last_index + 1;
+
+       assert(k >= page->hdr.lowest);
+       assert(k < page->hdr.highest);
+      
+        auto cnt = page->hdr.last_index + 1;
+        page->debug();
         if (k < page->records[0].key) {
           result.next_level = page->hdr.leftmost_ptr;
           return;
@@ -191,8 +195,7 @@ void Tree::internal_page_search(InternalPage *page, const Key &k, SearchResult &
                 return;
             }
         }
-
-        assert(false);
+        result.next_level = page->records[cnt - 1].ptr;
 }
 
 void Tree::leaf_page_search(LeafPage *page, const Key &k, SearchResult &result) {
@@ -280,9 +283,55 @@ retry:
     page->front_version++;
     page->rear_version = page->front_version;
 
-    std::cout << "LLL " << page->hdr.leftmost_ptr << " " << page_addr << std::endl;
+    cnt = page->hdr.last_index + 1;
+    bool need_split = cnt == kLeafCardinality;
+    Key split_key;
+    GlobalAddress sibling_addr;
+    if (need_split) { // need split
+       sibling_addr = dsm->alloc(kLeafPageSize);
+       auto sibling_buf = dsm->get_rbuf().get_sibling_buffer();
+
+       auto sibling = new (sibling_buf) LeafPage(page->hdr.level);
+       
+       int m = cnt / 2;
+       split_key = page->records[m].key;
+       for (int i = m; i < cnt; ++i) { // move 
+          sibling->records[i - m].key = page->records[i].key;
+          sibling->records[i - m].value = page->records[i].value;
+       }
+       page->hdr.last_index -= (cnt - m);
+       sibling->hdr.last_index += (cnt - m);
+
+       sibling->hdr.lowest = page->records[m].key;
+       sibling->hdr.highest = page->hdr.highest;
+       page->hdr.highest = page->records[m].key;
+       
+
+       // link
+       sibling->hdr.sibling_ptr = page->hdr.sibling_ptr;
+       page->hdr.sibling_ptr = sibling_addr;
+
+       dsm->write(sibling_buf, sibling_addr, kLeafPageSize,
+       false);
+    }
+
     dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
     *cas_buffer = 0;
     dsm->write_sync((char *)cas_buffer, lock_addr, sizeof(uint64_t)); // unlock
+
+    if (!need_split) return;
+
+    if (root == page_addr) { // update root
+       auto new_root = new (page_buffer) InternalPage(page_addr, split_key,
+       sibling_addr, level +  1);
+       auto new_root_addr = dsm->alloc(kInternalPageSize);
+       dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize);
+       if (dsm->cas_sync(root_ptr_ptr, root, new_root_addr, cas_buffer)) {
+           // 
+           std::cout << "oK" << std::endl;
+       } else {
+           // 
+       }
+    };
     
 }
