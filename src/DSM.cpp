@@ -58,6 +58,9 @@ DSM::DSM(const DSMConfig &conf)
 DSM::~DSM() {}
 
 void DSM::registerThread() {
+
+  if (thread_id != -1) return;
+
   thread_id = appID.fetch_add(1);
   iCon = thCon[thread_id];
 

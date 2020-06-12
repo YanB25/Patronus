@@ -10,6 +10,11 @@ Tree *tree;
 DSM *dsm;
 
 void test(int id) {
+
+  // if (dsm->getMyNodeID() == 0) {
+  //   while (true);
+  // }
+
   dsm->registerThread();
 
   int mod = dsm->getMyNodeID() * kThreadNum + id;
@@ -17,6 +22,9 @@ void test(int id) {
   for (uint64_t i = 1; i < kTestKeySpace; ++i) {
     if (i % all_thread == mod) {
       tree->insert(i, i * 2);
+    }
+    if (i % 100000 == 0) {
+      printf("%d\n", i);
     }
   }
 }
@@ -32,16 +40,16 @@ int main() {
 
   Value v;
 
-  test(0);
+  // test(0);
 
-  // std::thread th[kThreadNum];
-  // for (int i = 0; i < kThreadNum; ++i) {
-  //   th[i] = std::thread(test, i);
-  // }
+  std::thread th[kThreadNum];
+  for (int i = 0; i < kThreadNum; ++i) {
+    th[i] = std::thread(test, i);
+  }
 
-  // for (int i = 0; i < kThreadNum; ++i) {
-  //   th[i].join();
-  // }
+  for (int i = 0; i < kThreadNum; ++i) {
+    th[i].join();
+  }
 
   //   for (uint64_t i = 10240 - 1; i >= 1; --i) {
   //     tree->insert(i, i * 3);

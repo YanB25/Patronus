@@ -47,6 +47,7 @@ bool Keeper::connectMemcached() {
 
   if (rc != MEMCACHED_SUCCESS) {
     fprintf(stderr, "Counld't add server:%s\n", memcached_strerror(memc, rc));
+    sleep(1);
     return false;
   }
 

@@ -19,14 +19,15 @@ Tree::Tree(DSM *dsm, uint16_t tree_id) : dsm(dsm), tree_id(tree_id) {
   auto root_addr = dsm->alloc(kLeafPageSize);
   auto root_page = new (page_buffer) LeafPage;
 
+  root_page->set_consistent();
   dsm->write_sync(page_buffer, root_addr, kLeafPageSize);
 
   auto cas_buffer = (dsm->get_rbuf()).get_cas_buffer();
   bool res = dsm->cas_sync(root_ptr_ptr, 0, root_addr.val, cas_buffer);
   if (res) {
-    std::cout << "Tree root pointer value" << root_addr << std::endl;
+    std::cout << "Tree root pointer value " << root_addr << std::endl;
   } else {
-    std::cout << "fail\n";
+    // std::cout << "fail\n";
   }
 }
 
@@ -75,7 +76,13 @@ void Tree::insert(const Key &k, const Value &v) {
   GlobalAddress p = root;
 
 next:
-  page_search(p, k, result);
+
+  if (!page_search(p, k, result)) {
+    std::cout << "SEARCH WARNING" << std::endl;
+    p = get_root_ptr();
+    sleep(1);
+    goto next;
+  }
 
   if (!result.is_leaf) {
     assert(result.level != 0);
@@ -103,7 +110,11 @@ bool Tree::search(const Key &k, Value &v) {
   GlobalAddress p = root;
 
 next:
-  page_search(p, k, result);
+  if (!page_search(p, k, result)) {
+    std::cout << "SEARCH WARNING" << std::endl;
+    p = path_stack[result.level + 1];
+    goto next;
+  }
   if (result.is_leaf) {
     if (result.val != kValueNull) { // find
       v = result.val;
@@ -130,7 +141,11 @@ void Tree::del(const Key &k) {
   GlobalAddress p = root;
 
 next:
-  page_search(p, k, result);
+  if (!page_search(p, k, result)) {
+    std::cout << "SEARCH WARNING" << std::endl;
+    p = path_stack[result.level + 1];
+    goto next;
+  }
 
   if (!result.is_leaf) {
     assert(result.level != 0);
@@ -149,11 +164,16 @@ next:
   leaf_page_del(p, k, 0);
 }
 
-void Tree::page_search(GlobalAddress page_addr, const Key &k,
+bool Tree::page_search(GlobalAddress page_addr, const Key &k,
                        SearchResult &result) {
   auto page_buffer = (dsm->get_rbuf()).get_page_buffer();
 
+  int counter = 0;
 re_read:
+  if (++counter > 100) {
+    printf("re read too many times\n");
+    sleep(1);
+  }
   dsm->read_sync(page_buffer, page_addr, kLeafPageSize);
 
   auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
@@ -167,33 +187,37 @@ re_read:
 
   if (result.is_leaf) {
     auto page = (LeafPage *)page_buffer;
-    if (page->front_version != page->rear_version) {
+    if (!page->check_consistent()) {
       goto re_read;
     }
 
     assert(result.level == 0);
     if (k >= page->hdr.highest) { // should turn right
       result.slibing = page->hdr.sibling_ptr;
-      return;
+      return true;
     }
     if (k < page->hdr.lowest) {
-      assert(false);
+      return false;
     }
     leaf_page_search(page, k, result);
   } else {
     auto page = (InternalPage *)page_buffer;
-    if (page->front_version != page->rear_version) {
+    if (!page->check_consistent()) {
       goto re_read;
     }
     if (k >= page->hdr.highest) { // should turn right
       result.slibing = page->hdr.sibling_ptr;
-      return;
+      return true;
     }
     if (k < page->hdr.lowest) {
       assert(false);
+      print_and_check_tree();
+      return false;
     }
     internal_page_search(page, k, result);
   }
+
+  return true;
 }
 
 void Tree::internal_page_search(InternalPage *page, const Key &k,
@@ -251,7 +275,7 @@ retry:
   auto page = (InternalPage *)page_buffer;
 
   assert(page->hdr.level == level);
-  assert(page->front_version == page->rear_version);
+  assert(page->check_consistent());
   if (k >= page->hdr.highest) {
     *cas_buffer = 0;
     dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
@@ -292,9 +316,6 @@ retry:
     page->hdr.last_index++;
   }
 
-  page->front_version++;
-  page->rear_version = page->front_version;
-
   cnt = page->hdr.last_index + 1;
   bool need_split = cnt == kInternalCardinality;
   Key split_key;
@@ -310,12 +331,12 @@ retry:
 
     int m = cnt / 2;
     split_key = page->records[m].key;
-    for (int i = m; i < cnt; ++i) { // move
+    for (int i = m + 1; i < cnt; ++i) { // move
       sibling->records[i - m].key = page->records[i].key;
       sibling->records[i - m].ptr = page->records[i].ptr;
     }
     page->hdr.last_index -= (cnt - m);
-    sibling->hdr.last_index += (cnt - m);
+    sibling->hdr.last_index += (cnt - m - 1);
 
     sibling->hdr.leftmost_ptr = page->records[m].ptr;
     sibling->hdr.lowest = page->records[m].key;
@@ -326,9 +347,11 @@ retry:
     sibling->hdr.sibling_ptr = page->hdr.sibling_ptr;
     page->hdr.sibling_ptr = sibling_addr;
 
+    sibling->set_consistent();
     dsm->write_sync(sibling_buf, sibling_addr, kInternalPageSize);
   }
 
+  page->set_consistent();
   dsm->write_sync(page_buffer, page_addr, kInternalPageSize);
   *cas_buffer = 0;
   dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
@@ -342,14 +365,12 @@ retry:
         InternalPage(page_addr, split_key, sibling_addr, level + 1);
 
     auto new_root_addr = dsm->alloc(kInternalPageSize);
-    //    std::cout << "addr " <<  new_root_addr << " | level " << (int)(level +
-    //    1)
-    //    << std::endl;
+
+    new_root->set_consistent();
     dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize);
     if (dsm->cas_sync(root_ptr_ptr, root, new_root_addr, cas_buffer)) {
-      //
-      std::cout << "oK" << std::endl;
-      //    assert(false);
+
+      std::cout << "new root level " << level + 1 << std::endl;
       return;
     }
   }
@@ -381,7 +402,7 @@ retry:
   auto page = (LeafPage *)page_buffer;
 
   assert(page->hdr.level == level);
-  assert(page->front_version == page->rear_version);
+  assert(page->check_consistent());
   if (k >= page->hdr.highest) {
     *cas_buffer = 0;
     dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
@@ -422,9 +443,6 @@ retry:
     page->hdr.last_index++;
   }
 
-  page->front_version++;
-  page->rear_version = page->front_version;
-
   cnt = page->hdr.last_index + 1;
   bool need_split = cnt == kLeafCardinality;
   Key split_key;
@@ -455,9 +473,11 @@ retry:
     sibling->hdr.sibling_ptr = page->hdr.sibling_ptr;
     page->hdr.sibling_ptr = sibling_addr;
 
+    sibling->set_consistent();
     dsm->write_sync(sibling_buf, sibling_addr, kLeafPageSize);
   }
 
+  page->set_consistent();
   dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
   *cas_buffer = 0;
   dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
@@ -470,12 +490,12 @@ retry:
     auto new_root = new (page_buffer)
         InternalPage(page_addr, split_key, sibling_addr, level + 1);
     auto new_root_addr = dsm->alloc(kInternalPageSize);
-    // std::cout << "addr " <<  new_root_addr << " | level " << (int)(level + 1)
-    // << std::endl;
+
+    new_root->set_consistent();
     dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize);
     if (dsm->cas_sync(root_ptr_ptr, root, new_root_addr, cas_buffer)) {
       //
-      std::cout << "oK" << std::endl;
+      std::cout << "new root level " << level + 1 << std::endl;
       return;
     }
   }
@@ -506,7 +526,7 @@ retry:
   auto page = (LeafPage *)page_buffer;
 
   assert(page->hdr.level == level);
-  assert(page->front_version == page->rear_version);
+  assert(page->check_consistent());
   if (k >= page->hdr.highest) {
     *cas_buffer = 0;
     dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
@@ -535,8 +555,7 @@ retry:
 
     page->hdr.last_index--;
 
-    page->front_version++;
-    page->rear_version = page->front_version;
+    page->set_consistent();
     dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
   }
 

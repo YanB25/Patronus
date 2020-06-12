@@ -2,7 +2,10 @@
 #define _TREE_H_
 
 #include "DSM.h"
+#include <city.h>
 #include <iostream>
+
+// #define CONFIG_ENABLE_CRC
 
 struct SearchResult {
   bool is_leaf;
@@ -32,8 +35,9 @@ private:
   GlobalAddress get_root_ptr();
 
   void print_verbose();
+  void print_and_check_tree();
 
-  void page_search(GlobalAddress page_addr, const Key &k, SearchResult &result);
+  bool page_search(GlobalAddress page_addr, const Key &k, SearchResult &result);
   void internal_page_search(InternalPage *page, const Key &k,
                             SearchResult &result);
   void leaf_page_search(LeafPage *page, const Key &k, SearchResult &result);
@@ -110,11 +114,12 @@ constexpr int kLeafCardinality =
 
 class InternalPage {
 private:
+  uint32_t crc;
   uint8_t front_version;
   Header hdr;
   InternalEntry records[kInternalCardinality];
 
-  uint8_t padding[12];
+  uint8_t padding[8];
   uint8_t rear_version;
 
   friend class Tree;
@@ -143,6 +148,26 @@ public:
     rear_version = 0;
   }
 
+  void set_consistent() {
+    front_version++;
+    rear_version = front_version;
+#ifdef CONFIG_ENABLE_CRC
+    this->crc =
+        CityHash32((char *)&front_version, (&rear_version) - (&front_version));
+#endif
+  }
+
+  bool check_consistent() const {
+
+    bool succ = true;
+#ifdef CONFIG_ENABLE_CRC
+    auto cal_crc =
+        CityHash32((char *)&front_version, (&rear_version) - (&front_version));
+    succ = cal_crc == this->crc;
+#endif
+    return succ && (rear_version == front_version);
+  }
+
   void debug() {
     std::cout << "InternalPage@ ";
     hdr.debug();
@@ -154,11 +179,12 @@ public:
 
 class LeafPage {
 private:
+  uint32_t crc;
   uint8_t front_version;
   Header hdr;
   LeafEntry records[kLeafCardinality];
 
-  uint8_t padding[8];
+  uint8_t padding[4];
   uint8_t rear_version;
 
   friend class Tree;
@@ -170,6 +196,26 @@ public:
 
     front_version = 0;
     rear_version = 0;
+  }
+
+  void set_consistent() {
+    front_version++;
+    rear_version = front_version;
+#ifdef CONFIG_ENABLE_CRC
+    this->crc =
+        CityHash32((char *)&front_version, (&rear_version) - (&front_version));
+#endif
+  }
+
+  bool check_consistent() const {
+
+    bool succ = true;
+#ifdef CONFIG_ENABLE_CRC
+    auto cal_crc =
+        CityHash32((char *)&front_version, (&rear_version) - (&front_version));
+    succ = cal_crc == this->crc;
+#endif
+    return succ && (rear_version == front_version);
   }
 
   void debug() {
