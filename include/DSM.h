@@ -22,6 +22,7 @@ public:
 
   uint16_t getMyNodeID() { return myNodeID; }
   uint16_t getMyThreadID() { return thread_id; }
+  uint64_t getThreadTag() { return thread_tag; }
 
   // RDMA operations
   // buffer is registered memory
@@ -98,6 +99,7 @@ private:
   static thread_local char *rdma_buffer;
   static thread_local LocalAllocator local_allocator;
   static thread_local RdmaBuffer rbuf;
+  static thread_local uint64_t thread_tag;
 
   uint64_t baseAddr;
   uint32_t myNodeID;

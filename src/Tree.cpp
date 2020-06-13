@@ -67,6 +67,45 @@ GlobalAddress Tree::get_root_ptr() {
   return root_ptr;
 }
 
+void Tree::print_and_check_tree() {
+  assert(dsm->is_register());
+
+  auto root = get_root_ptr();
+  // SearchResult result;
+
+  GlobalAddress p = root;
+  GlobalAddress levels[define::kMaxLevelOfTree];
+  int level_cnt = 0;
+  auto page_buffer = (dsm->get_rbuf()).get_page_buffer();
+
+next_level:
+
+  dsm->read_sync(page_buffer, p, kLeafPageSize);
+  auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
+  levels[level_cnt++] = p;
+  if (header->level != 0) {
+    p = header->leftmost_ptr;
+    goto next_level;
+  }
+
+  for (int i = 0; i < level_cnt; ++i) {
+    dsm->read_sync(page_buffer, levels[i], kLeafPageSize);
+    auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
+    std::cout << "addr: " << levels[i] << " ";
+    header->debug();
+    std::cout << " | ";
+    while (header->sibling_ptr != GlobalAddress::Null()) {
+      dsm->read_sync(page_buffer, header->sibling_ptr, kLeafPageSize);
+      header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
+      std::cout << "addr: " << header->sibling_ptr << " ";
+      header->debug();
+      std::cout << " | ";
+    }
+    std::cout << "\n------------------------------------" << std::endl;
+    std::cout << "------------------------------------" << std::endl;
+  }
+}
+
 void Tree::insert(const Key &k, const Value &v) {
   assert(dsm->is_register());
 
@@ -78,7 +117,7 @@ void Tree::insert(const Key &k, const Value &v) {
 next:
 
   if (!page_search(p, k, result)) {
-    std::cout << "SEARCH WARNING" << std::endl;
+    std::cout << "SEARCH WARNING insert" << std::endl;
     p = get_root_ptr();
     sleep(1);
     goto next;
@@ -111,8 +150,9 @@ bool Tree::search(const Key &k, Value &v) {
 
 next:
   if (!page_search(p, k, result)) {
-    std::cout << "SEARCH WARNING" << std::endl;
+    std::cout << "SEARCH WARNING search" << std::endl;
     p = path_stack[result.level + 1];
+    sleep(1);
     goto next;
   }
   if (result.is_leaf) {
@@ -210,8 +250,10 @@ re_read:
       return true;
     }
     if (k < page->hdr.lowest) {
-      assert(false);
+      printf("key %ld error in level %d\n", k, page->hdr.level);
+      sleep(10);
       print_and_check_tree();
+      assert(false);
       return false;
     }
     internal_page_search(page, k, result);
@@ -263,10 +305,22 @@ void Tree::internal_page_store(GlobalAddress page_addr, const Key &k,
 
   uint64_t *cas_buffer = dsm->get_rbuf().get_cas_buffer();
 
+  uint64_t retry_cnt = 0;
+  auto tag = dsm->getThreadTag();
+  assert(tag != 0);
 retry:
-  bool res = dsm->cas_sync(lock_addr, 0, 1, cas_buffer);
+  if (retry_cnt++ > 1000) {
+    std::cout << "Deadlock Internal " << lock_addr.offset << std::endl;
+    uint64_t conflict_tag = *cas_buffer - 1;
+    std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
+              << " locked by " << (conflict_tag >> 32) << ", "
+              << (conflict_tag << 32 >> 32) << std::endl;
+    assert(false);
+  }
+  bool res = dsm->cas_sync(lock_addr, 0, tag, cas_buffer);
   if (!res) {
     // wait
+    // printf("LE\n");
     goto retry;
   }
 
@@ -277,14 +331,22 @@ retry:
   assert(page->hdr.level == level);
   assert(page->check_consistent());
   if (k >= page->hdr.highest) {
-    *cas_buffer = 0;
-    dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
+
+#ifdef CONFIG_ENABLE_CAS_UNLOCK
+    dsm->cas(lock_addr, tag, 0, cas_buffer, false);
+#else
+    dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
+               sizeof(uint64_t),
                false); // unlock
+#endif
 
     assert(page->hdr.sibling_ptr != GlobalAddress::Null());
 
     this->internal_page_store(page->hdr.sibling_ptr, k, v, root, level);
+
+    return;
   }
+  assert(k >= page->hdr.lowest);
 
   auto cnt = page->hdr.last_index + 1;
 
@@ -293,7 +355,8 @@ retry:
   for (int i = cnt - 1; i >= 0; --i) {
     if (page->records[i].key == k) { // find and update
       page->records[i].ptr = v;
-
+      // assert(false);
+      printf("KKKKK\n");
       is_update = true;
       break;
     }
@@ -331,9 +394,11 @@ retry:
 
     int m = cnt / 2;
     split_key = page->records[m].key;
+    assert(split_key > page->hdr.lowest);
+    assert(split_key < page->hdr.highest);
     for (int i = m + 1; i < cnt; ++i) { // move
-      sibling->records[i - m].key = page->records[i].key;
-      sibling->records[i - m].ptr = page->records[i].ptr;
+      sibling->records[i - m - 1].key = page->records[i].key;
+      sibling->records[i - m - 1].ptr = page->records[i].ptr;
     }
     page->hdr.last_index -= (cnt - m);
     sibling->hdr.last_index += (cnt - m - 1);
@@ -353,9 +418,14 @@ retry:
 
   page->set_consistent();
   dsm->write_sync(page_buffer, page_addr, kInternalPageSize);
-  *cas_buffer = 0;
-  dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
+
+#ifdef CONFIG_ENABLE_CAS_UNLOCK
+  dsm->cas(lock_addr, tag, 0, cas_buffer, false);
+#else
+  dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
+             sizeof(uint64_t),
              false); // unlock, async
+#endif
 
   if (!need_split)
     return;
@@ -372,6 +442,8 @@ retry:
 
       std::cout << "new root level " << level + 1 << std::endl;
       return;
+    } else {
+      std::cout << "cas root fail " << std::endl;
     }
   }
 
@@ -390,8 +462,19 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
 
   uint64_t *cas_buffer = dsm->get_rbuf().get_cas_buffer();
 
+  uint64_t retry_cnt = 0;
+  auto tag = dsm->getThreadTag();
+  assert(tag != 0);
 retry:
-  bool res = dsm->cas_sync(lock_addr, 0, 1, cas_buffer);
+  if (retry_cnt++ > 1000) {
+    std::cout << "Deadlock Leaf " << lock_addr.offset << std::endl;
+    uint64_t conflict_tag = *cas_buffer - 1;
+    std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
+              << " locked by " << (conflict_tag >> 32) << ", "
+              << (conflict_tag << 32 >> 32) << std::endl;
+    assert(false);
+  }
+  bool res = dsm->cas_sync(lock_addr, 0, tag, cas_buffer);
   if (!res) {
     // wait
     goto retry;
@@ -404,14 +487,22 @@ retry:
   assert(page->hdr.level == level);
   assert(page->check_consistent());
   if (k >= page->hdr.highest) {
-    *cas_buffer = 0;
-    dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
+
+#ifdef CONFIG_ENABLE_CAS_UNLOCK
+    dsm->cas(lock_addr, tag, 0, cas_buffer, false);
+#else
+    dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
+               sizeof(uint64_t),
                false); // unlock
+#endif
 
     assert(page->hdr.sibling_ptr != GlobalAddress::Null());
 
     this->leaf_page_store(page->hdr.sibling_ptr, k, v, root, level);
+
+    return;
   }
+  assert(k >= page->hdr.lowest);
 
   auto cnt = page->hdr.last_index + 1;
 
@@ -458,6 +549,9 @@ retry:
 
     int m = cnt / 2;
     split_key = page->records[m].key;
+    assert(split_key > page->hdr.lowest);
+    assert(split_key < page->hdr.highest);
+
     for (int i = m; i < cnt; ++i) { // move
       sibling->records[i - m].key = page->records[i].key;
       sibling->records[i - m].value = page->records[i].value;
@@ -479,9 +573,14 @@ retry:
 
   page->set_consistent();
   dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
-  *cas_buffer = 0;
-  dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
+
+#ifdef CONFIG_ENABLE_CAS_UNLOCK
+  dsm->cas(lock_addr, tag, 0, cas_buffer, false);
+#else
+  dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
+             sizeof(uint64_t),
              false); // unlock, async
+#endif
 
   if (!need_split)
     return;
@@ -497,6 +596,8 @@ retry:
       //
       std::cout << "new root level " << level + 1 << std::endl;
       return;
+    } else {
+      std::cout << "cas root fail " << std::endl;
     }
   }
 
@@ -514,8 +615,19 @@ void Tree::leaf_page_del(GlobalAddress page_addr, const Key &k, int level) {
 
   uint64_t *cas_buffer = dsm->get_rbuf().get_cas_buffer();
 
+  uint64_t retry_cnt = 0;
+  auto tag = dsm->getThreadTag();
+  assert(tag != 0);
 retry:
-  bool res = dsm->cas_sync(lock_addr, 0, 1, cas_buffer);
+  if (retry_cnt++ > 1000) {
+    std::cout << "Deadlock Internal " << lock_addr.offset << std::endl;
+    uint64_t conflict_tag = *cas_buffer - 1;
+    std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
+              << " locked by " << (conflict_tag >> 32) << ", "
+              << (conflict_tag << 32 >> 32) << std::endl;
+    assert(false);
+  }
+  bool res = dsm->cas_sync(lock_addr, 0, tag, cas_buffer);
   if (!res) {
     // wait
     goto retry;
@@ -528,9 +640,14 @@ retry:
   assert(page->hdr.level == level);
   assert(page->check_consistent());
   if (k >= page->hdr.highest) {
-    *cas_buffer = 0;
-    dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
+
+#ifdef CONFIG_ENABLE_CAS_UNLOCK
+    dsm->cas(lock_addr, tag, 0, cas_buffer, false);
+#else
+    dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
+               sizeof(uint64_t),
                false); // unlock
+#endif
 
     assert(page->hdr.sibling_ptr != GlobalAddress::Null());
 
@@ -559,7 +676,11 @@ retry:
     dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
   }
 
-  *cas_buffer = 0;
-  dsm->write((char *)cas_buffer, lock_addr, sizeof(uint64_t),
+#ifdef CONFIG_ENABLE_CAS_UNLOCK
+  dsm->cas(lock_addr, tag, 0, cas_buffer, false);
+#else
+  dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
+             sizeof(uint64_t),
              false); // unlock, async
+#endif
 }

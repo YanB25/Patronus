@@ -12,6 +12,7 @@ thread_local ThreadConnection *DSM::iCon = nullptr;
 thread_local char *DSM::rdma_buffer = nullptr;
 thread_local LocalAllocator DSM::local_allocator;
 thread_local RdmaBuffer DSM::rbuf;
+thread_local uint64_t DSM::thread_tag = 0;
 
 DSM *DSM::getInstance(const DSMConfig &conf) {
   static DSM *dsm = nullptr;
@@ -62,6 +63,8 @@ void DSM::registerThread() {
   if (thread_id != -1) return;
 
   thread_id = appID.fetch_add(1);
+  thread_tag = thread_id + (((uint64_t)this->getMyThreadID()) << 32) + 1;
+
   iCon = thCon[thread_id];
 
   iCon->message->initRecv();

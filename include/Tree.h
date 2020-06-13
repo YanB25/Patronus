@@ -5,7 +5,8 @@
 #include <city.h>
 #include <iostream>
 
-// #define CONFIG_ENABLE_CRC
+#define CONFIG_ENABLE_CRC
+// #define CONFIG_ENABLE_CAS_UNLOCK
 
 struct SearchResult {
   bool is_leaf;
@@ -26,6 +27,8 @@ public:
   bool search(const Key &k, Value &v);
   void del(const Key &k);
 
+  void print_and_check_tree();
+
 private:
   DSM *dsm;
   uint64_t tree_id;
@@ -35,7 +38,7 @@ private:
   GlobalAddress get_root_ptr();
 
   void print_verbose();
-  void print_and_check_tree();
+ 
 
   bool page_search(GlobalAddress page_addr, const Key &k, SearchResult &result);
   void internal_page_search(InternalPage *page, const Key &k,

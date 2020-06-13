@@ -3,8 +3,8 @@
 #include <thread>
 
 constexpr int kTestKeySpace = 10000000;
-constexpr int kNodeNum = 2;
-constexpr int kThreadNum = 1;
+constexpr int kNodeNum = 3;
+constexpr int kThreadNum = 8;
 
 Tree *tree;
 DSM *dsm;
@@ -19,11 +19,19 @@ void test(int id) {
 
   int mod = dsm->getMyNodeID() * kThreadNum + id;
   int all_thread = kNodeNum * kThreadNum;
+
+  Value v;
   for (uint64_t i = 1; i < kTestKeySpace; ++i) {
     if (i % all_thread == mod) {
       tree->insert(i, i * 2);
+      // auto res = tree->search(i, v);
+      
+      // if (!res || v != i * 2) {
+      //   printf("Error %d\n", i);
+      // }
+      // assert(res && v == i * 2);
     }
-    if (i % 100000 == 0) {
+    if (i % 1000000 == 0) {
       printf("%d\n", i);
     }
   }
@@ -50,6 +58,8 @@ int main() {
   for (int i = 0; i < kThreadNum; ++i) {
     th[i].join();
   }
+
+  // tree->print_and_check_tree();
 
   //   for (uint64_t i = 10240 - 1; i >= 1; --i) {
   //     tree->insert(i, i * 3);

@@ -2,6 +2,7 @@
     "files.associations": {
         "*.p4": "c",
         "cstdint": "cpp",
-        "mutex": "cpp"
+        "mutex": "cpp",
+        "*.tcc": "cpp"
     }
 }
