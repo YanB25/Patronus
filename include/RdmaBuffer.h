@@ -3,67 +3,67 @@
 
 #include "Common.h"
 
-
 // abstract rdma registered buffer
 class RdmaBuffer {
 
-    private:
+private:
+  static const int kPageBufferCnt = 8;    // async, buffer safty
+  static const int kSiblingBufferCnt = 8; // async, buffer safty
 
-    char *buffer;
-    
-    uint64_t *cas_buffer;
-    uint64_t *unlock_buffer;
-    uint64_t *zero_64bit;
-    char *page_buffer;
-    char *sibling_buffer;
-    char *entry_buffer;
-    
+  char *buffer;
 
-    public:
+  uint64_t *cas_buffer;
+  uint64_t *unlock_buffer;
+  uint64_t *zero_64bit;
+  char *page_buffer;
+  char *sibling_buffer;
+  char *entry_buffer;
 
-    RdmaBuffer(char *buffer) {
-        set_buffer(buffer);
-    }
+  int page_buffer_cur;
+  int sibling_buffer_cur;
 
-    RdmaBuffer() = default;
+  int kPageSize;
 
-    void set_buffer(char *buffer) {
-        this->buffer = buffer;
-        cas_buffer = (uint64_t *)buffer;
-        unlock_buffer = (uint64_t *)((char *)cas_buffer + sizeof(uint64_t));
-        zero_64bit = (uint64_t *)((char *)unlock_buffer + sizeof(uint64_t));
-        page_buffer = (char *)zero_64bit + sizeof(uint64_t);
-        sibling_buffer = (char *)page_buffer + std::max(kLeafPageSize, kInternalPageSize);
-        entry_buffer = (char *)sibling_buffer + std::max(kLeafPageSize, kInternalPageSize);
+public:
+  RdmaBuffer(char *buffer) {
+    set_buffer(buffer);
 
-        *zero_64bit = 0;
-    }
+    page_buffer_cur = 0;
+    sibling_buffer_cur = 0;
+  }
 
-    uint64_t *get_cas_buffer() const {
-        return cas_buffer;
-    }
+  RdmaBuffer() = default;
 
-    uint64_t *get_unlock_buffer() const {
-        return unlock_buffer;
-    }
-    
-    uint64_t *get_zero_64bit()  const {
-        return zero_64bit;
-    }
+  void set_buffer(char *buffer) {
 
-    char *get_page_buffer() const {
-        return page_buffer;
-    }
+    kPageSize = std::max(kLeafPageSize, kInternalPageSize);
+    this->buffer = buffer;
+    cas_buffer = (uint64_t *)buffer;
+    unlock_buffer = (uint64_t *)((char *)cas_buffer + sizeof(uint64_t));
+    zero_64bit = (uint64_t *)((char *)unlock_buffer + sizeof(uint64_t));
+    page_buffer = (char *)zero_64bit + sizeof(uint64_t);
+    sibling_buffer = (char *)page_buffer + kPageSize * kPageBufferCnt;
+    entry_buffer = (char *)sibling_buffer + kPageSize * kSiblingBufferCnt;
+    *zero_64bit = 0;
+  }
 
-    char *get_sibling_buffer() const {
-        return sibling_buffer;
-    }
+  uint64_t *get_cas_buffer() const { return cas_buffer; }
 
-    char *get_entry_buffer() const {
-        return entry_buffer;
-    }
+  uint64_t *get_unlock_buffer() const { return unlock_buffer; }
 
-    
+  uint64_t *get_zero_64bit() const { return zero_64bit; }
+
+  char *get_page_buffer() {
+    page_buffer_cur = (page_buffer_cur + 1) % kPageBufferCnt;
+    return page_buffer + (page_buffer_cur * kPageSize);
+  }
+
+  char *get_sibling_buffer() {
+    sibling_buffer_cur = (sibling_buffer_cur + 1) % kSiblingBufferCnt;
+    return sibling_buffer + (sibling_buffer_cur * kPageSize);
+  }
+
+  char *get_entry_buffer() const { return entry_buffer; }
 };
 
 #endif // _RDMA_BUFFER_H_

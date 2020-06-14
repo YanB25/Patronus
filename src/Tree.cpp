@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include "RdmaBuffer.h"
+#include <algorithm>
 #include <city.h>
 
 thread_local GlobalAddress path_stack[define::kMaxLevelOfTree];
@@ -45,6 +46,8 @@ void Tree::print_verbose() {
     std::cout << "Leaf Page size: " << sizeof(LeafPage) << " [" << kLeafPageSize
               << "]" << std::endl;
     std::cout << "Leaf per Page: " << kLeafCardinality << std::endl;
+    std::cout << "LeafEntry size: " << sizeof(LeafEntry) << std::endl;
+    std::cout << "InternalEntry size: " << sizeof(InternalEntry) << std::endl;
   }
 }
 
@@ -104,6 +107,71 @@ next_level:
     std::cout << "\n------------------------------------" << std::endl;
     std::cout << "------------------------------------" << std::endl;
   }
+}
+
+inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
+                                uint64_t *buf) {
+#ifdef CONFIG_ENABLE_ON_CHIP_LOCK
+  bool res = dsm->cas_dm_sync(lock_addr, 0, tag, buf);
+#else
+  bool res = dsm->cas_sync(lock_addr, 0, tag, buf);
+#endif
+
+  return res;
+}
+
+inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
+                              uint64_t *buf) {
+#ifdef CONFIG_ENABLE_CAS_UNLOCK
+
+#ifdef CONFIG_ENABLE_ON_CHIP_LOCK
+  dsm->cas_dm(lock_addr, tag, 0, cas_buffer, false);
+#else
+  dsm->cas(lock_addr, tag, 0, cas_buffer, false);
+#endif
+
+#else
+
+#ifdef CONFIG_ENABLE_ON_CHIP_LOCK
+  dsm->write_dm((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
+                sizeof(uint64_t),
+                false); // unlock
+#else
+  dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
+             sizeof(uint64_t),
+             false); // unlock
+#endif
+
+#endif
+}
+
+void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
+                                 int page_size, uint64_t *cas_buffer,
+                                 GlobalAddress lock_addr, uint64_t tag) {
+#ifdef CONFIG_ENABLE_OP_COUPLE
+
+  RdmaOpRegion rs[2];
+  rs[0].source = (uint64_t)page_buffer;
+  rs[0].dest = page_addr;
+  rs[0].size = page_size;
+  rs[0].is_on_chip = false;
+
+  rs[1].source = (uint64_t)dsm->get_rbuf().get_zero_64bit();
+  rs[1].dest = lock_addr;
+  rs[1].size = sizeof(uint64_t);
+
+#ifdef CONFIG_ENABLE_ON_CHIP_LOCK
+  rs[1].is_on_chip = true;
+#else
+  rs[1].is_on_chip = false;
+#endif
+
+  dsm->write_batch(rs, 2, false);
+
+#else
+  dsm->write_sync(page_buffer, page_addr, page_size);
+  this->unlock_addr(lock_addr, tag, cas_buffer);
+#endif
 }
 
 void Tree::insert(const Key &k, const Value &v) {
@@ -207,6 +275,7 @@ next:
 bool Tree::page_search(GlobalAddress page_addr, const Key &k,
                        SearchResult &result) {
   auto page_buffer = (dsm->get_rbuf()).get_page_buffer();
+  auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
 
   int counter = 0;
 re_read:
@@ -215,8 +284,6 @@ re_read:
     sleep(1);
   }
   dsm->read_sync(page_buffer, page_addr, kLeafPageSize);
-
-  auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
 
   memset(&result, 0, sizeof(result));
   result.is_leaf = header->leftmost_ptr == GlobalAddress::Null();
@@ -286,12 +353,24 @@ void Tree::internal_page_search(InternalPage *page, const Key &k,
 
 void Tree::leaf_page_search(LeafPage *page, const Key &k,
                             SearchResult &result) {
+
+#ifdef CONFIG_ENABLE_FINER_VERSION
+  for (int i = 0; i < kLeafCardinality; ++i) {
+    auto &r = page->records[i];
+    if (r.key == k && r.value != kValueNull && r.f_version == r.r_version) {
+      result.val = r.value;
+      break;
+    }
+  }
+#else
   auto cnt = page->hdr.last_index + 1;
   for (int i = 0; i < cnt; ++i) {
     if (page->records[i].key == k) {
       result.val = page->records[i].value;
+      break;
     }
   }
+#endif
 }
 
 void Tree::internal_page_store(GlobalAddress page_addr, const Key &k,
@@ -317,7 +396,8 @@ retry:
               << (conflict_tag << 32 >> 32) << std::endl;
     assert(false);
   }
-  bool res = dsm->cas_sync(lock_addr, 0, tag, cas_buffer);
+
+  bool res = try_lock_addr(lock_addr, tag, cas_buffer);
   if (!res) {
     // wait
     // printf("LE\n");
@@ -332,13 +412,7 @@ retry:
   assert(page->check_consistent());
   if (k >= page->hdr.highest) {
 
-#ifdef CONFIG_ENABLE_CAS_UNLOCK
-    dsm->cas(lock_addr, tag, 0, cas_buffer, false);
-#else
-    dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
-               sizeof(uint64_t),
-               false); // unlock
-#endif
+    this->unlock_addr(lock_addr, tag, cas_buffer);
 
     assert(page->hdr.sibling_ptr != GlobalAddress::Null());
 
@@ -417,20 +491,16 @@ retry:
   }
 
   page->set_consistent();
-  dsm->write_sync(page_buffer, page_addr, kInternalPageSize);
 
-#ifdef CONFIG_ENABLE_CAS_UNLOCK
-  dsm->cas(lock_addr, tag, 0, cas_buffer, false);
-#else
-  dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
-             sizeof(uint64_t),
-             false); // unlock, async
-#endif
+  write_page_and_unlock(page_buffer, page_addr, kInternalPageSize, cas_buffer,
+                        lock_addr, tag);
 
   if (!need_split)
     return;
 
   if (root == page_addr) { // update root
+
+    page_buffer = dsm->get_rbuf().get_page_buffer();
     auto new_root = new (page_buffer)
         InternalPage(page_addr, split_key, sibling_addr, level + 1);
 
@@ -461,10 +531,12 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
   lock_addr.offset = lock_index * sizeof(uint64_t);
 
   uint64_t *cas_buffer = dsm->get_rbuf().get_cas_buffer();
-
-  uint64_t retry_cnt = 0;
+  auto page_buffer = dsm->get_rbuf().get_page_buffer();
   auto tag = dsm->getThreadTag();
   assert(tag != 0);
+
+  uint64_t retry_cnt = 0;
+
 retry:
   if (retry_cnt++ > 1000) {
     std::cout << "Deadlock Leaf " << lock_addr.offset << std::endl;
@@ -474,27 +546,20 @@ retry:
               << (conflict_tag << 32 >> 32) << std::endl;
     assert(false);
   }
-  bool res = dsm->cas_sync(lock_addr, 0, tag, cas_buffer);
+  bool res = try_lock_addr(lock_addr, tag, cas_buffer);
   if (!res) {
     // wait
     goto retry;
   }
-
-  auto page_buffer = dsm->get_rbuf().get_page_buffer();
   dsm->read_sync(page_buffer, page_addr, kLeafPageSize);
+
   auto page = (LeafPage *)page_buffer;
 
   assert(page->hdr.level == level);
   assert(page->check_consistent());
   if (k >= page->hdr.highest) {
 
-#ifdef CONFIG_ENABLE_CAS_UNLOCK
-    dsm->cas(lock_addr, tag, 0, cas_buffer, false);
-#else
-    dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
-               sizeof(uint64_t),
-               false); // unlock
-#endif
+    this->unlock_addr(lock_addr, tag, cas_buffer);
 
     assert(page->hdr.sibling_ptr != GlobalAddress::Null());
 
@@ -504,8 +569,65 @@ retry:
   }
   assert(k >= page->hdr.lowest);
 
-  auto cnt = page->hdr.last_index + 1;
+#ifdef CONFIG_ENABLE_FINER_VERSION
+  int cnt = 0;
+  int empty_index = -1;
+  char *update_addr = nullptr;
+  for (int i = 0; i < kLeafCardinality; ++i) {
 
+    auto &r = page->records[i];
+    if (r.value != kValueNull) {
+      cnt++;
+      if (r.key == k) {
+        r.value = v;
+        r.f_version++;
+        r.r_version = r.f_version;
+        update_addr = (char *)&r;
+        break;
+      }
+    } else if (empty_index == -1) {
+      empty_index = i;
+    }
+  }
+
+  assert(cnt != kLeafCardinality);
+
+  if (update_addr == nullptr) { // insert new item
+    if (empty_index == -1) {
+      printf("%d cnt\n", cnt);
+      assert(false);
+    }
+
+    auto &r = page->records[empty_index];
+    r.key = k;
+    r.value = v;
+    r.f_version++;
+    r.r_version = r.f_version;
+
+    update_addr = (char *)&r;
+
+    cnt++;
+  }
+
+  bool need_split = cnt == kLeafCardinality;
+  if (!need_split) {
+    assert(update_addr);
+    write_page_and_unlock(update_addr,
+                          GADD(page_addr, (update_addr - (char *)page)),
+                          sizeof(LeafEntry), cas_buffer, lock_addr, tag);
+    // dsm->write_sync(update_addr, GADD(page_addr, (update_addr - (char
+    // *)page)),
+    //                 sizeof(LeafEntry));
+    // this->unlock_addr(lock_addr, tag, cas_buffer);
+
+    return;
+  } else {
+    std::sort(
+        page->records, page->records + kLeafCardinality,
+        [](const LeafEntry &a, const LeafEntry &b) { return a.key < b.key; });
+  }
+#else
+  auto cnt = page->hdr.last_index + 1;
   bool is_update = false;
   uint16_t insert_index = 0;
   for (int i = cnt - 1; i >= 0; --i) {
@@ -536,6 +658,8 @@ retry:
 
   cnt = page->hdr.last_index + 1;
   bool need_split = cnt == kLeafCardinality;
+#endif
+
   Key split_key;
   GlobalAddress sibling_addr;
   if (need_split) { // need split
@@ -555,13 +679,17 @@ retry:
     for (int i = m; i < cnt; ++i) { // move
       sibling->records[i - m].key = page->records[i].key;
       sibling->records[i - m].value = page->records[i].value;
+#ifdef CONFIG_ENABLE_FINER_VERSION
+      page->records[i].key = 0;
+      page->records[i].value = kValueNull;
+#endif
     }
     page->hdr.last_index -= (cnt - m);
     sibling->hdr.last_index += (cnt - m);
 
-    sibling->hdr.lowest = page->records[m].key;
+    sibling->hdr.lowest = split_key;
     sibling->hdr.highest = page->hdr.highest;
-    page->hdr.highest = page->records[m].key;
+    page->hdr.highest = split_key;
 
     // link
     sibling->hdr.sibling_ptr = page->hdr.sibling_ptr;
@@ -572,20 +700,15 @@ retry:
   }
 
   page->set_consistent();
-  dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
 
-#ifdef CONFIG_ENABLE_CAS_UNLOCK
-  dsm->cas(lock_addr, tag, 0, cas_buffer, false);
-#else
-  dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
-             sizeof(uint64_t),
-             false); // unlock, async
-#endif
+  write_page_and_unlock(page_buffer, page_addr, kLeafPageSize, cas_buffer,
+                        lock_addr, tag);
 
   if (!need_split)
     return;
 
   if (root == page_addr) { // update root
+    page_buffer = dsm->get_rbuf().get_page_buffer();
     auto new_root = new (page_buffer)
         InternalPage(page_addr, split_key, sibling_addr, level + 1);
     auto new_root_addr = dsm->alloc(kInternalPageSize);
@@ -605,6 +728,7 @@ retry:
                       level + 1);
 }
 
+// Need BIG FIX
 void Tree::leaf_page_del(GlobalAddress page_addr, const Key &k, int level) {
   uint64_t lock_index =
       CityHash64((char *)&page_addr, sizeof(page_addr)) % define::kNumOfLock;
@@ -627,7 +751,7 @@ retry:
               << (conflict_tag << 32 >> 32) << std::endl;
     assert(false);
   }
-  bool res = dsm->cas_sync(lock_addr, 0, tag, cas_buffer);
+  bool res = try_lock_addr(lock_addr, tag, cas_buffer);
   if (!res) {
     // wait
     goto retry;
@@ -640,14 +764,7 @@ retry:
   assert(page->hdr.level == level);
   assert(page->check_consistent());
   if (k >= page->hdr.highest) {
-
-#ifdef CONFIG_ENABLE_CAS_UNLOCK
-    dsm->cas(lock_addr, tag, 0, cas_buffer, false);
-#else
-    dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
-               sizeof(uint64_t),
-               false); // unlock
-#endif
+    this->unlock_addr(lock_addr, tag, cas_buffer);
 
     assert(page->hdr.sibling_ptr != GlobalAddress::Null());
 
@@ -675,12 +792,5 @@ retry:
     page->set_consistent();
     dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
   }
-
-#ifdef CONFIG_ENABLE_CAS_UNLOCK
-  dsm->cas(lock_addr, tag, 0, cas_buffer, false);
-#else
-  dsm->write((char *)dsm->get_rbuf().get_zero_64bit(), lock_addr,
-             sizeof(uint64_t),
-             false); // unlock, async
-#endif
+  this->unlock_addr(lock_addr, tag, cas_buffer);
 }

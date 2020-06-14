@@ -2,18 +2,18 @@
 #include "Tree.h"
 #include <thread>
 
-constexpr int kTestKeySpace = 10000000;
-constexpr int kNodeNum = 3;
-constexpr int kThreadNum = 8;
+constexpr uint64_t kTestKeySpace = 100000000ull;
+constexpr int kNodeNum = 1;
+constexpr int kThreadNum = 1;
 
 Tree *tree;
 DSM *dsm;
 
 void test(int id) {
 
-  // if (dsm->getMyNodeID() == 0) {
-  //   while (true);
-  // }
+  if (dsm->getMyNodeID() == 0) {
+    while (true);
+  }
 
   dsm->registerThread();
 
@@ -24,16 +24,16 @@ void test(int id) {
   for (uint64_t i = 1; i < kTestKeySpace; ++i) {
     if (i % all_thread == mod) {
       tree->insert(i, i * 2);
-      // auto res = tree->search(i, v);
+      auto res = tree->search(i, v);
       
-      // if (!res || v != i * 2) {
-      //   printf("Error %d\n", i);
-      // }
-      // assert(res && v == i * 2);
+      if (!res || v != i * 2) {
+        printf("Error %d\n", i);
+      }
+      assert(res && v == i * 2);
     }
-    if (i % 1000000 == 0) {
-      printf("%d\n", i);
-    }
+    // if (i % 1000000 == 0) {
+    //   printf("%d\n", i);
+    // }
   }
 }
 

@@ -20,7 +20,20 @@
 #define UD_PKEY 0x11111111
 #define PSN 3185
 
-extern int kMaxDeviceMemorySize; 
+constexpr int kOroMax = 3;
+struct RdmaOpRegion {
+  uint64_t source;
+  uint64_t dest;
+  uint64_t size;
+
+  uint32_t lkey;
+  union {
+    uint32_t remoteRKey;
+    bool is_on_chip;
+  };
+};
+
+extern int kMaxDeviceMemorySize;
 
 struct RdmaContext {
   uint8_t devIndex;
@@ -92,7 +105,8 @@ bool rdmaReceive(ibv_exp_dct *dct, uint64_t source, uint64_t size,
                  uint32_t lkey);
 
 bool rdmaRead(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t size,
-              uint32_t lkey, uint32_t remoteRKey, bool signal = true, uint64_t wrID = 0);
+              uint32_t lkey, uint32_t remoteRKey, bool signal = true,
+              uint64_t wrID = 0);
 bool rdmaRead(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t size,
               uint32_t lkey, uint32_t remoteRKey, ibv_ah *ah,
               uint32_t remoteDctNumber);
@@ -156,5 +170,11 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 //// Utility.cpp
 void rdmaQueryQueuePair(ibv_qp *qp);
 void checkDctSupported(struct ibv_context *ctx);
+
+bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k,
+                    bool isSignaled, uint64_t wrID = 0);
+bool rdmaCasRead(ibv_qp *qp, const RdmaOpRegion &cas_ror,
+                 const RdmaOpRegion &read_ror, uint64_t compare, uint64_t swap,
+                 bool isSignaled, uint64_t wrID = 0);
 
 #endif

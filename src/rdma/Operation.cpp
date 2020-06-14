@@ -433,3 +433,72 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
   }
   return true;
 }
+
+bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k,
+                    bool isSignaled, uint64_t wrID) {
+
+  struct ibv_sge sg[kOroMax];
+  struct ibv_send_wr wr[kOroMax];
+  struct ibv_send_wr *wrBad;
+  
+
+  for (int i = 0; i < k; ++i) {
+    fillSgeWr(sg[i], wr[i], ror[i].source, ror[i].size, ror[i].lkey);
+
+    wr[i].next = (i == k - 1) ? NULL : &wr[i + 1];
+
+    wr[i].opcode = IBV_WR_RDMA_WRITE;
+
+    if (i == k - 1 && isSignaled) {
+      wr[i].send_flags = IBV_SEND_SIGNALED;
+    }
+
+    wr[i].wr.rdma.remote_addr = ror[i].dest;
+    wr[i].wr.rdma.rkey = ror[i].remoteRKey;
+    wr[i].wr_id = wrID;
+  }
+
+  assert(k == 2);
+  assert(wr[0].next == wr + 1);
+
+  if (ibv_post_send(qp, &wr[0], &wrBad) != 0) {
+    Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");
+    sleep(10);
+    return false;
+  }
+  return true;
+}
+
+bool rdmaCasRead(ibv_qp *qp, const RdmaOpRegion &cas_ror,
+                 const RdmaOpRegion &read_ror, uint64_t compare, uint64_t swap,
+                 bool isSignaled, uint64_t wrID) {
+
+  struct ibv_sge sg[2];
+  struct ibv_send_wr wr[2];
+  struct ibv_send_wr *wrBad;
+
+  fillSgeWr(sg[0], wr[0], cas_ror.source, 8, cas_ror.lkey);
+  wr[0].opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
+  wr[0].wr.atomic.remote_addr = cas_ror.dest;
+  wr[0].wr.atomic.rkey = cas_ror.remoteRKey;
+  wr[0].wr.atomic.compare_add = compare;
+  wr[0].wr.atomic.swap = swap;
+  wr[0].next = &wr[1];
+
+  fillSgeWr(sg[1], wr[1], read_ror.source, read_ror.size, read_ror.lkey);
+  wr[1].opcode = IBV_WR_RDMA_READ;
+  wr[1].wr.rdma.remote_addr = read_ror.dest;
+  wr[1].wr.rdma.rkey = read_ror.remoteRKey;
+  wr[1].wr_id = wrID;
+  wr[1].send_flags |= IBV_SEND_FENCE;
+  if (isSignaled) {
+    wr[1].send_flags |= IBV_SEND_SIGNALED;
+  }
+
+  if (ibv_post_send(qp, &wr[0], &wrBad)) {
+    Debug::notifyError("Send with CAS_READs failed.");
+    sleep(10);
+    return false;
+  }
+  return true;
+}

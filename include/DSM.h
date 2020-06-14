@@ -33,10 +33,18 @@ public:
              bool signal = true);
   void write_sync(const char *buffer, GlobalAddress gaddr, size_t size);
 
+  void write_batch(RdmaOpRegion *rs, int k, bool signal = true);
+  void write_batch_sync(RdmaOpRegion *rs, int k);
+
   void cas(GlobalAddress gaddr, uint64_t equal, uint64_t val,
            uint64_t *rdma_buffer, bool signal = true);
   bool cas_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                 uint64_t *rdma_buffer);
+
+  void cas_read(RdmaOpRegion &cas_ror, RdmaOpRegion &read_ror, uint64_t equal,
+                uint64_t val, bool signal = true);
+  bool cas_read_sync(RdmaOpRegion &cas_ror, RdmaOpRegion &read_ror,
+                     uint64_t equal, uint64_t val);
 
   void cas_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                 uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
@@ -112,12 +120,11 @@ private:
   Directory *dirAgent[NR_DIRECTORY];
 
 public:
-
-  bool is_register() { return thread_id != -1;}
+  bool is_register() { return thread_id != -1; }
   void barrier(const std::string &ss) { keeper->barrier(ss); }
 
   char *get_rdma_buffer() { return rdma_buffer; }
-  const RdmaBuffer &get_rbuf() { return rbuf; }
+  RdmaBuffer &get_rbuf() { return rbuf; }
 
   GlobalAddress alloc(size_t size);
   void free(GlobalAddress addr);

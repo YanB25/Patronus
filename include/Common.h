@@ -10,12 +10,18 @@
 #include <bitset>
 #include <limits>
 
-#include "Debug.h"
+#include "Debug.h" 
 #include "HugePageAlloc.h"
 #include "Rdma.h"
 
 #include "Statistics.h"
 #include "WRLock.h"
+
+// #define CONFIG_ENABLE_CRC
+// #define CONFIG_ENABLE_CAS_UNLOCK
+// #define CONFIG_ENABLE_ON_CHIP_LOCK
+// #define CONFIG_ENABLE_FINER_VERSION
+#define CONFIG_ENABLE_OP_COUPLE
 
 #define STRUCT_OFFSET(type, field) (char *)&((type *)(0))->field - (char *)((type *)(0))
 
@@ -32,7 +38,7 @@
 #define RAW_RECV_CQ_COUNT 128
 
 // { app thread
-#define MAX_APP_THREAD 24
+#define MAX_APP_THREAD 26
 
 #define APP_MESSAGE_NR 96
 

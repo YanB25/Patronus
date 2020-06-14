@@ -5,9 +5,6 @@
 #include <city.h>
 #include <iostream>
 
-#define CONFIG_ENABLE_CRC
-// #define CONFIG_ENABLE_CAS_UNLOCK
-
 struct SearchResult {
   bool is_leaf;
   uint8_t level;
@@ -38,7 +35,12 @@ private:
   GlobalAddress get_root_ptr();
 
   void print_verbose();
- 
+
+  bool try_lock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf);
+  void unlock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf);
+  void write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
+                             int page_size, uint64_t *cas_buffer,
+                             GlobalAddress lock_addr, uint64_t tag);
 
   bool page_search(GlobalAddress page_addr, const Key &k, SearchResult &result);
   void internal_page_search(InternalPage *page, const Key &k,
@@ -75,7 +77,7 @@ public:
     highest = kKeyMax;
   }
 
-  void debug() {
+  void debug() const {
     std::cout << "leftmost=" << leftmost_ptr << ", "
               << "sibling=" << sibling_ptr << ", "
               << "level=" << (int)level << ","
@@ -90,21 +92,24 @@ public:
   Key key;
   GlobalAddress ptr;
 
-  InternalEntry() { ptr = GlobalAddress::Null(); }
+  InternalEntry() {
+    ptr = GlobalAddress::Null();
+    key = 0;
+  }
 } __attribute__((packed));
-;
 
 class LeafEntry {
 public:
-  uint8_t f_version : 4;
+  uint8_t f_version;
   Key key;
   Value value;
-  uint8_t r_version : 4;
+  uint8_t r_version;
 
   LeafEntry() {
     f_version = 0;
     r_version = 0;
     value = kValueNull;
+    key = 0;
   }
 } __attribute__((packed));
 
@@ -168,10 +173,14 @@ public:
         CityHash32((char *)&front_version, (&rear_version) - (&front_version));
     succ = cal_crc == this->crc;
 #endif
-    return succ && (rear_version == front_version);
+    succ = succ && (rear_version == front_version);
+    if (!succ) {
+      // this->debug();
+    }
+    return succ;
   }
 
-  void debug() {
+  void debug() const {
     std::cout << "InternalPage@ ";
     hdr.debug();
     std::cout << "version: [" << (int)front_version << ", " << (int)rear_version
@@ -218,10 +227,16 @@ public:
         CityHash32((char *)&front_version, (&rear_version) - (&front_version));
     succ = cal_crc == this->crc;
 #endif
-    return succ && (rear_version == front_version);
+
+    succ = succ && (rear_version == front_version);
+    if (!succ) {
+      // this->debug();
+    }
+
+    return succ;
   }
 
-  void debug() {
+  void debug() const {
     std::cout << "LeafPage@ ";
     hdr.debug();
     std::cout << "version: [" << (int)front_version << ", " << (int)rear_version
