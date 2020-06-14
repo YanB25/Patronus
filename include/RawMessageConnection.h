@@ -9,6 +9,7 @@
 enum RpcType : uint8_t {
   MALLOC,
   FREE,
+  NEW_ROOT,
   NOP,
 };
 
@@ -19,6 +20,7 @@ struct RawMessage {
   uint16_t app_id;
 
   GlobalAddress addr; // for malloc
+  int level;
 } __attribute__((packed));
 
 class RawMessageConnection : public AbstractMessageConnection {

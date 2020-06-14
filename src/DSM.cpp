@@ -138,7 +138,6 @@ void DSM::write_batch(RdmaOpRegion *rs, int k, bool signal) {
 
     rs[i].lkey = iCon->cacheLKey;
     if (is_on_chip) {
-      assert(false);
       rs[i].dest = remoteInfo[gaddr.nodeID].lockBase + gaddr.offset;
       rs[i].remoteRKey = remoteInfo[gaddr.nodeID].lockRKey[0];
     } else {
@@ -168,7 +167,6 @@ void DSM::cas_read(RdmaOpRegion &cas_ror, RdmaOpRegion &read_ror,
 
     cas_ror.lkey = iCon->cacheLKey;
     if (is_on_chip) {
-      // assert(false);
       cas_ror.dest = remoteInfo[gaddr.nodeID].lockBase + gaddr.offset;
       cas_ror.remoteRKey = remoteInfo[gaddr.nodeID].lockRKey[0];
     } else {

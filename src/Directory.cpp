@@ -5,6 +5,9 @@
 
 #include <gperftools/profiler.h>
 
+GlobalAddress g_root_ptr = GlobalAddress::Null();
+int g_root_level = -1;
+
 Directory::Directory(DirectoryConnection *dCon, RemoteConnection *remoteInfo,
                      uint32_t machineNR, uint16_t dirID, uint16_t nodeID)
     : dCon(dCon), remoteInfo(remoteInfo), machineNR(machineNR), dirID(dirID),
@@ -35,7 +38,7 @@ void Directory::dirThread() {
     switch (int(wc.opcode)) {
     case IBV_WC_RECV: // control message
     {
-     
+
       auto *m = (RawMessage *)dCon->message->getMessage();
 
       process_message(m);
@@ -56,7 +59,7 @@ void Directory::dirThread() {
 }
 
 void Directory::process_message(const RawMessage *m) {
-   
+
   RawMessage *send = nullptr;
   switch (m->type) {
   case RpcType::MALLOC: {
@@ -64,6 +67,12 @@ void Directory::process_message(const RawMessage *m) {
     send = (RawMessage *)dCon->message->getSendPool();
 
     send->addr = chunckAlloc->alloc_chunck();
+    break;
+  }
+
+  case RpcType::NEW_ROOT: {
+    g_root_ptr = m->addr;
+    g_root_level = m->level;
     break;
   }
 

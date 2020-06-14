@@ -18,7 +18,8 @@ const int kMaxThread = 32;
 int kReadRatio;
 int kThreadCount;
 int kNodeCount;
-uint64_t kKeySpace = 100 * define::MB;
+uint64_t kKeySpace = 40960;
+// 100 * define::MB;
 
 std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
@@ -27,6 +28,10 @@ Tree *tree;
 DSM *dsm;
 
 void thread_run(int id) {
+
+  if (id != 0) {
+    sleep(10);
+  }
 
   bindCore(id);
 
@@ -55,6 +60,8 @@ void thread_run(int id) {
 }
 
 void warm_up() {
+
+  return;
   if (dsm->getMyNodeID() == 0) {
     for (uint64_t i = 1; i < 102400; ++i) {
       if (i % 5 == 0) {

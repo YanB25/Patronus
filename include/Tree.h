@@ -36,9 +36,13 @@ private:
 
   void print_verbose();
 
+  void broadcast_new_root(GlobalAddress new_root_addr, int root_level);
   bool try_lock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf);
   void unlock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf);
   void write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
+                             int page_size, uint64_t *cas_buffer,
+                             GlobalAddress lock_addr, uint64_t tag);
+  void lock_and_read_page(char *page_buffer, GlobalAddress page_addr,
                              int page_size, uint64_t *cas_buffer,
                              GlobalAddress lock_addr, uint64_t tag);
 
