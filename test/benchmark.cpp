@@ -1,11 +1,13 @@
 #include "Tree.h"
 #include "zipf.h"
 
+#include <city.h>
 #include <stdlib.h>
 #include <thread>
 #include <time.h>
 #include <unistd.h>
-#include <city.h>
+
+#define USE_CORO
 
 static __inline__ unsigned long long rdtsc(void) {
   unsigned hi, lo;
@@ -21,11 +23,48 @@ int kNodeCount;
 uint64_t kKeySpace = 40960;
 // 100 * define::MB;
 
+double zipfan = 0.99;
+
 std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
 
 Tree *tree;
 DSM *dsm;
+
+class RequsetGenBench : public RequstGen {
+
+public:
+  RequsetGenBench(int coro_id, DSM *dsm, int id)
+      : coro_id(coro_id), dsm(dsm), id(id) {
+    seed = rdtsc();
+    mehcached_zipf_init(&state, kKeySpace, zipfan,
+                        rdtsc() & (0x0000ffffffffffffull) ^ id);
+  }
+
+  Request next() override {
+    Request r;
+    uint64_t dis = mehcached_zipf_next(&state);
+    r.k = CityHash64((char *)&dis, sizeof(dis)) + 1;
+    r.v = 23;
+    r.is_search = rand_r(&seed) % 100 < kReadRatio;
+
+    tp[id][0]++;
+
+    return r;
+  }
+
+private:
+  int coro_id;
+  DSM *dsm;
+  int id;
+
+  unsigned int seed;
+  struct zipf_gen_state state;
+};
+
+RequstGen *coro_func(int coro_id, DSM *dsm, int id) {
+  return new RequsetGenBench(coro_id, dsm, id);
+}
 
 void thread_run(int id) {
 
@@ -37,26 +76,34 @@ void thread_run(int id) {
 
   dsm->registerThread();
 
+#ifdef USE_CORO
+  tree->run_coroutine(coro_func, id, 1);
+
+#else
+
+  /// without coro
   unsigned int seed = rdtsc();
   struct zipf_gen_state state;
-  mehcached_zipf_init(&state, kKeySpace, 0,
+  mehcached_zipf_init(&state, kKeySpace, zipfan,
                       rdtsc() & (0x0000ffffffffffffull) ^ id);
 
   while (true) {
-    
+
     uint64_t dis = mehcached_zipf_next(&state);
     uint64_t key = CityHash64((char *)&dis, sizeof(dis)) + 1;
-    
+
     Value v;
     if (rand_r(&seed) % 100 < kReadRatio) { // GET
-       tree->search(key, v);
+      tree->search(key, v);
     } else {
-       v = 12;
-       tree->insert(key, v);
+      v = 12;
+      tree->insert(key, v);
     }
 
     tp[id][0]++;
   }
+
+#endif
 }
 
 void warm_up() {
@@ -95,7 +142,7 @@ int main(int argc, char *argv[]) {
 
   dsm->registerThread();
   tree = new Tree(dsm);
-  
+
   warm_up();
 
   dsm->barrier("benchmark");

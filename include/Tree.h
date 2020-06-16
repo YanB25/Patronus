@@ -6,7 +6,6 @@
 #include <functional>
 #include <iostream>
 
-
 struct Request {
   bool is_search;
   Key k;
@@ -16,7 +15,7 @@ struct Request {
 class RequstGen {
 public:
   RequstGen() = default;
-  Request next();
+  virtual Request next() { return Request{}; }
 };
 
 using CoroFunc = std::function<RequstGen *(int, DSM *, int)>;
@@ -36,11 +35,13 @@ class Tree {
 public:
   Tree(DSM *dsm, uint16_t tree_id = 0);
 
-  void insert(const Key &k, const Value &v);
-  bool search(const Key &k, Value &v);
-  void del(const Key &k);
+  void insert(const Key &k, const Value &v, CoroContext *cxt = nullptr,
+              int coro_id = 0);
+  bool search(const Key &k, Value &v, CoroContext *cxt = nullptr,
+              int coro_id = 0);
+  void del(const Key &k, CoroContext *cxt = nullptr, int coro_id = 0);
 
-  void print_and_check_tree();
+  void print_and_check_tree(CoroContext *cxt = nullptr, int coro_id = 0);
 
   void run_coroutine(CoroFunc func, int id, int coro_cnt);
 
@@ -55,36 +56,46 @@ private:
   static thread_local CoroCall worker[kMaxCoro];
   static thread_local CoroCall master;
 
-  GlobalAddress get_root_ptr_ptr();
-  GlobalAddress get_root_ptr();
-
   void print_verbose();
+
+  GlobalAddress get_root_ptr_ptr();
+  GlobalAddress get_root_ptr(CoroContext *cxt, int coro_id);
 
   void coro_worker(CoroYield &yield, RequstGen *gen, int coro_id);
   void coro_master(CoroYield &yield, int coro_cnt);
 
   void broadcast_new_root(GlobalAddress new_root_addr, int root_level);
-  bool update_new_root(GlobalAddress left, const Key &k, GlobalAddress right, int level, GlobalAddress old_root);
-  bool try_lock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf);
-  void unlock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf);
+  bool update_new_root(GlobalAddress left, const Key &k, GlobalAddress right,
+                       int level, GlobalAddress old_root, CoroContext *cxt,
+                       int coro_id);
+
+  bool try_lock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf,
+                     CoroContext *cxt, int coro_id);
+  void unlock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf,
+                   CoroContext *cxt, int coro_id);
   void write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
                              int page_size, uint64_t *cas_buffer,
-                             GlobalAddress lock_addr, uint64_t tag);
+                             GlobalAddress lock_addr, uint64_t tag,
+                             CoroContext *cxt, int coro_id);
   void lock_and_read_page(char *page_buffer, GlobalAddress page_addr,
                           int page_size, uint64_t *cas_buffer,
-                          GlobalAddress lock_addr, uint64_t tag);
+                          GlobalAddress lock_addr, uint64_t tag,
+                          CoroContext *cxt, int coro_id);
 
-  bool page_search(GlobalAddress page_addr, const Key &k, SearchResult &result);
+  bool page_search(GlobalAddress page_addr, const Key &k, SearchResult &result,
+                   CoroContext *cxt, int coro_id);
   void internal_page_search(InternalPage *page, const Key &k,
                             SearchResult &result);
   void leaf_page_search(LeafPage *page, const Key &k, SearchResult &result);
 
   void internal_page_store(GlobalAddress page_addr, const Key &k,
-                           GlobalAddress value, GlobalAddress root, int level);
+                           GlobalAddress value, GlobalAddress root, int level,
+                           CoroContext *cxt, int coro_id);
   void leaf_page_store(GlobalAddress page_addr, const Key &k, const Value &v,
-                       GlobalAddress root, int level);
-
-  void leaf_page_del(GlobalAddress page_addr, const Key &k, int level);
+                       GlobalAddress root, int level, CoroContext *cxt,
+                       int coro_id);
+  void leaf_page_del(GlobalAddress page_addr, const Key &k, int level,
+                     CoroContext *cxt, int coro_id);
 };
 
 class Header {
