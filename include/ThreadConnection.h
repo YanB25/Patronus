@@ -12,7 +12,8 @@ struct ThreadConnection {
   uint16_t threadID;
 
   RdmaContext ctx;
-  ibv_cq *cq;
+  ibv_cq *cq; // for one-side verbs
+  ibv_cq *rpc_cq;
 
   RawMessageConnection *message;
 

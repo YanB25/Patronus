@@ -19,8 +19,8 @@
 
 // #define CONFIG_ENABLE_CRC
 // #define CONFIG_ENABLE_CAS_UNLOCK
-#define CONFIG_ENABLE_ON_CHIP_LOCK
-#define CONFIG_ENABLE_FINER_VERSION
+// #define CONFIG_ENABLE_ON_CHIP_LOCK
+// #define CONFIG_ENABLE_FINER_VERSION
 #define CONFIG_ENABLE_OP_COUPLE
 
 // #define TEST_SINGLE_THREAD
@@ -93,6 +93,9 @@ constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
 
 // level of tree
 constexpr uint64_t kMaxLevelOfTree = 12;
+
+constexpr uint16_t kMaxCoro = 16;
+constexpr int64_t kPerCoroRdmaBuf = 32 * 1024;
 
 } // namespace define
 

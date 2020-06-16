@@ -36,6 +36,8 @@ public:
 
   void set_buffer(char *buffer) {
 
+    // printf("set buffer %p\n", buffer);
+
     kPageSize = std::max(kLeafPageSize, kInternalPageSize);
     this->buffer = buffer;
     cas_buffer = (uint64_t *)buffer;
@@ -45,6 +47,8 @@ public:
     sibling_buffer = (char *)page_buffer + kPageSize * kPageBufferCnt;
     entry_buffer = (char *)sibling_buffer + kPageSize * kSiblingBufferCnt;
     *zero_64bit = 0;
+
+    assert((char *)zero_64bit + 8 - buffer < define::kPerCoroRdmaBuf);
   }
 
   uint64_t *get_cas_buffer() const { return cas_buffer; }

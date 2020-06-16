@@ -11,7 +11,7 @@ thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
 thread_local char *DSM::rdma_buffer = nullptr;
 thread_local LocalAllocator DSM::local_allocator;
-thread_local RdmaBuffer DSM::rbuf;
+thread_local RdmaBuffer DSM::rbuf[define::kMaxCoro];
 thread_local uint64_t DSM::thread_tag = 0;
 
 DSM *DSM::getInstance(const DSMConfig &conf) {
@@ -71,7 +71,11 @@ void DSM::registerThread() {
   iCon->message->initRecv();
   iCon->message->initSend();
   rdma_buffer = (char *)cache.data + thread_id * 12 * define::MB;
-  rbuf.set_buffer(rdma_buffer);
+
+  for (int i = 0; i < define::kMaxCoro; ++i) {
+     rbuf[i].set_buffer(rdma_buffer + i * define::kPerCoroRdmaBuf);
+  }
+ 
 }
 
 void DSM::initRDMAConnection() {
@@ -100,6 +104,7 @@ void DSM::initRDMAConnection() {
 void DSM::read(char *buffer, GlobalAddress gaddr, size_t size, bool signal,
                CoroContext *ctx) {
   if (ctx == nullptr) {
+    assert(signal == true);
     rdmaRead(iCon->data[0][gaddr.nodeID], (uint64_t)buffer,
              remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset, size,
              iCon->cacheLKey, remoteInfo[gaddr.nodeID].dsmRKey[0], signal);

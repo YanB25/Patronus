@@ -114,7 +114,7 @@ private:
   static thread_local ThreadConnection *iCon;
   static thread_local char *rdma_buffer;
   static thread_local LocalAllocator local_allocator;
-  static thread_local RdmaBuffer rbuf;
+  static thread_local RdmaBuffer rbuf[define::kMaxCoro];
   static thread_local uint64_t thread_tag;
 
   uint64_t baseAddr;
@@ -132,7 +132,7 @@ public:
   void barrier(const std::string &ss) { keeper->barrier(ss); }
 
   char *get_rdma_buffer() { return rdma_buffer; }
-  RdmaBuffer &get_rbuf() { return rbuf; }
+  RdmaBuffer &get_rbuf(int coro_id) { return rbuf[coro_id]; }
 
   GlobalAddress alloc(size_t size);
   void free(GlobalAddress addr);
@@ -152,7 +152,7 @@ public:
   RawMessage *rpc_wait() {
     ibv_wc wc;
 
-    pollWithCQ(iCon->cq, 1, &wc);
+    pollWithCQ(iCon->rpc_cq, 1, &wc);
     return (RawMessage *)iCon->message->getMessage();
   }
 };

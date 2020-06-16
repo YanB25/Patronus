@@ -50,10 +50,9 @@ private:
   uint64_t tree_id;
   GlobalAddress root_ptr_ptr; // the address which stores root pointer;
 
-  const static int kMaxCoro = 8;
 
-  static thread_local int coro_id;
-  static thread_local CoroCall worker[kMaxCoro];
+  // static thread_local int coro_id;
+  static thread_local CoroCall worker[define::kMaxCoro];
   static thread_local CoroCall master;
 
   void print_verbose();

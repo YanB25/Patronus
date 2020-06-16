@@ -7,7 +7,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define USE_CORO
+// #define USE_CORO
 
 static __inline__ unsigned long long rdtsc(void) {
   unsigned hi, lo;
@@ -23,7 +23,7 @@ int kNodeCount;
 uint64_t kKeySpace = 40960;
 // 100 * define::MB;
 
-double zipfan = 0.99;
+double zipfan = 0;
 
 std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
@@ -108,13 +108,14 @@ void thread_run(int id) {
 
 void warm_up() {
 
-  return;
+  // return;
   if (dsm->getMyNodeID() == 0) {
-    for (uint64_t i = 1; i < 102400; ++i) {
+    for (uint64_t i = 1; i < 1024; ++i) {
       if (i % 5 == 0) {
         tree->insert(i, 12);
       }
     }
+    // tree->print_and_check_tree();
   }
 }
 
