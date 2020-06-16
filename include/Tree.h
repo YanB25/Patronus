@@ -50,7 +50,6 @@ private:
   uint64_t tree_id;
   GlobalAddress root_ptr_ptr; // the address which stores root pointer;
 
-
   // static thread_local int coro_id;
   static thread_local CoroCall worker[define::kMaxCoro];
   static thread_local CoroCall master;
@@ -71,11 +70,11 @@ private:
   bool try_lock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf,
                      CoroContext *cxt, int coro_id);
   void unlock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf,
-                   CoroContext *cxt, int coro_id);
+                   CoroContext *cxt, int coro_id, bool async);
   void write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
                              int page_size, uint64_t *cas_buffer,
                              GlobalAddress lock_addr, uint64_t tag,
-                             CoroContext *cxt, int coro_id);
+                             CoroContext *cxt, int coro_id, bool async);
   void lock_and_read_page(char *page_buffer, GlobalAddress page_addr,
                           int page_size, uint64_t *cas_buffer,
                           GlobalAddress lock_addr, uint64_t tag,

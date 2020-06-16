@@ -77,7 +77,7 @@ void thread_run(int id) {
   dsm->registerThread();
 
 #ifdef USE_CORO
-  tree->run_coroutine(coro_func, id, 1);
+  tree->run_coroutine(coro_func, id, 4);
 
 #else
 
