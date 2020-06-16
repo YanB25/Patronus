@@ -27,25 +27,30 @@ public:
 
   // RDMA operations
   // buffer is registered memory
-  void read(char *buffer, GlobalAddress gaddr, size_t size, bool signal = true);
-  void read_sync(char *buffer, GlobalAddress gaddr, size_t size);
+  void read(char *buffer, GlobalAddress gaddr, size_t size, bool signal = true,
+            CoroContext *ctx = nullptr);
+  void read_sync(char *buffer, GlobalAddress gaddr, size_t size,
+                 CoroContext *ctx = nullptr);
 
   void write(const char *buffer, GlobalAddress gaddr, size_t size,
-             bool signal = true);
-  void write_sync(const char *buffer, GlobalAddress gaddr, size_t size);
+             bool signal = true, CoroContext *ctx = nullptr);
+  void write_sync(const char *buffer, GlobalAddress gaddr, size_t size,
+                  CoroContext *ctx = nullptr);
 
-  void write_batch(RdmaOpRegion *rs, int k, bool signal = true);
-  void write_batch_sync(RdmaOpRegion *rs, int k);
+  void write_batch(RdmaOpRegion *rs, int k, bool signal = true,
+                   CoroContext *ctx = nullptr);
+  void write_batch_sync(RdmaOpRegion *rs, int k, CoroContext *ctx = nullptr);
 
   void cas(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-           uint64_t *rdma_buffer, bool signal = true);
+           uint64_t *rdma_buffer, bool signal = true,
+           CoroContext *ctx = nullptr);
   bool cas_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-                uint64_t *rdma_buffer);
+                uint64_t *rdma_buffer, CoroContext *ctx = nullptr);
 
   void cas_read(RdmaOpRegion &cas_ror, RdmaOpRegion &read_ror, uint64_t equal,
-                uint64_t val, bool signal = true);
+                uint64_t val, bool signal = true, CoroContext *ctx = nullptr);
   bool cas_read_sync(RdmaOpRegion &cas_ror, RdmaOpRegion &read_ror,
-                     uint64_t equal, uint64_t val);
+                     uint64_t equal, uint64_t val, CoroContext *ctx = nullptr);
 
   void cas_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                 uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
@@ -59,13 +64,15 @@ public:
   void read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size);
 
   void write_dm(const char *buffer, GlobalAddress gaddr, size_t size,
-                bool signal = true);
-  void write_dm_sync(const char *buffer, GlobalAddress gaddr, size_t size);
+                bool signal = true, CoroContext *ctx = nullptr);
+  void write_dm_sync(const char *buffer, GlobalAddress gaddr, size_t size,
+                     CoroContext *ctx = nullptr);
 
   void cas_dm(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-              uint64_t *rdma_buffer, bool signal = true);
+              uint64_t *rdma_buffer, bool signal = true,
+              CoroContext *ctx = nullptr);
   bool cas_dm_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
-                   uint64_t *rdma_buffer);
+                   uint64_t *rdma_buffer, CoroContext *ctx = nullptr);
 
   void cas_dm_mask(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                    uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
@@ -73,7 +80,7 @@ public:
   bool cas_dm_mask_sync(GlobalAddress gaddr, uint64_t equal, uint64_t val,
                         uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
 
-  void poll_rdma_cq(int count = 1);
+  uint64_t poll_rdma_cq(int count = 1);
 
   // Memcached operations for sync
   size_t Put(uint64_t key, const void *value, size_t count) {

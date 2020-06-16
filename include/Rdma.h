@@ -126,7 +126,8 @@ bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
 
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,
-                        uint32_t remoteRKey, bool signal = true);
+                        uint32_t remoteRKey, bool signal = true,
+                        uint64_t wrID = 0);
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,
                         uint32_t remoteRKey, ibv_ah *ah,
@@ -171,8 +172,8 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 void rdmaQueryQueuePair(ibv_qp *qp);
 void checkDctSupported(struct ibv_context *ctx);
 
-bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k,
-                    bool isSignaled, uint64_t wrID = 0);
+bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled,
+                    uint64_t wrID = 0);
 bool rdmaCasRead(ibv_qp *qp, const RdmaOpRegion &cas_ror,
                  const RdmaOpRegion &read_ror, uint64_t compare, uint64_t swap,
                  bool isSignaled, uint64_t wrID = 0);

@@ -10,7 +10,7 @@
 #include <bitset>
 #include <limits>
 
-#include "Debug.h" 
+#include "Debug.h"
 #include "HugePageAlloc.h"
 #include "Rdma.h"
 
@@ -25,13 +25,12 @@
 
 // #define TEST_SINGLE_THREAD
 
-#define STRUCT_OFFSET(type, field) (char *)&((type *)(0))->field - (char *)((type *)(0))
-
+#define STRUCT_OFFSET(type, field)                                             \
+  (char *)&((type *)(0))->field - (char *)((type *)(0))
 
 #define MAX_MACHINE 8
 
 #define ADD_ROUND(x, n) ((x) = ((x) + 1) % (n))
-
 
 #define MESSAGE_SIZE 96 // byte
 
@@ -46,7 +45,6 @@
 
 // }
 
-
 // { dir thread
 #define NR_DIRECTORY 1
 
@@ -57,11 +55,21 @@ void bindCore(uint16_t core);
 char *getIP();
 char *getMac();
 
-
 inline int bits_in(std::uint64_t u) {
   auto bs = std::bitset<64>(u);
   return bs.count();
 }
+
+#include <boost/coroutine/all.hpp>
+
+using CoroYield = boost::coroutines::symmetric_coroutine<void>::yield_type;
+using CoroCall = boost::coroutines::symmetric_coroutine<void>::call_type;
+
+struct CoroContext {
+  CoroYield *yield;
+  CoroCall *master;
+  int coro_id;
+};
 
 namespace define {
 
@@ -70,7 +78,7 @@ constexpr uint64_t GB = 1024ull * MB;
 constexpr uint16_t kCacheLineSize = 64;
 
 // for remote allocate
-constexpr uint64_t kChunkSize = MB * 32; 
+constexpr uint64_t kChunkSize = MB * 32;
 
 // for store root pointer
 constexpr uint64_t kRootPointerStoreOffest = kChunkSize / 2;
@@ -94,7 +102,6 @@ static inline unsigned long long asm_rdtsc(void) {
   return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
 }
 
-
 // For Tree
 using Key = uint64_t;
 using Value = uint64_t;
@@ -103,6 +110,5 @@ constexpr Key kKeyMax = std::numeric_limits<Key>::max();
 constexpr Value kValueNull = 0;
 constexpr uint32_t kInternalPageSize = 512;
 constexpr uint32_t kLeafPageSize = 512;
-
 
 #endif /* __COMMON_H__ */

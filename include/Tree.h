@@ -3,7 +3,23 @@
 
 #include "DSM.h"
 #include <city.h>
+#include <functional>
 #include <iostream>
+
+
+struct Request {
+  bool is_search;
+  Key k;
+  Value v;
+};
+
+class RequstGen {
+public:
+  RequstGen() = default;
+  Request next();
+};
+
+using CoroFunc = std::function<RequstGen *(int, DSM *, int)>;
 
 struct SearchResult {
   bool is_leaf;
@@ -26,25 +42,37 @@ public:
 
   void print_and_check_tree();
 
+  void run_coroutine(CoroFunc func, int id, int coro_cnt);
+
 private:
   DSM *dsm;
   uint64_t tree_id;
   GlobalAddress root_ptr_ptr; // the address which stores root pointer;
+
+  const static int kMaxCoro = 8;
+
+  static thread_local int coro_id;
+  static thread_local CoroCall worker[kMaxCoro];
+  static thread_local CoroCall master;
 
   GlobalAddress get_root_ptr_ptr();
   GlobalAddress get_root_ptr();
 
   void print_verbose();
 
+  void coro_worker(CoroYield &yield, RequstGen *gen, int coro_id);
+  void coro_master(CoroYield &yield, int coro_cnt);
+
   void broadcast_new_root(GlobalAddress new_root_addr, int root_level);
+  bool update_new_root(GlobalAddress left, const Key &k, GlobalAddress right, int level, GlobalAddress old_root);
   bool try_lock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf);
   void unlock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf);
   void write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
                              int page_size, uint64_t *cas_buffer,
                              GlobalAddress lock_addr, uint64_t tag);
   void lock_and_read_page(char *page_buffer, GlobalAddress page_addr,
-                             int page_size, uint64_t *cas_buffer,
-                             GlobalAddress lock_addr, uint64_t tag);
+                          int page_size, uint64_t *cas_buffer,
+                          GlobalAddress lock_addr, uint64_t tag);
 
   bool page_search(GlobalAddress page_addr, const Key &k, SearchResult &result);
   void internal_page_search(InternalPage *page, const Key &k,

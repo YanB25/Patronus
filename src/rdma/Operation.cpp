@@ -344,7 +344,8 @@ bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
 // for RC & UC
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,
-                        uint32_t remoteRKey, bool signal) {
+                        uint32_t remoteRKey, bool signal,
+                        uint64_t wrID) {
   struct ibv_sge sg;
   struct ibv_send_wr wr;
   struct ibv_send_wr *wrBad;
@@ -361,6 +362,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
   wr.wr.atomic.rkey = remoteRKey;
   wr.wr.atomic.compare_add = compare;
   wr.wr.atomic.swap = swap;
+  wr.wr_id = wrID;
 
   if (ibv_post_send(qp, &wr, &wrBad)) {
     Debug::notifyError("Send with ATOMIC_CMP_AND_SWP failed.");
@@ -458,8 +460,6 @@ bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k,
     wr[i].wr_id = wrID;
   }
 
-  assert(k == 2);
-  assert(wr[0].next == wr + 1);
 
   if (ibv_post_send(qp, &wr[0], &wrBad) != 0) {
     Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");

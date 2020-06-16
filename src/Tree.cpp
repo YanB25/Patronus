@@ -7,11 +7,15 @@
 #include <city.h>
 
 #include <map>
+#include <utility>
 
 #ifdef TEST_SINGLE_THREAD
 std::map<Key, GlobalAddress> mapping;
 #endif
 
+thread_local int Tree::coro_id;
+thread_local CoroCall Tree::worker[Tree::kMaxCoro];
+thread_local CoroCall Tree::master;
 thread_local GlobalAddress path_stack[define::kMaxLevelOfTree];
 
 Tree::Tree(DSM *dsm, uint16_t tree_id) : dsm(dsm), tree_id(tree_id) {
@@ -92,6 +96,29 @@ void Tree::broadcast_new_root(GlobalAddress new_root_addr, int root_level) {
   for (int i = 0; i < dsm->getClusterSize(); ++i) {
     dsm->rpc_call_dir(m, i);
   }
+}
+
+bool Tree::update_new_root(GlobalAddress left, const Key &k,
+                           GlobalAddress right, int level,
+                           GlobalAddress old_root) {
+
+  auto page_buffer = dsm->get_rbuf().get_page_buffer();
+  auto cas_buffer = dsm->get_rbuf().get_cas_buffer();
+  auto new_root = new (page_buffer) InternalPage(left, k, right, level);
+
+  auto new_root_addr = dsm->alloc(kInternalPageSize);
+
+  new_root->set_consistent();
+  dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize);
+  if (dsm->cas_sync(root_ptr_ptr, old_root, new_root_addr, cas_buffer)) {
+    broadcast_new_root(new_root_addr, level);
+    std::cout << "new root level " << level << std::endl;
+    return true;
+  } else {
+    std::cout << "cas root fail " << std::endl;
+  }
+
+  return false;
 }
 
 void Tree::print_and_check_tree() {
@@ -582,20 +609,8 @@ void Tree::internal_page_store(GlobalAddress page_addr, const Key &k,
 
   if (root == page_addr) { // update root
 
-    page_buffer = dsm->get_rbuf().get_page_buffer();
-    auto new_root = new (page_buffer)
-        InternalPage(page_addr, split_key, sibling_addr, level + 1);
-
-    auto new_root_addr = dsm->alloc(kInternalPageSize);
-
-    new_root->set_consistent();
-    dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize);
-    if (dsm->cas_sync(root_ptr_ptr, root, new_root_addr, cas_buffer)) {
-      broadcast_new_root(new_root_addr, level + 1);
-      std::cout << "new root level " << level + 1 << std::endl;
+    if (update_new_root(page_addr, split_key, sibling_addr, level + 1, root)) {
       return;
-    } else {
-      std::cout << "cas root fail " << std::endl;
     }
   }
 
@@ -778,19 +793,8 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
     return;
 
   if (root == page_addr) { // update root
-    page_buffer = dsm->get_rbuf().get_page_buffer();
-    auto new_root = new (page_buffer)
-        InternalPage(page_addr, split_key, sibling_addr, level + 1);
-    auto new_root_addr = dsm->alloc(kInternalPageSize);
-
-    new_root->set_consistent();
-    dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize);
-    if (dsm->cas_sync(root_ptr_ptr, root, new_root_addr, cas_buffer)) {
-      broadcast_new_root(new_root_addr, level + 1);
-      std::cout << "new root level " << level + 1 << std::endl;
+    if (update_new_root(page_addr, split_key, sibling_addr, level + 1, root)) {
       return;
-    } else {
-      std::cout << "cas root fail " << std::endl;
     }
   }
 
@@ -863,4 +867,31 @@ retry:
     dsm->write_sync(page_buffer, page_addr, kLeafPageSize);
   }
   this->unlock_addr(lock_addr, tag, cas_buffer);
+}
+
+void Tree::run_coroutine(CoroFunc func, int id, int coro_cnt) {
+
+  using namespace std::placeholders;
+  for (int i = 0; i < coro_cnt; ++i) {
+
+    auto gen = func(coro_cnt, dsm, id);
+    worker[i] = CoroCall(std::bind(&Tree::coro_worker, this, _1, gen, i));
+  }
+
+  master = CoroCall(std::bind(&Tree::coro_master, this, _1, coro_cnt));
+}
+
+void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id) {}
+
+void Tree::coro_master(CoroYield &yield, int coro_cnt) {
+
+  for (int i = 0; i < coro_cnt; ++i) {
+    yield(worker[i]);
+  }
+
+  while (true) {
+    auto wr_id = dsm->poll_rdma_cq(1);
+    assert(wr_id >= 0 && wr_id < coro_cnt);
+    yield(worker[wr_id]);
+  }
 }
