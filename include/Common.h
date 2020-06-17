@@ -23,7 +23,7 @@
 #define CONFIG_ENABLE_FINER_VERSION
 #define CONFIG_ENABLE_OP_COUPLE
 
-// #define TEST_SINGLE_THREAD
+#define TEST_SINGLE_THREAD
 
 #define STRUCT_OFFSET(type, field)                                             \
   (char *)&((type *)(0))->field - (char *)((type *)(0))

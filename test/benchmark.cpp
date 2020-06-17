@@ -6,8 +6,12 @@
 #include <thread>
 #include <time.h>
 #include <unistd.h>
+#include <vector>
 
 // #define USE_CORO
+
+extern uint64_t cache_miss[MAX_APP_THREAD][8];
+extern uint64_t cache_hit[MAX_APP_THREAD][8];
 
 static __inline__ unsigned long long rdtsc(void) {
   unsigned hi, lo;
@@ -77,7 +81,7 @@ void thread_run(int id) {
   dsm->registerThread();
 
 #ifdef USE_CORO
-  tree->run_coroutine(coro_func, id, 4);
+  tree->run_coroutine(coro_func, id, 1);
 
 #else
 
@@ -108,15 +112,18 @@ void thread_run(int id) {
 
 void warm_up() {
 
-  // return;
+  // // return;
   if (dsm->getMyNodeID() == 0) {
-    for (uint64_t i = 1; i < 1024; ++i) {
-      if (i % 5 == 0) {
-        tree->insert(i, 12);
-      }
+    for (uint64_t i = 0; i < kKeySpace; ++i) {
+      tree->insert(CityHash64((char *)&i, sizeof(i)) + 1, 12);
     }
-    // tree->print_and_check_tree();
+   
   }
+
+  dsm->barrier("start-cache");
+  tree->print_and_check_tree();
+  dsm->barrier("end-cache");
+  // printf("End warmup\n");
 }
 
 void parse_args(int argc, char *argv[]) {
@@ -169,6 +176,14 @@ int main(int argc, char *argv[]) {
     pre_tp = all_tp;
 
     printf("throughput %.4f\n", cap * 1.0 / microseconds);
+
+    uint64_t all = 0;
+    uint64_t hit = 0;
+    for (int i = 0; i < MAX_APP_THREAD; ++i) {
+      all += (cache_hit[i][0] + cache_miss[i][0]);
+      hit += cache_hit[i][0];
+    }
+    printf("cache hit rate: %lf\n", hit * 1.0 / all);
   }
 
   return 0;

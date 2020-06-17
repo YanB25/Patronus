@@ -6,12 +6,15 @@
 #include <algorithm>
 #include <city.h>
 
-#include <map>
+#include "SimpleHT.h"
 #include <utility>
 
 #ifdef TEST_SINGLE_THREAD
-std::map<Key, GlobalAddress> mapping;
+SimpleHT mapping;
 #endif
+
+uint64_t cache_miss[MAX_APP_THREAD][8];
+uint64_t cache_hit[MAX_APP_THREAD][8];
 
 thread_local CoroCall Tree::worker[define::kMaxCoro];
 thread_local CoroCall Tree::master;
@@ -64,11 +67,11 @@ void Tree::print_verbose() {
 #endif
 
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
-    std::cout << "On-chip Lock: On"  << std::endl;
+    std::cout << "On-chip Lock: On" << std::endl;
 #endif
 
 #ifdef CONFIG_ENABLE_FINER_VERSION
-    std::cout << "Finer Verision lock: On"  << std::endl;
+    std::cout << "Finer Verision lock: On" << std::endl;
 #endif
   }
 }
@@ -101,13 +104,13 @@ GlobalAddress Tree::get_root_ptr(CoroContext *cxt, int coro_id) {
 }
 
 void Tree::broadcast_new_root(GlobalAddress new_root_addr, int root_level) {
-  RawMessage m;
-  m.type = RpcType::NEW_ROOT;
-  m.addr = new_root_addr;
-  m.level = root_level;
-  for (int i = 0; i < dsm->getClusterSize(); ++i) {
-    dsm->rpc_call_dir(m, i);
-  }
+  // RawMessage m;
+  // m.type = RpcType::NEW_ROOT;
+  // m.addr = new_root_addr;
+  // m.level = root_level;
+  // for (int i = 0; i < dsm->getClusterSize(); ++i) {
+  //   dsm->rpc_call_dir(m, i);
+  // }
 }
 
 bool Tree::update_new_root(GlobalAddress left, const Key &k,
@@ -125,7 +128,10 @@ bool Tree::update_new_root(GlobalAddress left, const Key &k,
   dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize, cxt);
   if (dsm->cas_sync(root_ptr_ptr, old_root, new_root_addr, cas_buffer, cxt)) {
     broadcast_new_root(new_root_addr, level);
-    std::cout << "new root level " << level << std::endl;
+    std::cout << "new root level " << level << " " << new_root_addr
+              << std::endl;
+    // << " split key =" << k << " buffer " << (uint64_t)
+    // page_buffer << std::endl;
     return true;
   } else {
     std::cout << "cas root fail " << std::endl;
@@ -144,6 +150,7 @@ void Tree::print_and_check_tree(CoroContext *cxt, int coro_id) {
   GlobalAddress levels[define::kMaxLevelOfTree];
   int level_cnt = 0;
   auto page_buffer = (dsm->get_rbuf(coro_id)).get_page_buffer();
+  GlobalAddress leaf_head;
 
 next_level:
 
@@ -153,24 +160,41 @@ next_level:
   if (header->level != 0) {
     p = header->leftmost_ptr;
     goto next_level;
+  } else {
+    leaf_head = p;
   }
 
-  for (int i = 0; i < level_cnt; ++i) {
-    dsm->read_sync(page_buffer, levels[i], kLeafPageSize);
-    auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
-    std::cout << "addr: " << levels[i] << " ";
-    header->debug();
-    std::cout << " | ";
-    while (header->sibling_ptr != GlobalAddress::Null()) {
-      dsm->read_sync(page_buffer, header->sibling_ptr, kLeafPageSize);
-      header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
-      std::cout << "addr: " << header->sibling_ptr << " ";
-      header->debug();
-      std::cout << " | ";
+next:
+  dsm->read_sync(page_buffer, leaf_head, kLeafPageSize);
+  auto page = (LeafPage *)page_buffer;
+  for (int i = 0; i < kLeafCardinality; ++i) {
+    if (page->records[i].value != kValueNull) {
+      #ifdef TEST_SINGLE_THREAD
+      mapping.set(page->records[i].key, leaf_head);
+      #endif
     }
-    std::cout << "\n------------------------------------" << std::endl;
-    std::cout << "------------------------------------" << std::endl;
   }
+  while (page->hdr.sibling_ptr != GlobalAddress::Null()) {
+    leaf_head = page->hdr.sibling_ptr;
+    goto next;
+  }
+
+  // for (int i = 0; i < level_cnt; ++i) {
+  //   dsm->read_sync(page_buffer, levels[i], kLeafPageSize);
+  //   auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
+  //   // std::cout << "addr: " << levels[i] << " ";
+  //   // header->debug();
+  //   // std::cout << " | ";
+  //   while (header->sibling_ptr != GlobalAddress::Null()) {
+  //     dsm->read_sync(page_buffer, header->sibling_ptr, kLeafPageSize);
+  //     header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
+  //     // std::cout << "addr: " << header->sibling_ptr << " ";
+  //     // header->debug();
+  //     // std::cout << " | ";
+  //   }
+  //   // std::cout << "\n------------------------------------" << std::endl;
+  //   // std::cout << "------------------------------------" << std::endl;
+  // }
 }
 
 inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
@@ -205,7 +229,7 @@ inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
     dsm->write_dm_sync(zeros, lock_addr, sizeof(uint64_t), cxt); // unlock
   }
 #else
-  if (false) {
+  if (true) {
     dsm->write(zeros, lock_addr, sizeof(uint64_t), false);
   } else {
     dsm->write_sync(zeros, lock_addr, sizeof(uint64_t), cxt); // unlock
@@ -237,7 +261,7 @@ void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
   rs[1].is_on_chip = false;
 #endif
 
-  if (false) {
+  if (true) {
     dsm->write_batch(rs, 2, false);
   } else {
     dsm->write_batch_sync(rs, 2, cxt);
@@ -253,7 +277,7 @@ void Tree::lock_and_read_page(char *page_buffer, GlobalAddress page_addr,
                               int page_size, uint64_t *cas_buffer,
                               GlobalAddress lock_addr, uint64_t tag,
                               CoroContext *cxt, int coro_id) {
-#ifdef CONFIG_ENABLE_OP_COUPLE
+#ifdef CONFIG_ENABLE_OP_COUPLE_D
   uint64_t retry_cnt = 0;
 retry:
   if (retry_cnt++ > 1000) {
@@ -309,12 +333,16 @@ void Tree::insert(const Key &k, const Value &v, CoroContext *cxt, int coro_id) {
   assert(dsm->is_register());
 
 #ifdef TEST_SINGLE_THREAD
-  auto it = mapping.find(k);
-  if (it != mapping.cend()) {
-    auto addr = it->second;
-    leaf_page_store(addr, k, v, get_root_ptr(cxt, coro_id), 0, cxt, coro_id);
+  GlobalAddress cache_addr = mapping.get(k);
+  if (cache_addr != GlobalAddress::Null()) {
+    cache_hit[dsm->getMyThreadID()][0]++;
+    auto root = get_root_ptr(cxt, coro_id);
+    leaf_page_store(cache_addr, k, v, root, 0, cxt, coro_id);
     return;
+  } else {
+    cache_miss[dsm->getMyThreadID()][0]++;
   }
+
 #endif
 
   auto root = get_root_ptr(cxt, coro_id);
@@ -346,7 +374,7 @@ next:
   }
 
 #ifdef TEST_SINGLE_THREAD
-  mapping[k] = p;
+  // mapping.set(k, p);
 #endif
 
   leaf_page_store(p, k, v, root, 0, cxt, coro_id);
@@ -360,9 +388,9 @@ bool Tree::search(const Key &k, Value &v, CoroContext *cxt, int coro_id) {
 
   GlobalAddress p = root;
 #ifdef TEST_SINGLE_THREAD
-  auto it = mapping.find(k);
-  if (it != mapping.cend()) {
-    p = it->second;
+  auto tmp = mapping.get(k);
+  if (tmp != GlobalAddress::Null()) {
+    p = tmp;
   }
 #endif
 
@@ -533,7 +561,7 @@ void Tree::internal_page_store(GlobalAddress page_addr, const Key &k,
   lock_addr.nodeID = page_addr.nodeID;
   lock_addr.offset = lock_index * sizeof(uint64_t);
 
-  auto rbuf = dsm->get_rbuf(coro_id);
+  auto &rbuf = dsm->get_rbuf(coro_id);
   uint64_t *cas_buffer = rbuf.get_cas_buffer();
   auto page_buffer = rbuf.get_page_buffer();
 
@@ -657,9 +685,10 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
   lock_addr.nodeID = page_addr.nodeID;
   lock_addr.offset = lock_index * sizeof(uint64_t);
 
-  auto rbuf = dsm->get_rbuf(coro_id);
+  auto &rbuf = dsm->get_rbuf(coro_id);
   uint64_t *cas_buffer = rbuf.get_cas_buffer();
   auto page_buffer = rbuf.get_page_buffer();
+
   auto tag = dsm->getThreadTag();
   assert(tag != 0);
 
@@ -668,6 +697,9 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
 
   auto page = (LeafPage *)page_buffer;
 
+  // if (page->hdr.level != level) {
+  //   this->print_and_check_tree();
+  // }
   assert(page->hdr.level == level);
   assert(page->check_consistent());
   if (k >= page->hdr.highest) {
@@ -677,7 +709,7 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
     assert(page->hdr.sibling_ptr != GlobalAddress::Null());
 
 #ifdef TEST_SINGLE_THREAD
-    mapping[k] = page->hdr.sibling_ptr;
+    // mapping.set(k, page->hdr.sibling_ptr);
 #endif
     this->leaf_page_store(page->hdr.sibling_ptr, k, v, root, level, cxt,
                           coro_id);

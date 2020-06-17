@@ -104,7 +104,6 @@ void DSM::initRDMAConnection() {
 void DSM::read(char *buffer, GlobalAddress gaddr, size_t size, bool signal,
                CoroContext *ctx) {
   if (ctx == nullptr) {
-    assert(signal == true);
     rdmaRead(iCon->data[0][gaddr.nodeID], (uint64_t)buffer,
              remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset, size,
              iCon->cacheLKey, remoteInfo[gaddr.nodeID].dsmRKey[0], signal);
