@@ -163,12 +163,16 @@ constexpr int kLeafCardinality =
 
 class InternalPage {
 private:
-  uint32_t crc;
+  union {
+    uint32_t crc;
+    uint64_t embedding_lock;
+  };
+
   uint8_t front_version;
   Header hdr;
   InternalEntry records[kInternalCardinality];
 
-  uint8_t padding[8];
+  uint8_t padding[4];
   uint8_t rear_version;
 
   friend class Tree;
@@ -195,6 +199,8 @@ public:
 
     front_version = 0;
     rear_version = 0;
+
+    embedding_lock = 0;
   }
 
   void set_consistent() {
@@ -232,12 +238,15 @@ public:
 
 class LeafPage {
 private:
-  uint32_t crc;
+   union {
+    uint32_t crc;
+    uint64_t embedding_lock;
+  };
   uint8_t front_version;
   Header hdr;
   LeafEntry records[kLeafCardinality];
 
-  uint8_t padding[4];
+  // uint8_t padding[4];
   uint8_t rear_version;
 
   friend class Tree;
@@ -249,6 +258,8 @@ public:
 
     front_version = 0;
     rear_version = 0;
+
+    embedding_lock = 0;
   }
 
   void set_consistent() {

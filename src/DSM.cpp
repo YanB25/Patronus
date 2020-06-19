@@ -201,6 +201,8 @@ void DSM::cas_read(RdmaOpRegion &cas_ror, RdmaOpRegion &read_ror,
     node_id = gaddr.nodeID;
     bool is_on_chip = cas_ror.is_on_chip;
 
+
+
     cas_ror.lkey = iCon->cacheLKey;
     if (is_on_chip) {
       cas_ror.dest = remoteInfo[gaddr.nodeID].lockBase + gaddr.offset;

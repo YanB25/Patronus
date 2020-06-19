@@ -17,11 +17,17 @@
 #include "Statistics.h"
 #include "WRLock.h"
 
+// CONFIG_ENABLE_EMBEDDING_LOCK and CONFIG_ENABLE_CRC 
+// **cannot** be ON at the same time
+
+// #define CONFIG_ENABLE_EMBEDDING_LOCK
 // #define CONFIG_ENABLE_CRC
 // #define CONFIG_ENABLE_CAS_UNLOCK
-#define CONFIG_ENABLE_ON_CHIP_LOCK
-#define CONFIG_ENABLE_FINER_VERSION
-#define CONFIG_ENABLE_OP_COUPLE
+// #define CONFIG_ENABLE_ON_CHIP_LOCK
+// #define CONFIG_ENABLE_FINER_VERSION
+// #define CONFIG_ENABLE_OP_COUPLE
+
+// #define CONFIG_ENABLE_HOT_FILTER
 
 #define TEST_SINGLE_THREAD
 
@@ -78,7 +84,7 @@ constexpr uint64_t GB = 1024ull * MB;
 constexpr uint16_t kCacheLineSize = 64;
 
 // for remote allocate
-constexpr uint64_t kChunkSize = MB * 32;
+constexpr uint64_t kChunkSize = 1 * MB;
 
 // for store root pointer
 constexpr uint64_t kRootPointerStoreOffest = kChunkSize / 2;
@@ -86,7 +92,7 @@ static_assert(kRootPointerStoreOffest % sizeof(uint64_t) == 0, "XX");
 
 // lock on-chip memory
 constexpr uint64_t kLockStartAddr = 0;
-constexpr uint64_t kLockChipMemSize = 128 * 1024;
+constexpr uint64_t kLockChipMemSize = 256 * 1024;
 
 // number of locks
 constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
@@ -113,5 +119,12 @@ constexpr Key kKeyMax = std::numeric_limits<Key>::max();
 constexpr Value kValueNull = 0;
 constexpr uint32_t kInternalPageSize = 512;
 constexpr uint32_t kLeafPageSize = 512;
+
+
+__inline__ unsigned long long rdtsc(void) {
+  unsigned hi, lo;
+  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+  return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
+}
 
 #endif /* __COMMON_H__ */

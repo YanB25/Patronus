@@ -13,8 +13,15 @@
 SimpleHT mapping;
 #endif
 
+#include "HotBuffer.h"
+
+HotBuffer hot_buf;
 uint64_t cache_miss[MAX_APP_THREAD][8];
 uint64_t cache_hit[MAX_APP_THREAD][8];
+uint64_t lock_fail[MAX_APP_THREAD][8];
+uint64_t pattern[MAX_APP_THREAD][8];
+uint64_t hot_filter_count[MAX_APP_THREAD][8];
+volatile bool need_stop = false;
 
 thread_local CoroCall Tree::worker[define::kMaxCoro];
 thread_local CoroCall Tree::master;
@@ -73,6 +80,12 @@ void Tree::print_verbose() {
 #ifdef CONFIG_ENABLE_FINER_VERSION
     std::cout << "Finer Verision lock: On" << std::endl;
 #endif
+
+#ifdef CONFIG_ENABLE_HOT_FILTER
+
+    std::cout << "Hot filter: On" << std::endl;
+
+#endif
   }
 }
 
@@ -104,13 +117,13 @@ GlobalAddress Tree::get_root_ptr(CoroContext *cxt, int coro_id) {
 }
 
 void Tree::broadcast_new_root(GlobalAddress new_root_addr, int root_level) {
-  // RawMessage m;
-  // m.type = RpcType::NEW_ROOT;
-  // m.addr = new_root_addr;
-  // m.level = root_level;
-  // for (int i = 0; i < dsm->getClusterSize(); ++i) {
-  //   dsm->rpc_call_dir(m, i);
-  // }
+  RawMessage m;
+  m.type = RpcType::NEW_ROOT;
+  m.addr = new_root_addr;
+  m.level = root_level;
+  for (int i = 0; i < dsm->getClusterSize(); ++i) {
+    dsm->rpc_call_dir(m, i);
+  }
 }
 
 bool Tree::update_new_root(GlobalAddress left, const Key &k,
@@ -169,9 +182,9 @@ next:
   auto page = (LeafPage *)page_buffer;
   for (int i = 0; i < kLeafCardinality; ++i) {
     if (page->records[i].value != kValueNull) {
-      #ifdef TEST_SINGLE_THREAD
+#ifdef TEST_SINGLE_THREAD
       mapping.set(page->records[i].key, leaf_head);
-      #endif
+#endif
     }
   }
   while (page->hdr.sibling_ptr != GlobalAddress::Null()) {
@@ -211,25 +224,27 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
 inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
                               uint64_t *buf, CoroContext *cxt, int coro_id,
                               bool async) {
+
 #ifdef CONFIG_ENABLE_CAS_UNLOCK
 
+  auto unlock_buf = dsm->get_rbuf(coro_id).get_unlock_buffer();
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
-  dsm->cas_dm(lock_addr, tag, 0, cas_buffer, false, cxt);
+  dsm->cas_dm(lock_addr, tag, 0, unlock_buf, false, cxt);
 #else
-  dsm->cas(lock_addr, tag, 0, cas_buffer, false, cxt);
+  dsm->cas(lock_addr, tag, 0, unlock_buf, false, cxt);
 #endif
 
 #else
 
   auto zeros = (char *)dsm->get_rbuf(coro_id).get_zero_64bit();
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
-  if (false) {
+  if (async) {
     dsm->write_dm(zeros, lock_addr, sizeof(uint64_t), false);
   } else {
     dsm->write_dm_sync(zeros, lock_addr, sizeof(uint64_t), cxt); // unlock
   }
 #else
-  if (true) {
+  if (async) {
     dsm->write(zeros, lock_addr, sizeof(uint64_t), false);
   } else {
     dsm->write_sync(zeros, lock_addr, sizeof(uint64_t), cxt); // unlock
@@ -261,7 +276,7 @@ void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
   rs[1].is_on_chip = false;
 #endif
 
-  if (true) {
+  if (async) {
     dsm->write_batch(rs, 2, false);
   } else {
     dsm->write_batch_sync(rs, 2, cxt);
@@ -277,6 +292,7 @@ void Tree::lock_and_read_page(char *page_buffer, GlobalAddress page_addr,
                               int page_size, uint64_t *cas_buffer,
                               GlobalAddress lock_addr, uint64_t tag,
                               CoroContext *cxt, int coro_id) {
+  auto &pattern_cnt = pattern[dsm->getMyThreadID()][page_addr.nodeID];
 #ifdef CONFIG_ENABLE_OP_COUPLE_D
   uint64_t retry_cnt = 0;
 retry:
@@ -289,31 +305,47 @@ retry:
     assert(false);
   }
 
-  RdmaOpRegion cas_ror;
-  RdmaOpRegion read_ror;
-  cas_ror.source = (uint64_t)cas_buffer;
-  cas_ror.dest = lock_addr;
-  cas_ror.size = sizeof(uint64_t);
+  if (retry_cnt == 0) {
+    RdmaOpRegion cas_ror;
+    RdmaOpRegion read_ror;
+    cas_ror.source = (uint64_t)cas_buffer;
+    cas_ror.dest = lock_addr;
+    cas_ror.size = sizeof(uint64_t);
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
-  cas_ror.is_on_chip = true;
+    cas_ror.is_on_chip = true;
 #else
-  cas_ror.is_on_chip = false;
+    cas_ror.is_on_chip = false;
 #endif
 
-  read_ror.source = (uint64_t)page_buffer;
-  read_ror.dest = page_addr;
-  read_ror.size = page_size;
-  read_ror.is_on_chip = false;
-  bool res = dsm->cas_read_sync(cas_ror, read_ror, 0, tag, cxt);
-  if (!res) {
-    goto retry;
+    read_ror.source = (uint64_t)page_buffer;
+    read_ror.dest = page_addr;
+    read_ror.size = page_size;
+    read_ror.is_on_chip = false;
+    bool res = dsm->cas_read_sync(cas_ror, read_ror, 0, tag, cxt);
+    if (!res) {
+      goto retry;
+    }
+  } else {
+    bool res = try_lock_addr(lock_addr, tag, cas_buffer, cxt, coro_id);
+    if (!res) {
+      goto retry;
+    }
+    dsm->read_sync(page_buffer, page_addr, page_size, cxt);
   }
+
 #else
   uint64_t retry_cnt = 0;
+  uint64_t pre_tag = 0;
+  uint64_t conflict_tag = 0;
 retry:
-  if (retry_cnt++ > 1000) {
-    std::cout << "Deadlock " << lock_addr.offset << std::endl;
-    uint64_t conflict_tag = *cas_buffer - 1;
+  retry_cnt++;
+  if (retry_cnt > 100) {
+    // auto start = rdtsc();
+    // while (rdtsc() - start < 1000);
+  }
+  if (retry_cnt > 10000) {
+    std::cout << "Deadlock " << lock_addr << std::endl;
+
     std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
               << " locked by " << (conflict_tag >> 32) << ", "
               << (conflict_tag << 32 >> 32) << std::endl;
@@ -321,9 +353,18 @@ retry:
   }
 
   bool res = try_lock_addr(lock_addr, tag, cas_buffer, cxt, coro_id);
+  pattern_cnt++;
   if (!res) {
+    conflict_tag = *cas_buffer - 1;
+    if (conflict_tag != pre_tag) {
+      retry_cnt = 0;
+      pre_tag = conflict_tag;
+    }
+    lock_fail[dsm->getMyThreadID()][0]++;
     goto retry;
-  }
+  } 
+
+
   dsm->read_sync(page_buffer, page_addr, page_size, cxt);
 
 #endif
@@ -332,12 +373,27 @@ retry:
 void Tree::insert(const Key &k, const Value &v, CoroContext *cxt, int coro_id) {
   assert(dsm->is_register());
 
+#ifdef CONFIG_ENABLE_HOT_FILTER
+  auto res = hot_buf.set(k);
+
+  if (res == HotResult::OCCUPIED) {
+    hot_filter_count[dsm->getMyThreadID()][0]++;
+    while (!hot_buf.wait(k))
+      ;
+  }
+#endif
+
 #ifdef TEST_SINGLE_THREAD
   GlobalAddress cache_addr = mapping.get(k);
   if (cache_addr != GlobalAddress::Null()) {
     cache_hit[dsm->getMyThreadID()][0]++;
     auto root = get_root_ptr(cxt, coro_id);
     leaf_page_store(cache_addr, k, v, root, 0, cxt, coro_id);
+#ifdef CONFIG_ENABLE_HOT_FILTER
+    if (res == HotResult::SUCC) {
+      hot_buf.clear(k);
+    }
+#endif
     return;
   } else {
     cache_miss[dsm->getMyThreadID()][0]++;
@@ -378,6 +434,12 @@ next:
 #endif
 
   leaf_page_store(p, k, v, root, 0, cxt, coro_id);
+
+#ifdef CONFIG_ENABLE_HOT_FILTER
+  if (res == HotResult::SUCC) {
+    hot_buf.clear(k);
+  }
+#endif
 }
 
 bool Tree::search(const Key &k, Value &v, CoroContext *cxt, int coro_id) {
@@ -678,12 +740,18 @@ void Tree::internal_page_store(GlobalAddress page_addr, const Key &k,
 void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
                            const Value &v, GlobalAddress root, int level,
                            CoroContext *cxt, int coro_id) {
+
   uint64_t lock_index =
       CityHash64((char *)&page_addr, sizeof(page_addr)) % define::kNumOfLock;
 
   GlobalAddress lock_addr;
+
+#ifdef CONFIG_ENABLE_EMBEDDING_LOCK
+  lock_addr = page_addr;
+#else
   lock_addr.nodeID = page_addr.nodeID;
   lock_addr.offset = lock_index * sizeof(uint64_t);
+#endif
 
   auto &rbuf = dsm->get_rbuf(coro_id);
   uint64_t *cas_buffer = rbuf.get_cas_buffer();
@@ -693,6 +761,7 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
   assert(tag != 0);
 
   lock_and_read_page(page_buffer, page_addr, kLeafPageSize, cas_buffer,
+
                      lock_addr, tag, cxt, coro_id);
 
   auto page = (LeafPage *)page_buffer;
@@ -956,7 +1025,7 @@ void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id) {
   ctx.master = &master;
   ctx.yield = &yield;
 
-  // printf("I am %d\n", coro_id);
+  // printf("I am %d %p\n", coro_id, gen);
 
   while (true) {
 
@@ -966,6 +1035,7 @@ void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id) {
     // }
 
     auto r = gen->next();
+    // a
     if (r.is_search) {
       Value v;
       this->search(r.k, v, &ctx, coro_id);

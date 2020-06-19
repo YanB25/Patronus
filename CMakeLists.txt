@@ -12,10 +12,10 @@ set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++11 ")
 # Link Options
 set(LINKS_FLAGS "-lpthread -libverbs -lmemcached -lprofiler")
 
-option (SANITIZE "Turn on sanitization" OFF)
-if (SANITIZE)
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
-endif()
+# option (SANITIZE "Turn on sanitization" ON)
+# if (SANITIZE)
+    # set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+# endif()
 
 set(INCLUDE_BASE ${PROJECT_SOURCE_DIR}/include)
 include_directories(${INCLUDE_BASE})

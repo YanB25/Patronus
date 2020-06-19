@@ -178,12 +178,12 @@ static uint64_t mehcached_zipf_next(struct zipf_gen_state *state) {
     }
 }
 
-static void mehcached_test_zipf(double theta) {
+void mehcached_test_zipf(double theta) {
 
     (void)(mehcached_test_zipf);
 
     double zetan = 0.;
-    const uint64_t n = 1000000UL;
+    const uint64_t n = 10000000000UL;
     uint64_t i;
 
     for (i = 0; i < n; i++)

@@ -24,7 +24,7 @@ char *getIP() {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
 
     ifr.ifr_addr.sa_family = AF_INET;
-    strncpy(ifr.ifr_name, "ens2", IFNAMSIZ - 1);
+    strncpy(ifr.ifr_name, "ib0", IFNAMSIZ - 1);
 
     ioctl(fd, SIOCGIFADDR, &ifr);
     close(fd);
