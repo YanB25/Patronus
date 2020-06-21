@@ -23,11 +23,11 @@
 // #define CONFIG_ENABLE_EMBEDDING_LOCK
 // #define CONFIG_ENABLE_CRC
 // #define CONFIG_ENABLE_CAS_UNLOCK
-// #define CONFIG_ENABLE_ON_CHIP_LOCK
+#define CONFIG_ENABLE_ON_CHIP_LOCK
 // #define CONFIG_ENABLE_FINER_VERSION
 // #define CONFIG_ENABLE_OP_COUPLE
 
-// #define CONFIG_ENABLE_HOT_FILTER
+#define CONFIG_ENABLE_HOT_FILTER
 
 #define TEST_SINGLE_THREAD
 
@@ -95,7 +95,8 @@ constexpr uint64_t kLockStartAddr = 0;
 constexpr uint64_t kLockChipMemSize = 256 * 1024;
 
 // number of locks
-constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
+constexpr uint64_t kNumOfLock = 10240;
+// ;kLockChipMemSize / sizeof(uint64_t);
 
 // level of tree
 constexpr uint64_t kMaxLevelOfTree = 12;

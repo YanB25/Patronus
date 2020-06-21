@@ -1,3 +1,4 @@
+#include "Timer.h"
 #include "Tree.h"
 #include "zipf.h"
 
@@ -35,8 +36,6 @@ extern uint64_t lock_fail[MAX_APP_THREAD][8];
 extern uint64_t pattern[MAX_APP_THREAD][8];
 extern uint64_t hot_filter_count[MAX_APP_THREAD][8];
 
-
-
 const int kMaxThread = 32;
 
 int kReadRatio;
@@ -50,6 +49,9 @@ int hottest = 1;
 
 std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
+
+uint64_t latency[kMaxThread][10000];
+uint64_t latency_th_all[10000];
 
 Tree *tree;
 DSM *dsm;
@@ -97,7 +99,7 @@ RequstGen *coro_func(int coro_id, DSM *dsm, int id) {
 void thread_run(int id) {
 
   if (id != 0) {
-    sleep(5);
+    // sleep(5);
   }
 
   bindCore(id);
@@ -115,6 +117,7 @@ void thread_run(int id) {
   mehcached_zipf_init(&state, kKeySpace, zipfan,
                       rdtsc() & (0x0000ffffffffffffull) ^ id);
 
+  Timer timer;
   while (true) {
 
     if (need_stop) {
@@ -130,13 +133,21 @@ void thread_run(int id) {
 
     uint64_t key = CityHash64((char *)&dis, sizeof(dis)) + 1;
 
-    Value v;
-    if (rand_r(&seed) % 100 < kReadRatio) { // GET
-      tree->search(key, v);
-    } else {
-      v = 12;
-      tree->insert(key, v);
+    timer.begin();
+    tree->lock_bench(key);
+    auto us_10 = timer.end() / 100;
+    if (us_10 >= 10000) {
+      us_10 = 9999;
     }
+    latency[id][us_10]++;
+
+    // Value v;
+    // if (rand_r(&seed) % 100 < kReadRatio) { // GET
+    //   tree->search(key, v);
+    // } else {
+    //   v = 12;
+    //   tree->insert(key, v);
+    // }
 
     tp[id][0]++;
   }
@@ -146,7 +157,7 @@ void thread_run(int id) {
 
 void warm_up() {
 
-  // return;
+  return;
   // if (dsm->getMyNodeID() == 0) {
   for (uint64_t i = 0; i < kKeySpace; ++i) {
     auto k = CityHash64((char *)&i, sizeof(i)) + 1;
@@ -177,6 +188,50 @@ void parse_args(int argc, char *argv[]) {
          kReadRatio, kThreadCount);
 }
 
+void cal_latency() {
+  uint64_t all_lat = 0;
+  for (int i = 0; i < 10000; ++i) {
+    latency_th_all[i] = 0;
+    for (int k = 0; k < MAX_APP_THREAD; ++k) {
+      latency_th_all[i] += latency[k][i];
+    }
+    all_lat += latency_th_all[i];
+  }
+
+  uint64_t th50 = all_lat / 2;
+  uint64_t th90 = all_lat * 9 / 10;
+  uint64_t th95 = all_lat * 95 / 100;
+  uint64_t th99 = all_lat * 99 / 100;
+  uint64_t th999 = all_lat * 999 / 1000;
+
+  uint64_t cum = 0;
+  for (int i = 0; i < 10000; ++i) {
+    cum += latency_th_all[i];
+
+    if (cum >= th50) {
+      printf("p50 %f\t", i / 10.0);
+      th50 = -1;
+    }
+    if (cum >= th90) {
+      printf("p90 %f\t", i / 10.0);
+      th90 = -1;
+    }
+    if (cum >= th95) {
+      printf("p95 %f\t", i / 10.0);
+      th95 = -1;
+    }
+    if (cum >= th99) {
+      printf("p99 %f\t", i / 10.0);
+      th99 = -1;
+    }
+    if (cum >= th999) {
+      printf("p999 %f\t", i / 10.0);
+      th999 = -1;
+    }
+  }
+  printf("\n");
+}
+
 int main(int argc, char *argv[]) {
 
   parse_args(argc, argv);
@@ -192,6 +247,11 @@ int main(int argc, char *argv[]) {
 
   dsm->barrier("benchmark");
 
+  if (dsm->getMyNodeID() == 0) {
+    while (true)
+      ;
+  }
+
   for (int i = 0; i < kThreadCount; i++) {
     th[i] = std::thread(thread_run, i);
   }
@@ -203,6 +263,7 @@ int main(int argc, char *argv[]) {
     pre_ths[i] = 0;
   }
 
+  int count = 0;
   while (true) {
     clock_gettime(CLOCK_REALTIME, &s);
     sleep(1);
@@ -266,6 +327,10 @@ int main(int argc, char *argv[]) {
       hot_filter_count[i][0] = 0;
     }
     printf("hot count %ld\n", hot_count);
+
+    if (++count % 3 == 0 && dsm->getMyNodeID() == 1) {
+      cal_latency();
+    }
   }
 
   return 0;

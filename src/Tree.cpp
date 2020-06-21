@@ -362,12 +362,26 @@ retry:
     }
     lock_fail[dsm->getMyThreadID()][0]++;
     goto retry;
-  } 
-
+  }
 
   dsm->read_sync(page_buffer, page_addr, page_size, cxt);
 
 #endif
+}
+
+void Tree::lock_bench(const Key &k, CoroContext *cxt, int coro_id) {
+  uint64_t lock_index = k % define::kNumOfLock;
+
+  GlobalAddress lock_addr;
+  lock_addr.nodeID = 0;
+  lock_addr.offset = lock_index * sizeof(uint64_t);
+  auto cas_buffer = dsm->get_rbuf(coro_id).get_cas_buffer();
+
+  while (!try_lock_addr(lock_addr, 1, cas_buffer, cxt, coro_id)) {
+    lock_fail[dsm->getMyThreadID()][0]++;
+  }
+
+  unlock_addr(lock_addr, 1, cas_buffer, cxt, coro_id, true);
 }
 
 void Tree::insert(const Key &k, const Value &v, CoroContext *cxt, int coro_id) {
