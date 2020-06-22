@@ -269,11 +269,6 @@ int main(int argc, char *argv[]) {
 
   dsm->barrier("benchmark");
 
-  if (dsm->getMyNodeID() == 0) {
-    while (true)
-      ;
-  }
-
   for (int i = 0; i < kThreadCount; i++) {
     th[i] = std::thread(thread_run, i);
   }
@@ -286,9 +281,11 @@ int main(int argc, char *argv[]) {
   }
 
   int count = 0;
+
+  clock_gettime(CLOCK_REALTIME, &s);
   while (true) {
-    clock_gettime(CLOCK_REALTIME, &s);
-    sleep(1);
+
+    sleep(2);
     clock_gettime(CLOCK_REALTIME, &e);
     int microseconds = (e.tv_sec - s.tv_sec) * 1000000 +
                        (double)(e.tv_nsec - s.tv_nsec) / 1000;
@@ -300,8 +297,6 @@ int main(int argc, char *argv[]) {
     uint64_t cap = all_tp - pre_tp;
     pre_tp = all_tp;
 
-    printf("%d, throughput %.4f\n", cap * 1.0 / microseconds,
-           dsm->getMyNodeID());
     for (int i = 0; i < kThreadCount; ++i) {
       auto val = tp[i][0];
       // printf("thread %d %ld\n", i, val - pre_ths[i]);
@@ -314,7 +309,6 @@ int main(int argc, char *argv[]) {
       all += (cache_hit[i][0] + cache_miss[i][0]);
       hit += cache_hit[i][0];
     }
-    printf("cache hit rate: %lf\n", hit * 1.0 / all);
 
     uint64_t fail_locks_cnt = 0;
     for (int i = 0; i < MAX_APP_THREAD; ++i) {
@@ -325,9 +319,6 @@ int main(int argc, char *argv[]) {
       // need_stop = true;
     }
 
-    printf("%d fail locks: %ld %s\n", dsm->getMyNodeID(), fail_locks_cnt,
-           getIP());
-
     //  pattern
     uint64_t pp[8];
     memset(pp, 0, sizeof(pp));
@@ -337,21 +328,36 @@ int main(int argc, char *argv[]) {
         pattern[t][i] = 0;
       }
     }
-    printf("ACCESS PATTERN");
-    for (int i = 0; i < 8; ++i) {
-      printf("\t%ld", pp[i]);
-    }
-    printf("\n");
 
     uint64_t hot_count = 0;
     for (int i = 0; i < MAX_APP_THREAD; ++i) {
       hot_count += hot_filter_count[i][0];
       hot_filter_count[i][0] = 0;
     }
-    printf("hot count %ld\n", hot_count);
 
-    if (++count % 3 == 0 && dsm->getMyNodeID() == 1) {
+    clock_gettime(CLOCK_REALTIME, &s);
+
+    if (++count % 3 == 0 && dsm->getMyNodeID() == 0) {
       cal_latency();
+    }
+
+    double per_node_tp = cap * 1.0 / microseconds;
+    uint64_t cluster_tp = dsm->sum((uint64_t)(per_node_tp * 1000));
+
+    printf("%d, throughput %.4f\n", per_node_tp, dsm->getMyNodeID());
+
+    if (dsm->getMyNodeID() == 0) {
+      printf("cluster throughput %.3f\n", cluster_tp / 1000.0);
+
+      printf("cache hit rate: %lf\n", hit * 1.0 / all);
+      printf("ACCESS PATTERN");
+      for (int i = 0; i < 8; ++i) {
+        printf("\t%ld", pp[i]);
+      }
+      printf("\n");
+      printf("%d fail locks: %ld %s\n", dsm->getMyNodeID(), fail_locks_cnt,
+             getIP());
+      printf("hot count %ld\n", hot_count);
     }
   }
 

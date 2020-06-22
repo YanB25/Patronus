@@ -134,6 +134,28 @@ int main() {
     }
     timer.end_print(loop);
 
+    printf("\n-------- write faa succ ----------\n");
+    timer.begin();
+    for (size_t i = 0; i < loop; ++i) {
+      auto faa_ror_input = cas_ror;
+      auto write_ror_input = read_ror;
+      dsm->write_faa_sync(write_ror_input, faa_ror_input, 1);
+      // assert(res);
+      // cur_val++;
+    }
+    timer.end_print(loop);
+
+    printf("\n-------- write cas succ ----------\n");
+    timer.begin();
+    for (size_t i = 0; i < loop; ++i) {
+      auto cas_ror_input = cas_ror;
+      auto write_ror_input = read_ror;
+      dsm->write_cas_sync(write_ror_input, cas_ror_input, cur_val, cur_val + 1);
+      // assert(res);
+      // cur_val++;
+    }
+    timer.end_print(loop);
+
     // function call time
     size_t call_loop = 100;
     printf("\n -------- cas function call ----------\n");

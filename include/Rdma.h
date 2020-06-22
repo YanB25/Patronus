@@ -176,10 +176,17 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 void rdmaQueryQueuePair(ibv_qp *qp);
 void checkDctSupported(struct ibv_context *ctx);
 
+
+//// specified
 bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled,
                     uint64_t wrID = 0);
 bool rdmaCasRead(ibv_qp *qp, const RdmaOpRegion &cas_ror,
                  const RdmaOpRegion &read_ror, uint64_t compare, uint64_t swap,
                  bool isSignaled, uint64_t wrID = 0);
-
+bool rdmaWriteFaa(ibv_qp *qp, const RdmaOpRegion &write_ror,
+                  const RdmaOpRegion &faa_ror, uint64_t add_val,
+                  bool isSignaled, uint64_t wrID = 0);
+bool rdmaWriteCas(ibv_qp *qp, const RdmaOpRegion &write_ror,
+                  const RdmaOpRegion &cas_ror, uint64_t compare, uint64_t swap,
+                  bool isSignaled, uint64_t wrID = 0);                 
 #endif

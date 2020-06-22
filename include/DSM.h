@@ -41,6 +41,18 @@ public:
                    CoroContext *ctx = nullptr);
   void write_batch_sync(RdmaOpRegion *rs, int k, CoroContext *ctx = nullptr);
 
+  void write_faa(RdmaOpRegion &write_ror, RdmaOpRegion &faa_ror,
+                 uint64_t add_val, bool signal = true,
+                 CoroContext *ctx = nullptr);
+  void write_faa_sync(RdmaOpRegion &write_ror, RdmaOpRegion &faa_ror,
+                      uint64_t add_val, CoroContext *ctx = nullptr);
+
+  void write_cas(RdmaOpRegion &write_ror, RdmaOpRegion &cas_ror,
+                 uint64_t equal, uint64_t val, bool signal = true,
+                 CoroContext *ctx = nullptr);
+  void write_cas_sync(RdmaOpRegion &write_ror, RdmaOpRegion &cas_ror,
+                      uint64_t equal, uint64_t val, CoroContext *ctx = nullptr);
+
   void cas(GlobalAddress gaddr, uint64_t equal, uint64_t val,
            uint64_t *rdma_buffer, bool signal = true,
            CoroContext *ctx = nullptr);
@@ -68,7 +80,8 @@ public:
   // for on-chip device memory
   void read_dm(char *buffer, GlobalAddress gaddr, size_t size,
                bool signal = true, CoroContext *ctx = nullptr);
-  void read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size, CoroContext *ctx = nullptr);
+  void read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size,
+                    CoroContext *ctx = nullptr);
 
   void write_dm(const char *buffer, GlobalAddress gaddr, size_t size,
                 bool signal = true, CoroContext *ctx = nullptr);
@@ -96,6 +109,11 @@ public:
 
   uint64_t poll_rdma_cq(int count = 1);
 
+  uint64_t sum(uint64_t value) {
+    static uint64_t count = 0;
+    return keeper->sum(std::string("sum-") + std::to_string(count++), value);
+  }
+
   // Memcached operations for sync
   size_t Put(uint64_t key, const void *value, size_t count) {
 
@@ -119,6 +137,7 @@ private:
   ~DSM();
 
   void initRDMAConnection();
+  void fill_keys_dest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip);
 
   DSMConfig conf;
   std::atomic_int appID;

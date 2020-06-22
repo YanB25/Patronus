@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "Timer.h"
+#include <queue>
 
 #ifdef TEST_SINGLE_THREAD
 SimpleHT mapping;
@@ -29,7 +30,18 @@ thread_local CoroCall Tree::worker[define::kMaxCoro];
 thread_local CoroCall Tree::master;
 thread_local GlobalAddress path_stack[define::kMaxCoro]
                                      [define::kMaxLevelOfTree];
+
+// for coroutine schedule
+struct CoroDeadline {
+  uint64_t deadline;
+  uint16_t coro_id;
+
+  bool operator<(const CoroDeadline &o) const { return this->deadline < o.deadline; }
+};
+
 thread_local Timer timer;
+std::queue<uint16_t> hot_wait_queue;
+std::priority_queue<CoroDeadline> deadline_queue;
 
 Tree::Tree(DSM *dsm, uint16_t tree_id) : dsm(dsm), tree_id(tree_id) {
 
@@ -213,9 +225,7 @@ next:
   // }
 }
 
-GlobalAddress Tree::query_cache(const Key &k) {
-  return mapping.get(k);
-}
+GlobalAddress Tree::query_cache(const Key &k) { return mapping.get(k); }
 
 inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
                                 uint64_t *buf, CoroContext *cxt, int coro_id) {
@@ -344,7 +354,7 @@ void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
   rs[0].size = page_size;
   rs[0].is_on_chip = false;
 
-  rs[1].source = (uint64_t)dsm->get_rbuf(coro_id).get_zero_64bit();
+  rs[1].source = (uint64_t)dsm->get_rbuf(coro_id).get_cas_buffer();
   rs[1].dest = lock_addr;
   rs[1].size = sizeof(uint64_t);
 
@@ -354,11 +364,19 @@ void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
   rs[1].is_on_chip = false;
 #endif
 
+#ifdef CONFIG_EABLE_BAKERY_LOCK
   if (async) {
-    dsm->write_batch(rs, 2, false);
+    dsm->write_faa(rs[0], rs[1], (1ull << 32), false);
   } else {
-    dsm->write_batch_sync(rs, 2, cxt);
+    dsm->write_faa_sync(rs[0], rs[1], (1ull << 32), cxt);
   }
+#else
+  if (async) {
+    dsm->write_cas(rs[0], rs[1], tag, 0, false);
+  } else {
+    dsm->write_cas_sync(rs[0], rs[1], tag, 0, cxt);
+  }
+#endif
 
 #else
   dsm->write_sync(page_buffer, page_addr, page_size, cxt);

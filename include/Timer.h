@@ -30,6 +30,12 @@ public:
     }
   }
 
+  static uint64_t get_time_ns() {
+    timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    return 1000000000ull * now.tv_sec + now.tv_nsec;
+  }
+
   static void sleep(uint64_t sleep_ns) {
     Timer clock;
 
