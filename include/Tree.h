@@ -47,6 +47,8 @@ public:
 
   void lock_bench(const Key &k, CoroContext *cxt = nullptr, int coro_id = 0);
 
+  GlobalAddress query_cache(const Key &k);
+
 private:
   DSM *dsm;
   uint64_t tree_id;

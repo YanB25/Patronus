@@ -321,17 +321,29 @@ void DSM::faa_boundary_sync(GlobalAddress gaddr, uint64_t add_val,
   }
 }
 
-void DSM::read_dm(char *buffer, GlobalAddress gaddr, size_t size, bool signal) {
-  rdmaRead(iCon->data[0][gaddr.nodeID], (uint64_t)buffer,
-           remoteInfo[gaddr.nodeID].lockBase + gaddr.offset, size,
-           iCon->cacheLKey, remoteInfo[gaddr.nodeID].lockRKey[0], signal);
+void DSM::read_dm(char *buffer, GlobalAddress gaddr, size_t size, bool signal,
+                  CoroContext *ctx) {
+
+  if (ctx == nullptr) {
+    rdmaRead(iCon->data[0][gaddr.nodeID], (uint64_t)buffer,
+             remoteInfo[gaddr.nodeID].lockBase + gaddr.offset, size,
+             iCon->cacheLKey, remoteInfo[gaddr.nodeID].lockRKey[0], signal);
+  } else {
+    rdmaRead(iCon->data[0][gaddr.nodeID], (uint64_t)buffer,
+             remoteInfo[gaddr.nodeID].lockBase + gaddr.offset, size,
+             iCon->cacheLKey, remoteInfo[gaddr.nodeID].lockRKey[0], true);
+    (*ctx->yield)(*ctx->master);
+  }
 }
 
-void DSM::read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size) {
-  read_dm(buffer, gaddr, size);
+void DSM::read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size,
+                       CoroContext *ctx) {
+  read_dm(buffer, gaddr, size, true, ctx);
 
-  ibv_wc wc;
-  pollWithCQ(iCon->cq, 1, &wc);
+  if (ctx == nullptr) {
+    ibv_wc wc;
+    pollWithCQ(iCon->cq, 1, &wc);
+  }
 }
 
 void DSM::write_dm(const char *buffer, GlobalAddress gaddr, size_t size,

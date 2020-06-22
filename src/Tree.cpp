@@ -9,6 +9,8 @@
 #include "SimpleHT.h"
 #include <utility>
 
+#include "Timer.h"
+
 #ifdef TEST_SINGLE_THREAD
 SimpleHT mapping;
 #endif
@@ -27,6 +29,7 @@ thread_local CoroCall Tree::worker[define::kMaxCoro];
 thread_local CoroCall Tree::master;
 thread_local GlobalAddress path_stack[define::kMaxCoro]
                                      [define::kMaxLevelOfTree];
+thread_local Timer timer;
 
 Tree::Tree(DSM *dsm, uint16_t tree_id) : dsm(dsm), tree_id(tree_id) {
 
@@ -210,46 +213,121 @@ next:
   // }
 }
 
+GlobalAddress Tree::query_cache(const Key &k) {
+  return mapping.get(k);
+}
+
 inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
                                 uint64_t *buf, CoroContext *cxt, int coro_id) {
+  auto &pattern_cnt = pattern[dsm->getMyThreadID()][lock_addr.nodeID];
+#ifdef CONFIG_EABLE_BAKERY_LOCK
+  {
+    auto current_addr = GADD(lock_addr, sizeof(uint32_t));
+
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
-  bool res = dsm->cas_dm_sync(lock_addr, 0, tag, buf, cxt);
+    dsm->faa_dm_boundary_sync(lock_addr, 1, buf, 31, cxt);
 #else
-  bool res = dsm->cas_sync(lock_addr, 0, tag, buf, cxt);
+    dsm->faa_boundary_sync(lock_addr, 1, buf, 31, cxt);
+#endif
+    pattern_cnt++;
+    uint32_t ticket = (*buf) << 32 >> 32;
+    uint32_t current = (*buf) >> 32;
+
+  re_read:
+    if (ticket != current) { // fail
+      lock_fail[dsm->getMyThreadID()][0]++;
+      // printf("%d %d\n", ticket, current);
+      // sleep(1);
+      assert(ticket > current);
+      if (ticket != current + 1) {
+        timer.sleep(5000 * (ticket - current - 1));
+      }
+#ifdef CONFIG_ENABLE_ON_CHIP_LOCK
+      dsm->read_dm_sync((char *)buf, current_addr, sizeof(uint32_t), cxt);
+#else
+      dsm->read_sync((char *)buf, current_addr, sizeof(uint32_t), cxt);
+#endif
+      pattern_cnt++;
+      current = (*buf);
+      goto re_read;
+    }
+  }
+
+#else
+  {
+
+    uint64_t retry_cnt = 0;
+    uint64_t pre_tag = 0;
+    uint64_t conflict_tag = 0;
+  retry:
+    retry_cnt++;
+    if (retry_cnt > 10000) {
+      std::cout << "Deadlock " << lock_addr << std::endl;
+
+      std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
+                << " locked by " << (conflict_tag >> 32) << ", "
+                << (conflict_tag << 32 >> 32) << std::endl;
+      assert(false);
+    }
+
+#ifdef CONFIG_ENABLE_ON_CHIP_LOCK
+    bool res = dsm->cas_dm_sync(lock_addr, 0, tag, buf, cxt);
+#else
+    bool res = dsm->cas_sync(lock_addr, 0, tag, buf, cxt);
+#endif
+    pattern_cnt++;
+    if (!res) {
+      conflict_tag = *buf - 1;
+      if (conflict_tag != pre_tag) {
+        retry_cnt = 0;
+        pre_tag = conflict_tag;
+      }
+      lock_fail[dsm->getMyThreadID()][0]++;
+      goto retry;
+    }
+  }
+
 #endif
 
-  return res;
+  return true;
 }
 
 inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
                               uint64_t *buf, CoroContext *cxt, int coro_id,
                               bool async) {
 
-#ifdef CONFIG_ENABLE_CAS_UNLOCK
+  auto cas_buf = dsm->get_rbuf(coro_id).get_cas_buffer();
 
-  auto unlock_buf = dsm->get_rbuf(coro_id).get_unlock_buffer();
+#ifdef CONFIG_EABLE_BAKERY_LOCK
+
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
-  dsm->cas_dm(lock_addr, tag, 0, unlock_buf, false, cxt);
+  if (async) {
+    dsm->faa_dm_boundary(lock_addr, (1ull << 32), cas_buf, 63, false);
+  } else {
+    dsm->faa_dm_boundary_sync(lock_addr, (1ull << 32), cas_buf, 63, cxt);
+  }
 #else
-  dsm->cas(lock_addr, tag, 0, unlock_buf, false, cxt);
+  if (async) {
+    dsm->faa_boundary(lock_addr, (1ull << 32), cas_buf, 63, false);
+  } else {
+    dsm->faa_boundary_sync(lock_addr, (1ull << 32), cas_buf, 63, cxt);
+  }
 #endif
 
 #else
 
-  auto zeros = (char *)dsm->get_rbuf(coro_id).get_zero_64bit();
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
   if (async) {
-    dsm->write_dm(zeros, lock_addr, sizeof(uint64_t), false);
+    dsm->cas_dm(lock_addr, tag, 0, cas_buf, false);
   } else {
-    dsm->write_dm_sync(zeros, lock_addr, sizeof(uint64_t), cxt); // unlock
+    dsm->cas_dm_sync(lock_addr, tag, 0, cas_buf, cxt);
   }
 #else
   if (async) {
-    dsm->write(zeros, lock_addr, sizeof(uint64_t), false);
+    dsm->cas(lock_addr, tag, 0, cas_buf, false);
   } else {
-    dsm->write_sync(zeros, lock_addr, sizeof(uint64_t), cxt); // unlock
+    dsm->cas_sync(lock_addr, tag, 0, cas_buf, cxt);
   }
-
 #endif
 
 #endif
@@ -334,53 +412,22 @@ retry:
   }
 
 #else
-  uint64_t retry_cnt = 0;
-  uint64_t pre_tag = 0;
-  uint64_t conflict_tag = 0;
-retry:
-  retry_cnt++;
-  if (retry_cnt > 100) {
-    // auto start = rdtsc();
-    // while (rdtsc() - start < 1000);
-  }
-  if (retry_cnt > 10000) {
-    std::cout << "Deadlock " << lock_addr << std::endl;
 
-    std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
-              << " locked by " << (conflict_tag >> 32) << ", "
-              << (conflict_tag << 32 >> 32) << std::endl;
-    assert(false);
-  }
-
-  bool res = try_lock_addr(lock_addr, tag, cas_buffer, cxt, coro_id);
-  pattern_cnt++;
-  if (!res) {
-    conflict_tag = *cas_buffer - 1;
-    if (conflict_tag != pre_tag) {
-      retry_cnt = 0;
-      pre_tag = conflict_tag;
-    }
-    lock_fail[dsm->getMyThreadID()][0]++;
-    goto retry;
-  }
-
+  try_lock_addr(lock_addr, tag, cas_buffer, cxt, coro_id);
   dsm->read_sync(page_buffer, page_addr, page_size, cxt);
 
 #endif
 }
 
 void Tree::lock_bench(const Key &k, CoroContext *cxt, int coro_id) {
-  uint64_t lock_index = k % define::kNumOfLock;
+  uint64_t lock_index = CityHash64((char *)&k, sizeof(k)) % define::kNumOfLock;
 
   GlobalAddress lock_addr;
   lock_addr.nodeID = 0;
   lock_addr.offset = lock_index * sizeof(uint64_t);
   auto cas_buffer = dsm->get_rbuf(coro_id).get_cas_buffer();
 
-  while (!try_lock_addr(lock_addr, 1, cas_buffer, cxt, coro_id)) {
-    lock_fail[dsm->getMyThreadID()][0]++;
-  }
-
+  try_lock_addr(lock_addr, 1, cas_buffer, cxt, coro_id);
   unlock_addr(lock_addr, 1, cas_buffer, cxt, coro_id, true);
 }
 
@@ -962,23 +1009,8 @@ void Tree::leaf_page_del(GlobalAddress page_addr, const Key &k, int level,
 
   uint64_t *cas_buffer = dsm->get_rbuf(coro_id).get_cas_buffer();
 
-  uint64_t retry_cnt = 0;
   auto tag = dsm->getThreadTag();
-  assert(tag != 0);
-retry:
-  if (retry_cnt++ > 1000) {
-    std::cout << "Deadlock Internal " << lock_addr.offset << std::endl;
-    uint64_t conflict_tag = *cas_buffer - 1;
-    std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
-              << " locked by " << (conflict_tag >> 32) << ", "
-              << (conflict_tag << 32 >> 32) << std::endl;
-    assert(false);
-  }
-  bool res = try_lock_addr(lock_addr, tag, cas_buffer, cxt, coro_id);
-  if (!res) {
-    // wait
-    goto retry;
-  }
+  try_lock_addr(lock_addr, tag, cas_buffer, cxt, coro_id);
 
   auto page_buffer = dsm->get_rbuf(coro_id).get_page_buffer();
   dsm->read_sync(page_buffer, page_addr, kLeafPageSize, cxt);

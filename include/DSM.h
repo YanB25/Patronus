@@ -59,16 +59,16 @@ public:
                      uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
 
   void faa_boundary(GlobalAddress gaddr, uint64_t add_val,
-                    uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
+                    uint64_t *rdma_buffer, uint64_t mask = 63,
                     bool signal = true, CoroContext *ctx = nullptr);
   void faa_boundary_sync(GlobalAddress gaddr, uint64_t add_val,
-                         uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
+                         uint64_t *rdma_buffer, uint64_t mask = 63,
                          CoroContext *ctx = nullptr);
 
   // for on-chip device memory
   void read_dm(char *buffer, GlobalAddress gaddr, size_t size,
-               bool signal = true);
-  void read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size);
+               bool signal = true, CoroContext *ctx = nullptr);
+  void read_dm_sync(char *buffer, GlobalAddress gaddr, size_t size, CoroContext *ctx = nullptr);
 
   void write_dm(const char *buffer, GlobalAddress gaddr, size_t size,
                 bool signal = true, CoroContext *ctx = nullptr);
@@ -88,10 +88,10 @@ public:
                         uint64_t *rdma_buffer, uint64_t mask = ~(0ull));
 
   void faa_dm_boundary(GlobalAddress gaddr, uint64_t add_val,
-                       uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
+                       uint64_t *rdma_buffer, uint64_t mask = 63,
                        bool signal = true, CoroContext *ctx = nullptr);
   void faa_dm_boundary_sync(GlobalAddress gaddr, uint64_t add_val,
-                            uint64_t *rdma_buffer, uint64_t mask = ~(0ull),
+                            uint64_t *rdma_buffer, uint64_t mask = 63,
                             CoroContext *ctx = nullptr);
 
   uint64_t poll_rdma_cq(int count = 1);

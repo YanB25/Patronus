@@ -9,6 +9,7 @@ class RdmaBuffer {
 private:
   static const int kPageBufferCnt = 8;    // async, buffer safty
   static const int kSiblingBufferCnt = 8; // async, buffer safty
+  static const int kCasBufferCnt = 8;     // async, buffer safty
 
   char *buffer;
 
@@ -21,6 +22,7 @@ private:
 
   int page_buffer_cur;
   int sibling_buffer_cur;
+  int cas_buffer_cur;
 
   int kPageSize;
 
@@ -30,6 +32,7 @@ public:
 
     page_buffer_cur = 0;
     sibling_buffer_cur = 0;
+    cas_buffer_cur = 0;
   }
 
   RdmaBuffer() = default;
@@ -41,7 +44,8 @@ public:
     kPageSize = std::max(kLeafPageSize, kInternalPageSize);
     this->buffer = buffer;
     cas_buffer = (uint64_t *)buffer;
-    unlock_buffer = (uint64_t *)((char *)cas_buffer + sizeof(uint64_t));
+    unlock_buffer =
+        (uint64_t *)((char *)cas_buffer + sizeof(uint64_t) * kCasBufferCnt);
     zero_64bit = (uint64_t *)((char *)unlock_buffer + sizeof(uint64_t));
     page_buffer = (char *)zero_64bit + sizeof(uint64_t);
     sibling_buffer = (char *)page_buffer + kPageSize * kPageBufferCnt;
@@ -51,7 +55,10 @@ public:
     assert((char *)zero_64bit + 8 - buffer < define::kPerCoroRdmaBuf);
   }
 
-  uint64_t *get_cas_buffer() const { return cas_buffer; }
+  uint64_t *get_cas_buffer() {
+    cas_buffer_cur = (cas_buffer_cur + 1) % kCasBufferCnt;
+    return cas_buffer + cas_buffer_cur;
+  }
 
   uint64_t *get_unlock_buffer() const { return unlock_buffer; }
 

@@ -70,9 +70,9 @@ public:
     Request r;
     uint64_t dis = mehcached_zipf_next(&state);
 
-    if (rand_r(&seed) % 100 < 80) {
-      dis = dis % uint64_t(kKeySpace / hottest);
-    }
+    // if (rand_r(&seed) % 100 < 80) {
+    //   dis = dis % uint64_t(kKeySpace / hottest);
+    // }
 
     r.k = CityHash64((char *)&dis, sizeof(dis)) + 1;
     r.v = 23;
@@ -127,27 +127,38 @@ void thread_run(int id) {
 
     uint64_t dis = mehcached_zipf_next(&state);
 
-    if (rand_r(&seed) % 100 < 80) {
-      dis = dis % uint64_t(kKeySpace / hottest);
-    }
+    // if (rand_r(&seed) % 100 < 80) {
+    //   dis = dis % uint64_t(kKeySpace / hottest);
+    // }
+
+    // if (dis < 1) {
+    //   continue;
+    // }
 
     uint64_t key = CityHash64((char *)&dis, sizeof(dis)) + 1;
 
+    // timer.begin();
+    // tree->lock_bench(key);
+    // auto us_10 = timer.end() / 100;
+    // if (us_10 >= 10000) {
+    //   us_10 = 9999;
+    // }
+    // latency[id][us_10]++;
+
+    Value v;
+
     timer.begin();
-    tree->lock_bench(key);
+    if (rand_r(&seed) % 100 < kReadRatio) { // GET
+      tree->search(key, v);
+    } else {
+      v = 12;
+      tree->insert(key, v);
+    }
     auto us_10 = timer.end() / 100;
     if (us_10 >= 10000) {
       us_10 = 9999;
     }
     latency[id][us_10]++;
-
-    // Value v;
-    // if (rand_r(&seed) % 100 < kReadRatio) { // GET
-    //   tree->search(key, v);
-    // } else {
-    //   v = 12;
-    //   tree->insert(key, v);
-    // }
 
     tp[id][0]++;
   }
@@ -157,7 +168,7 @@ void thread_run(int id) {
 
 void warm_up() {
 
-  return;
+  // return;
   // if (dsm->getMyNodeID() == 0) {
   for (uint64_t i = 0; i < kKeySpace; ++i) {
     auto k = CityHash64((char *)&i, sizeof(i)) + 1;
@@ -170,7 +181,18 @@ void warm_up() {
 
   dsm->barrier("start-cache");
   tree->print_and_check_tree();
+
   dsm->barrier("end-cache");
+
+  if (dsm->getMyNodeID() == 0) {
+    for (uint64_t i = 0; i < 25; ++i) {
+      auto k = CityHash64((char *)&i, sizeof(i)) + 1;
+      std::cout << tree->query_cache(k) << "\t";
+    }
+    printf("\n");
+  }
+
+  dsm->barrier("end-print");
   // printf("End warmup\n");
 }
 
