@@ -123,6 +123,10 @@ bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
 bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
                      uint32_t lkey, uint32_t remoteRKey, ibv_ah *ah,
                      uint32_t remoteDctNumber);
+bool rdmaFetchAndAddBoundary(ibv_qp *qp, uint64_t source, uint64_t dest,
+                         uint64_t add, uint32_t lkey, uint32_t remoteRKey,
+                         uint64_t boundary = 63, bool singal = true,
+                         uint64_t wr_id = 0);
 
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,

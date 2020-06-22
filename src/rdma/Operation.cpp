@@ -313,6 +313,38 @@ bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
   return true;
 }
 
+bool rdmaFetchAndAddBoundary(ibv_qp *qp, uint64_t source, uint64_t dest,
+                             uint64_t add, uint32_t lkey, uint32_t remoteRKey,
+                             uint64_t boundary, bool singal, uint64_t wr_id) {
+  struct ibv_sge sg;
+  struct ibv_exp_send_wr wr;
+  struct ibv_exp_send_wr *wrBad;
+
+  fillSgeWr(sg, wr, source, 8, lkey);
+
+  wr.exp_opcode = IBV_EXP_WR_EXT_MASKED_ATOMIC_FETCH_AND_ADD;
+  wr.exp_send_flags = IBV_EXP_SEND_EXT_ATOMIC_INLINE;
+  wr.wr_id = wr_id;
+
+  if (singal) {
+    wr.exp_send_flags |= IBV_EXP_SEND_SIGNALED;
+  }
+
+  wr.ext_op.masked_atomics.log_arg_sz = 3;
+  wr.ext_op.masked_atomics.remote_addr = dest;
+  wr.ext_op.masked_atomics.rkey = remoteRKey;
+
+  auto &op = wr.ext_op.masked_atomics.wr_data.inline_data.op.fetch_add;
+  op.add_val = add;
+  op.field_boundary = 1ull << boundary;
+
+  if (ibv_exp_post_send(qp, &wr, &wrBad)) {
+    Debug::notifyError("Send with MASK FETCH_AND_ADD failed.");
+    return false;
+  }
+  return true;
+}
+
 // DC
 bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
                      uint32_t lkey, uint32_t remoteRKey, ibv_ah *ah,
@@ -344,8 +376,7 @@ bool rdmaFetchAndAdd(ibv_qp *qp, uint64_t source, uint64_t dest, uint64_t add,
 // for RC & UC
 bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
                         uint64_t compare, uint64_t swap, uint32_t lkey,
-                        uint32_t remoteRKey, bool signal,
-                        uint64_t wrID) {
+                        uint32_t remoteRKey, bool signal, uint64_t wrID) {
   struct ibv_sge sg;
   struct ibv_send_wr wr;
   struct ibv_send_wr *wrBad;
@@ -400,7 +431,7 @@ bool rdmaCompareAndSwapMask(ibv_qp *qp, uint64_t source, uint64_t dest,
   op.swap_mask = mask;
 
   if (ibv_exp_post_send(qp, &wr, &wrBad)) {
-    Debug::notifyError("Send with ATOMIC_CMP_AND_SWP failed.");
+    Debug::notifyError("Send with MASK ATOMIC_CMP_AND_SWP failed.");
     return false;
   }
   return true;
@@ -436,13 +467,12 @@ bool rdmaCompareAndSwap(ibv_qp *qp, uint64_t source, uint64_t dest,
   return true;
 }
 
-bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k,
-                    bool isSignaled, uint64_t wrID) {
+bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled,
+                    uint64_t wrID) {
 
   struct ibv_sge sg[kOroMax];
   struct ibv_send_wr wr[kOroMax];
   struct ibv_send_wr *wrBad;
-  
 
   for (int i = 0; i < k; ++i) {
     fillSgeWr(sg[i], wr[i], ror[i].source, ror[i].size, ror[i].lkey);
@@ -459,7 +489,6 @@ bool rdmaWriteBatch(ibv_qp *qp, RdmaOpRegion *ror, int k,
     wr[i].wr.rdma.rkey = ror[i].remoteRKey;
     wr[i].wr_id = wrID;
   }
-
 
   if (ibv_post_send(qp, &wr[0], &wrBad) != 0) {
     Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");

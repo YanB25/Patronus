@@ -14,7 +14,7 @@ int main() {
     RawMessage m;
     // m.num = 111;
 
-    dsm->rpc_call_dir(m, 1);
+    // dsm->rpc_call_dir(m, 1);
 
     GlobalAddress gaddr;
     gaddr.nodeID = 1;
@@ -49,7 +49,14 @@ int main() {
 
     buffer += 12;
     dsm->read_sync(buffer, gaddr, sizeof(uint64_t));
-    printf("%ld\n", *(uint64_t *)buffer);
+    printf("read %ld\n", *(uint64_t *)buffer);
+
+    for (int i = 0; i < 16; ++i) {
+
+      *(uint64_t *)buffer = 0;
+      dsm->faa_boundary_sync(gaddr, 1, (uint64_t *)buffer, 2);
+      printf("faa %ld\n", *(uint64_t *)buffer);
+    }
   }
 
   printf("OK\n");

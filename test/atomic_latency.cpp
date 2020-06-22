@@ -49,6 +49,14 @@ int main() {
     }
     timer.end_print(loop);
 
+    printf("\n-------- fetch_and_add mask ----------\n");
+    timer.begin();
+    for (size_t i = 0; i < loop; ++i) {
+      dsm->faa_boundary_sync(gaddr, 1, (uint64_t *)buffer);
+      cur_val++;
+    }
+    timer.end_print(loop);
+
     printf("\n-------- cas succ ----------\n");
     timer.begin();
     for (size_t i = 0; i < loop; ++i) {
@@ -88,7 +96,6 @@ int main() {
     }
     timer.end_print(loop);
 
-
     printf("\n-------- cas and read succ ----------\n");
 
     RdmaOpRegion cas_ror;
@@ -107,13 +114,14 @@ int main() {
     for (size_t i = 0; i < loop; ++i) {
       auto cas_ror_input = cas_ror;
       auto read_ror_input = read_ror;
-      bool res = dsm->cas_read_sync(cas_ror_input, read_ror_input, cur_val, cur_val + 1);
+      bool res = dsm->cas_read_sync(cas_ror_input, read_ror_input, cur_val,
+                                    cur_val + 1);
       // assert(res);
       cur_val++;
     }
     timer.end_print(loop);
 
-printf("\n-------- write 2 succ ----------\n");
+    printf("\n-------- write 2 succ ----------\n");
     timer.begin();
     for (size_t i = 0; i < loop; ++i) {
 
@@ -166,6 +174,14 @@ printf("\n-------- write 2 succ ----------\n");
     timer.begin();
     for (size_t i = 0; i < loop; ++i) {
       dsm->read_dm_sync(buffer, gaddr, sizeof(uint64_t));
+    }
+    timer.end_print(loop);
+
+    printf("\n-------- fetch_and_add dm mask ----------\n");
+    timer.begin();
+    for (size_t i = 0; i < loop; ++i) {
+      dsm->faa_dm_boundary_sync(gaddr, 1, (uint64_t *)buffer);
+      cur_val++;
     }
     timer.end_print(loop);
 
@@ -230,8 +246,6 @@ printf("\n-------- write 2 succ ----------\n");
 
     dsm->poll_rdma_cq(call_loop);
   }
-
-  
 
   printf("OK\n");
 
