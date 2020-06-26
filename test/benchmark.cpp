@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <vector>
 
-#define USE_CORO
+// #define USE_CORO
 const int kCoroCnt = 2;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
@@ -26,7 +26,7 @@ int kNodeCount;
 uint64_t kKeySpace = 20096000;
 // 100 * define::MB;
 
-double zipfan = 0;
+double zipfan = 0.99;
 
 std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
@@ -93,7 +93,7 @@ void thread_run(int id) {
   unsigned int seed = rdtsc();
   struct zipf_gen_state state;
   mehcached_zipf_init(&state, kKeySpace, zipfan,
-                      rdtsc() & (0x0000ffffffffffffull) ^ id);
+                      (rdtsc() & (0x0000ffffffffffffull)) ^ id);
 
   Timer timer;
   while (true) {

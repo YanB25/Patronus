@@ -164,7 +164,7 @@ void DSM::fill_keys_dest(RdmaOpRegion &ror, GlobalAddress gaddr, bool is_chip) {
 
 void DSM::write_batch(RdmaOpRegion *rs, int k, bool signal, CoroContext *ctx) {
 
-  int node_id;
+  int node_id = -1;
   for (int i = 0; i < k; ++i) {
 
     GlobalAddress gaddr;
@@ -203,7 +203,6 @@ void DSM::write_faa(RdmaOpRegion &write_ror, RdmaOpRegion &faa_ror,
   {
     GlobalAddress gaddr;
     gaddr.val = faa_ror.dest;
-    bool is_on_chip = faa_ror.is_on_chip;
 
     fill_keys_dest(faa_ror, gaddr, faa_ror.is_on_chip);
   }
@@ -238,7 +237,6 @@ void DSM::write_cas(RdmaOpRegion &write_ror, RdmaOpRegion &cas_ror,
   {
     GlobalAddress gaddr;
     gaddr.val = cas_ror.dest;
-    bool is_on_chip = cas_ror.is_on_chip;
 
     fill_keys_dest(cas_ror, gaddr, cas_ror.is_on_chip);
   }
