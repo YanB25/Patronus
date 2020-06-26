@@ -108,6 +108,7 @@ public:
                             CoroContext *ctx = nullptr);
 
   uint64_t poll_rdma_cq(int count = 1);
+  bool poll_rdma_cq_once(uint64_t &wr_id);
 
   uint64_t sum(uint64_t value) {
     static uint64_t count = 0;

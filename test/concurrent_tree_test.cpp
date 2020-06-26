@@ -22,12 +22,12 @@ void test(int id) {
 
   Value v;
   for (uint64_t i = 1; i < kTestKeySpace; ++i) {
-    if (i % all_thread == mod) {
+    if (i % all_thread == (uint64_t)mod) {
       tree->insert(i, i * 2);
       auto res = tree->search(i, v);
       
       if (!res || v != i * 2) {
-        printf("Error %d\n", i);
+        printf("Error %ld\n", i);
       }
       assert(res && v == i * 2);
     }
@@ -46,7 +46,7 @@ int main() {
   dsm->registerThread();
   tree = new Tree(dsm);
 
-  Value v;
+  // Value v;
 
   // test(0);
 

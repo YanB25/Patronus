@@ -86,7 +86,7 @@ constexpr uint64_t GB = 1024ull * MB;
 constexpr uint16_t kCacheLineSize = 64;
 
 // for remote allocate
-constexpr uint64_t kChunkSize = 1 * MB;
+constexpr uint64_t kChunkSize = 32 * MB;
 
 // for store root pointer
 constexpr uint64_t kRootPointerStoreOffest = kChunkSize / 2;
@@ -119,8 +119,8 @@ using Value = uint64_t;
 constexpr Key kKeyMin = std::numeric_limits<Key>::min();
 constexpr Key kKeyMax = std::numeric_limits<Key>::max();
 constexpr Value kValueNull = 0;
-constexpr uint32_t kInternalPageSize = 512;
-constexpr uint32_t kLeafPageSize = 512;
+constexpr uint32_t kInternalPageSize = 1024;
+constexpr uint32_t kLeafPageSize = 1024;
 
 __inline__ unsigned long long rdtsc(void) {
   unsigned hi, lo;

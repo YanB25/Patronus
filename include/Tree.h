@@ -250,7 +250,7 @@ private:
   Header hdr;
   LeafEntry records[kLeafCardinality];
 
-  // uint8_t padding[4];
+  uint8_t padding[8];
   uint8_t rear_version;
 
   friend class Tree;

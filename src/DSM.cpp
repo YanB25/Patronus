@@ -506,3 +506,12 @@ uint64_t DSM::poll_rdma_cq(int count) {
 
   return wc.wr_id;
 }
+
+bool DSM::poll_rdma_cq_once(uint64_t &wr_id) {
+  ibv_wc wc;
+  int res = pollOnce(iCon->cq, 1, &wc);
+
+  wr_id = wc.wr_id;
+
+  return res == 1;
+}

@@ -11,7 +11,7 @@ int main() {
   dsm->registerThread();
 
   if (dsm->getMyNodeID() == 0) {
-    RawMessage m;
+    // RawMessage m;
     // m.num = 111;
 
     // dsm->rpc_call_dir(m, 1);

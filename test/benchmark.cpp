@@ -9,26 +9,8 @@
 #include <unistd.h>
 #include <vector>
 
-inline size_t jenkins(const void *_ptr, size_t _len,
-                      size_t _seed = 0xc70f6907UL) {
-  // assert(_len < 100);
-  size_t i = 0;
-  size_t hash = 0;
-  const char *key = static_cast<const char *>(_ptr);
-  while (i != _len) {
-    hash += key[i++];
-    hash += hash << (10);
-    hash ^= hash >> (6);
-  }
-  hash += hash << (3);
-  hash ^= hash >> (11);
-  hash += hash << (15);
-  return hash;
-}
-
-extern volatile bool need_stop;
-
-// #define USE_CORO
+#define USE_CORO
+const int kCoroCnt = 2;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 extern uint64_t cache_hit[MAX_APP_THREAD][8];
@@ -44,13 +26,13 @@ int kNodeCount;
 uint64_t kKeySpace = 20096000;
 // 100 * define::MB;
 
-double zipfan = 0.99;
-int hottest = 1;
+double zipfan = 0;
 
 std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
 
-uint64_t latency[kMaxThread][10000];
+extern volatile bool need_stop;
+extern uint64_t latency[MAX_APP_THREAD][10000];
 uint64_t latency_th_all[10000];
 
 Tree *tree;
@@ -63,16 +45,12 @@ public:
       : coro_id(coro_id), dsm(dsm), id(id) {
     seed = rdtsc();
     mehcached_zipf_init(&state, kKeySpace, zipfan,
-                        rdtsc() & (0x0000ffffffffffffull) ^ id);
+                        (rdtsc() & (0x0000ffffffffffffull)) ^ id);
   }
 
   Request next() override {
     Request r;
     uint64_t dis = mehcached_zipf_next(&state);
-
-    // if (rand_r(&seed) % 100 < 80) {
-    //   dis = dis % uint64_t(kKeySpace / hottest);
-    // }
 
     r.k = CityHash64((char *)&dis, sizeof(dis)) + 1;
     r.v = 23;
@@ -107,7 +85,7 @@ void thread_run(int id) {
   dsm->registerThread();
 
 #ifdef USE_CORO
-  tree->run_coroutine(coro_func, id, 6);
+  tree->run_coroutine(coro_func, id, kCoroCnt);
 
 #else
 
@@ -126,14 +104,6 @@ void thread_run(int id) {
     }
 
     uint64_t dis = mehcached_zipf_next(&state);
-
-    // if (rand_r(&seed) % 100 < 80) {
-    //   dis = dis % uint64_t(kKeySpace / hottest);
-    // }
-
-    // if (dis < 1) {
-    //   continue;
-    // }
 
     uint64_t key = CityHash64((char *)&dis, sizeof(dis)) + 1;
 
@@ -344,7 +314,7 @@ int main(int argc, char *argv[]) {
     double per_node_tp = cap * 1.0 / microseconds;
     uint64_t cluster_tp = dsm->sum((uint64_t)(per_node_tp * 1000));
 
-    printf("%d, throughput %.4f\n", per_node_tp, dsm->getMyNodeID());
+    printf("%d, throughput %.4f\n", dsm->getMyNodeID(), per_node_tp);
 
     if (dsm->getMyNodeID() == 0) {
       printf("cluster throughput %.3f\n", cluster_tp / 1000.0);

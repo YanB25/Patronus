@@ -24,6 +24,7 @@ uint64_t cache_hit[MAX_APP_THREAD][8];
 uint64_t lock_fail[MAX_APP_THREAD][8];
 uint64_t pattern[MAX_APP_THREAD][8];
 uint64_t hot_filter_count[MAX_APP_THREAD][8];
+uint64_t latency[MAX_APP_THREAD][10000];
 volatile bool need_stop = false;
 
 thread_local CoroCall Tree::worker[define::kMaxCoro];
@@ -36,12 +37,14 @@ struct CoroDeadline {
   uint64_t deadline;
   uint16_t coro_id;
 
-  bool operator<(const CoroDeadline &o) const { return this->deadline < o.deadline; }
+  bool operator<(const CoroDeadline &o) const {
+    return this->deadline < o.deadline;
+  }
 };
 
 thread_local Timer timer;
-std::queue<uint16_t> hot_wait_queue;
-std::priority_queue<CoroDeadline> deadline_queue;
+thread_local std::queue<uint16_t> hot_wait_queue;
+thread_local std::priority_queue<CoroDeadline> deadline_queue;
 
 Tree::Tree(DSM *dsm, uint16_t tree_id) : dsm(dsm), tree_id(tree_id) {
 
@@ -246,11 +249,22 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
   re_read:
     if (ticket != current) { // fail
       lock_fail[dsm->getMyThreadID()][0]++;
-      // printf("%d %d\n", ticket, current);
-      // sleep(1);
+
       assert(ticket > current);
+
       if (ticket != current + 1) {
-        timer.sleep(5000 * (ticket - current - 1));
+        static const uint64_t wait_unit = 5000;
+        uint64_t wait_time = wait_unit * (ticket - current - 1);
+
+        if (cxt == nullptr) {
+          timer.sleep(wait_time);
+        } else {
+          CoroDeadline task;
+          task.coro_id = coro_id;
+          task.deadline = timer.get_time_ns() + wait_time;
+          deadline_queue.push(task);
+          (*cxt->yield)(*cxt->master);
+        }
       }
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
       dsm->read_dm_sync((char *)buf, current_addr, sizeof(uint32_t), cxt);
@@ -271,7 +285,7 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
     uint64_t conflict_tag = 0;
   retry:
     retry_cnt++;
-    if (retry_cnt > 10000) {
+    if (retry_cnt > 100000) {
       std::cout << "Deadlock " << lock_addr << std::endl;
 
       std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
@@ -388,7 +402,7 @@ void Tree::lock_and_read_page(char *page_buffer, GlobalAddress page_addr,
                               int page_size, uint64_t *cas_buffer,
                               GlobalAddress lock_addr, uint64_t tag,
                               CoroContext *cxt, int coro_id) {
-  auto &pattern_cnt = pattern[dsm->getMyThreadID()][page_addr.nodeID];
+  // auto &pattern_cnt = pattern[dsm->getMyThreadID()][page_addr.nodeID];
 #ifdef CONFIG_ENABLE_OP_COUPLE_D
   uint64_t retry_cnt = 0;
 retry:
@@ -457,8 +471,13 @@ void Tree::insert(const Key &k, const Value &v, CoroContext *cxt, int coro_id) {
 
   if (res == HotResult::OCCUPIED) {
     hot_filter_count[dsm->getMyThreadID()][0]++;
-    while (!hot_buf.wait(k))
-      ;
+    if (cxt == nullptr) {
+      while (!hot_buf.wait(k))
+        ;
+    } else {
+      hot_wait_queue.push(coro_id);
+      (*cxt->yield)(*cxt->master);
+    }
   }
 #endif
 
@@ -912,10 +931,6 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
     write_page_and_unlock(
         update_addr, GADD(page_addr, (update_addr - (char *)page)),
         sizeof(LeafEntry), cas_buffer, lock_addr, tag, cxt, coro_id, false);
-    // dsm->write_sync(update_addr, GADD(page_addr, (update_addr - (char
-    // *)page)),
-    //                 sizeof(LeafEntry));
-    // this->unlock_addr(lock_addr, tag, cas_buffer);
 
     return;
   } else {
@@ -1089,23 +1104,25 @@ void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id) {
   ctx.master = &master;
   ctx.yield = &yield;
 
-  // printf("I am %d %p\n", coro_id, gen);
+  Timer coro_timer;
+  auto thread_id = dsm->getMyThreadID();
 
   while (true) {
 
-    // if (coro_id == 0) {
-    //   yield(master);
-    //   continue;
-    // }
-
     auto r = gen->next();
-    // a
+
+    coro_timer.begin();
     if (r.is_search) {
       Value v;
       this->search(r.k, v, &ctx, coro_id);
     } else {
       this->insert(r.k, r.v, &ctx, coro_id);
     }
+    auto us_10 = coro_timer.end() / 100;
+    if (us_10 >= 10000) {
+      us_10 = 9999;
+    }
+    latency[thread_id][us_10]++;
   }
 }
 
@@ -1116,13 +1133,26 @@ void Tree::coro_master(CoroYield &yield, int coro_cnt) {
   }
 
   while (true) {
-    auto wr_id = dsm->poll_rdma_cq(1);
-    assert(wr_id >= 0 && wr_id < (uint64_t)coro_cnt);
 
-    // assert(wr_id != 0);
+    uint64_t next_coro_id;
 
-    // printf("yield to worker %d\n", wr_id);
-    // sleep(1);
-    yield(worker[wr_id]);
+    if (dsm->poll_rdma_cq_once(next_coro_id)) {
+      yield(worker[next_coro_id]);
+    }
+
+    if (!hot_wait_queue.empty()) {
+      next_coro_id = hot_wait_queue.front();
+      hot_wait_queue.pop();
+      yield(worker[next_coro_id]);
+    }
+
+    if (!deadline_queue.empty()) {
+      auto now = timer.get_time_ns();
+      auto task = deadline_queue.top();
+      if (now > task.deadline) {
+        deadline_queue.pop();
+        yield(worker[task.coro_id]);
+      }
+    }
   }
 }
