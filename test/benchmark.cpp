@@ -10,13 +10,14 @@
 #include <vector>
 
 // #define USE_CORO
-const int kCoroCnt = 2;
+const int kCoroCnt = 4;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 extern uint64_t cache_hit[MAX_APP_THREAD][8];
 extern uint64_t lock_fail[MAX_APP_THREAD][8];
 extern uint64_t pattern[MAX_APP_THREAD][8];
 extern uint64_t hot_filter_count[MAX_APP_THREAD][8];
+extern uint64_t hierarchy_lock[MAX_APP_THREAD][8];
 
 const int kMaxThread = 32;
 
@@ -32,8 +33,8 @@ std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
 
 extern volatile bool need_stop;
-extern uint64_t latency[MAX_APP_THREAD][10000];
-uint64_t latency_th_all[10000];
+extern uint64_t latency[MAX_APP_THREAD][50000];
+uint64_t latency_th_all[50000];
 
 Tree *tree;
 DSM *dsm;
@@ -125,8 +126,8 @@ void thread_run(int id) {
       tree->insert(key, v);
     }
     auto us_10 = timer.end() / 100;
-    if (us_10 >= 10000) {
-      us_10 = 9999;
+    if (us_10 >= 50000) {
+      us_10 = 49999;
     }
     latency[id][us_10]++;
 
@@ -182,7 +183,7 @@ void parse_args(int argc, char *argv[]) {
 
 void cal_latency() {
   uint64_t all_lat = 0;
-  for (int i = 0; i < 10000; ++i) {
+  for (int i = 0; i < 50000; ++i) {
     latency_th_all[i] = 0;
     for (int k = 0; k < MAX_APP_THREAD; ++k) {
       latency_th_all[i] += latency[k][i];
@@ -197,7 +198,7 @@ void cal_latency() {
   uint64_t th999 = all_lat * 999 / 1000;
 
   uint64_t cum = 0;
-  for (int i = 0; i < 10000; ++i) {
+  for (int i = 0; i < 50000; ++i) {
     cum += latency_th_all[i];
 
     if (cum >= th50) {
@@ -217,11 +218,11 @@ void cal_latency() {
       th99 = -1;
     }
     if (cum >= th999) {
-      printf("p999 %f\t", i / 10.0);
+      printf("p999 %f\n", i / 10.0);
       th999 = -1;
+      return;
     }
   }
-  printf("\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -305,6 +306,12 @@ int main(int argc, char *argv[]) {
       hot_filter_count[i][0] = 0;
     }
 
+    uint64_t hier_count = 0;
+    for (int i = 0; i < MAX_APP_THREAD; ++i) {
+      hier_count += hierarchy_lock[i][0];
+      hierarchy_lock[i][0] = 0;
+    }
+
     clock_gettime(CLOCK_REALTIME, &s);
 
     if (++count % 3 == 0 && dsm->getMyNodeID() == 0) {
@@ -327,7 +334,8 @@ int main(int argc, char *argv[]) {
       printf("\n");
       printf("%d fail locks: %ld %s\n", dsm->getMyNodeID(), fail_locks_cnt,
              getIP());
-      printf("hot count %ld\n", hot_count);
+
+      printf("hot count %ld\t hierarchy count %d\n", hot_count, hier_count);
     }
   }
 

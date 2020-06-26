@@ -23,8 +23,9 @@ uint64_t cache_miss[MAX_APP_THREAD][8];
 uint64_t cache_hit[MAX_APP_THREAD][8];
 uint64_t lock_fail[MAX_APP_THREAD][8];
 uint64_t pattern[MAX_APP_THREAD][8];
+uint64_t hierarchy_lock[MAX_APP_THREAD][8];
 uint64_t hot_filter_count[MAX_APP_THREAD][8];
-uint64_t latency[MAX_APP_THREAD][10000];
+uint64_t latency[MAX_APP_THREAD][50000];
 volatile bool need_stop = false;
 
 thread_local CoroCall Tree::worker[define::kMaxCoro];
@@ -47,6 +48,12 @@ thread_local std::queue<uint16_t> hot_wait_queue;
 thread_local std::priority_queue<CoroDeadline> deadline_queue;
 
 Tree::Tree(DSM *dsm, uint16_t tree_id) : dsm(dsm), tree_id(tree_id) {
+
+#ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
+  for (int i = 0; i < dsm->getClusterSize(); ++i) {
+    local_locks[i] = new std::atomic<uint64_t>[define::kNumOfLock];
+  }
+#endif
 
   assert(dsm->is_register());
   print_verbose();
@@ -96,12 +103,18 @@ void Tree::print_verbose() {
 #endif
 
 #ifdef CONFIG_ENABLE_FINER_VERSION
-    std::cout << "Finer Verision lock: On" << std::endl;
+    std::cout << "Finer Verision: On" << std::endl;
 #endif
 
 #ifdef CONFIG_ENABLE_HOT_FILTER
 
-    std::cout << "Hot filter: On" << std::endl;
+    std::cout << "Hot Filter: On" << std::endl;
+
+#endif
+
+#ifdef CONFIG_EABLE_BAKERY_LOCK
+
+    std::cout << "Bakery Lock: On" << std::endl;
 
 #endif
   }
@@ -233,6 +246,26 @@ GlobalAddress Tree::query_cache(const Key &k) { return mapping.get(k); }
 inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
                                 uint64_t *buf, CoroContext *cxt, int coro_id) {
   auto &pattern_cnt = pattern[dsm->getMyThreadID()][lock_addr.nodeID];
+
+#ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
+  auto &llock = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
+  uint64_t unlock_value = 0;
+  bool is_local_locked = false;
+  while (!llock.compare_exchange_strong(unlock_value, 1)) {
+    is_local_locked = true;
+    unlock_value = 0;
+    while (llock.load(std::memory_order_relaxed) != unlock_value) {
+      if (cxt != nullptr) {
+        hot_wait_queue.push(coro_id);
+        (*cxt->yield)(*cxt->master);
+      }
+    }
+  }
+  if (is_local_locked) {
+    hierarchy_lock[dsm->getMyThreadID()][0]++;
+  }
+#endif
+
 #ifdef CONFIG_EABLE_BAKERY_LOCK
   {
     auto current_addr = GADD(lock_addr, sizeof(uint32_t));
@@ -355,6 +388,11 @@ inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
 #endif
 
 #endif
+
+#ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
+  auto &llock = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
+  llock.store(0);
+#endif
 }
 
 void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
@@ -385,11 +423,22 @@ void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
     dsm->write_faa_sync(rs[0], rs[1], (1ull << 32), cxt);
   }
 #else
+  *(uint64_t *)rs[1].source = 0;
   if (async) {
-    dsm->write_cas(rs[0], rs[1], tag, 0, false);
+    dsm->write_batch(rs, 2, false);
   } else {
-    dsm->write_cas_sync(rs[0], rs[1], tag, 0, cxt);
+    dsm->write_batch_sync(rs, 2, cxt);
   }
+  // if (async) {
+  //   dsm->write_cas(rs[0], rs[1], tag, 0, false);
+  // } else {
+  //   dsm->write_cas_sync(rs[0], rs[1], tag, 0, cxt);
+  // }
+#endif
+
+#ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
+  auto &llock = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
+  llock.store(0);
 #endif
 
 #else
@@ -1119,8 +1168,8 @@ void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id) {
       this->insert(r.k, r.v, &ctx, coro_id);
     }
     auto us_10 = coro_timer.end() / 100;
-    if (us_10 >= 10000) {
-      us_10 = 9999;
+    if (us_10 >= 50000) {
+      us_10 = 49999;
     }
     latency[thread_id][us_10]++;
   }

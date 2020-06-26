@@ -5,6 +5,7 @@
 #include <city.h>
 #include <functional>
 #include <iostream>
+#include  <atomic>
 
 struct Request {
   bool is_search;
@@ -57,6 +58,8 @@ private:
   // static thread_local int coro_id;
   static thread_local CoroCall worker[define::kMaxCoro];
   static thread_local CoroCall master;
+
+  std::atomic<uint64_t> *local_locks[MAX_MACHINE];
 
   void print_verbose();
 
