@@ -103,8 +103,10 @@ constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
 // level of tree
 constexpr uint64_t kMaxLevelOfTree = 12;
 
-constexpr uint16_t kMaxCoro = 16;
+constexpr uint16_t kMaxCoro = 8;
 constexpr int64_t kPerCoroRdmaBuf = 32 * 1024;
+
+constexpr uint8_t kMaxHandOverTime = 8;
 
 } // namespace define
 

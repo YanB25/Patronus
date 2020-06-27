@@ -10,7 +10,7 @@
 #include <vector>
 
 // #define USE_CORO
-const int kCoroCnt = 4;
+const int kCoroCnt = 2;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 extern uint64_t cache_hit[MAX_APP_THREAD][8];
@@ -18,6 +18,7 @@ extern uint64_t lock_fail[MAX_APP_THREAD][8];
 extern uint64_t pattern[MAX_APP_THREAD][8];
 extern uint64_t hot_filter_count[MAX_APP_THREAD][8];
 extern uint64_t hierarchy_lock[MAX_APP_THREAD][8];
+extern uint64_t handover_count[MAX_APP_THREAD][8];
 
 const int kMaxThread = 32;
 
@@ -312,6 +313,12 @@ int main(int argc, char *argv[]) {
       hierarchy_lock[i][0] = 0;
     }
 
+    uint64_t ho_count = 0;
+    for (int i = 0; i < MAX_APP_THREAD; ++i) {
+      ho_count += handover_count[i][0];
+      handover_count[i][0] = 0;
+    }
+
     clock_gettime(CLOCK_REALTIME, &s);
 
     if (++count % 3 == 0 && dsm->getMyNodeID() == 0) {
@@ -335,7 +342,8 @@ int main(int argc, char *argv[]) {
       printf("%d fail locks: %ld %s\n", dsm->getMyNodeID(), fail_locks_cnt,
              getIP());
 
-      printf("hot count %ld\t hierarchy count %d\n", hot_count, hier_count);
+      printf("hot count %ld\t hierarchy count %ld\t handover %ld\n", hot_count,
+             hier_count, ho_count);
     }
   }
 

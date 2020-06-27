@@ -2,10 +2,16 @@
 #define _TREE_H_
 
 #include "DSM.h"
+#include <atomic>
 #include <city.h>
 #include <functional>
 #include <iostream>
-#include  <atomic>
+
+struct LocalLockNode {
+  std::atomic<uint64_t> ticket_lock;
+  bool hand_over;
+  uint8_t hand_time;
+};
 
 struct Request {
   bool is_search;
@@ -59,7 +65,7 @@ private:
   static thread_local CoroCall worker[define::kMaxCoro];
   static thread_local CoroCall master;
 
-  std::atomic<uint64_t> *local_locks[MAX_MACHINE];
+  LocalLockNode *local_locks[MAX_MACHINE];
 
   void print_verbose();
 
@@ -101,6 +107,11 @@ private:
                        int coro_id);
   void leaf_page_del(GlobalAddress page_addr, const Key &k, int level,
                      CoroContext *cxt, int coro_id);
+
+  bool acquire_local_lock(GlobalAddress lock_addr, CoroContext *cxt,
+                          int coro_id);
+  bool can_hand_over(GlobalAddress lock_addr);
+  void releases_local_lock(GlobalAddress lock_addr);
 };
 
 class Header {
@@ -245,7 +256,7 @@ public:
 
 class LeafPage {
 private:
-   union {
+  union {
     uint32_t crc;
     uint64_t embedding_lock;
   };

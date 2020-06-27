@@ -24,6 +24,7 @@ uint64_t cache_hit[MAX_APP_THREAD][8];
 uint64_t lock_fail[MAX_APP_THREAD][8];
 uint64_t pattern[MAX_APP_THREAD][8];
 uint64_t hierarchy_lock[MAX_APP_THREAD][8];
+uint64_t handover_count[MAX_APP_THREAD][8];
 uint64_t hot_filter_count[MAX_APP_THREAD][8];
 uint64_t latency[MAX_APP_THREAD][50000];
 volatile bool need_stop = false;
@@ -51,7 +52,13 @@ Tree::Tree(DSM *dsm, uint16_t tree_id) : dsm(dsm), tree_id(tree_id) {
 
 #ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
   for (int i = 0; i < dsm->getClusterSize(); ++i) {
-    local_locks[i] = new std::atomic<uint64_t>[define::kNumOfLock];
+    local_locks[i] = new LocalLockNode[define::kNumOfLock];
+    for (size_t k = 0; k < define::kNumOfLock; ++k) {
+      auto &n = local_locks[i][k];
+      n.ticket_lock.store(0);
+      n.hand_over = false;
+      n.hand_time = 0;
+    }
   }
 #endif
 
@@ -248,21 +255,9 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
   auto &pattern_cnt = pattern[dsm->getMyThreadID()][lock_addr.nodeID];
 
 #ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
-  auto &llock = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
-  uint64_t unlock_value = 0;
-  bool is_local_locked = false;
-  while (!llock.compare_exchange_strong(unlock_value, 1)) {
-    is_local_locked = true;
-    unlock_value = 0;
-    while (llock.load(std::memory_order_relaxed) != unlock_value) {
-      if (cxt != nullptr) {
-        hot_wait_queue.push(coro_id);
-        (*cxt->yield)(*cxt->master);
-      }
-    }
-  }
-  if (is_local_locked) {
-    hierarchy_lock[dsm->getMyThreadID()][0]++;
+  bool hand_over = acquire_local_lock(lock_addr, cxt, coro_id);
+  if (hand_over) {
+    return true;
   }
 #endif
 
@@ -353,6 +348,14 @@ inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
                               uint64_t *buf, CoroContext *cxt, int coro_id,
                               bool async) {
 
+#ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
+  bool hand_over_other = can_hand_over(lock_addr);
+  if (hand_over_other) {
+    releases_local_lock(lock_addr);
+    return;
+  }
+#endif
+
   auto cas_buf = dsm->get_rbuf(coro_id).get_cas_buffer();
 
 #ifdef CONFIG_EABLE_BAKERY_LOCK
@@ -373,25 +376,35 @@ inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
 
 #else
 
+  *cas_buf = 0;
 #ifdef CONFIG_ENABLE_ON_CHIP_LOCK
   if (async) {
-    dsm->cas_dm(lock_addr, tag, 0, cas_buf, false);
+    dsm->write_dm((char *)cas_buf, lock_addr, sizeof(uint64_t), false);
   } else {
-    dsm->cas_dm_sync(lock_addr, tag, 0, cas_buf, cxt);
+    dsm->write_dm_sync((char *)cas_buf, lock_addr, sizeof(uint64_t), cxt);
   }
+  // if (async) { // TODO, tag in hand-over
+  //   dsm->cas_dm(lock_addr, tag, 0, cas_buf, false);
+  // } else {
+  //   dsm->cas_dm_sync(lock_addr, tag, 0, cas_buf, cxt);
+  // }
 #else
   if (async) {
-    dsm->cas(lock_addr, tag, 0, cas_buf, false);
+    dsm->write((char *)cas_buf, lock_addr, sizeof(uint64_t), false);
   } else {
-    dsm->cas_sync(lock_addr, tag, 0, cas_buf, cxt);
+    dsm->write_sync((char *)cas_buf, lock_addr, sizeof(uint64_t), cxt);
   }
+  if (async) {
+    //   dsm->cas(lock_addr, tag, 0, cas_buf, false);
+    // } else {
+    //   dsm->cas_sync(lock_addr, tag, 0, cas_buf, cxt);
+    // }
 #endif
 
 #endif
 
 #ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
-  auto &llock = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
-  llock.store(0);
+  releases_local_lock(lock_addr);
 #endif
 }
 
@@ -400,6 +413,16 @@ void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
                                  GlobalAddress lock_addr, uint64_t tag,
                                  CoroContext *cxt, int coro_id, bool async) {
 #ifdef CONFIG_ENABLE_OP_COUPLE
+
+#ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
+  bool hand_over_other = can_hand_over(lock_addr);
+  if (hand_over_other) {
+    dsm->write_sync(page_buffer, page_addr, page_size, cxt);
+    releases_local_lock(lock_addr);
+    return;
+  }
+#endif
+
   RdmaOpRegion rs[2];
   rs[0].source = (uint64_t)page_buffer;
   rs[0].dest = page_addr;
@@ -437,8 +460,7 @@ void Tree::write_page_and_unlock(char *page_buffer, GlobalAddress page_addr,
 #endif
 
 #ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
-  auto &llock = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
-  llock.store(0);
+  releases_local_lock(lock_addr);
 #endif
 
 #else
@@ -1204,4 +1226,61 @@ void Tree::coro_master(CoroYield &yield, int coro_cnt) {
       }
     }
   }
+}
+
+// Local Locks
+inline bool Tree::acquire_local_lock(GlobalAddress lock_addr, CoroContext *cxt,
+                                     int coro_id) {
+  auto &node = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
+  bool is_local_locked = false;
+
+  uint64_t lock_val = node.ticket_lock.fetch_add(1);
+
+  uint32_t ticket = lock_val << 32 >> 32;
+  uint32_t current = lock_val >> 32;
+
+  // printf("%ud %ud\n", ticket, current);
+  while (ticket != current) { // lock failed
+    is_local_locked = true;
+
+    if (cxt != nullptr) {
+      hot_wait_queue.push(coro_id);
+      (*cxt->yield)(*cxt->master);
+    }
+
+    current = node.ticket_lock.load(std::memory_order_relaxed) >> 32;
+  }
+
+  if (is_local_locked) {
+    hierarchy_lock[dsm->getMyThreadID()][0]++;
+  }
+
+  node.hand_time++;
+  return node.hand_over;
+}
+
+inline bool Tree::can_hand_over(GlobalAddress lock_addr) {
+  auto &node = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
+  uint64_t lock_val = node.ticket_lock.load(std::memory_order_relaxed);
+
+  uint32_t ticket = lock_val << 32 >> 32;
+  uint32_t current = lock_val >> 32;
+
+  if (ticket <= current + 1) { // no pending locks
+    node.hand_over = false;
+  } else {
+    node.hand_over = node.hand_time < define::kMaxHandOverTime;
+  }
+  if (!node.hand_over) {
+    node.hand_time = 0;
+  } else {
+    handover_count[dsm->getMyThreadID()][0]++;
+  }
+
+  return node.hand_over;
+}
+
+inline void Tree::releases_local_lock(GlobalAddress lock_addr) {
+  auto &node = local_locks[lock_addr.nodeID][lock_addr.offset / 8];
+  node.ticket_lock.fetch_add((1ull << 32));
 }
