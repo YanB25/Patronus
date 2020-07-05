@@ -26,7 +26,7 @@ uint64_t pattern[MAX_APP_THREAD][8];
 uint64_t hierarchy_lock[MAX_APP_THREAD][8];
 uint64_t handover_count[MAX_APP_THREAD][8];
 uint64_t hot_filter_count[MAX_APP_THREAD][8];
-uint64_t latency[MAX_APP_THREAD][50000];
+uint64_t latency[MAX_APP_THREAD][LATENCY_WINDOWS];
 volatile bool need_stop = false;
 
 thread_local CoroCall Tree::worker[define::kMaxCoro];
@@ -116,6 +116,12 @@ void Tree::print_verbose() {
 #ifdef CONFIG_ENABLE_HOT_FILTER
 
     std::cout << "Hot Filter: On" << std::endl;
+
+#endif
+
+#ifdef CONFIG_ENABLE_HIERARCHIAL_LOCK
+
+    std::cout << "Hierarchial Lock: On" << std::endl;
 
 #endif
 
@@ -394,7 +400,7 @@ inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
   } else {
     dsm->write_sync((char *)cas_buf, lock_addr, sizeof(uint64_t), cxt);
   }
-  if (async) {
+  // if (async) {
     //   dsm->cas(lock_addr, tag, 0, cas_buf, false);
     // } else {
     //   dsm->cas_sync(lock_addr, tag, 0, cas_buf, cxt);
@@ -1190,8 +1196,8 @@ void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id) {
       this->insert(r.k, r.v, &ctx, coro_id);
     }
     auto us_10 = coro_timer.end() / 100;
-    if (us_10 >= 50000) {
-      us_10 = 49999;
+    if (us_10 >= LATENCY_WINDOWS) {
+      us_10 = LATENCY_WINDOWS - 1;
     }
     latency[thread_id][us_10]++;
   }

@@ -29,10 +29,11 @@
 #define CONFIG_ENABLE_HOT_FILTER
 #define CONFIG_ENABLE_HIERARCHIAL_LOCK
 
-
 // #define CONFIG_EABLE_BAKERY_LOCK
 
 #define TEST_SINGLE_THREAD
+
+#define LATENCY_WINDOWS 1000000
 
 #define STRUCT_OFFSET(type, field)                                             \
   (char *)&((type *)(0))->field - (char *)((type *)(0))
@@ -107,7 +108,6 @@ constexpr uint16_t kMaxCoro = 8;
 constexpr int64_t kPerCoroRdmaBuf = 32 * 1024;
 
 constexpr uint8_t kMaxHandOverTime = 8;
-
 } // namespace define
 
 static inline unsigned long long asm_rdtsc(void) {

@@ -9,8 +9,8 @@
 #include <unistd.h>
 #include <vector>
 
-// #define USE_CORO
-const int kCoroCnt = 2;
+#define USE_CORO
+const int kCoroCnt = 6;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 extern uint64_t cache_hit[MAX_APP_THREAD][8];
@@ -28,14 +28,14 @@ int kNodeCount;
 uint64_t kKeySpace = 20096000;
 // 100 * define::MB;
 
-double zipfan = 0.99;
+double zipfan = 0;
 
 std::thread th[kMaxThread];
 uint64_t tp[kMaxThread][8];
 
 extern volatile bool need_stop;
-extern uint64_t latency[MAX_APP_THREAD][50000];
-uint64_t latency_th_all[50000];
+extern uint64_t latency[MAX_APP_THREAD][LATENCY_WINDOWS];
+uint64_t latency_th_all[LATENCY_WINDOWS];
 
 Tree *tree;
 DSM *dsm;
@@ -127,8 +127,8 @@ void thread_run(int id) {
       tree->insert(key, v);
     }
     auto us_10 = timer.end() / 100;
-    if (us_10 >= 50000) {
-      us_10 = 49999;
+    if (us_10 >= LATENCY_WINDOWS) {
+      us_10 = LATENCY_WINDOWS - 1;
     }
     latency[id][us_10]++;
 
@@ -184,7 +184,7 @@ void parse_args(int argc, char *argv[]) {
 
 void cal_latency() {
   uint64_t all_lat = 0;
-  for (int i = 0; i < 50000; ++i) {
+  for (int i = 0; i < LATENCY_WINDOWS; ++i) {
     latency_th_all[i] = 0;
     for (int k = 0; k < MAX_APP_THREAD; ++k) {
       latency_th_all[i] += latency[k][i];
@@ -199,7 +199,7 @@ void cal_latency() {
   uint64_t th999 = all_lat * 999 / 1000;
 
   uint64_t cum = 0;
-  for (int i = 0; i < 50000; ++i) {
+  for (int i = 0; i < LATENCY_WINDOWS; ++i) {
     cum += latency_th_all[i];
 
     if (cum >= th50) {
@@ -287,9 +287,9 @@ int main(int argc, char *argv[]) {
       fail_locks_cnt += lock_fail[i][0];
       lock_fail[i][0] = 0;
     }
-    if (fail_locks_cnt > 500000) {
-      // need_stop = true;
-    }
+    // if (fail_locks_cnt > 500000) {
+    //   // need_stop = true;
+    // }
 
     //  pattern
     uint64_t pp[8];
