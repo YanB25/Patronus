@@ -6,11 +6,11 @@ set (CMAKE_CXX_COMPILER ${CMAKE_C_COMPILER})
 
 #Compiler options
 # set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare -DNDEBUG -g")
-set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare -O3 -lcityhash -lboost_system -lboost_coroutine -g")
+set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare -O3 -g")
 set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++11 ")
 
 # Link Options
-set(LINKS_FLAGS "-lpthread -libverbs -lmemcached -lprofiler")
+set(LINKS_FLAGS "-lcityhash -lboost_system -lboost_coroutine -lpthread -libverbs -lmemcached -lprofiler -ltcmalloc")
 
 # option (SANITIZE "Turn on sanitization" ON)
 # if (SANITIZE)

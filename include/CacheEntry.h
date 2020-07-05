@@ -8,12 +8,16 @@ struct CacheEntry {
   Key from;
   Key to; // [from, to]
   InternalPage *ptr;
+
 };
 
-static CacheEntry Decode(const char *key) {
-  CacheEntry rv;
-  memcpy(&rv, key, sizeof(Key));
-  return rv;
+inline std::ostream &operator<<(std::ostream &os, const CacheEntry &obj) {
+  os << "[" << (int)obj.from << ", " << obj.to + 1 << ")";
+  return os;
+}
+
+inline static CacheEntry Decode(const char *val) {
+  return *(CacheEntry *)val;
 }
 
 struct CacheEntryComparator {
@@ -30,9 +34,9 @@ struct CacheEntryComparator {
       return +1;
     }
 
-    if (a_v.from < a_v.from) {
+    if (a_v.from < b_v.from) {
       return -1;
-    } else if (a_v.from > a_v.from) {
+    } else if (a_v.from > b_v.from) {
       return +1;
     } else {
       return 0;
