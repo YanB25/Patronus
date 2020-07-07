@@ -1,22 +1,21 @@
 #include "Tree.h"
-
-#include <iostream>
-
+#include "HotBuffer.h"
+#include "IndexCache.h"
 #include "RdmaBuffer.h"
+#include "SimpleHT.h"
+#include "Timer.h"
+
 #include <algorithm>
 #include <city.h>
-
-#include "SimpleHT.h"
+#include <iostream>
+#include <queue>
 #include <utility>
 
-#include "Timer.h"
-#include <queue>
+bool enter_debug = false;
 
 #ifdef TEST_SINGLE_THREAD
 SimpleHT mapping;
 #endif
-
-#include "HotBuffer.h"
 
 HotBuffer hot_buf;
 uint64_t cache_miss[MAX_APP_THREAD][8];
@@ -64,6 +63,8 @@ Tree::Tree(DSM *dsm, uint16_t tree_id) : dsm(dsm), tree_id(tree_id) {
 
   assert(dsm->is_register());
   print_verbose();
+
+  index_cache = new IndexCache(define::kIndexCacheSize);
 
   root_ptr_ptr = get_root_ptr_ptr();
 
@@ -133,6 +134,12 @@ void Tree::print_verbose() {
   }
 }
 
+inline void Tree::before_operation(CoroContext *cxt, int coro_id) {
+  for (size_t i = 0; i < define::kMaxLevelOfTree; ++i) {
+    path_stack[coro_id][i] = GlobalAddress::Null();
+  }
+}
+
 GlobalAddress Tree::get_root_ptr_ptr() {
   GlobalAddress addr;
   addr.nodeID = 0;
@@ -144,6 +151,7 @@ GlobalAddress Tree::get_root_ptr_ptr() {
 
 extern GlobalAddress g_root_ptr;
 extern int g_root_level;
+extern bool enable_cache;
 GlobalAddress Tree::get_root_ptr(CoroContext *cxt, int coro_id) {
 
   if (g_root_ptr == GlobalAddress::Null()) {
@@ -152,8 +160,6 @@ GlobalAddress Tree::get_root_ptr(CoroContext *cxt, int coro_id) {
     GlobalAddress root_ptr = *(GlobalAddress *)page_buffer;
     return root_ptr;
   } else {
-    // printf("hh\n");
-    // sleep(1);
     return g_root_ptr;
   }
 
@@ -254,7 +260,13 @@ next:
   // }
 }
 
-GlobalAddress Tree::query_cache(const Key &k) { return mapping.get(k); }
+GlobalAddress Tree::query_cache(const Key &k) {
+#ifdef TEST_SINGLE_THREAD
+  return mapping.get(k);
+#else
+  return GlobalAddress::Null();
+#endif
+}
 
 inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
                                 uint64_t *buf, CoroContext *cxt, int coro_id) {
@@ -401,10 +413,10 @@ inline void Tree::unlock_addr(GlobalAddress lock_addr, uint64_t tag,
     dsm->write_sync((char *)cas_buf, lock_addr, sizeof(uint64_t), cxt);
   }
   // if (async) {
-    //   dsm->cas(lock_addr, tag, 0, cas_buf, false);
-    // } else {
-    //   dsm->cas_sync(lock_addr, tag, 0, cas_buf, cxt);
-    // }
+  //   dsm->cas(lock_addr, tag, 0, cas_buf, false);
+  // } else {
+  //   dsm->cas_sync(lock_addr, tag, 0, cas_buf, cxt);
+  // }
 #endif
 
 #endif
@@ -540,8 +552,40 @@ void Tree::lock_bench(const Key &k, CoroContext *cxt, int coro_id) {
   unlock_addr(lock_addr, 1, cas_buffer, cxt, coro_id, true);
 }
 
+void Tree::insert_internal(const Key &k, GlobalAddress v, CoroContext *cxt,
+                           int coro_id, int level) {
+  auto root = get_root_ptr(cxt, coro_id);
+  SearchResult result;
+
+  GlobalAddress p = root;
+
+next:
+
+  if (!page_search(p, k, result, cxt, coro_id)) {
+    std::cout << "SEARCH WARNING insert" << std::endl;
+    p = get_root_ptr(cxt, coro_id);
+    sleep(1);
+    goto next;
+  }
+
+  assert(result.level != 0);
+  if (result.slibing != GlobalAddress::Null()) {
+    p = result.slibing;
+    goto next;
+  }
+
+  p = result.next_level;
+  if (result.level != level + 1) {
+    goto next;
+  }
+
+  internal_page_store(p, k, v, root, level, cxt, coro_id);
+}
+
 void Tree::insert(const Key &k, const Value &v, CoroContext *cxt, int coro_id) {
   assert(dsm->is_register());
+
+  before_operation(cxt, coro_id);
 
 #ifdef CONFIG_ENABLE_HOT_FILTER
   auto res = hot_buf.set(k);
@@ -559,11 +603,13 @@ void Tree::insert(const Key &k, const Value &v, CoroContext *cxt, int coro_id) {
 #endif
 
 #ifdef TEST_SINGLE_THREAD
+
   GlobalAddress cache_addr = mapping.get(k);
   if (cache_addr != GlobalAddress::Null()) {
     cache_hit[dsm->getMyThreadID()][0]++;
     auto root = get_root_ptr(cxt, coro_id);
     leaf_page_store(cache_addr, k, v, root, 0, cxt, coro_id);
+
 #ifdef CONFIG_ENABLE_HOT_FILTER
     if (res == HotResult::SUCC) {
       hot_buf.clear(k);
@@ -575,6 +621,27 @@ void Tree::insert(const Key &k, const Value &v, CoroContext *cxt, int coro_id) {
   }
 
 #endif
+
+  if (enable_cache) {
+    GlobalAddress cache_addr;
+    auto entry = index_cache->search_from_cache(k, &cache_addr);
+    if (entry) { // cache hit
+      auto root = get_root_ptr(cxt, coro_id);
+      if (leaf_page_store(cache_addr, k, v, root, 0, cxt, coro_id, true)) {
+
+        cache_hit[dsm->getMyThreadID()][0]++;
+#ifdef CONFIG_ENABLE_HOT_FILTER
+        if (res == HotResult::SUCC) {
+          hot_buf.clear(k);
+        }
+#endif
+        return;
+      }
+      // cache stale, from root,
+      index_cache->invalidate(entry);
+    }
+    cache_miss[dsm->getMyThreadID()][0]++;
+  }
 
   auto root = get_root_ptr(cxt, coro_id);
   SearchResult result;
@@ -599,7 +666,6 @@ next:
 
     p = result.next_level;
     if (result.level != 1) {
-
       goto next;
     }
   }
@@ -631,11 +697,30 @@ bool Tree::search(const Key &k, Value &v, CoroContext *cxt, int coro_id) {
   }
 #endif
 
+  bool from_cache = false;
+  const CacheEntry *entry = nullptr;
+  if (enable_cache) {
+    GlobalAddress cache_addr;
+    entry = index_cache->search_from_cache(k, &cache_addr);
+    if (entry) { // cache hit
+      cache_hit[dsm->getMyThreadID()][0]++;
+      from_cache = true;
+      p = cache_addr;
+
+    } else {
+      cache_miss[dsm->getMyThreadID()][0]++;
+    }
+  }
+
 next:
-  if (!page_search(p, k, result, cxt, coro_id)) {
-    std::cout << "SEARCH WARNING search" << std::endl;
-    p = path_stack[coro_id][result.level + 1];
-    sleep(1);
+  if (!page_search(p, k, result, cxt, coro_id, from_cache)) {
+    if (from_cache) { // cache stale
+      p = root;
+      index_cache->invalidate(entry);
+    } else {
+      std::cout << "SEARCH WARNING search" << std::endl;
+      sleep(1);
+    }
     goto next;
   }
   if (result.is_leaf) {
@@ -657,6 +742,7 @@ next:
 
 void Tree::del(const Key &k, CoroContext *cxt, int coro_id) {
   assert(dsm->is_register());
+  before_operation(cxt, coro_id);
 
   auto root = get_root_ptr(cxt, coro_id);
   SearchResult result;
@@ -666,7 +752,6 @@ void Tree::del(const Key &k, CoroContext *cxt, int coro_id) {
 next:
   if (!page_search(p, k, result, cxt, coro_id)) {
     std::cout << "SEARCH WARNING" << std::endl;
-    p = path_stack[coro_id][result.level + 1];
     goto next;
   }
 
@@ -688,7 +773,8 @@ next:
 }
 
 bool Tree::page_search(GlobalAddress page_addr, const Key &k,
-                       SearchResult &result, CoroContext *cxt, int coro_id) {
+                       SearchResult &result, CoroContext *cxt, int coro_id,
+                       bool from_cache) {
   auto page_buffer = (dsm->get_rbuf(coro_id)).get_page_buffer();
   auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
 
@@ -713,20 +799,38 @@ re_read:
       goto re_read;
     }
 
+    if (from_cache &&
+        (k < page->hdr.lowest || k >= page->hdr.highest)) { // cache is stale
+      return false;
+    }
+
     assert(result.level == 0);
     if (k >= page->hdr.highest) { // should turn right
       result.slibing = page->hdr.sibling_ptr;
       return true;
     }
     if (k < page->hdr.lowest) {
+      assert(false);
       return false;
     }
     leaf_page_search(page, k, result);
   } else {
+
+    assert(!from_cache);
     auto page = (InternalPage *)page_buffer;
+
     if (!page->check_consistent()) {
       goto re_read;
     }
+
+    if (result.level == 1 && enable_cache) {
+      index_cache->add_to_cache(page);
+      // if (enter_debug) {
+      //   printf("add %lud [%lud %lud]\n", k, page->hdr.lowest,
+      //          page->hdr.highest);
+      // }
+    }
+
     if (k >= page->hdr.highest) { // should turn right
       result.slibing = page->hdr.sibling_ptr;
       return true;
@@ -908,13 +1012,19 @@ void Tree::internal_page_store(GlobalAddress page_addr, const Key &k,
     }
   }
 
-  internal_page_store(path_stack[coro_id][level + 1], split_key, sibling_addr,
-                      root, level + 1, cxt, coro_id);
+  auto up_level = path_stack[coro_id][level + 1];
+
+  if (up_level != GlobalAddress::Null()) {
+    internal_page_store(up_level, split_key, sibling_addr, root, level + 1, cxt,
+                        coro_id);
+  } else {
+    assert(false);
+  }
 }
 
-void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
+bool Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
                            const Value &v, GlobalAddress root, int level,
-                           CoroContext *cxt, int coro_id) {
+                           CoroContext *cxt, int coro_id, bool from_cache) {
 
   uint64_t lock_index =
       CityHash64((char *)&page_addr, sizeof(page_addr)) % define::kNumOfLock;
@@ -941,11 +1051,26 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
 
   auto page = (LeafPage *)page_buffer;
 
-  // if (page->hdr.level != level) {
-  //   this->print_and_check_tree();
-  // }
   assert(page->hdr.level == level);
   assert(page->check_consistent());
+
+  if (from_cache &&
+      (k < page->hdr.lowest || k >= page->hdr.highest)) { // cache is stale
+    this->unlock_addr(lock_addr, tag, cas_buffer, cxt, coro_id, true);
+
+    // if (enter_debug) {
+    //   printf("cache {%lu} %lu [%lu %lu]\n", page_addr.val, k, page->hdr.lowest,
+    //          page->hdr.highest);
+    // }
+
+    return false;
+  }
+
+  // if (enter_debug) {
+  //   printf("{%lu} %lu [%lu %lu]\n", page_addr.val, k, page->hdr.lowest,
+  //          page->hdr.highest);
+  // }
+
   if (k >= page->hdr.highest) {
 
     this->unlock_addr(lock_addr, tag, cas_buffer, cxt, coro_id, true);
@@ -958,7 +1083,7 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
     this->leaf_page_store(page->hdr.sibling_ptr, k, v, root, level, cxt,
                           coro_id);
 
-    return;
+    return true;
   }
   assert(k >= page->hdr.lowest);
 
@@ -1009,7 +1134,7 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
         update_addr, GADD(page_addr, (update_addr - (char *)page)),
         sizeof(LeafEntry), cas_buffer, lock_addr, tag, cxt, coro_id, false);
 
-    return;
+    return true;
   } else {
     std::sort(
         page->records, page->records + kLeafCardinality,
@@ -1094,17 +1219,26 @@ void Tree::leaf_page_store(GlobalAddress page_addr, const Key &k,
                         lock_addr, tag, cxt, coro_id, need_split);
 
   if (!need_split)
-    return;
+    return true;
 
   if (root == page_addr) { // update root
     if (update_new_root(page_addr, split_key, sibling_addr, level + 1, root,
                         cxt, coro_id)) {
-      return;
+      return true;
     }
   }
 
-  internal_page_store(path_stack[coro_id][level + 1], split_key, sibling_addr,
-                      root, level + 1, cxt, coro_id);
+  auto up_level = path_stack[coro_id][level + 1];
+
+  if (up_level != GlobalAddress::Null()) {
+    internal_page_store(up_level, split_key, sibling_addr, root, level + 1, cxt,
+                        coro_id);
+  } else {
+    assert(from_cache);
+    insert_internal(split_key, sibling_addr, cxt, coro_id, level + 1);
+  }
+
+  return true;
 }
 
 // Need BIG FIX

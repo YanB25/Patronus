@@ -31,7 +31,7 @@
 
 // #define CONFIG_EABLE_BAKERY_LOCK
 
-#define TEST_SINGLE_THREAD
+// #define TEST_SINGLE_THREAD
 
 #define LATENCY_WINDOWS 1000000
 
@@ -102,12 +102,14 @@ constexpr uint64_t kLockChipMemSize = 256 * 1024;
 constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
 
 // level of tree
-constexpr uint64_t kMaxLevelOfTree = 12;
+constexpr uint64_t kMaxLevelOfTree = 7;
 
 constexpr uint16_t kMaxCoro = 8;
 constexpr int64_t kPerCoroRdmaBuf = 32 * 1024;
 
 constexpr uint8_t kMaxHandOverTime = 8;
+
+constexpr int kIndexCacheSize = 1024; // MB
 } // namespace define
 
 static inline unsigned long long asm_rdtsc(void) {
@@ -130,5 +132,9 @@ __inline__ unsigned long long rdtsc(void) {
   __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
   return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
 }
+
+inline void mfence() { asm volatile("mfence" ::: "memory"); }
+
+inline void compiler_barrier() { asm volatile("" ::: "memory"); }
 
 #endif /* __COMMON_H__ */

@@ -7,6 +7,8 @@
 #include <functional>
 #include <iostream>
 
+class IndexCache;
+
 struct LocalLockNode {
   std::atomic<uint64_t> ticket_lock;
   bool hand_over;
@@ -67,7 +69,11 @@ private:
 
   LocalLockNode *local_locks[MAX_MACHINE];
 
+  IndexCache *index_cache;
+
   void print_verbose();
+
+  void before_operation(CoroContext *cxt, int coro_id);
 
   GlobalAddress get_root_ptr_ptr();
   GlobalAddress get_root_ptr(CoroContext *cxt, int coro_id);
@@ -79,6 +85,9 @@ private:
   bool update_new_root(GlobalAddress left, const Key &k, GlobalAddress right,
                        int level, GlobalAddress old_root, CoroContext *cxt,
                        int coro_id);
+
+  void insert_internal(const Key &k, GlobalAddress v, CoroContext *cxt,
+                       int coro_id, int level);
 
   bool try_lock_addr(GlobalAddress lock_addr, uint64_t tag, uint64_t *buf,
                      CoroContext *cxt, int coro_id);
@@ -94,7 +103,7 @@ private:
                           CoroContext *cxt, int coro_id);
 
   bool page_search(GlobalAddress page_addr, const Key &k, SearchResult &result,
-                   CoroContext *cxt, int coro_id);
+                   CoroContext *cxt, int coro_id, bool from_cache = false);
   void internal_page_search(InternalPage *page, const Key &k,
                             SearchResult &result);
   void leaf_page_search(LeafPage *page, const Key &k, SearchResult &result);
@@ -102,9 +111,9 @@ private:
   void internal_page_store(GlobalAddress page_addr, const Key &k,
                            GlobalAddress value, GlobalAddress root, int level,
                            CoroContext *cxt, int coro_id);
-  void leaf_page_store(GlobalAddress page_addr, const Key &k, const Value &v,
+  bool leaf_page_store(GlobalAddress page_addr, const Key &k, const Value &v,
                        GlobalAddress root, int level, CoroContext *cxt,
-                       int coro_id);
+                       int coro_id, bool from_cache = false);
   void leaf_page_del(GlobalAddress page_addr, const Key &k, int level,
                      CoroContext *cxt, int coro_id);
 
@@ -126,6 +135,7 @@ private:
   friend class InternalPage;
   friend class LeafPage;
   friend class Tree;
+  friend class IndexCache;
 
 public:
   Header() {
@@ -184,6 +194,7 @@ private:
   union {
     uint32_t crc;
     uint64_t embedding_lock;
+    uint64_t index_cache_freq;
   };
 
   uint8_t front_version;
@@ -194,6 +205,7 @@ private:
   uint8_t rear_version;
 
   friend class Tree;
+  friend class IndexCache;
 
 public:
   // this is called when tree grows
@@ -250,6 +262,14 @@ public:
     hdr.debug();
     std::cout << "version: [" << (int)front_version << ", " << (int)rear_version
               << "]" << std::endl;
+  }
+
+  void verbose_debug() const {
+    this->debug();
+    for (int i = 0; i < this->hdr.last_index + 1; ++i) {
+      printf("[%lu %lu] ", this->records[i].key, this->records[i].ptr.val);
+    }
+    printf("\n");
   }
 
 } __attribute__((packed));

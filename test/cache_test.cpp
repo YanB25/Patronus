@@ -6,7 +6,7 @@ int main() {
     auto cache = new IndexCache(1);
     
     InternalPage *page = (InternalPage *)11;
-    assert(cache->add_entry(1, 100, nullptr));
+    assert(cache->add_entry(1, 100, page));
   
     assert(cache->add_entry(1, 43, page));
 

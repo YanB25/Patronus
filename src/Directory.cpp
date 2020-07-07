@@ -7,6 +7,7 @@
 
 GlobalAddress g_root_ptr = GlobalAddress::Null();
 int g_root_level = -1;
+bool enable_cache;
 
 Directory::Directory(DirectoryConnection *dCon, RemoteConnection *remoteInfo,
                      uint32_t machineNR, uint16_t dirID, uint16_t nodeID)
@@ -71,8 +72,15 @@ void Directory::process_message(const RawMessage *m) {
   }
 
   case RpcType::NEW_ROOT: {
-    g_root_ptr = m->addr;
-    g_root_level = m->level;
+
+    if (g_root_level < m->level) {
+      g_root_ptr = m->addr;
+      g_root_level = m->level;
+      if (g_root_level >= 3) {
+        enable_cache = true;
+      }
+    }
+
     break;
   }
 
