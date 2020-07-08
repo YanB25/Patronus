@@ -13,11 +13,10 @@
 #pragma once
 #include <cerrno>
 #include <cstddef>
-
 class Allocator {
 public:
   char *Allocate(size_t bytes) { return AllocateAligned(bytes); }
   char *AllocateAligned(size_t bytes, size_t huge_page_size = 0) {
-    return (char *)malloc(bytes);
+    return (char *)aligned_alloc(8, bytes);
   }
 };

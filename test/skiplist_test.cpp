@@ -1,4 +1,5 @@
 #include "inlineskiplist.h"
+#include "Timer.h"
 
 // Our test skip list stores 8-byte unsigned integers
 typedef uint64_t Key;
@@ -42,26 +43,26 @@ struct TestComparator {
 int main() {
   Allocator alloc;
   TestComparator cmp;
-  InlineSkipList<TestComparator> list(cmp, &alloc);
-
-  auto buf = list.AllocateKey(sizeof(Key));
-  *(Key *)buf = 123;
-  list.InsertConcurrently(buf);
+  InlineSkipList<TestComparator> list(cmp, &alloc, 21);
 
   InlineSkipList<TestComparator>::Iterator iter(&list);
 
-
-
-  buf = list.AllocateKey(sizeof(Key));
-  *(Key *)buf = 145;
-  bool res = list.InsertConcurrently(buf);
-
-    uint64_t k = 124;
-  iter.Seek((char *)&k);
-  if (iter.Valid()) {
-    const char *val = iter.key();
-    printf("%ld\n", *(uint64_t *)val);
+  const uint64_t Space = 100000ull;
+  const int loop = 10000;
+  for (uint64_t i = 0; i < Space; ++i) {
+    auto buf = list.AllocateKey(sizeof(Key));
+    *(Key *)buf = i;
+    bool res = list.InsertConcurrently(buf);
   }
+
+
+  Timer t;
+  t.begin();
+  for (int i = 0; i < loop; ++i) {
+    uint64_t k = rand() % Space;
+    iter.Seek((char *)&k);
+  }
+  t.end_print(loop);
 
   return 0;
 }

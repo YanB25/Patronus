@@ -7,18 +7,18 @@
 struct CacheEntry {
   Key from;
   Key to; // [from, to]
-  mutable std::atomic<InternalPage *> ptr;
-  
-  CacheEntry() = default;
+  mutable InternalPage *ptr;
+  // mutable std::atomic<InternalPage *> ptr;
 
-  CacheEntry(const CacheEntry &p) {
-    from = p.from;
-    to = p.to;
-    ptr = p.ptr.load(std::memory_order_relaxed);
-  }
+  // CacheEntry() = default;
 
-};
-//  __attribute__((packed));
+  // CacheEntry(const CacheEntry &p) {
+  //   from = p.from;
+  //   to = p.to;
+  //   ptr = p.ptr.load(std::memory_order_relaxed);
+  // }
+}
+ __attribute__((packed));
 
 static_assert(sizeof(CacheEntry) == 2 * sizeof(Key) + sizeof(uint64_t), "XXX");
 
@@ -27,9 +27,7 @@ inline std::ostream &operator<<(std::ostream &os, const CacheEntry &obj) {
   return os;
 }
 
-inline static CacheEntry Decode(const char *val) {
-  return *(CacheEntry *)val;
-}
+inline static CacheEntry Decode(const char *val) { return *(CacheEntry *)val; }
 
 struct CacheEntryComparator {
   typedef CacheEntry DecodedType;

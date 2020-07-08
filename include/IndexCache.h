@@ -3,6 +3,7 @@
 
 #include "CacheEntry.h"
 #include "HugePageAlloc.h"
+#include "Timer.h"
 #include "inlineskiplist.h"
 
 #include <atomic>
@@ -26,6 +27,8 @@ public:
   void invalidate(const CacheEntry *entry);
 
   void statistics();
+
+  void bench();
 
 private:
   uint64_t cache_size; // MB;
@@ -107,8 +110,9 @@ inline bool IndexCache::add_to_cache(InternalPage *page) {
   } else { // conflicted
     auto e = this->find_entry(page->hdr.lowest, page->hdr.highest);
     if (e && e->from == page->hdr.lowest && e->to == page->hdr.highest - 1) {
-      auto ptr = e->ptr.load(std::memory_order_relaxed);
-      if (ptr == nullptr && e->ptr.compare_exchange_strong(ptr, new_page)) {
+      auto ptr = e->ptr;
+      if (ptr == nullptr &&
+          __sync_bool_compare_and_swap(&(e->ptr), 0ull, new_page)) {
 
         // if (enter_debug) {
         //   page->verbose_debug();
@@ -130,8 +134,7 @@ inline const CacheEntry *IndexCache::search_from_cache(const Key &k,
                                                        GlobalAddress *addr) {
   auto entry = find_entry(k);
 
-  InternalPage *page =
-      entry ? entry->ptr.load(std::memory_order_relaxed) : nullptr;
+  InternalPage *page = entry ? entry->ptr : nullptr;
 
   if (page && entry->from <= k && entry->to >= k) {
 
@@ -160,7 +163,7 @@ inline const CacheEntry *IndexCache::search_from_cache(const Key &k,
     }
 
     compiler_barrier();
-    if (entry->ptr.load(std::memory_order_relaxed)) { // check if it is freed.
+    if (entry->ptr) { // check if it is freed.
       // printf("Cache HIt\n");
       return entry;
     }
@@ -170,9 +173,9 @@ inline const CacheEntry *IndexCache::search_from_cache(const Key &k,
 }
 
 inline void IndexCache::invalidate(const CacheEntry *entry) {
-  auto ptr = entry->ptr.load(std::memory_order_relaxed);
+  auto ptr = entry->ptr;
 
-  if (entry->ptr.compare_exchange_strong(ptr, nullptr)) {
+  if (__sync_bool_compare_and_swap(&(entry->ptr), ptr, 0)) {
     free(ptr);
     free_page_cnt.fetch_add(1);
   }
@@ -181,9 +184,22 @@ inline void IndexCache::invalidate(const CacheEntry *entry) {
 inline void IndexCache::evict_one() { assert(false); }
 
 inline void IndexCache::statistics() {
-  printf("[skiplist node: %ld]  [page cache: %ld]\n",
-         skiplist_node_cnt.load(),
+  printf("[skiplist node: %ld]  [page cache: %ld]\n", skiplist_node_cnt.load(),
          all_page_cnt - free_page_cnt.load());
+}
+
+inline void IndexCache::bench() {
+
+  Timer t;
+  t.begin();
+  const int loop = 100000;
+
+  for (int i = 0; i < loop; ++i) {
+    uint64_t r = rand() % (5 * define::MB);
+    this->find_entry(r);
+  }
+
+  t.end_print(loop);
 }
 
 #endif // _INDEX_CACHE_H_

@@ -331,7 +331,7 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr, uint64_t tag,
     uint64_t conflict_tag = 0;
   retry:
     retry_cnt++;
-    if (retry_cnt > 100000) {
+    if (retry_cnt > 1000000) {
       std::cout << "Deadlock " << lock_addr << std::endl;
 
       std::cout << dsm->getMyNodeID() << ", " << dsm->getMyThreadID()
@@ -783,6 +783,7 @@ bool Tree::page_search(GlobalAddress page_addr, const Key &k,
                        bool from_cache) {
   auto page_buffer = (dsm->get_rbuf(coro_id)).get_page_buffer();
   auto header = (Header *)(page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
+  auto &pattern_cnt = pattern[dsm->getMyThreadID()][page_addr.nodeID];
 
   int counter = 0;
 re_read:
@@ -791,6 +792,7 @@ re_read:
     sleep(1);
   }
   dsm->read_sync(page_buffer, page_addr, kLeafPageSize, cxt);
+  pattern_cnt++;
 
   memset(&result, 0, sizeof(result));
   result.is_leaf = header->leftmost_ptr == GlobalAddress::Null();
@@ -1432,7 +1434,10 @@ inline void Tree::releases_local_lock(GlobalAddress lock_addr) {
   node.ticket_lock.fetch_add((1ull << 32));
 }
 
-void Tree::index_cache_statistics() { index_cache->statistics(); }
+void Tree::index_cache_statistics() {
+  index_cache->statistics();
+  index_cache->bench();
+}
 
 void Tree::clear_statistics() {
   for (int i = 0; i < MAX_APP_THREAD; ++i) {
