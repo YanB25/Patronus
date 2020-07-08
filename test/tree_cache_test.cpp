@@ -1,11 +1,23 @@
 #include "DSM.h"
 #include "Tree.h"
 
+#include "Timer.h"
 
+#include <thread>
+
+DSM *dsm;
+Tree *tree;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 extern uint64_t cache_hit[MAX_APP_THREAD][8];
 extern bool enter_debug;
+
+const uint64_t kSpace = 1000024000ull;
+const int kThread = 20;
+
+inline Key to_key(uint64_t k) {
+  return (CityHash64((char *)&k, sizeof(k)) + 1) % kSpace;
+}
 
 void cal_hit() {
   uint64_t all = 0;
@@ -14,59 +26,54 @@ void cal_hit() {
     all += (cache_hit[i][0] + cache_miss[i][0]);
     hit += cache_hit[i][0];
 
-    cache_hit[i][0] = 0; 
+    cache_hit[i][0] = 0;
     cache_miss[i][0] = 0;
   }
   printf("hit: %f\n", hit * 1.0 / all);
+}
 
+void run_warmup(int id) {
 
+  dsm->registerThread();
+  for (uint64_t i = 1; i < kSpace; ++i) {
+    if (i % kThread == id) {
+      tree->insert(to_key(i), i * 2);
+    }
+  }
 }
 
 int main() {
 
   DSMConfig config;
   config.machineNR = 2;
-  DSM *dsm = DSM::getInstance(config);
+  dsm = DSM::getInstance(config);
 
   dsm->registerThread();
 
-  auto tree = new Tree(dsm);
-
-  Value v;
+  tree = new Tree(dsm);
 
   if (dsm->getMyNodeID() != 0) {
     while (true)
       ;
   }
 
-  const uint64_t kSpace = 502400ull;
-  for (uint64_t i = 1; i < kSpace; ++i) {
-    tree->insert(i + 1, i * 2);
+  std::thread *th[kThread];
 
-    // if (i % 100000 == 0) {
-    //   printf("K\n");
-    // }
+  for (int i = 0; i < kThread; ++i) {
+    th[i] = new std::thread(run_warmup, i);
   }
+  Timer timer;
 
-  printf("WarmUP\n");
-  cal_hit();
-
-  enter_debug = true;
-
-  for (uint64_t i = 1; i < 10; ++i) {
-
-    uint64_t k = 24544;
-    tree->insert(k + 1, i * 2);
-
-    printf("\n-------\n");
-
-    if (i % 100000 == 0) {
-      printf("K\n");
-    }
+  timer.begin();
+  for (int i = 0; i < kThread; ++i) {
+    th[i]->join();
   }
-  cal_hit();
+  uint64_t ns = timer.end();
 
-  printf("Hello\n");
+  cal_hit();
+  tree->index_cache_statistics();
+
+  printf("Hello %lds\n", ns / 1000 / 1000 / 1000);
 
   while (true)
     ;

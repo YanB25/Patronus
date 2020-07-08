@@ -25,9 +25,13 @@ public:
 
   void invalidate(const CacheEntry *entry);
 
+  void statistics();
+
 private:
   uint64_t cache_size; // MB;
   std::atomic<int64_t> free_page_cnt;
+  std::atomic<int64_t> skiplist_node_cnt;
+  int64_t all_page_cnt;
 
   // SkipList
   CacheSkipList *skiplist;
@@ -40,12 +44,17 @@ private:
 inline IndexCache::IndexCache(int cache_size) : cache_size(cache_size) {
   skiplist = new CacheSkipList(cmp, &alloc, 21);
   uint64_t memory_size = define::MB * cache_size;
-  free_page_cnt.store(memory_size / sizeof(InternalPage));
+
+  all_page_cnt = memory_size / sizeof(InternalPage);
+  free_page_cnt.store(all_page_cnt);
+  skiplist_node_cnt.store(0);
 }
 
 // [from, to）
 inline bool IndexCache::add_entry(const Key &from, const Key &to,
                                   InternalPage *ptr) {
+
+  // TODO memory leak
   auto buf = skiplist->AllocateKey(sizeof(CacheEntry));
   auto &e = *(CacheEntry *)buf;
   e.from = from;
@@ -88,6 +97,7 @@ inline bool IndexCache::add_to_cache(InternalPage *page) {
   new_page->index_cache_freq = 0;
 
   if (this->add_entry(page->hdr.lowest, page->hdr.highest, new_page)) {
+    skiplist_node_cnt.fetch_add(1);
     auto v = free_page_cnt.fetch_add(-1);
     if (v <= 0) {
       evict_one();
@@ -103,7 +113,10 @@ inline bool IndexCache::add_to_cache(InternalPage *page) {
         // if (enter_debug) {
         //   page->verbose_debug();
         // }
-
+        auto v = free_page_cnt.fetch_add(-1);
+        if (v <= 0) {
+          evict_one();
+        }
         return true;
       }
     }
@@ -166,5 +179,11 @@ inline void IndexCache::invalidate(const CacheEntry *entry) {
 }
 
 inline void IndexCache::evict_one() { assert(false); }
+
+inline void IndexCache::statistics() {
+  printf("[skiplist node: %ld]  [page cache: %ld]\n",
+         skiplist_node_cnt.load(),
+         all_page_cnt - free_page_cnt.load());
+}
 
 #endif // _INDEX_CACHE_H_

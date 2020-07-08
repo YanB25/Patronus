@@ -76,7 +76,7 @@ void Directory::process_message(const RawMessage *m) {
     if (g_root_level < m->level) {
       g_root_ptr = m->addr;
       g_root_level = m->level;
-      if (g_root_level >= 3) {
+      if (g_root_level >= 4) {
         enable_cache = true;
       }
     }

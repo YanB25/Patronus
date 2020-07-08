@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <vector>
 
-#define USE_CORO
+// #define USE_CORO
 const int kCoroCnt = 6;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
@@ -25,7 +25,7 @@ const int kMaxThread = 32;
 int kReadRatio;
 int kThreadCount;
 int kNodeCount;
-uint64_t kKeySpace = 20096000;
+uint64_t kKeySpace = 1000 * define::MB;
 // 100 * define::MB;
 
 double zipfan = 0;
@@ -39,6 +39,10 @@ uint64_t latency_th_all[LATENCY_WINDOWS];
 
 Tree *tree;
 DSM *dsm;
+
+inline Key to_key(uint64_t k) {
+  return (CityHash64((char *)&k, sizeof(k)) + 1) % kKeySpace;
+}
 
 class RequsetGenBench : public RequstGen {
 
@@ -54,7 +58,7 @@ public:
     Request r;
     uint64_t dis = mehcached_zipf_next(&state);
 
-    r.k = CityHash64((char *)&dis, sizeof(dis)) + 1;
+    r.k = to_key(dis);
     r.v = 23;
     r.is_search = rand_r(&seed) % 100 < kReadRatio;
 
@@ -76,15 +80,51 @@ RequstGen *coro_func(int coro_id, DSM *dsm, int id) {
   return new RequsetGenBench(coro_id, dsm, id);
 }
 
+Timer bench_timer;
+std::atomic<int64_t> warmup_cnt{0};
+std::atomic_bool ready{false};
 void thread_run(int id) {
-
-  if (id != 0) {
-    // sleep(5);
-  }
 
   bindCore(id);
 
   dsm->registerThread();
+
+  uint64_t all_thread = kThreadCount * dsm->getClusterSize();
+  uint64_t my_id = kThreadCount * dsm->getMyNodeID() + id;
+
+  printf("I am %d\n", my_id);
+
+  if (id == 0) {
+    bench_timer.begin();
+  }
+
+  for (uint64_t i = 1; i < kKeySpace; ++i) {
+    if (i % all_thread == my_id) {
+      tree->insert(to_key(i), i * 2);
+    }
+  }
+
+  warmup_cnt.fetch_add(1);
+
+  if (id == 0) {
+    while (warmup_cnt.load() != kThreadCount)
+      ;
+    printf("node %d finish\n", dsm->getMyNodeID());
+    dsm->barrier("warm_finish");
+  
+    uint64_t ns = bench_timer.end();
+    printf("warmup time %lds\n", ns / 1000 / 1000 / 1000);
+
+    tree->index_cache_statistics();
+    tree->clear_statistics();
+
+    ready = true;
+
+    warmup_cnt.store(0);
+  }
+
+  while (warmup_cnt.load() != 0)
+    ;
 
 #ifdef USE_CORO
   tree->run_coroutine(coro_func, id, kCoroCnt);
@@ -107,7 +147,7 @@ void thread_run(int id) {
 
     uint64_t dis = mehcached_zipf_next(&state);
 
-    uint64_t key = CityHash64((char *)&dis, sizeof(dis)) + 1;
+    uint64_t key = to_key(dis);
 
     // timer.begin();
     // tree->lock_bench(key);
@@ -136,36 +176,6 @@ void thread_run(int id) {
   }
 
 #endif
-}
-
-void warm_up() {
-
-  // return;
-  // if (dsm->getMyNodeID() == 0) {
-  for (uint64_t i = 0; i < kKeySpace; ++i) {
-    auto k = CityHash64((char *)&i, sizeof(i)) + 1;
-    if (k % dsm->getClusterSize() == dsm->getMyNodeID()) {
-      tree->insert(k, 12);
-    }
-    // }
-    //
-  }
-
-  dsm->barrier("start-cache");
-  tree->print_and_check_tree();
-
-  dsm->barrier("end-cache");
-
-  if (dsm->getMyNodeID() == 0) {
-    for (uint64_t i = 0; i < 25; ++i) {
-      auto k = CityHash64((char *)&i, sizeof(i)) + 1;
-      std::cout << tree->query_cache(k) << "\t";
-    }
-    printf("\n");
-  }
-
-  dsm->barrier("end-print");
-  // printf("End warmup\n");
 }
 
 void parse_args(int argc, char *argv[]) {
@@ -237,13 +247,20 @@ int main(int argc, char *argv[]) {
   dsm->registerThread();
   tree = new Tree(dsm);
 
-  warm_up();
+  if (dsm->getMyNodeID() == 0) {
+    for (uint64_t i = 1; i < 102400; ++i) {
+      tree->insert(to_key(i), i * 2);
+    }
+  }
 
   dsm->barrier("benchmark");
 
   for (int i = 0; i < kThreadCount; i++) {
     th[i] = std::thread(thread_run, i);
   }
+
+  while (!ready.load())
+    ;
 
   timespec s, e;
   uint64_t pre_tp = 0;
