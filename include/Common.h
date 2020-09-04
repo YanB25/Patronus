@@ -1,19 +1,17 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#include <atomic>
+#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-
-#include <atomic>
-#include <bitset>
 #include <limits>
 
 #include "Debug.h"
 #include "HugePageAlloc.h"
 #include "Rdma.h"
-
 #include "Statistics.h"
 #include "WRLock.h"
 
@@ -36,7 +34,7 @@
 #define LATENCY_WINDOWS 1000000
 
 #define STRUCT_OFFSET(type, field) \
-    (char *)&((type *)(0))->field - (char *)((type *)(0))
+    (char *) &((type *) (0))->field - (char *) ((type *) (0))
 
 #define MAX_MACHINE 8
 
@@ -85,7 +83,6 @@ struct CoroContext
 
 namespace define
 {
-
 constexpr uint64_t MB = 1024ull * 1024;
 constexpr uint64_t GB = 1024ull * MB;
 constexpr uint16_t kCacheLineSize = 64;
@@ -119,7 +116,7 @@ static inline unsigned long long asm_rdtsc(void)
 {
     unsigned hi, lo;
     __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-    return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
+    return ((unsigned long long) lo) | (((unsigned long long) hi) << 32);
 }
 
 // For Tree
@@ -135,17 +132,30 @@ __inline__ unsigned long long rdtsc(void)
 {
     unsigned hi, lo;
     __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-    return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
+    return ((unsigned long long) lo) | (((unsigned long long) hi) << 32);
 }
 
 inline void mfence()
 {
-    asm volatile("mfence" :: : "memory");
+    asm volatile("mfence" ::: "memory");
 }
 
 inline void compiler_barrier()
 {
-    asm volatile("" :: : "memory");
+    asm volatile("" ::: "memory");
 }
+
+/**
+ * It's c++ 11, so implement my make_unique
+ */
+namespace future
+{
+template <typename T, typename... Args>
+std::unique_ptr<T> make_unique(Args &&... args)
+{
+    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+
+}  // namespace future
 
 #endif /* __COMMON_H__ */

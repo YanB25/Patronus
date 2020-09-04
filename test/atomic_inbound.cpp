@@ -1,8 +1,8 @@
+#include <thread>
+
 #include "DSM.h"
 #include "Timer.h"
 #include "zipf.h"
-
-#include <thread>
 
 /*
 ./restartMemc.sh && /usr/local/openmpi/bin/mpiexec --allow-run-as-root -hostfile
@@ -15,7 +15,7 @@ const int kBucketPerThread = 32;
 std::thread th[kMaxTestThread];
 uint64_t tp_counter[kMaxTestThread][8];
 uint64_t tp_write_counter[kMaxTestThread][8];
-DSM *dsm;
+std::shared_ptr<DSM> dsm;
 
 int node_nr, my_node;
 int thread_nr;
@@ -30,7 +30,7 @@ void send_cas(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    uint64_t *buffer = (uint64_t *)dsm->get_rdma_buffer();
+    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer();
     size_t buffer_size = sizeof(uint64_t) * kBucketPerThread;
 
     GlobalAddress gaddr;
@@ -41,7 +41,7 @@ void send_cas(int node_id, int thread_id)
 
     memset(buffer, 0, buffer_size);
     gaddr.offset = offset_start;
-    dsm->write_sync((char *)buffer, gaddr, buffer_size);
+    dsm->write_sync((char *) buffer, gaddr, buffer_size);
 
     uint64_t new_val = 0;
     while (true)
@@ -78,7 +78,6 @@ void send_cas(int node_id, int thread_id)
 
 void send_skew_cas(int node_id, int thread_id)
 {
-
     const int kCounterBucket = 4096;
     const uint64_t seed = time(nullptr);
 
@@ -90,7 +89,7 @@ void send_skew_cas(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    uint64_t *buffer = (uint64_t *)dsm->get_rdma_buffer();
+    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer();
     size_t buffer_size = sizeof(uint64_t) * kCounterBucket;
 
     GlobalAddress gaddr;
@@ -98,7 +97,7 @@ void send_skew_cas(int node_id, int thread_id)
 
     memset(buffer, 0, buffer_size);
     gaddr.offset = 0;
-    dsm->write_sync((char *)buffer, gaddr, buffer_size);
+    dsm->write_sync((char *) buffer, gaddr, buffer_size);
 
     while (true)
     {
@@ -128,7 +127,6 @@ void send_skew_cas(int node_id, int thread_id)
 
 void send_write(int node_id, int thread_id)
 {
-
     const int kDifferLocation = 256;
 
     bindCore(thread_id);
@@ -206,7 +204,6 @@ void read_args(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-
     bindCore(0);
 
     read_args(argc, argv);

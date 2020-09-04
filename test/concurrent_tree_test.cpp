@@ -1,17 +1,17 @@
+#include <thread>
+
 #include "DSM.h"
 #include "Tree.h"
-#include <thread>
 
 constexpr uint64_t kTestKeySpace = 100000000ull;
 constexpr int kNodeNum = 1;
 constexpr int kThreadNum = 1;
 
 Tree *tree;
-DSM *dsm;
+std::shared_ptr<DSM> dsm;
 
 void test(int id)
 {
-
     if (dsm->getMyNodeID() == 0)
     {
         while (true)
@@ -26,7 +26,7 @@ void test(int id)
     Value v;
     for (uint64_t i = 1; i < kTestKeySpace; ++i)
     {
-        if (i % all_thread == (uint64_t)mod)
+        if (i % all_thread == (uint64_t) mod)
         {
             tree->insert(i, i * 2);
             auto res = tree->search(i, v);
@@ -45,7 +45,6 @@ void test(int id)
 
 int main()
 {
-
     DSMConfig config;
     config.machineNR = kNodeNum;
     dsm = DSM::getInstance(config);

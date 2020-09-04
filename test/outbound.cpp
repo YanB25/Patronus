@@ -1,15 +1,15 @@
+#include <thread>
+
 #include "DSM.h"
 #include "Timer.h"
 #include "zipf.h"
-
-#include <thread>
 
 const int kMaxTestThread = 24;
 const int kBucketPerThread = 32;
 
 std::thread th[kMaxTestThread];
 uint64_t tp_write_counter[kMaxTestThread][8];
-DSM *dsm;
+std::shared_ptr<DSM> dsm{nullptr};
 
 int node_nr, my_node;
 int thread_nr;
@@ -17,7 +17,6 @@ int kPacketSize = 16;
 
 void send_write(int node_id, int thread_id)
 {
-
     const int kDifferLocation = 256;
 
     bindCore(thread_id);
@@ -76,7 +75,6 @@ void read_args(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-
     bindCore(0);
 
     read_args(argc, argv);

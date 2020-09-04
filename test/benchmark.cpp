@@ -1,13 +1,14 @@
+#include <city.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <thread>
+#include <vector>
+
 #include "Timer.h"
 #include "Tree.h"
 #include "zipf.h"
-
-#include <city.h>
-#include <stdlib.h>
-#include <thread>
-#include <time.h>
-#include <unistd.h>
-#include <vector>
 
 // #define USE_CORO
 const int kCoroCnt = 6;
@@ -38,16 +39,15 @@ extern uint64_t latency[MAX_APP_THREAD][LATENCY_WINDOWS];
 uint64_t latency_th_all[LATENCY_WINDOWS];
 
 Tree *tree;
-DSM *dsm;
+std::shared_ptr<DSM> dsm{nullptr};
 
 inline Key to_key(uint64_t k)
 {
-    return (CityHash64((char *)&k, sizeof(k)) + 1) % kKeySpace;
+    return (CityHash64((char *) &k, sizeof(k)) + 1) % kKeySpace;
 }
 
 class RequsetGenBench : public RequstGen
 {
-
 public:
     RequsetGenBench(int coro_id, DSM *dsm, int id)
         : coro_id(coro_id), dsm(dsm), id(id)
@@ -92,7 +92,6 @@ std::atomic<int64_t> warmup_cnt{0};
 std::atomic_bool ready{false};
 void thread_run(int id)
 {
-
     bindCore(id);
 
     dsm->registerThread();
@@ -100,7 +99,7 @@ void thread_run(int id)
     uint64_t all_thread = kThreadCount * dsm->getClusterSize();
     uint64_t my_id = kThreadCount * dsm->getMyNodeID() + id;
 
-    printf("I am %llu\n", (unsigned long long)my_id);
+    printf("I am %llu\n", (unsigned long long) my_id);
 
     if (id == 0)
     {
@@ -152,7 +151,6 @@ void thread_run(int id)
     Timer timer;
     while (true)
     {
-
         if (need_stop)
         {
             while (true)
@@ -269,7 +267,6 @@ void cal_latency()
 
 int main(int argc, char *argv[])
 {
-
     parse_args(argc, argv);
 
     DSMConfig config;
@@ -310,11 +307,10 @@ int main(int argc, char *argv[])
     clock_gettime(CLOCK_REALTIME, &s);
     while (true)
     {
-
         sleep(2);
         clock_gettime(CLOCK_REALTIME, &e);
         int microseconds = (e.tv_sec - s.tv_sec) * 1000000 +
-                           (double)(e.tv_nsec - s.tv_nsec) / 1000;
+                           (double) (e.tv_nsec - s.tv_nsec) / 1000;
 
         uint64_t all_tp = 0;
         for (int i = 0; i < kThreadCount; ++i)

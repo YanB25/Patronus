@@ -1,11 +1,13 @@
 #if !defined(_TREE_H_)
 #define _TREE_H_
 
-#include "DSM.h"
-#include <atomic>
 #include <city.h>
+
+#include <atomic>
 #include <functional>
 #include <iostream>
+
+#include "DSM.h"
 
 class IndexCache;
 
@@ -48,9 +50,8 @@ class InternalPage;
 class LeafPage;
 class Tree
 {
-
 public:
-    Tree(DSM *dsm, uint16_t tree_id = 0);
+    Tree(std::shared_ptr<DSM> dsm, uint16_t tree_id = 0);
 
     void insert(const Key &k,
                 const Value &v,
@@ -73,7 +74,7 @@ public:
     void clear_statistics();
 
 private:
-    DSM *dsm;
+    std::shared_ptr<DSM> dsm;
     uint64_t tree_id;
     GlobalAddress root_ptr_ptr;  // the address which stores root pointer;
 
@@ -207,7 +208,7 @@ public:
     {
         std::cout << "leftmost=" << leftmost_ptr << ", "
                   << "sibling=" << sibling_ptr << ", "
-                  << "level=" << (int)level << ","
+                  << "level=" << (int) level << ","
                   << "cnt=" << last_index + 1 << ","
                   << "range=[" << lowest << " - " << highest << "]";
     }
@@ -306,17 +307,16 @@ public:
         front_version++;
         rear_version = front_version;
 #ifdef CONFIG_ENABLE_CRC
-        this->crc = CityHash32((char *)&front_version,
+        this->crc = CityHash32((char *) &front_version,
                                (&rear_version) - (&front_version));
 #endif
     }
 
     bool check_consistent() const
     {
-
         bool succ = true;
 #ifdef CONFIG_ENABLE_CRC
-        auto cal_crc = CityHash32((char *)&front_version,
+        auto cal_crc = CityHash32((char *) &front_version,
                                   (&rear_version) - (&front_version));
         succ = cal_crc == this->crc;
 #endif
@@ -332,8 +332,8 @@ public:
     {
         std::cout << "InternalPage@ ";
         hdr.debug();
-        std::cout << "version: [" << (int)front_version << ", "
-                  << (int)rear_version << "]" << std::endl;
+        std::cout << "version: [" << (int) front_version << ", "
+                  << (int) rear_version << "]" << std::endl;
     }
 
     void verbose_debug() const
@@ -383,17 +383,16 @@ public:
         front_version++;
         rear_version = front_version;
 #ifdef CONFIG_ENABLE_CRC
-        this->crc = CityHash32((char *)&front_version,
+        this->crc = CityHash32((char *) &front_version,
                                (&rear_version) - (&front_version));
 #endif
     }
 
     bool check_consistent() const
     {
-
         bool succ = true;
 #ifdef CONFIG_ENABLE_CRC
-        auto cal_crc = CityHash32((char *)&front_version,
+        auto cal_crc = CityHash32((char *) &front_version,
                                   (&rear_version) - (&front_version));
         succ = cal_crc == this->crc;
 #endif
@@ -411,8 +410,8 @@ public:
     {
         std::cout << "LeafPage@ ";
         hdr.debug();
-        std::cout << "version: [" << (int)front_version << ", "
-                  << (int)rear_version << "]" << std::endl;
+        std::cout << "version: [" << (int) front_version << ", "
+                  << (int) rear_version << "]" << std::endl;
     }
 
 } __attribute__((packed));

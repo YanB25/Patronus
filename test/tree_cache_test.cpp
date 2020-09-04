@@ -1,11 +1,10 @@
-#include "DSM.h"
-#include "Tree.h"
-
-#include "Timer.h"
-
 #include <thread>
 
-DSM *dsm;
+#include "DSM.h"
+#include "Timer.h"
+#include "Tree.h"
+
+std::shared_ptr<DSM> dsm;
 Tree *tree;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
@@ -17,7 +16,7 @@ const int kThread = 20;
 
 inline Key to_key(uint64_t k)
 {
-    return (CityHash64((char *)&k, sizeof(k)) + 1) % kSpace;
+    return (CityHash64((char *) &k, sizeof(k)) + 1) % kSpace;
 }
 
 void cal_hit()
@@ -37,7 +36,6 @@ void cal_hit()
 
 void run_warmup(int id)
 {
-
     dsm->registerThread();
     for (uint64_t i = 1; i < kSpace; ++i)
     {
@@ -50,7 +48,6 @@ void run_warmup(int id)
 
 int main()
 {
-
     DSMConfig config;
     config.machineNR = 2;
     dsm = DSM::getInstance(config);

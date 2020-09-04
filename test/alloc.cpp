@@ -2,10 +2,9 @@
 
 int main()
 {
-
     DSMConfig config;
     config.machineNR = 2;
-    DSM *dsm = DSM::getInstance(config);
+    auto dsm = DSM::getInstance(config);
 
     sleep(4);
 

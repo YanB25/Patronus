@@ -14,7 +14,7 @@ int main()
     DSMConfig config;
     config.machineNR = kMachineNr;
 
-    DSM *dsm = DSM::getInstance(config);
+    auto dsm = DSM::getInstance(config);
 
     sleep(1);
 
@@ -71,10 +71,8 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res =
-                dsm->cas_sync(gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
+            dsm->cas_sync(gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
 
-            assert(res);
             cur_val++;
         }
         timer.end_print(loop);
@@ -83,10 +81,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res =
-                dsm->cas_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
-
-            assert(!res);
+            dsm->cas_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
         }
         timer.end_print(loop);
 
@@ -94,10 +89,9 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res = dsm->cas_mask_sync(
+            dsm->cas_mask_sync(
                 gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
 
-            assert(res);
             cur_val++;
         }
         timer.end_print(loop);
@@ -106,10 +100,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res =
-                dsm->cas_mask_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
-
-            assert(!res);
+            dsm->cas_mask_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
         }
         timer.end_print(loop);
 
@@ -132,9 +123,8 @@ int main()
         {
             auto cas_ror_input = cas_ror;
             auto read_ror_input = read_ror;
-            bool res = dsm->cas_read_sync(
+            dsm->cas_read_sync(
                 cas_ror_input, read_ror_input, cur_val, cur_val + 1);
-            // assert(res);
             cur_val++;
         }
         timer.end_print(loop);
@@ -237,10 +227,8 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res = dsm->cas_dm_sync(
-                gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
+            dsm->cas_dm_sync(gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
 
-            assert(res);
             cur_val++;
         }
         timer.end_print(loop);
@@ -249,10 +237,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res =
-                dsm->cas_dm_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
-
-            assert(!res);
+            dsm->cas_dm_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
         }
         timer.end_print(loop);
 
@@ -260,10 +245,9 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res = dsm->cas_dm_mask_sync(
+            dsm->cas_dm_mask_sync(
                 gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
 
-            assert(res);
             cur_val++;
         }
         timer.end_print(loop);
@@ -272,10 +256,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res = dsm->cas_dm_mask_sync(
-                gaddr, 1, cur_val + 1, (uint64_t *) buffer);
-
-            assert(!res);
+            dsm->cas_dm_mask_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
         }
         timer.end_print(loop);
 

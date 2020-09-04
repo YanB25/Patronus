@@ -2,10 +2,9 @@
 
 int main()
 {
-
     DSMConfig config;
     config.machineNR = 2;
-    DSM *dsm = DSM::getInstance(config);
+    auto dsm = DSM::getInstance(config);
 
     sleep(1);
 
@@ -40,26 +39,25 @@ int main()
         }
         printf("\n");
 
-        *(uint64_t *)buffer = 123;
+        *(uint64_t *) buffer = 123;
         dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
         buffer += 12;
 
         buffer += 12;
-        bool res = dsm->cas_mask_sync(gaddr, 1, 0, (uint64_t *)buffer, 1);
+        bool res = dsm->cas_mask_sync(gaddr, 1, 0, (uint64_t *) buffer, 1);
 
         assert(res);
-        printf("%ld\n", *(uint64_t *)buffer);
+        printf("%ld\n", *(uint64_t *) buffer);
 
         buffer += 12;
         dsm->read_sync(buffer, gaddr, sizeof(uint64_t));
-        printf("read %ld\n", *(uint64_t *)buffer);
+        printf("read %ld\n", *(uint64_t *) buffer);
 
         for (int i = 0; i < 16; ++i)
         {
-
-            *(uint64_t *)buffer = 0;
-            dsm->faa_boundary_sync(gaddr, 1, (uint64_t *)buffer, 2);
-            printf("faa %ld\n", *(uint64_t *)buffer);
+            *(uint64_t *) buffer = 0;
+            dsm->faa_boundary_sync(gaddr, 1, (uint64_t *) buffer, 2);
+            printf("faa %ld\n", *(uint64_t *) buffer);
         }
     }
 

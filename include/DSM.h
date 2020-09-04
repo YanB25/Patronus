@@ -16,10 +16,9 @@ class Directory;
 
 class DSM
 {
-
 public:
     void registerThread();
-    static DSM *getInstance(const DSMConfig &conf);
+    static std::shared_ptr<DSM> getInstance(const DSMConfig &conf);
 
     uint16_t getMyNodeID()
     {
@@ -206,15 +205,13 @@ public:
     // Memcached operations for sync
     size_t Put(uint64_t key, const void *value, size_t count)
     {
-
         std::string k = std::string("gam-") + std::to_string(key);
-        keeper->memSet(k.c_str(), k.size(), (char *)value, count);
+        keeper->memSet(k.c_str(), k.size(), (char *) value, count);
         return count;
     }
 
     size_t Get(uint64_t key, void *value)
     {
-
         std::string k = std::string("gam-") + std::to_string(key);
         size_t size;
         char *ret = keeper->memGet(k.c_str(), k.size(), &size);
@@ -223,10 +220,10 @@ public:
         return size;
     }
 
-private:
     DSM(const DSMConfig &conf);
     ~DSM();
 
+private:
     void initRDMAConnection();
     void fill_keys_dest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip);
 
@@ -277,8 +274,7 @@ public:
                       uint16_t node_id,
                       uint16_t dir_id = 0)
     {
-
-        auto buffer = (RawMessage *)iCon->message->getSendPool();
+        auto buffer = (RawMessage *) iCon->message->getSendPool();
 
         memcpy(buffer, &m, sizeof(RawMessage));
         buffer->node_id = myNodeID;
@@ -292,13 +288,12 @@ public:
         ibv_wc wc;
 
         pollWithCQ(iCon->rpc_cq, 1, &wc);
-        return (RawMessage *)iCon->message->getMessage();
+        return (RawMessage *) iCon->message->getMessage();
     }
 };
 
 inline GlobalAddress DSM::alloc(size_t size)
 {
-
     thread_local int next_target_node =
         (getMyThreadID() + getMyNodeID()) % conf.machineNR;
     thread_local int next_target_dir_id =

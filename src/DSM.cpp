@@ -2,6 +2,7 @@
 #include "DSM.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "DSMKeeper.h"
 #include "Directory.h"
@@ -14,22 +15,9 @@ thread_local LocalAllocator DSM::local_allocator;
 thread_local RdmaBuffer DSM::rbuf[define::kMaxCoro];
 thread_local uint64_t DSM::thread_tag = 0;
 
-DSM *DSM::getInstance(const DSMConfig &conf)
+std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
 {
-    static DSM *dsm = nullptr;
-    static WRLock lock;
-
-    lock.wLock();
-    if (!dsm)
-    {
-        dsm = new DSM(conf);
-    }
-    else
-    {
-    }
-    lock.wUnlock();
-
-    return dsm;
+    return future::make_unique<DSM>(conf);
 }
 
 DSM::DSM(const DSMConfig &conf) : conf(conf), appID(0), cache(conf.cacheConfig)

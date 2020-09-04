@@ -1,12 +1,12 @@
-#include "DSM.h"
 #include "Tree.h"
+
+#include "DSM.h"
 
 int main()
 {
-
     DSMConfig config;
     config.machineNR = 2;
-    DSM *dsm = DSM::getInstance(config);
+    auto dsm = DSM::getInstance(config);
 
     dsm->registerThread();
 
