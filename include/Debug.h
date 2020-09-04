@@ -1,3 +1,12 @@
+/*
+ * @Author: your name
+ * @Date: 2020-09-04 15:49:10
+ * @LastEditTime: 2020-09-04 17:09:01
+ * @LastEditors: Please set LastEditors
+ * @Description: In User Settings Edit
+ * @FilePath: /Sherman/include/Debug.h
+ * @file Debug util functions
+ */
 /*** Debug header. ***/
 
 /** Version 1 + Functional Model Modification **/
@@ -7,8 +16,8 @@
 #define DEBUG_HEADER
 
 /** Included files. **/
-#include <stdio.h>    /* Standard I/O operations. E.g. vprintf() */
 #include <stdarg.h>   /* Standard argument operations. E.g. va_list */
+#include <stdio.h>    /* Standard I/O operations. E.g. vprintf() */
 #include <sys/time.h> /* Time functions. E.g. gettimeofday() */
 
 /** Defninitions. **/
@@ -39,6 +48,13 @@ public:
     static void startTimer(const char *); /* Start timer and display
                                              information. */
     static void endTimer(); /* End timer and display information. */
+
+    static void check(bool cond,
+                      const char *format,
+                      ...); /* check that an assertion holds */
+    static void dcheck(bool cond,
+                       const char *format,
+                       ...); /* check that an assertion holds on debug mode */
 };
 
 /** Redundance check. **/

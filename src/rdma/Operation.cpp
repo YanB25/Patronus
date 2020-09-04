@@ -3,15 +3,16 @@
 int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
 {
     int count = 0;
+    Debug::dcheck(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
 
     do
     {
-
         int new_count = ibv_poll_cq(cq, 1, wc);
         count += new_count;
 
     } while (count < pollNumber);
 
+    // TODO(yanbin): why count < 0?
     if (count < 0)
     {
         Debug::notifyError("Poll Completion failed.");
@@ -24,7 +25,7 @@ int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
         Debug::notifyError("Failed status %s (%d) for wr_id %d",
                            ibv_wc_status_str(wc->status),
                            wc->status,
-                           (int)wc->wr_id);
+                           (int) wc->wr_id);
         sleep(5);
         return -1;
     }
@@ -44,7 +45,7 @@ int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
         Debug::notifyError("Failed status %s (%d) for wr_id %d",
                            ibv_wc_status_str(wc->status),
                            wc->status,
-                           (int)wc->wr_id);
+                           (int) wc->wr_id);
         return -1;
     }
     else
@@ -52,12 +53,14 @@ int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
         return count;
     }
 }
-
+/**
+ * @brief fill SGE and WR and links the SGE to the WR
+ */
 static inline void fillSgeWr(
     ibv_sge &sg, ibv_send_wr &wr, uint64_t source, uint64_t size, uint32_t lkey)
 {
     memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t)source;
+    sg.addr = (uintptr_t) source;
     sg.length = size;
     sg.lkey = lkey;
 
@@ -71,7 +74,7 @@ static inline void fillSgeWr(
     ibv_sge &sg, ibv_recv_wr &wr, uint64_t source, uint64_t size, uint32_t lkey)
 {
     memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t)source;
+    sg.addr = (uintptr_t) source;
     sg.length = size;
     sg.lkey = lkey;
 
@@ -88,7 +91,7 @@ static inline void fillSgeWr(ibv_sge &sg,
                              uint32_t lkey)
 {
     memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t)source;
+    sg.addr = (uintptr_t) source;
     sg.length = size;
     sg.lkey = lkey;
 
@@ -107,7 +110,6 @@ bool rdmaSend(ibv_qp *qp,
               uint32_t remoteQPN /* remote dct_number */,
               bool isSignaled)
 {
-
     struct ibv_sge sg;
     struct ibv_send_wr wr;
     struct ibv_send_wr *wrBad;
@@ -121,7 +123,9 @@ bool rdmaSend(ibv_qp *qp,
     wr.wr.ud.remote_qkey = UD_PKEY;
 
     if (isSignaled)
+    {
         wr.send_flags = IBV_SEND_SIGNALED;
+    }
     if (ibv_post_send(qp, &wr, &wrBad))
     {
         Debug::notifyError("Send with RDMA_SEND failed.");
@@ -134,7 +138,6 @@ bool rdmaSend(ibv_qp *qp,
 bool rdmaSend(
     ibv_qp *qp, uint64_t source, uint64_t size, uint32_t lkey, int32_t imm)
 {
-
     struct ibv_sge sg;
     struct ibv_send_wr wr;
     struct ibv_send_wr *wrBad;
@@ -181,7 +184,6 @@ bool rdmaReceive(
 
 bool rdmaReceive(ibv_srq *srq, uint64_t source, uint64_t size, uint32_t lkey)
 {
-
     struct ibv_sge sg;
     struct ibv_recv_wr wr;
     struct ibv_recv_wr *wrBad;
@@ -284,7 +286,6 @@ bool rdmaWrite(ibv_qp *qp,
                bool isSignaled,
                uint64_t wrID)
 {
-
     struct ibv_sge sg;
     struct ibv_send_wr wr;
     struct ibv_send_wr *wrBad;
@@ -330,7 +331,6 @@ bool rdmaWrite(ibv_qp *qp,
                uint32_t remoteDctNumber,
                int32_t imm)
 {
-
     struct ibv_sge sg;
     struct ibv_exp_send_wr wr;
     struct ibv_exp_send_wr *wrBad;
@@ -591,6 +591,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 bool rdmaWriteBatch(
     ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled, uint64_t wrID)
 {
+    Debug::dcheck(k < kOroMax, "overflow detected at k = %d", k);
 
     struct ibv_sge sg[kOroMax];
     struct ibv_send_wr wr[kOroMax];
@@ -631,7 +632,6 @@ bool rdmaCasRead(ibv_qp *qp,
                  bool isSignaled,
                  uint64_t wrID)
 {
-
     struct ibv_sge sg[2];
     struct ibv_send_wr wr[2];
     struct ibv_send_wr *wrBad;
@@ -664,6 +664,9 @@ bool rdmaCasRead(ibv_qp *qp,
     return true;
 }
 
+/**
+ * @brief rdma Write and Fetch and Add
+ */
 bool rdmaWriteFaa(ibv_qp *qp,
                   const RdmaOpRegion &write_ror,
                   const RdmaOpRegion &faa_ror,
@@ -671,7 +674,6 @@ bool rdmaWriteFaa(ibv_qp *qp,
                   bool isSignaled,
                   uint64_t wrID)
 {
-
     struct ibv_sge sg[2];
     struct ibv_send_wr wr[2];
     struct ibv_send_wr *wrBad;
@@ -711,7 +713,6 @@ bool rdmaWriteCas(ibv_qp *qp,
                   bool isSignaled,
                   uint64_t wrID)
 {
-
     struct ibv_sge sg[2];
     struct ibv_send_wr wr[2];
     struct ibv_send_wr *wrBad;

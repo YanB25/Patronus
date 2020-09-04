@@ -14,11 +14,13 @@ void Debug::debugTitle(const char *str)
         printf("\033[0;45;1m%s\033[0m\n", str); /* Print debug title string. */
 }
 
-/* Print debug item string. Can be used in a formatted style like a printf().
+/**
+ * Print debug item string. Can be used in a formatted style like a printf().
    @param   format  Format of debug item. Same as printf().
                     POTENTIALPROBLEM: the length of format can not exceed
    MAX_FORMAT_LEN - 1, but there is no check.
-   @param   ...     Other argument variables to print. Same as printf(). */
+   @param   ...     Other argument variables to print. Same as printf().
+   */
 void Debug::debugItem(const char *format, ...)
 {
     char newFormat[MAX_FORMAT_LEN];
@@ -95,7 +97,7 @@ void Debug::startTimer(const char *timerName)
     struct timezone tz;
     gettimeofday(&tv, &tz); /* Get start time. */
     if (TIMER == true)
-    {/* If debug option is set. */
+    { /* If debug option is set. */
         // printf("%s is started.\n", timerName);
         Debug::startTime = tv.tv_sec * 1000 * 1000 +
                            tv.tv_usec; /* Convert to milliseconds and save. */
@@ -110,11 +112,43 @@ void Debug::endTimer()
     gettimeofday(&tv, &tz); /* Get end time. */
     long endTime;
     if (TIMER == true)
-    {/* If debug option is set. */
+    { /* If debug option is set. */
         endTime =
             tv.tv_sec * 1000 * 1000 + tv.tv_usec; /* Convert to milliseconds. */
         printf("Timer is ended. Cost %ld us.\n", (endTime - Debug::startTime));
     }
+}
+
+void Debug::check(bool cond, const char *format, ...)
+{
+    char newFormat[MAX_FORMAT_LEN];
+    if (!cond)
+    {
+        va_list args;
+        va_start(args, format); /* Start of variable arguments. */
+
+        sprintf(newFormat, "%s\n", format); /* Wrap format in a style. */
+        vprintf(newFormat, args);           /* Print string of debug item. */
+
+        va_end(args); /* End of variable arguments. */
+    }
+}
+void Debug::dcheck(bool cond, const char *foramt, ...)
+{
+#ifndef NDEBUG
+    char newFormat[MAX_FORMAT_LEN];
+    if (!cond)
+    {
+        va_list args;
+        va_start(args, format); /* Start of variable arguments. */
+
+        sprintf(newFormat, "%s\n", format); /* Wrap format in a style. */
+        vprintf(newFormat, args);           /* Print string of debug item. */
+
+        va_end(args); /* End of variable arguments. */
+    }
+
+#endif
 }
 
 /** Variables. **/

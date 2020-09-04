@@ -1,6 +1,16 @@
 #include "Rdma.h"
 
 // RC & UC
+/**
+ * @brief issue a batch of send
+ * @param qp
+ * @param regions a list of @see Region
+ * @param lkey
+ * @param signalBatch
+ * @param counter the counter of every passed requests
+ * @param isInline
+ * @param imm
+ */
 bool rdmaBatchSend(ibv_qp *qp,
                    const std::list<Region> &regions,
                    uint32_t lkey,
@@ -9,7 +19,6 @@ bool rdmaBatchSend(ibv_qp *qp,
                    bool isInline,
                    int32_t imm)
 {
-
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_send_wr send_wr[MAX_POST_LIST];
     struct ibv_send_wr *wrBad;
@@ -71,7 +80,6 @@ bool rdmaBatchSend(ibv_qp *qp,
                    bool isInline,
                    int32_t imm)
 {
-
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_exp_send_wr send_wr[MAX_POST_LIST];
     struct ibv_exp_send_wr *wrBad;
@@ -146,7 +154,6 @@ bool rdmaBatchReceive(ibv_qp *qp,
     uint32_t batchSize = regions.size();
     for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
     {
-
         sgl[w_i].addr = iter->source;
         sgl[w_i].length = iter->size;
         sgl[w_i].lkey = lkey;
@@ -167,7 +174,6 @@ bool rdmaBatchReceive(ibv_srq *srq,
                       const std::list<Region> &regions,
                       uint32_t lkey)
 {
-
     struct ibv_recv_wr recv_wr[MAX_POST_LIST], *bad_recv_wr;
     struct ibv_sge sgl[MAX_POST_LIST];
 
@@ -175,7 +181,6 @@ bool rdmaBatchReceive(ibv_srq *srq,
     uint32_t batchSize = regions.size();
     for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
     {
-
         sgl[w_i].addr = iter->source;
         sgl[w_i].length = iter->size;
         sgl[w_i].lkey = lkey;
@@ -209,7 +214,6 @@ bool rdmaBatchRead(ibv_qp *qp,
                    uint32_t remoteRKey,
                    bool isInline)
 {
-
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_send_wr send_wr[MAX_POST_LIST];
     struct ibv_send_wr *wrBad;
@@ -266,7 +270,6 @@ bool rdmaBatchRead(ibv_qp *qp,
                    uint32_t remoteDctNumber,
                    bool isInline)
 {
-
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_exp_send_wr send_wr[MAX_POST_LIST];
     struct ibv_exp_send_wr *wrBad;
@@ -276,6 +279,9 @@ bool rdmaBatchRead(ibv_qp *qp,
     uint32_t batchSize = regions.size();
     for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
     {
+        // TODO:
+        // why we need to pollwithcq and why the condition is counter &
+        // signalBatch
         if ((counter & signalBatch) == 0 && counter > 0)
         {
             pollWithCQ(qp->send_cq, 1, &wc);

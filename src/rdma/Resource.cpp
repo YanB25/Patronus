@@ -5,7 +5,6 @@ bool createContext(RdmaContext *context,
                    int gidIndex,
                    uint8_t devIndex)
 {
-
     ibv_device *dev = NULL;
     ibv_context *ctx = NULL;
     ibv_pd *pd = NULL;
@@ -26,7 +25,7 @@ bool createContext(RdmaContext *context,
         Debug::notifyInfo("found %d device(s)", devicesNum);
         goto CreateResourcesExit;
     }
-    // Debug::notifyInfo("Open IB Device");
+    Debug::notifyInfo("Open IB Device");
 
     for (int i = 0; i < devicesNum; ++i)
     {
@@ -82,6 +81,7 @@ bool createContext(RdmaContext *context,
     }
 
     // Success :)
+    Debug::notifyInfo("setup succeed.");
     context->devIndex = devIndex;
     context->gidIndex = gidIndex;
     context->port = port;
@@ -145,10 +145,9 @@ bool destoryContext(RdmaContext *context)
 
 ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
 {
-
     ibv_mr *mr = NULL;
     mr = ibv_reg_mr(ctx->pd,
-                    (void *)mm,
+                    (void *) mm,
                     mmSize,
                     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                         IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC);
@@ -163,7 +162,6 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
 
 ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
 {
-
     /* Device memory allocation request */
     struct ibv_exp_alloc_dm_attr dm_attr;
     memset(&dm_attr, 0, sizeof(dm_attr));
@@ -178,7 +176,7 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     /* Device memory registration as memory region */
     struct ibv_exp_reg_mr_in mr_in;
     memset(&mr_in, 0, sizeof(mr_in));
-    mr_in.pd = ctx->pd, mr_in.addr = (void *)mm, mr_in.length = mmSize,
+    mr_in.pd = ctx->pd, mr_in.addr = (void *) mm, mr_in.length = mmSize,
     mr_in.exp_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                        IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
     mr_in.create_flags = 0;
@@ -192,13 +190,13 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     }
 
     // init zero
-    char *buffer = (char *)malloc(mmSize);
+    char *buffer = (char *) malloc(mmSize);
     memset(buffer, 0, mmSize);
 
     struct ibv_exp_memcpy_dm_attr cpy_attr;
     memset(&cpy_attr, 0, sizeof(cpy_attr));
     cpy_attr.memcpy_dir = IBV_EXP_DM_CPY_TO_DEVICE;
-    cpy_attr.host_addr = (void *)buffer;
+    cpy_attr.host_addr = (void *) buffer;
     cpy_attr.length = mmSize;
     cpy_attr.dm_offset = 0;
     ibv_exp_memcpy_dm(dm, &cpy_attr);
@@ -216,7 +214,6 @@ bool createQueuePair(ibv_qp **qp,
                      uint32_t qpsMaxDepth,
                      uint32_t maxInlineData)
 {
-
     struct ibv_exp_qp_init_attr attr;
     memset(&attr, 0, sizeof(attr));
 
@@ -273,7 +270,6 @@ bool createDCTarget(ibv_exp_dct **dct,
                     uint32_t qpsMaxDepth,
                     uint32_t maxInlineData)
 {
-
     // construct SRQ fot DC Target :)
     struct ibv_srq_init_attr attr;
     memset(&attr, 0, sizeof(attr));
@@ -314,8 +310,7 @@ void fillAhAttr(ibv_ah_attr *attr,
                 uint8_t *remoteGid,
                 RdmaContext *context)
 {
-
-    (void)remoteGid;
+    (void) remoteGid;
 
     memset(attr, 0, sizeof(ibv_ah_attr));
     attr->dlid = remoteLid;

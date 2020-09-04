@@ -1,15 +1,18 @@
+/**
+ * @file rdma
+ */
 #ifndef _RDMA_H__
 #define _RDMA_H__
 
 #define forceinline inline __attribute__((always_inline))
 
 #include <assert.h>
-#include <cstring>
 #include <infiniband/verbs.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <cstring>
 #include <list>
 #include <string>
 
@@ -115,9 +118,35 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                    RdmaContext *context);
 
 //// Operation.cpp
+/**
+ * @brief block and poll the CQ until the specified number
+ * @param cq the CQ to polled with
+ * @param pollNumber the number to poll until returns
+ * @param wc the polling results
+ * @return the number of wc actually polled.
+ */
 int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc);
+/**
+ * @brief non-blocking and try to poll the CQ and return immediately if get
+ * nothing.
+ * @param cq
+ * @param pollNumber to number used to poll with
+ * @param wc the polling results
+ * @return the number of wc actually polled.
+ */
 int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc);
 
+/**
+ * @brief rdma send for UD and DC
+ * @param qp
+ * @param source sge.addr
+ * @param size sge.length
+ * @param lkey sge.lkey
+ * @param ah wr.ud.ah
+ * @param remoeQPN wr.ud.remote_qpn
+ * @param isSignaled
+ * @return whether or not operation succeeds
+ */
 bool rdmaSend(ibv_qp *qp,
               uint64_t source,
               uint64_t size,
@@ -126,18 +155,31 @@ bool rdmaSend(ibv_qp *qp,
               uint32_t remoteQPN,
               bool isSignaled = false);
 
+/**
+ * @brief rdma send for RC and UC
+ * @param imm the immediate number, -1 for null.
+ * @return whether or not operation succeeds.
+ */
 bool rdmaSend(ibv_qp *qp,
               uint64_t source,
               uint64_t size,
               uint32_t lkey,
               int32_t imm = -1);
-
+/**
+ * @brief rdma receive
+ */
 bool rdmaReceive(ibv_qp *qp,
                  uint64_t source,
                  uint64_t size,
                  uint32_t lkey,
                  uint64_t wr_id = 0);
+/**
+ * @brief rdma receive for shared receive queue
+ */
 bool rdmaReceive(ibv_srq *srq, uint64_t source, uint64_t size, uint32_t lkey);
+/**
+ * @brief rdma receive for dct
+ */
 bool rdmaReceive(ibv_exp_dct *dct,
                  uint64_t source,
                  uint64_t size,
@@ -159,7 +201,10 @@ bool rdmaRead(ibv_qp *qp,
               uint32_t remoteRKey,
               ibv_ah *ah,
               uint32_t remoteDctNumber);
-
+/**
+ * @brief rdma write to RC and UC
+ * @param remoteRKey wr.rdma.rkey
+ */
 bool rdmaWrite(ibv_qp *qp,
                uint64_t source,
                uint64_t dest,
@@ -169,6 +214,9 @@ bool rdmaWrite(ibv_qp *qp,
                int32_t imm = -1,
                bool isSignaled = true,
                uint64_t wrID = 0);
+/**
+ * @brief rdma write for dct
+ */
 bool rdmaWrite(ibv_qp *qp,
                uint64_t source,
                uint64_t dest,

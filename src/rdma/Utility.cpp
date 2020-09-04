@@ -1,3 +1,11 @@
+/*
+ * @Author: your name
+ * @Date: 2020-09-04 16:59:56
+ * @LastEditTime: 2020-09-04 17:08:26
+ * @LastEditors: your name
+ * @Description: In User Settings Edit
+ * @FilePath: /Sherman/src/rdma/Utility.cpp
+ */
 #include "Rdma.h"
 
 int kMaxDeviceMemorySize = 0;
@@ -63,48 +71,4 @@ void checkDctSupported(struct ibv_context *ctx)
         printf("NIC Device Memory is %dKB\n", kMaxDeviceMemorySize / 1024);
         // printf("DM %d\n", maxMemic);
     }
-
-    return;
-
-    struct ibv_exp_device_attr dattr;
-    dattr.comp_mask = IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS |
-                      IBV_EXP_DEVICE_DC_RD_REQ | IBV_EXP_DEVICE_DC_RD_RES |
-                      IBV_EXP_DEVICE_ATTR_EXT_ATOMIC_ARGS;
-    int err = ibv_exp_query_device(ctx, &dattr);
-    if (err)
-    {
-        printf("couldn't query device extended attributes\n");
-        assert(false);
-    }
-    else
-    {
-        if (!(dattr.comp_mask & IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS))
-        {
-            printf("no extended capability flgas\n");
-            assert(false);
-        }
-        if (!(dattr.exp_device_cap_flags & IBV_EXP_DEVICE_DC_TRANSPORT))
-        {
-            printf("DC transport not enabled\n");
-            assert(false);
-        }
-
-        if (!(dattr.comp_mask & IBV_EXP_DEVICE_DC_RD_REQ))
-        {
-            printf("no report on max requestor rdma/atomic resources\n");
-            assert(false);
-        }
-
-        if (!(dattr.comp_mask & IBV_EXP_DEVICE_DC_RD_RES))
-        {
-            printf("no report on max responder rdma/atomic resources\n");
-            assert(false);
-        }
-
-        //  if (!(dattr.comp_mask & IBV_EXP_DEVICE_ATTR_MASKED_ATOMICS)) {
-        //     printf("no report on extended atomic\n");
-        //     assert(false);
-        // }
-    }
-    printf("Success\n");
 }
