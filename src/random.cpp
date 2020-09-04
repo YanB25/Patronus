@@ -11,15 +11,17 @@
 #include <thread>
 #include <utility>
 
-Random *Random::GetTLSInstance() {
-  thread_local Random *tls_instance;
-  thread_local std::aligned_storage<sizeof(Random)>::type tls_instance_bytes;
+Random *Random::GetTLSInstance()
+{
+    thread_local Random *tls_instance;
+    thread_local std::aligned_storage<sizeof(Random)>::type tls_instance_bytes;
 
-  auto rv = tls_instance;
-  if (rv == nullptr) {
-    size_t seed = std::hash<std::thread::id>()(std::this_thread::get_id());
-    rv = new (&tls_instance_bytes) Random((uint32_t)seed);
-    tls_instance = rv;
-  }
-  return rv;
+    auto rv = tls_instance;
+    if (rv == nullptr)
+    {
+        size_t seed = std::hash<std::thread::id>()(std::this_thread::get_id());
+        rv = new (&tls_instance_bytes) Random((uint32_t)seed);
+        tls_instance = rv;
+    }
+    return rv;
 }

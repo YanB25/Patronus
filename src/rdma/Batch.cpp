@@ -1,9 +1,14 @@
 #include "Rdma.h"
 
 // RC & UC
-bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
-                   uint32_t signalBatch, uint64_t &counter, bool isInline,
-                   int32_t imm) {
+bool rdmaBatchSend(ibv_qp *qp,
+                   const std::list<Region> &regions,
+                   uint32_t lkey,
+                   uint32_t signalBatch,
+                   uint64_t &counter,
+                   bool isInline,
+                   int32_t imm)
+{
 
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_send_wr send_wr[MAX_POST_LIST];
@@ -12,8 +17,10 @@ bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 
     auto iter = regions.begin();
     uint32_t batchSize = regions.size();
-    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter) {
-        if ((counter & signalBatch) == 0 && counter > 0) {
+    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
+    {
+        if ((counter & signalBatch) == 0 && counter > 0)
+        {
             pollWithCQ(qp->send_cq, 1, &wc);
         }
 
@@ -25,9 +32,12 @@ bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         send_wr[w_i].next = (w_i == batchSize - 1) ? NULL : &send_wr[w_i + 1];
         send_wr[w_i].wr_id = 0;
 
-        if (imm == -1) {
+        if (imm == -1)
+        {
             send_wr[w_i].opcode = IBV_WR_SEND;
-        } else {
+        }
+        else
+        {
             send_wr[w_i].imm_data = imm;
             send_wr[w_i].opcode = IBV_WR_SEND_WITH_IMM;
         }
@@ -35,13 +45,15 @@ bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         send_wr[w_i].send_flags =
             (counter & signalBatch) == 0 ? IBV_SEND_SIGNALED : 0;
 
-        if (isInline) {
+        if (isInline)
+        {
             send_wr[w_i].send_flags |= IBV_SEND_INLINE;
         }
 
         counter += 1;
     }
-    if (ibv_post_send(qp, &send_wr[0], &wrBad)) {
+    if (ibv_post_send(qp, &send_wr[0], &wrBad))
+    {
         Debug::notifyError("Send with RDMA_SEND failed");
         return false;
     }
@@ -49,10 +61,16 @@ bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 }
 
 // UC & DC
-bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
-                   uint32_t signalBatch, uint64_t &counter, ibv_ah *ah,
-                   uint32_t remoteQPN /* remote dct_number */, bool isInline,
-                   int32_t imm) {
+bool rdmaBatchSend(ibv_qp *qp,
+                   const std::list<Region> &regions,
+                   uint32_t lkey,
+                   uint32_t signalBatch,
+                   uint64_t &counter,
+                   ibv_ah *ah,
+                   uint32_t remoteQPN /* remote dct_number */,
+                   bool isInline,
+                   int32_t imm)
+{
 
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_exp_send_wr send_wr[MAX_POST_LIST];
@@ -61,8 +79,10 @@ bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 
     auto iter = regions.begin();
     uint32_t batchSize = regions.size();
-    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter) {
-        if ((counter & signalBatch) == 0 && counter > 0) {
+    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
+    {
+        if ((counter & signalBatch) == 0 && counter > 0)
+        {
             pollWithCQ(qp->send_cq, 1, &wc);
         }
 
@@ -74,19 +94,25 @@ bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         send_wr[w_i].next = (w_i == batchSize - 1) ? NULL : &send_wr[w_i + 1];
         send_wr[w_i].wr_id = 0;
 
-        if (qp->qp_type == IBV_QPT_UD) {
+        if (qp->qp_type == IBV_QPT_UD)
+        {
             send_wr[w_i].wr.ud.ah = ah;
             send_wr[w_i].wr.ud.remote_qpn = remoteQPN;
             send_wr[w_i].wr.ud.remote_qkey = UD_PKEY;
-        } else {
+        }
+        else
+        {
             send_wr[w_i].dc.ah = ah;
             send_wr[w_i].dc.dct_access_key = DCT_ACCESS_KEY;
             send_wr[w_i].dc.dct_number = remoteQPN;
         }
 
-        if (imm == -1) {
+        if (imm == -1)
+        {
             send_wr[w_i].exp_opcode = IBV_EXP_WR_SEND;
-        } else {
+        }
+        else
+        {
             send_wr[w_i].ex.imm_data = imm;
             send_wr[w_i].exp_opcode = IBV_EXP_WR_SEND_WITH_IMM;
         }
@@ -94,27 +120,32 @@ bool rdmaBatchSend(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         send_wr[w_i].exp_send_flags =
             (counter & signalBatch) == 0 ? IBV_SEND_SIGNALED : 0;
 
-        if (isInline) {
+        if (isInline)
+        {
             send_wr[w_i].exp_send_flags |= IBV_SEND_INLINE;
         }
 
         counter += 1;
     }
-    if (ibv_exp_post_send(qp, &send_wr[0], &wrBad)) {
+    if (ibv_exp_post_send(qp, &send_wr[0], &wrBad))
+    {
         Debug::notifyError("Send with RDMA_SEND failed");
         return false;
     }
     return true;
 }
 
-bool rdmaBatchReceive(ibv_qp *qp, const std::list<Region> &regions,
-                      uint32_t lkey) {
+bool rdmaBatchReceive(ibv_qp *qp,
+                      const std::list<Region> &regions,
+                      uint32_t lkey)
+{
     struct ibv_recv_wr recv_wr[MAX_POST_LIST], *bad_recv_wr;
     struct ibv_sge sgl[MAX_POST_LIST];
 
     auto iter = regions.begin();
     uint32_t batchSize = regions.size();
-    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter) {
+    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
+    {
 
         sgl[w_i].addr = iter->source;
         sgl[w_i].length = iter->size;
@@ -124,22 +155,26 @@ bool rdmaBatchReceive(ibv_qp *qp, const std::list<Region> &regions,
         recv_wr[w_i].num_sge = 1;
         recv_wr[w_i].next = (w_i == batchSize - 1) ? NULL : &recv_wr[w_i + 1];
     }
-    if (ibv_post_recv(qp, &recv_wr[0], &bad_recv_wr)) {
+    if (ibv_post_recv(qp, &recv_wr[0], &bad_recv_wr))
+    {
         Debug::notifyError("Receive failed.");
         return false;
     }
     return true;
 }
 
-bool rdmaBatchReceive(ibv_srq *srq, const std::list<Region> &regions,
-                      uint32_t lkey) {
+bool rdmaBatchReceive(ibv_srq *srq,
+                      const std::list<Region> &regions,
+                      uint32_t lkey)
+{
 
     struct ibv_recv_wr recv_wr[MAX_POST_LIST], *bad_recv_wr;
     struct ibv_sge sgl[MAX_POST_LIST];
 
     auto iter = regions.begin();
     uint32_t batchSize = regions.size();
-    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter) {
+    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
+    {
 
         sgl[w_i].addr = iter->source;
         sgl[w_i].length = iter->size;
@@ -150,22 +185,30 @@ bool rdmaBatchReceive(ibv_srq *srq, const std::list<Region> &regions,
         recv_wr[w_i].next = (w_i == batchSize - 1) ? NULL : &recv_wr[w_i + 1];
     }
 
-    if (ibv_post_srq_recv(srq, &recv_wr[0], &bad_recv_wr)) {
+    if (ibv_post_srq_recv(srq, &recv_wr[0], &bad_recv_wr))
+    {
         Debug::notifyError("Receive failed.");
         return false;
     }
     return true;
 }
 
-bool rdmaBatchReceive(ibv_exp_dct *dct, const std::list<Region> &regions,
-                      uint32_t lkey) {
+bool rdmaBatchReceive(ibv_exp_dct *dct,
+                      const std::list<Region> &regions,
+                      uint32_t lkey)
+{
     return rdmaBatchReceive(dct->srq, regions, lkey);
 }
 
 // RC & UC
-bool rdmaBatchRead(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
-                   uint32_t signalBatch, uint64_t &counter, uint32_t remoteRKey,
-                   bool isInline) {
+bool rdmaBatchRead(ibv_qp *qp,
+                   const std::list<Region> &regions,
+                   uint32_t lkey,
+                   uint32_t signalBatch,
+                   uint64_t &counter,
+                   uint32_t remoteRKey,
+                   bool isInline)
+{
 
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_send_wr send_wr[MAX_POST_LIST];
@@ -174,8 +217,10 @@ bool rdmaBatchRead(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 
     auto iter = regions.begin();
     uint32_t batchSize = regions.size();
-    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter) {
-        if ((counter & signalBatch) == 0 && counter > 0) {
+    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
+    {
+        if ((counter & signalBatch) == 0 && counter > 0)
+        {
             pollWithCQ(qp->send_cq, 1, &wc);
         }
 
@@ -194,14 +239,16 @@ bool rdmaBatchRead(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         send_wr[w_i].wr.rdma.remote_addr = iter->dest;
         send_wr[w_i].wr.rdma.rkey = remoteRKey;
 
-        if (isInline) {
+        if (isInline)
+        {
             send_wr[w_i].send_flags |= IBV_SEND_INLINE;
         }
 
         counter += 1;
     }
 
-    if (ibv_post_send(qp, &send_wr[0], &wrBad)) {
+    if (ibv_post_send(qp, &send_wr[0], &wrBad))
+    {
         Debug::notifyError("Send with RDMA_READ failed.");
         return false;
     }
@@ -209,9 +256,16 @@ bool rdmaBatchRead(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 }
 
 // DC
-bool rdmaBatchRead(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
-                   uint32_t signalBatch, uint64_t &counter, uint32_t remoteRKey,
-                   ibv_ah *ah, uint32_t remoteDctNumber, bool isInline) {
+bool rdmaBatchRead(ibv_qp *qp,
+                   const std::list<Region> &regions,
+                   uint32_t lkey,
+                   uint32_t signalBatch,
+                   uint64_t &counter,
+                   uint32_t remoteRKey,
+                   ibv_ah *ah,
+                   uint32_t remoteDctNumber,
+                   bool isInline)
+{
 
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_exp_send_wr send_wr[MAX_POST_LIST];
@@ -220,8 +274,10 @@ bool rdmaBatchRead(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 
     auto iter = regions.begin();
     uint32_t batchSize = regions.size();
-    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter) {
-        if ((counter & signalBatch) == 0 && counter > 0) {
+    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
+    {
+        if ((counter & signalBatch) == 0 && counter > 0)
+        {
             pollWithCQ(qp->send_cq, 1, &wc);
         }
 
@@ -244,14 +300,16 @@ bool rdmaBatchRead(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         send_wr[w_i].dc.dct_access_key = DCT_ACCESS_KEY;
         send_wr[w_i].dc.dct_number = remoteDctNumber;
 
-        if (isInline) {
+        if (isInline)
+        {
             send_wr[w_i].exp_send_flags |= IBV_SEND_INLINE;
         }
 
         counter += 1;
     }
 
-    if (ibv_exp_post_send(qp, &send_wr[0], &wrBad)) {
+    if (ibv_exp_post_send(qp, &send_wr[0], &wrBad))
+    {
         Debug::notifyError("Send with RDMA_READ failed.");
         return false;
     }
@@ -259,9 +317,15 @@ bool rdmaBatchRead(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 }
 
 // RC & UC
-bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
-                    uint32_t signalBatch, uint64_t &counter,
-                    uint32_t remoteRKey, bool isInline, int32_t imm) {
+bool rdmaBatchWrite(ibv_qp *qp,
+                    const std::list<Region> &regions,
+                    uint32_t lkey,
+                    uint32_t signalBatch,
+                    uint64_t &counter,
+                    uint32_t remoteRKey,
+                    bool isInline,
+                    int32_t imm)
+{
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_send_wr send_wr[MAX_POST_LIST];
     struct ibv_send_wr *wrBad;
@@ -269,8 +333,10 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 
     auto iter = regions.begin();
     uint32_t batchSize = regions.size();
-    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter) {
-        if ((counter & signalBatch) == 0 && counter > 0) {
+    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
+    {
+        if ((counter & signalBatch) == 0 && counter > 0)
+        {
             pollWithCQ(qp->send_cq, 1, &wc);
         }
 
@@ -282,16 +348,20 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         send_wr[w_i].next = (w_i == batchSize - 1) ? NULL : &send_wr[w_i + 1];
         send_wr[w_i].wr_id = 0;
 
-        if (imm == -1) {
+        if (imm == -1)
+        {
             send_wr[w_i].opcode = IBV_WR_RDMA_WRITE;
-        } else {
+        }
+        else
+        {
             send_wr[w_i].opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
             send_wr[w_i].imm_data = imm;
         }
 
         send_wr[w_i].send_flags =
             (counter & signalBatch) == 0 ? IBV_SEND_SIGNALED : 0;
-        if (isInline) {
+        if (isInline)
+        {
             send_wr[w_i].send_flags |= IBV_SEND_INLINE;
         }
 
@@ -301,17 +371,25 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         counter += 1;
     }
 
-    if (ibv_post_send(qp, &send_wr[0], &wrBad)) {
+    if (ibv_post_send(qp, &send_wr[0], &wrBad))
+    {
         Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");
         return false;
     }
     return true;
 }
 
-bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
-                    uint32_t signalBatch, uint64_t &counter,
-                    uint32_t remoteRKey, ibv_ah *ah, uint32_t remoteDctNumber,
-                    bool isInline, int32_t imm) {
+bool rdmaBatchWrite(ibv_qp *qp,
+                    const std::list<Region> &regions,
+                    uint32_t lkey,
+                    uint32_t signalBatch,
+                    uint64_t &counter,
+                    uint32_t remoteRKey,
+                    ibv_ah *ah,
+                    uint32_t remoteDctNumber,
+                    bool isInline,
+                    int32_t imm)
+{
     struct ibv_sge sgl[MAX_POST_LIST];
     struct ibv_exp_send_wr send_wr[MAX_POST_LIST];
     struct ibv_exp_send_wr *wrBad;
@@ -319,8 +397,10 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
 
     auto iter = regions.begin();
     uint32_t batchSize = regions.size();
-    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter) {
-        if ((counter & signalBatch) == 0 && counter > 0) {
+    for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
+    {
+        if ((counter & signalBatch) == 0 && counter > 0)
+        {
             pollWithCQ(qp->send_cq, 1, &wc);
         }
 
@@ -332,16 +412,20 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         send_wr[w_i].next = (w_i == batchSize - 1) ? NULL : &send_wr[w_i + 1];
         send_wr[w_i].wr_id = 0;
 
-        if (imm == -1) {
+        if (imm == -1)
+        {
             send_wr[w_i].exp_opcode = IBV_EXP_WR_RDMA_WRITE;
-        } else {
+        }
+        else
+        {
             send_wr[w_i].exp_opcode = IBV_EXP_WR_RDMA_WRITE_WITH_IMM;
             send_wr[w_i].ex.imm_data = imm;
         }
 
         send_wr[w_i].exp_send_flags =
             (counter & signalBatch) == 0 ? IBV_SEND_SIGNALED : 0;
-        if (isInline) {
+        if (isInline)
+        {
             send_wr[w_i].exp_send_flags |= IBV_SEND_INLINE;
         }
 
@@ -355,7 +439,8 @@ bool rdmaBatchWrite(ibv_qp *qp, const std::list<Region> &regions, uint32_t lkey,
         counter += 1;
     }
 
-    if (ibv_exp_post_send(qp, &send_wr[0], &wrBad)) {
+    if (ibv_exp_post_send(qp, &send_wr[0], &wrBad))
+    {
         Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");
         return false;
     }

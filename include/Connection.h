@@ -7,7 +7,8 @@
 #include "ThreadConnection.h"
 #include "DirectoryConnection.h"
 
-struct RemoteConnection {
+struct RemoteConnection
+{
     // directory
     uint64_t dsmBase;
 

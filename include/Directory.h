@@ -10,32 +10,34 @@
 #include "Connection.h"
 #include "GlobalAllocator.h"
 
-
-class Directory {
+class Directory
+{
 public:
-  Directory(DirectoryConnection *dCon, RemoteConnection *remoteInfo,
-            uint32_t machineNR, uint16_t dirID, uint16_t nodeID);
+    Directory(DirectoryConnection *dCon,
+              RemoteConnection *remoteInfo,
+              uint32_t machineNR,
+              uint16_t dirID,
+              uint16_t nodeID);
 
-  ~Directory();
+    ~Directory();
 
 private:
-  DirectoryConnection *dCon;
-  RemoteConnection *remoteInfo;
+    DirectoryConnection *dCon;
+    RemoteConnection *remoteInfo;
 
-  uint32_t machineNR;
-  uint16_t dirID;
-  uint16_t nodeID;
+    uint32_t machineNR;
+    uint16_t dirID;
+    uint16_t nodeID;
 
-  std::thread *dirTh;
+    std::thread *dirTh;
 
-  GlobalAllocator *chunckAlloc;
+    GlobalAllocator *chunckAlloc;
 
-  void dirThread();
+    void dirThread();
 
-  void sendData2App(const RawMessage *m);
+    void sendData2App(const RawMessage *m);
 
-  void process_message(const RawMessage *m);
-
+    void process_message(const RawMessage *m);
 };
 
 #endif /* __DIRECTORY_H__ */

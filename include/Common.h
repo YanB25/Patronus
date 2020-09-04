@@ -35,14 +35,14 @@
 
 #define LATENCY_WINDOWS 1000000
 
-#define STRUCT_OFFSET(type, field)                                             \
-  (char *)&((type *)(0))->field - (char *)((type *)(0))
+#define STRUCT_OFFSET(type, field) \
+    (char *)&((type *)(0))->field - (char *)((type *)(0))
 
 #define MAX_MACHINE 8
 
 #define ADD_ROUND(x, n) ((x) = ((x) + 1) % (n))
 
-#define MESSAGE_SIZE 96 // byte
+#define MESSAGE_SIZE 96  // byte
 
 #define POST_RECV_PER_RC_QP 128
 
@@ -65,9 +65,10 @@ void bindCore(uint16_t core);
 char *getIP();
 char *getMac();
 
-inline int bits_in(std::uint64_t u) {
-  auto bs = std::bitset<64>(u);
-  return bs.count();
+inline int bits_in(std::uint64_t u)
+{
+    auto bs = std::bitset<64>(u);
+    return bs.count();
 }
 
 #include <boost/coroutine/all.hpp>
@@ -75,13 +76,15 @@ inline int bits_in(std::uint64_t u) {
 using CoroYield = boost::coroutines::symmetric_coroutine<void>::yield_type;
 using CoroCall = boost::coroutines::symmetric_coroutine<void>::call_type;
 
-struct CoroContext {
-  CoroYield *yield;
-  CoroCall *master;
-  int coro_id;
+struct CoroContext
+{
+    CoroYield *yield;
+    CoroCall *master;
+    int coro_id;
 };
 
-namespace define {
+namespace define
+{
 
 constexpr uint64_t MB = 1024ull * 1024;
 constexpr uint64_t GB = 1024ull * MB;
@@ -109,13 +112,14 @@ constexpr int64_t kPerCoroRdmaBuf = 32 * 1024;
 
 constexpr uint8_t kMaxHandOverTime = 8;
 
-constexpr int kIndexCacheSize = 1024; // MB
-} // namespace define
+constexpr int kIndexCacheSize = 1024;  // MB
+}  // namespace define
 
-static inline unsigned long long asm_rdtsc(void) {
-  unsigned hi, lo;
-  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-  return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
+static inline unsigned long long asm_rdtsc(void)
+{
+    unsigned hi, lo;
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
 }
 
 // For Tree
@@ -127,14 +131,21 @@ constexpr Value kValueNull = 0;
 constexpr uint32_t kInternalPageSize = 1024;
 constexpr uint32_t kLeafPageSize = 1024;
 
-__inline__ unsigned long long rdtsc(void) {
-  unsigned hi, lo;
-  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-  return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
+__inline__ unsigned long long rdtsc(void)
+{
+    unsigned hi, lo;
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
 }
 
-inline void mfence() { asm volatile("mfence" ::: "memory"); }
+inline void mfence()
+{
+    asm volatile("mfence" :: : "memory");
+}
 
-inline void compiler_barrier() { asm volatile("" ::: "memory"); }
+inline void compiler_barrier()
+{
+    asm volatile("" :: : "memory");
+}
 
 #endif /* __COMMON_H__ */

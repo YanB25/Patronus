@@ -3,22 +3,29 @@
 
 #include "Common.h"
 
-class CacheConfig {
+class CacheConfig
+{
 public:
-  uint32_t cacheSize;
+    uint32_t cacheSize;
 
-  CacheConfig(uint32_t cacheSize = 1) : cacheSize(cacheSize) {}
+    CacheConfig(uint32_t cacheSize = 1) : cacheSize(cacheSize)
+    {
+    }
 };
 
-class DSMConfig {
+class DSMConfig
+{
 public:
-  CacheConfig cacheConfig;
-  uint32_t machineNR;
-  uint64_t dsmSize; // G
+    CacheConfig cacheConfig;
+    uint32_t machineNR;
+    uint64_t dsmSize;  // G
 
-  DSMConfig(const CacheConfig &cacheConfig = CacheConfig(),
-            uint32_t machineNR = 2, uint64_t dsmSize = 48)
-      : cacheConfig(cacheConfig), machineNR(machineNR), dsmSize(dsmSize) {}
+    DSMConfig(const CacheConfig &cacheConfig = CacheConfig(),
+              uint32_t machineNR = 2,
+              uint64_t dsmSize = 48)
+        : cacheConfig(cacheConfig), machineNR(machineNR), dsmSize(dsmSize)
+    {
+    }
 };
 
 #endif /* __CONFIG_H__ */

@@ -29,524 +29,641 @@
 
 #include "rocksdb/slice.h"
 
-
-class Status {
- public:
-  // Create a success status.
-  Status() : code_(kOk), subcode_(kNone), sev_(kNoError), state_(nullptr) {}
-  ~Status() {
-#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    if (!checked_) {
-      fprintf(stderr, "Failed to check Status\n");
-      port::PrintStack();
-      abort();
+class Status
+{
+public:
+    // Create a success status.
+    Status() : code_(kOk), subcode_(kNone), sev_(kNoError), state_(nullptr)
+    {
     }
+    ~Status()
+    {
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+        if (!checked_)
+        {
+            fprintf(stderr, "Failed to check Status\n");
+            port::PrintStack();
+            abort();
+        }
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    delete[] state_;
-  }
+        delete[] state_;
+    }
 
-  // Copy the specified status.
-  Status(const Status& s);
-  Status& operator=(const Status& s);
-  Status(Status&& s)
+    // Copy the specified status.
+    Status(const Status& s);
+    Status& operator=(const Status& s);
+    Status(Status&& s)
 #if !(defined _MSC_VER) || ((defined _MSC_VER) && (_MSC_VER >= 1900))
-      noexcept
+    noexcept
 #endif
-      ;
-  Status& operator=(Status&& s)
+        ;
+    Status& operator=(Status&& s)
 #if !(defined _MSC_VER) || ((defined _MSC_VER) && (_MSC_VER >= 1900))
-      noexcept
+        noexcept
 #endif
-      ;
-  bool operator==(const Status& rhs) const;
-  bool operator!=(const Status& rhs) const;
+        ;
+    bool operator==(const Status& rhs) const;
+    bool operator!=(const Status& rhs) const;
 
-  // In case of intentionally swallowing an error, user must explicitly call
-  // this function. That way we are easily able to search the code to find where
-  // error swallowing occurs.
-  void PermitUncheckedError() const {
+    // In case of intentionally swallowing an error, user must explicitly call
+    // this function. That way we are easily able to search the code to find
+    // where
+    // error swallowing occurs.
+    void PermitUncheckedError() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-  }
+    }
 
-  enum Code : unsigned char {
-    kOk = 0,
-    kNotFound = 1,
-    kCorruption = 2,
-    kNotSupported = 3,
-    kInvalidArgument = 4,
-    kIOError = 5,
-    kMergeInProgress = 6,
-    kIncomplete = 7,
-    kShutdownInProgress = 8,
-    kTimedOut = 9,
-    kAborted = 10,
-    kBusy = 11,
-    kExpired = 12,
-    kTryAgain = 13,
-    kCompactionTooLarge = 14,
-    kColumnFamilyDropped = 15,
-    kMaxCode
-  };
+    enum Code : unsigned char
+    {
+        kOk = 0,
+        kNotFound = 1,
+        kCorruption = 2,
+        kNotSupported = 3,
+        kInvalidArgument = 4,
+        kIOError = 5,
+        kMergeInProgress = 6,
+        kIncomplete = 7,
+        kShutdownInProgress = 8,
+        kTimedOut = 9,
+        kAborted = 10,
+        kBusy = 11,
+        kExpired = 12,
+        kTryAgain = 13,
+        kCompactionTooLarge = 14,
+        kColumnFamilyDropped = 15,
+        kMaxCode
+    };
 
-  Code code() const {
+    Code code() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code_;
-  }
+        return code_;
+    }
 
-  enum SubCode : unsigned char {
-    kNone = 0,
-    kMutexTimeout = 1,
-    kLockTimeout = 2,
-    kLockLimit = 3,
-    kNoSpace = 4,
-    kDeadlock = 5,
-    kStaleFile = 6,
-    kMemoryLimit = 7,
-    kSpaceLimit = 8,
-    kPathNotFound = 9,
-    KMergeOperandsInsufficientCapacity = 10,
-    kManualCompactionPaused = 11,
-    kOverwritten = 12,
-    kTxnNotPrepared = 13,
-    kMaxSubCode
-  };
+    enum SubCode : unsigned char
+    {
+        kNone = 0,
+        kMutexTimeout = 1,
+        kLockTimeout = 2,
+        kLockLimit = 3,
+        kNoSpace = 4,
+        kDeadlock = 5,
+        kStaleFile = 6,
+        kMemoryLimit = 7,
+        kSpaceLimit = 8,
+        kPathNotFound = 9,
+        KMergeOperandsInsufficientCapacity = 10,
+        kManualCompactionPaused = 11,
+        kOverwritten = 12,
+        kTxnNotPrepared = 13,
+        kMaxSubCode
+    };
 
-  SubCode subcode() const {
+    SubCode subcode() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return subcode_;
-  }
+        return subcode_;
+    }
 
-  enum Severity : unsigned char {
-    kNoError = 0,
-    kSoftError = 1,
-    kHardError = 2,
-    kFatalError = 3,
-    kUnrecoverableError = 4,
-    kMaxSeverity
-  };
+    enum Severity : unsigned char
+    {
+        kNoError = 0,
+        kSoftError = 1,
+        kHardError = 2,
+        kFatalError = 3,
+        kUnrecoverableError = 4,
+        kMaxSeverity
+    };
 
-  Status(const Status& s, Severity sev);
-  Severity severity() const {
+    Status(const Status& s, Severity sev);
+    Severity severity() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return sev_;
-  }
+        return sev_;
+    }
 
-  // Returns a C style string indicating the message of the Status
-  const char* getState() const {
+    // Returns a C style string indicating the message of the Status
+    const char* getState() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return state_;
-  }
+        return state_;
+    }
 
-  // Return a success status.
-  static Status OK() { return Status(); }
+    // Return a success status.
+    static Status OK()
+    {
+        return Status();
+    }
 
-  // Successful, though an existing something was overwritten
-  // Note: using variants of OK status for program logic is discouraged,
-  // but it can be useful for communicating statistical information without
-  // changing public APIs.
-  static Status OkOverwritten() { return Status(kOk, kOverwritten); }
+    // Successful, though an existing something was overwritten
+    // Note: using variants of OK status for program logic is discouraged,
+    // but it can be useful for communicating statistical information without
+    // changing public APIs.
+    static Status OkOverwritten()
+    {
+        return Status(kOk, kOverwritten);
+    }
 
-  // Return error status of an appropriate type.
-  static Status NotFound(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kNotFound, msg, msg2);
-  }
-  // Fast path for not found without malloc;
-  static Status NotFound(SubCode msg = kNone) { return Status(kNotFound, msg); }
+    // Return error status of an appropriate type.
+    static Status NotFound(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kNotFound, msg, msg2);
+    }
+    // Fast path for not found without malloc;
+    static Status NotFound(SubCode msg = kNone)
+    {
+        return Status(kNotFound, msg);
+    }
 
-  static Status Corruption(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kCorruption, msg, msg2);
-  }
-  static Status Corruption(SubCode msg = kNone) {
-    return Status(kCorruption, msg);
-  }
+    static Status Corruption(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kCorruption, msg, msg2);
+    }
+    static Status Corruption(SubCode msg = kNone)
+    {
+        return Status(kCorruption, msg);
+    }
 
-  static Status NotSupported(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kNotSupported, msg, msg2);
-  }
-  static Status NotSupported(SubCode msg = kNone) {
-    return Status(kNotSupported, msg);
-  }
+    static Status NotSupported(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kNotSupported, msg, msg2);
+    }
+    static Status NotSupported(SubCode msg = kNone)
+    {
+        return Status(kNotSupported, msg);
+    }
 
-  static Status InvalidArgument(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kInvalidArgument, msg, msg2);
-  }
-  static Status InvalidArgument(SubCode msg = kNone) {
-    return Status(kInvalidArgument, msg);
-  }
+    static Status InvalidArgument(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kInvalidArgument, msg, msg2);
+    }
+    static Status InvalidArgument(SubCode msg = kNone)
+    {
+        return Status(kInvalidArgument, msg);
+    }
 
-  static Status IOError(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kIOError, msg, msg2);
-  }
-  static Status IOError(SubCode msg = kNone) { return Status(kIOError, msg); }
+    static Status IOError(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kIOError, msg, msg2);
+    }
+    static Status IOError(SubCode msg = kNone)
+    {
+        return Status(kIOError, msg);
+    }
 
-  static Status MergeInProgress(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kMergeInProgress, msg, msg2);
-  }
-  static Status MergeInProgress(SubCode msg = kNone) {
-    return Status(kMergeInProgress, msg);
-  }
+    static Status MergeInProgress(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kMergeInProgress, msg, msg2);
+    }
+    static Status MergeInProgress(SubCode msg = kNone)
+    {
+        return Status(kMergeInProgress, msg);
+    }
 
-  static Status Incomplete(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kIncomplete, msg, msg2);
-  }
-  static Status Incomplete(SubCode msg = kNone) {
-    return Status(kIncomplete, msg);
-  }
+    static Status Incomplete(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kIncomplete, msg, msg2);
+    }
+    static Status Incomplete(SubCode msg = kNone)
+    {
+        return Status(kIncomplete, msg);
+    }
 
-  static Status ShutdownInProgress(SubCode msg = kNone) {
-    return Status(kShutdownInProgress, msg);
-  }
-  static Status ShutdownInProgress(const Slice& msg,
-                                   const Slice& msg2 = Slice()) {
-    return Status(kShutdownInProgress, msg, msg2);
-  }
-  static Status Aborted(SubCode msg = kNone) { return Status(kAborted, msg); }
-  static Status Aborted(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kAborted, msg, msg2);
-  }
+    static Status ShutdownInProgress(SubCode msg = kNone)
+    {
+        return Status(kShutdownInProgress, msg);
+    }
+    static Status ShutdownInProgress(const Slice& msg,
+                                     const Slice& msg2 = Slice())
+    {
+        return Status(kShutdownInProgress, msg, msg2);
+    }
+    static Status Aborted(SubCode msg = kNone)
+    {
+        return Status(kAborted, msg);
+    }
+    static Status Aborted(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kAborted, msg, msg2);
+    }
 
-  static Status Busy(SubCode msg = kNone) { return Status(kBusy, msg); }
-  static Status Busy(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kBusy, msg, msg2);
-  }
+    static Status Busy(SubCode msg = kNone)
+    {
+        return Status(kBusy, msg);
+    }
+    static Status Busy(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kBusy, msg, msg2);
+    }
 
-  static Status TimedOut(SubCode msg = kNone) { return Status(kTimedOut, msg); }
-  static Status TimedOut(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kTimedOut, msg, msg2);
-  }
+    static Status TimedOut(SubCode msg = kNone)
+    {
+        return Status(kTimedOut, msg);
+    }
+    static Status TimedOut(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kTimedOut, msg, msg2);
+    }
 
-  static Status Expired(SubCode msg = kNone) { return Status(kExpired, msg); }
-  static Status Expired(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kExpired, msg, msg2);
-  }
+    static Status Expired(SubCode msg = kNone)
+    {
+        return Status(kExpired, msg);
+    }
+    static Status Expired(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kExpired, msg, msg2);
+    }
 
-  static Status TryAgain(SubCode msg = kNone) { return Status(kTryAgain, msg); }
-  static Status TryAgain(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kTryAgain, msg, msg2);
-  }
+    static Status TryAgain(SubCode msg = kNone)
+    {
+        return Status(kTryAgain, msg);
+    }
+    static Status TryAgain(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kTryAgain, msg, msg2);
+    }
 
-  static Status CompactionTooLarge(SubCode msg = kNone) {
-    return Status(kCompactionTooLarge, msg);
-  }
-  static Status CompactionTooLarge(const Slice& msg,
-                                   const Slice& msg2 = Slice()) {
-    return Status(kCompactionTooLarge, msg, msg2);
-  }
+    static Status CompactionTooLarge(SubCode msg = kNone)
+    {
+        return Status(kCompactionTooLarge, msg);
+    }
+    static Status CompactionTooLarge(const Slice& msg,
+                                     const Slice& msg2 = Slice())
+    {
+        return Status(kCompactionTooLarge, msg, msg2);
+    }
 
-  static Status ColumnFamilyDropped(SubCode msg = kNone) {
-    return Status(kColumnFamilyDropped, msg);
-  }
+    static Status ColumnFamilyDropped(SubCode msg = kNone)
+    {
+        return Status(kColumnFamilyDropped, msg);
+    }
 
-  static Status ColumnFamilyDropped(const Slice& msg,
-                                    const Slice& msg2 = Slice()) {
-    return Status(kColumnFamilyDropped, msg, msg2);
-  }
+    static Status ColumnFamilyDropped(const Slice& msg,
+                                      const Slice& msg2 = Slice())
+    {
+        return Status(kColumnFamilyDropped, msg, msg2);
+    }
 
-  static Status NoSpace() { return Status(kIOError, kNoSpace); }
-  static Status NoSpace(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kIOError, kNoSpace, msg, msg2);
-  }
+    static Status NoSpace()
+    {
+        return Status(kIOError, kNoSpace);
+    }
+    static Status NoSpace(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kIOError, kNoSpace, msg, msg2);
+    }
 
-  static Status MemoryLimit() { return Status(kAborted, kMemoryLimit); }
-  static Status MemoryLimit(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kAborted, kMemoryLimit, msg, msg2);
-  }
+    static Status MemoryLimit()
+    {
+        return Status(kAborted, kMemoryLimit);
+    }
+    static Status MemoryLimit(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kAborted, kMemoryLimit, msg, msg2);
+    }
 
-  static Status SpaceLimit() { return Status(kIOError, kSpaceLimit); }
-  static Status SpaceLimit(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kIOError, kSpaceLimit, msg, msg2);
-  }
+    static Status SpaceLimit()
+    {
+        return Status(kIOError, kSpaceLimit);
+    }
+    static Status SpaceLimit(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kIOError, kSpaceLimit, msg, msg2);
+    }
 
-  static Status PathNotFound() { return Status(kIOError, kPathNotFound); }
-  static Status PathNotFound(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kIOError, kPathNotFound, msg, msg2);
-  }
+    static Status PathNotFound()
+    {
+        return Status(kIOError, kPathNotFound);
+    }
+    static Status PathNotFound(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kIOError, kPathNotFound, msg, msg2);
+    }
 
-  static Status TxnNotPrepared() {
-    return Status(kInvalidArgument, kTxnNotPrepared);
-  }
-  static Status TxnNotPrepared(const Slice& msg, const Slice& msg2 = Slice()) {
-    return Status(kInvalidArgument, kTxnNotPrepared, msg, msg2);
-  }
+    static Status TxnNotPrepared()
+    {
+        return Status(kInvalidArgument, kTxnNotPrepared);
+    }
+    static Status TxnNotPrepared(const Slice& msg, const Slice& msg2 = Slice())
+    {
+        return Status(kInvalidArgument, kTxnNotPrepared, msg, msg2);
+    }
 
-  // Returns true iff the status indicates success.
-  bool ok() const {
+    // Returns true iff the status indicates success.
+    bool ok() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kOk;
-  }
+        return code() == kOk;
+    }
 
-  // Returns true iff the status indicates success *with* something
-  // overwritten
-  bool IsOkOverwritten() const {
+    // Returns true iff the status indicates success *with* something
+    // overwritten
+    bool IsOkOverwritten() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kOk && subcode() == kOverwritten;
-  }
+        return code() == kOk && subcode() == kOverwritten;
+    }
 
-  // Returns true iff the status indicates a NotFound error.
-  bool IsNotFound() const {
+    // Returns true iff the status indicates a NotFound error.
+    bool IsNotFound() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kNotFound;
-  }
+        return code() == kNotFound;
+    }
 
-  // Returns true iff the status indicates a Corruption error.
-  bool IsCorruption() const {
+    // Returns true iff the status indicates a Corruption error.
+    bool IsCorruption() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kCorruption;
-  }
+        return code() == kCorruption;
+    }
 
-  // Returns true iff the status indicates a NotSupported error.
-  bool IsNotSupported() const {
+    // Returns true iff the status indicates a NotSupported error.
+    bool IsNotSupported() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kNotSupported;
-  }
+        return code() == kNotSupported;
+    }
 
-  // Returns true iff the status indicates an InvalidArgument error.
-  bool IsInvalidArgument() const {
+    // Returns true iff the status indicates an InvalidArgument error.
+    bool IsInvalidArgument() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kInvalidArgument;
-  }
+        return code() == kInvalidArgument;
+    }
 
-  // Returns true iff the status indicates an IOError.
-  bool IsIOError() const {
+    // Returns true iff the status indicates an IOError.
+    bool IsIOError() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kIOError;
-  }
+        return code() == kIOError;
+    }
 
-  // Returns true iff the status indicates an MergeInProgress.
-  bool IsMergeInProgress() const {
+    // Returns true iff the status indicates an MergeInProgress.
+    bool IsMergeInProgress() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kMergeInProgress;
-  }
+        return code() == kMergeInProgress;
+    }
 
-  // Returns true iff the status indicates Incomplete
-  bool IsIncomplete() const {
+    // Returns true iff the status indicates Incomplete
+    bool IsIncomplete() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kIncomplete;
-  }
+        return code() == kIncomplete;
+    }
 
-  // Returns true iff the status indicates Shutdown In progress
-  bool IsShutdownInProgress() const {
+    // Returns true iff the status indicates Shutdown In progress
+    bool IsShutdownInProgress() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kShutdownInProgress;
-  }
+        return code() == kShutdownInProgress;
+    }
 
-  bool IsTimedOut() const {
+    bool IsTimedOut() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kTimedOut;
-  }
+        return code() == kTimedOut;
+    }
 
-  bool IsAborted() const {
+    bool IsAborted() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kAborted;
-  }
+        return code() == kAborted;
+    }
 
-  bool IsLockLimit() const {
+    bool IsLockLimit() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kAborted && subcode() == kLockLimit;
-  }
+        return code() == kAborted && subcode() == kLockLimit;
+    }
 
-  // Returns true iff the status indicates that a resource is Busy and
-  // temporarily could not be acquired.
-  bool IsBusy() const {
+    // Returns true iff the status indicates that a resource is Busy and
+    // temporarily could not be acquired.
+    bool IsBusy() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kBusy;
-  }
+        return code() == kBusy;
+    }
 
-  bool IsDeadlock() const {
+    bool IsDeadlock() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kBusy && subcode() == kDeadlock;
-  }
+        return code() == kBusy && subcode() == kDeadlock;
+    }
 
-  // Returns true iff the status indicated that the operation has Expired.
-  bool IsExpired() const {
+    // Returns true iff the status indicated that the operation has Expired.
+    bool IsExpired() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kExpired;
-  }
+        return code() == kExpired;
+    }
 
-  // Returns true iff the status indicates a TryAgain error.
-  // This usually means that the operation failed, but may succeed if
-  // re-attempted.
-  bool IsTryAgain() const {
+    // Returns true iff the status indicates a TryAgain error.
+    // This usually means that the operation failed, but may succeed if
+    // re-attempted.
+    bool IsTryAgain() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kTryAgain;
-  }
+        return code() == kTryAgain;
+    }
 
-  // Returns true iff the status indicates the proposed compaction is too large
-  bool IsCompactionTooLarge() const {
+    // Returns true iff the status indicates the proposed compaction is too
+    // large
+    bool IsCompactionTooLarge() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kCompactionTooLarge;
-  }
+        return code() == kCompactionTooLarge;
+    }
 
-  // Returns true iff the status indicates Column Family Dropped
-  bool IsColumnFamilyDropped() const {
+    // Returns true iff the status indicates Column Family Dropped
+    bool IsColumnFamilyDropped() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return code() == kColumnFamilyDropped;
-  }
+        return code() == kColumnFamilyDropped;
+    }
 
-  // Returns true iff the status indicates a NoSpace error
-  // This is caused by an I/O error returning the specific "out of space"
-  // error condition. Stricto sensu, an NoSpace error is an I/O error
-  // with a specific subcode, enabling users to take the appropriate action
-  // if needed
-  bool IsNoSpace() const {
+    // Returns true iff the status indicates a NoSpace error
+    // This is caused by an I/O error returning the specific "out of space"
+    // error condition. Stricto sensu, an NoSpace error is an I/O error
+    // with a specific subcode, enabling users to take the appropriate action
+    // if needed
+    bool IsNoSpace() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return (code() == kIOError) && (subcode() == kNoSpace);
-  }
+        return (code() == kIOError) && (subcode() == kNoSpace);
+    }
 
-  // Returns true iff the status indicates a memory limit error.  There may be
-  // cases where we limit the memory used in certain operations (eg. the size
-  // of a write batch) in order to avoid out of memory exceptions.
-  bool IsMemoryLimit() const {
+    // Returns true iff the status indicates a memory limit error.  There may be
+    // cases where we limit the memory used in certain operations (eg. the size
+    // of a write batch) in order to avoid out of memory exceptions.
+    bool IsMemoryLimit() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return (code() == kAborted) && (subcode() == kMemoryLimit);
-  }
+        return (code() == kAborted) && (subcode() == kMemoryLimit);
+    }
 
-  // Returns true iff the status indicates a PathNotFound error
-  // This is caused by an I/O error returning the specific "no such file or
-  // directory" error condition. A PathNotFound error is an I/O error with
-  // a specific subcode, enabling users to take appropriate action if necessary
-  bool IsPathNotFound() const {
+    // Returns true iff the status indicates a PathNotFound error
+    // This is caused by an I/O error returning the specific "no such file or
+    // directory" error condition. A PathNotFound error is an I/O error with
+    // a specific subcode, enabling users to take appropriate action if
+    // necessary
+    bool IsPathNotFound() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return (code() == kIOError) && (subcode() == kPathNotFound);
-  }
+        return (code() == kIOError) && (subcode() == kPathNotFound);
+    }
 
-  // Returns true iff the status indicates manual compaction paused. This
-  // is caused by a call to PauseManualCompaction
-  bool IsManualCompactionPaused() const {
+    // Returns true iff the status indicates manual compaction paused. This
+    // is caused by a call to PauseManualCompaction
+    bool IsManualCompactionPaused() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return (code() == kIncomplete) && (subcode() == kManualCompactionPaused);
-  }
+        return (code() == kIncomplete) &&
+               (subcode() == kManualCompactionPaused);
+    }
 
-  // Returns true iff the status indicates a TxnNotPrepared error.
-  bool IsTxnNotPrepared() const {
+    // Returns true iff the status indicates a TxnNotPrepared error.
+    bool IsTxnNotPrepared() const
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    checked_ = true;
+        checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    return (code() == kInvalidArgument) && (subcode() == kTxnNotPrepared);
-  }
+        return (code() == kInvalidArgument) && (subcode() == kTxnNotPrepared);
+    }
 
-  // Return a string representation of this status suitable for printing.
-  // Returns the string "OK" for success.
-  std::string ToString() const;
+    // Return a string representation of this status suitable for printing.
+    // Returns the string "OK" for success.
+    std::string ToString() const;
 
- protected:
-  // A nullptr state_ (which is always the case for OK) means the message
-  // is empty.
-  // of the following form:
-  //    state_[0..3] == length of message
-  //    state_[4..]  == message
-  Code code_;
-  SubCode subcode_;
-  Severity sev_;
-  const char* state_;
+protected:
+    // A nullptr state_ (which is always the case for OK) means the message
+    // is empty.
+    // of the following form:
+    //    state_[0..3] == length of message
+    //    state_[4..]  == message
+    Code code_;
+    SubCode subcode_;
+    Severity sev_;
+    const char* state_;
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-  mutable bool checked_ = false;
+    mutable bool checked_ = false;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
 
-  explicit Status(Code _code, SubCode _subcode = kNone)
-      : code_(_code), subcode_(_subcode), sev_(kNoError), state_(nullptr) {}
+    explicit Status(Code _code, SubCode _subcode = kNone)
+        : code_(_code), subcode_(_subcode), sev_(kNoError), state_(nullptr)
+    {
+    }
 
-  Status(Code _code, SubCode _subcode, const Slice& msg, const Slice& msg2);
-  Status(Code _code, const Slice& msg, const Slice& msg2)
-      : Status(_code, kNone, msg, msg2) {}
+    Status(Code _code, SubCode _subcode, const Slice& msg, const Slice& msg2);
+    Status(Code _code, const Slice& msg, const Slice& msg2)
+        : Status(_code, kNone, msg, msg2)
+    {
+    }
 
-  static const char* CopyState(const char* s);
+    static const char* CopyState(const char* s);
 };
 
 inline Status::Status(const Status& s)
-    : code_(s.code_), subcode_(s.subcode_), sev_(s.sev_) {
-#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-  s.checked_ = true;
-#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-  state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
-}
-inline Status::Status(const Status& s, Severity sev)
-    : code_(s.code_), subcode_(s.subcode_), sev_(sev) {
-#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-  s.checked_ = true;
-#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-  state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
-}
-inline Status& Status::operator=(const Status& s) {
-  if (this != &s) {
+    : code_(s.code_), subcode_(s.subcode_), sev_(s.sev_)
+{
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
     s.checked_ = true;
-    checked_ = false;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    code_ = s.code_;
-    subcode_ = s.subcode_;
-    sev_ = s.sev_;
-    delete[] state_;
     state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
-  }
-  return *this;
+}
+inline Status::Status(const Status& s, Severity sev)
+    : code_(s.code_), subcode_(s.subcode_), sev_(sev)
+{
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+    s.checked_ = true;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
+    state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
+}
+inline Status& Status::operator=(const Status& s)
+{
+    if (this != &s)
+    {
+#ifdef ROCKSDB_ASSERT_STATUS_CHECKED
+        s.checked_ = true;
+        checked_ = false;
+#endif  // ROCKSDB_ASSERT_STATUS_CHECKED
+        code_ = s.code_;
+        subcode_ = s.subcode_;
+        sev_ = s.sev_;
+        delete[] state_;
+        state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
+    }
+    return *this;
 }
 
 inline Status::Status(Status&& s)
 #if !(defined _MSC_VER) || ((defined _MSC_VER) && (_MSC_VER >= 1900))
     noexcept
 #endif
-    : Status() {
+    : Status()
+{
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-  s.checked_ = true;
+    s.checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-  *this = std::move(s);
+    *this = std::move(s);
 }
 
 inline Status& Status::operator=(Status&& s)
@@ -554,36 +671,39 @@ inline Status& Status::operator=(Status&& s)
     noexcept
 #endif
 {
-  if (this != &s) {
+    if (this != &s)
+    {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-    s.checked_ = true;
-    checked_ = false;
+        s.checked_ = true;
+        checked_ = false;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-    code_ = std::move(s.code_);
-    s.code_ = kOk;
-    subcode_ = std::move(s.subcode_);
-    s.subcode_ = kNone;
-    sev_ = std::move(s.sev_);
-    s.sev_ = kNoError;
-    delete[] state_;
-    state_ = nullptr;
-    std::swap(state_, s.state_);
-  }
-  return *this;
+        code_ = std::move(s.code_);
+        s.code_ = kOk;
+        subcode_ = std::move(s.subcode_);
+        s.subcode_ = kNone;
+        sev_ = std::move(s.sev_);
+        s.sev_ = kNoError;
+        delete[] state_;
+        state_ = nullptr;
+        std::swap(state_, s.state_);
+    }
+    return *this;
 }
 
-inline bool Status::operator==(const Status& rhs) const {
+inline bool Status::operator==(const Status& rhs) const
+{
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-  checked_ = true;
-  rhs.checked_ = true;
+    checked_ = true;
+    rhs.checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-  return (code_ == rhs.code_);
+    return (code_ == rhs.code_);
 }
 
-inline bool Status::operator!=(const Status& rhs) const {
+inline bool Status::operator!=(const Status& rhs) const
+{
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
-  checked_ = true;
-  rhs.checked_ = true;
+    checked_ = true;
+    rhs.checked_ = true;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
-  return !(*this == rhs);
+    return !(*this == rhs);
 }

@@ -9,88 +9,111 @@ GlobalAddress g_root_ptr = GlobalAddress::Null();
 int g_root_level = -1;
 bool enable_cache;
 
-Directory::Directory(DirectoryConnection *dCon, RemoteConnection *remoteInfo,
-                     uint32_t machineNR, uint16_t dirID, uint16_t nodeID)
-    : dCon(dCon), remoteInfo(remoteInfo), machineNR(machineNR), dirID(dirID),
-      nodeID(nodeID), dirTh(nullptr) {
+Directory::Directory(DirectoryConnection *dCon,
+                     RemoteConnection *remoteInfo,
+                     uint32_t machineNR,
+                     uint16_t dirID,
+                     uint16_t nodeID)
+    : dCon(dCon),
+      remoteInfo(remoteInfo),
+      machineNR(machineNR),
+      dirID(dirID),
+      nodeID(nodeID),
+      dirTh(nullptr)
+{
 
-  { // chunck alloctor
-    GlobalAddress dsm_start;
-    uint64_t per_directory_dsm_size = dCon->dsmSize / NR_DIRECTORY;
-    dsm_start.nodeID = nodeID;
-    dsm_start.offset = per_directory_dsm_size * dirID;
-    chunckAlloc = new GlobalAllocator(dsm_start, per_directory_dsm_size);
-  }
+    {  // chunck alloctor
+        GlobalAddress dsm_start;
+        uint64_t per_directory_dsm_size = dCon->dsmSize / NR_DIRECTORY;
+        dsm_start.nodeID = nodeID;
+        dsm_start.offset = per_directory_dsm_size * dirID;
+        chunckAlloc = new GlobalAllocator(dsm_start, per_directory_dsm_size);
+    }
 
-  dirTh = new std::thread(&Directory::dirThread, this);
+    dirTh = new std::thread(&Directory::dirThread, this);
 }
 
-Directory::~Directory() { delete chunckAlloc; }
+Directory::~Directory()
+{
+    delete chunckAlloc;
+}
 
-void Directory::dirThread() {
+void Directory::dirThread()
+{
 
-  bindCore(23 - dirID);
-  Debug::notifyInfo("dir %d launch!\n", dirID);
+    bindCore(23 - dirID);
+    Debug::notifyInfo("dir %d launch!\n", dirID);
 
-  while (true) {
-    struct ibv_wc wc;
-    pollWithCQ(dCon->cq, 1, &wc);
+    while (true)
+    {
+        struct ibv_wc wc;
+        pollWithCQ(dCon->cq, 1, &wc);
 
-    switch (int(wc.opcode)) {
-    case IBV_WC_RECV: // control message
+        switch (int(wc.opcode))
+        {
+        case IBV_WC_RECV:  // control message
+        {
+
+            auto *m = (RawMessage *)dCon->message->getMessage();
+
+            process_message(m);
+
+            break;
+        }
+        case IBV_WC_RDMA_WRITE:
+        {
+            break;
+        }
+        case IBV_WC_RECV_RDMA_WITH_IMM:
+        {
+
+            break;
+        }
+        default:
+            assert(false);
+        }
+    }
+}
+
+void Directory::process_message(const RawMessage *m)
+{
+
+    RawMessage *send = nullptr;
+    switch (m->type)
+    {
+    case RpcType::MALLOC:
     {
 
-      auto *m = (RawMessage *)dCon->message->getMessage();
+        send = (RawMessage *)dCon->message->getSendPool();
 
-      process_message(m);
+        send->addr = chunckAlloc->alloc_chunck();
+        break;
+    }
 
-      break;
-    }
-    case IBV_WC_RDMA_WRITE: {
-      break;
-    }
-    case IBV_WC_RECV_RDMA_WITH_IMM: {
+    case RpcType::NEW_ROOT:
+    {
 
-      break;
+        if (g_root_level < m->level)
+        {
+            g_root_ptr = m->addr;
+            g_root_level = m->level;
+            if (g_root_level >= 4)
+            {
+                enable_cache = true;
+            }
+        }
+
+        break;
     }
+
     default:
-      assert(false);
-    }
-  }
-}
-
-void Directory::process_message(const RawMessage *m) {
-
-  RawMessage *send = nullptr;
-  switch (m->type) {
-  case RpcType::MALLOC: {
-
-    send = (RawMessage *)dCon->message->getSendPool();
-
-    send->addr = chunckAlloc->alloc_chunck();
-    break;
-  }
-
-  case RpcType::NEW_ROOT: {
-
-    if (g_root_level < m->level) {
-      g_root_ptr = m->addr;
-      g_root_level = m->level;
-      if (g_root_level >= 4) {
-        enable_cache = true;
-      }
+        assert(false);
     }
 
-    break;
-  }
-
-  default:
-    assert(false);
-  }
-
-  if (send) {
-    dCon->sendMessage2App(send, m->node_id, m->app_id);
-  }
+    if (send)
+    {
+        dCon->sendMessage2App(send, m->node_id, m->app_id);
+    }
 }
 
 // void Directory::sendData2App(const RawMessage *m) {
