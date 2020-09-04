@@ -6,10 +6,11 @@
 
 struct RemoteConnection;
 
-// app thread
+/**
+ * @brief ThreadConnection is an abstraction of application thread
+ */
 struct ThreadConnection
 {
-
     uint16_t threadID;
 
     RdmaContext ctx;
@@ -18,6 +19,9 @@ struct ThreadConnection
 
     RawMessageConnection *message;
 
+    /**
+     * data contains NR_DIRECTORY * machineNR QP
+     */
     ibv_qp **data[NR_DIRECTORY];
 
     ibv_mr *cacheMR;

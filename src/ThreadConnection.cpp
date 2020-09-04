@@ -18,7 +18,7 @@ ThreadConnection::ThreadConnection(uint16_t threadID,
     message = new RawMessageConnection(ctx, rpc_cq, APP_MESSAGE_NR);
 
     this->cachePool = cachePool;
-    cacheMR = createMemoryRegion((uint64_t)cachePool, cacheSize, &ctx);
+    cacheMR = createMemoryRegion((uint64_t) cachePool, cacheSize, &ctx);
     cacheLKey = cacheMR->lkey;
 
     // dir, RC
@@ -36,7 +36,6 @@ void ThreadConnection::sendMessage2Dir(RawMessage *m,
                                        uint16_t node_id,
                                        uint16_t dir_id)
 {
-
     message->sendRawMessage(m,
                             remoteInfo[node_id].dirMessageQPN[dir_id],
                             remoteInfo[node_id].appToDirAh[threadID][dir_id]);

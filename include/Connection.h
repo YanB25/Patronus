@@ -2,11 +2,14 @@
 #define __CONNECTION_H__
 
 #include "Common.h"
-#include "RawMessageConnection.h"
-
-#include "ThreadConnection.h"
 #include "DirectoryConnection.h"
+#include "RawMessageConnection.h"
+#include "ThreadConnection.h"
 
+/**
+ * @brief RemoteConnection is a combination of @see ThreadConnection
+ * and @see DirectoryConnection
+ */
 struct RemoteConnection
 {
     // directory

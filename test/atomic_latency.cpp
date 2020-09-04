@@ -4,34 +4,39 @@
 // Two nodes
 // one node issues cas operations
 
+constexpr uint16_t kTargetNodeId = 1;
+constexpr uint32_t kMachineNr = 2;
+
 int main()
 {
-
     bindCore(0);
 
     DSMConfig config;
-    config.machineNR = 2;
+    config.machineNR = kMachineNr;
+
     DSM *dsm = DSM::getInstance(config);
 
     sleep(1);
 
     dsm->registerThread();
 
-    if (dsm->getMyNodeID() == 1)
+    if (dsm->getMyNodeID() == kTargetNodeId)
     {
         while (true)
-            ;
+        {
+            std::this_thread::yield();
+        }
     }
 
     GlobalAddress gaddr;
-    gaddr.nodeID = 1;
+    gaddr.nodeID = kTargetNodeId;
     gaddr.offset = 1024;
 
     auto *buffer = dsm->get_rdma_buffer();
 
     {
         uint64_t cur_val = 0;
-        *(uint64_t *)buffer = cur_val;
+        *(uint64_t *) buffer = cur_val;
         dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
 
         uint64_t loop = 1000000;
@@ -57,7 +62,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            dsm->faa_boundary_sync(gaddr, 1, (uint64_t *)buffer);
+            dsm->faa_boundary_sync(gaddr, 1, (uint64_t *) buffer);
             cur_val++;
         }
         timer.end_print(loop);
@@ -67,7 +72,7 @@ int main()
         for (size_t i = 0; i < loop; ++i)
         {
             bool res =
-                dsm->cas_sync(gaddr, cur_val, cur_val + 1, (uint64_t *)buffer);
+                dsm->cas_sync(gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
 
             assert(res);
             cur_val++;
@@ -78,7 +83,8 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            bool res = dsm->cas_sync(gaddr, 1, cur_val + 1, (uint64_t *)buffer);
+            bool res =
+                dsm->cas_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
 
             assert(!res);
         }
@@ -89,7 +95,7 @@ int main()
         for (size_t i = 0; i < loop; ++i)
         {
             bool res = dsm->cas_mask_sync(
-                gaddr, cur_val, cur_val + 1, (uint64_t *)buffer);
+                gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
 
             assert(res);
             cur_val++;
@@ -101,7 +107,7 @@ int main()
         for (size_t i = 0; i < loop; ++i)
         {
             bool res =
-                dsm->cas_mask_sync(gaddr, 1, cur_val + 1, (uint64_t *)buffer);
+                dsm->cas_mask_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
 
             assert(!res);
         }
@@ -112,13 +118,13 @@ int main()
         RdmaOpRegion cas_ror;
         cas_ror.dest = gaddr;
         cas_ror.is_on_chip = true;
-        cas_ror.source = (uint64_t)buffer;
+        cas_ror.source = (uint64_t) buffer;
         cas_ror.size = 8;
 
         RdmaOpRegion read_ror;
         read_ror.dest = GADD(gaddr, 1024);
         read_ror.is_on_chip = false;
-        read_ror.source = (uint64_t)buffer + 8;
+        read_ror.source = (uint64_t) buffer + 8;
         read_ror.size = 8;
 
         timer.begin();
@@ -137,7 +143,6 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-
             RdmaOpRegion rs[2];
             rs[0] = cas_ror;
             rs[1] = read_ror;
@@ -178,7 +183,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < call_loop; ++i)
         {
-            dsm->cas(gaddr, 1, cur_val + 1, (uint64_t *)buffer);
+            dsm->cas(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
         }
         timer.end_print(call_loop);
 
@@ -188,7 +193,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < call_loop; ++i)
         {
-            dsm->cas_mask(gaddr, 1, cur_val + 1, (uint64_t *)buffer);
+            dsm->cas_mask(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
         }
         timer.end_print(call_loop);
 
@@ -197,7 +202,7 @@ int main()
 
     {  // on-chip memory
         uint64_t cur_val = 0;
-        *(uint64_t *)buffer = cur_val;
+        *(uint64_t *) buffer = cur_val;
         dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
 
         uint64_t loop = 1000000;
@@ -223,7 +228,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < loop; ++i)
         {
-            dsm->faa_dm_boundary_sync(gaddr, 1, (uint64_t *)buffer);
+            dsm->faa_dm_boundary_sync(gaddr, 1, (uint64_t *) buffer);
             cur_val++;
         }
         timer.end_print(loop);
@@ -233,7 +238,7 @@ int main()
         for (size_t i = 0; i < loop; ++i)
         {
             bool res = dsm->cas_dm_sync(
-                gaddr, cur_val, cur_val + 1, (uint64_t *)buffer);
+                gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
 
             assert(res);
             cur_val++;
@@ -245,7 +250,7 @@ int main()
         for (size_t i = 0; i < loop; ++i)
         {
             bool res =
-                dsm->cas_dm_sync(gaddr, 1, cur_val + 1, (uint64_t *)buffer);
+                dsm->cas_dm_sync(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
 
             assert(!res);
         }
@@ -256,7 +261,7 @@ int main()
         for (size_t i = 0; i < loop; ++i)
         {
             bool res = dsm->cas_dm_mask_sync(
-                gaddr, cur_val, cur_val + 1, (uint64_t *)buffer);
+                gaddr, cur_val, cur_val + 1, (uint64_t *) buffer);
 
             assert(res);
             cur_val++;
@@ -268,7 +273,7 @@ int main()
         for (size_t i = 0; i < loop; ++i)
         {
             bool res = dsm->cas_dm_mask_sync(
-                gaddr, 1, cur_val + 1, (uint64_t *)buffer);
+                gaddr, 1, cur_val + 1, (uint64_t *) buffer);
 
             assert(!res);
         }
@@ -280,7 +285,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < call_loop; ++i)
         {
-            dsm->cas_dm(gaddr, 1, cur_val + 1, (uint64_t *)buffer);
+            dsm->cas_dm(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
         }
         timer.end_print(call_loop);
 
@@ -290,7 +295,7 @@ int main()
         timer.begin();
         for (size_t i = 0; i < call_loop; ++i)
         {
-            dsm->cas_dm_mask(gaddr, 1, cur_val + 1, (uint64_t *)buffer);
+            dsm->cas_dm_mask(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
         }
         timer.end_print(call_loop);
 
