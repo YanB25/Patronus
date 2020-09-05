@@ -24,9 +24,8 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize * define::GB);
 
-    Debug::notifyInfo(
-        "shared memory size: %dGB, 0x%lx", conf.dsmSize, baseAddr);
-    Debug::notifyInfo("cache size: %dGB", conf.cacheConfig.cacheSize);
+    info("shared memory size: %dGB, 0x%lx", conf.dsmSize, baseAddr);
+    info("cache size: %dGB", conf.cacheConfig.cacheSize);
 
     // warmup
     // memset((char *)baseAddr, 0, conf.dsmSize * define::GB);
@@ -52,13 +51,12 @@ void DSM::registerThread()
 {
     if (thread_id != -1)
     {
-        Debug::notifyError("Thread already registered.");
+        error("Thread already registered.");
         return;
     }
 
     thread_id = appID.fetch_add(1);
-    Debug::check(thread_id < (int) thCon.size(),
-                 "Can not allocate more threads");
+    check(thread_id < (int) thCon.size(), "Can not allocate more threads");
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
 
     iCon = &thCon[thread_id];
@@ -66,23 +64,22 @@ void DSM::registerThread()
     iCon->message->initRecv();
     iCon->message->initSend();
 
-    Debug::check(thread_id * define::kRDMABufferSize < cache.size,
-                 "Run out of cache size for offset = %llu",
-                 thread_id * define::kRDMABufferSize);
+    check(thread_id * define::kRDMABufferSize < cache.size,
+          "Run out of cache size for offset = %llu",
+          thread_id * define::kRDMABufferSize);
     rdma_buffer = (char *) cache.data + thread_id * define::kRDMABufferSize;
 
     for (int i = 0; i < define::kMaxCoro; ++i)
     {
-        Debug::check(
-            i * define::kPerCoroRdmaBuf < define::kRDMABufferSize,
-            "Run out of RDMA buffer when allocating coroutine buffer.");
+        check(i * define::kPerCoroRdmaBuf < define::kRDMABufferSize,
+              "Run out of RDMA buffer when allocating coroutine buffer.");
         rbuf[i].set_buffer(rdma_buffer + i * define::kPerCoroRdmaBuf);
     }
 }
 
 void DSM::initRDMAConnection()
 {
-    Debug::notifyInfo("Machine NR: %d", conf.machineNR);
+    info("Machine NR: %d", conf.machineNR);
 
     remoteInfo.resize(conf.machineNR);
 

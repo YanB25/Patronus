@@ -1,15 +1,14 @@
 #ifndef __HUGEPAGEALLOC_H__
 #define __HUGEPAGEALLOC_H__
 
-#include <cstdint>
-
-#include <sys/mman.h>
 #include <memory.h>
+#include <sys/mman.h>
+
+#include <cstdint>
 
 char *getIP();
 inline void *hugePageAlloc(size_t size)
 {
-
     void *res = mmap(NULL,
                      size,
                      PROT_READ | PROT_WRITE,
@@ -18,7 +17,7 @@ inline void *hugePageAlloc(size_t size)
                      0);
     if (res == MAP_FAILED)
     {
-        Debug::notifyError("%s mmap failed!\n", getIP());
+        error("%s mmap failed!\n", getIP());
     }
 
     return res;

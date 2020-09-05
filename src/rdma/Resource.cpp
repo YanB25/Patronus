@@ -15,17 +15,17 @@ bool createContext(RdmaContext *context,
     struct ibv_device **deviceList = ibv_get_device_list(&devicesNum);
     if (!deviceList)
     {
-        Debug::notifyError("failed to get IB devices list");
+        error("failed to get IB devices list");
         goto CreateResourcesExit;
     }
 
     // if there isn't any IB device in host
     if (!devicesNum)
     {
-        Debug::notifyInfo("found %d device(s)", devicesNum);
+        info("found %d device(s)", devicesNum);
         goto CreateResourcesExit;
     }
-    Debug::notifyDebug("Open IB Device");
+    dinfo("Open IB Device");
 
     for (int i = 0; i < devicesNum; ++i)
     {
@@ -39,7 +39,7 @@ bool createContext(RdmaContext *context,
 
     if (devIndex >= devicesNum)
     {
-        Debug::notifyError("ib device wasn't found");
+        error("ib device wasn't found");
         goto CreateResourcesExit;
     }
 
@@ -50,7 +50,7 @@ bool createContext(RdmaContext *context,
     ctx = ibv_open_device(dev);
     if (!ctx)
     {
-        Debug::notifyError("failed to open device");
+        error("failed to open device");
         goto CreateResourcesExit;
     }
     /* We are now done with device list, free it */
@@ -60,28 +60,27 @@ bool createContext(RdmaContext *context,
     // query port properties
     if (ibv_query_port(ctx, port, &portAttr))
     {
-        Debug::notifyError("ibv_query_port failed");
+        error("ibv_query_port failed");
         goto CreateResourcesExit;
     }
 
     // allocate Protection Domain
-    // Debug::notifyInfo("Allocate Protection Domain");
+    // info("Allocate Protection Domain");
     pd = ibv_alloc_pd(ctx);
     if (!pd)
     {
-        Debug::notifyError("ibv_alloc_pd failed");
+        error("ibv_alloc_pd failed");
         goto CreateResourcesExit;
     }
 
     if (ibv_query_gid(ctx, port, gidIndex, &context->gid))
     {
-        Debug::notifyError(
-            "could not get gid for port: %d, gidIndex: %d", port, gidIndex);
+        error("could not get gid for port: %d, gidIndex: %d", port, gidIndex);
         goto CreateResourcesExit;
     }
 
     // Success :)
-    Debug::notifyDebug("setup succeed.");
+    dinfo("setup succeed.");
     context->devIndex = devIndex;
     context->gidIndex = gidIndex;
     context->port = port;
@@ -99,7 +98,7 @@ bool createContext(RdmaContext *context,
 
 /* Error encountered, cleanup */
 CreateResourcesExit:
-    Debug::notifyError("Error Encountered, Cleanup ...");
+    error("Error Encountered, Cleanup ...");
 
     if (pd)
     {
@@ -127,7 +126,7 @@ bool destoryContext(RdmaContext *context)
     {
         if (ibv_dealloc_pd(context->pd))
         {
-            Debug::notifyError("Failed to deallocate PD");
+            error("Failed to deallocate PD");
             rc = false;
         }
     }
@@ -135,7 +134,7 @@ bool destoryContext(RdmaContext *context)
     {
         if (ibv_close_device(context->ctx))
         {
-            Debug::notifyError("failed to close device context");
+            error("failed to close device context");
             rc = false;
         }
     }
@@ -154,7 +153,7 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
 
     if (!mr)
     {
-        Debug::notifyError("Memory registration failed");
+        error("Memory registration failed");
     }
 
     return mr;
@@ -169,7 +168,7 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     struct ibv_exp_dm *dm = ibv_exp_alloc_dm(ctx->ctx, &dm_attr);
     if (!dm)
     {
-        Debug::notifyError("Allocate on-chip memory failed");
+        error("Allocate on-chip memory failed");
         return nullptr;
     }
 
@@ -185,7 +184,7 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     struct ibv_mr *mr = ibv_exp_reg_mr(&mr_in);
     if (!mr)
     {
-        Debug::notifyError("Memory registration failed");
+        error("Memory registration failed");
         return nullptr;
     }
 
@@ -244,11 +243,11 @@ bool createQueuePair(ibv_qp **qp,
     *qp = ibv_exp_create_qp(context->ctx, &attr);
     if (!(*qp))
     {
-        Debug::notifyError("Failed to create QP");
+        error("Failed to create QP");
         return false;
     }
 
-    // Debug::notifyInfo("Create Queue Pair with Num = %d", (*qp)->qp_num);
+    // info("Create Queue Pair with Num = %d", (*qp)->qp_num);
 
     return true;
 }
@@ -298,7 +297,7 @@ bool createDCTarget(ibv_exp_dct **dct,
     *dct = ibv_exp_create_dct(context->ctx, &dAttr);
     if (dct == NULL)
     {
-        Debug::notifyError("failed to create dc target");
+        error("failed to create dc target");
         return false;
     }
 

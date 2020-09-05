@@ -13,7 +13,6 @@ AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
       sendPadding(sendPadding),
       recvPadding(recvPadding)
 {
-
     assert(messageNR % kBatchCount == 0);
 
     send_cq = ibv_create_cq(ctx.ctx, 128, NULL, NULL, 0);
@@ -23,8 +22,8 @@ AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
 
     messagePool = hugePageAlloc(2 * messageNR * MESSAGE_SIZE);
     messageMR = createMemoryRegion(
-        (uint64_t)messagePool, 2 * messageNR * MESSAGE_SIZE, &ctx);
-    sendPool = (char *)messagePool + messageNR * MESSAGE_SIZE;
+        (uint64_t) messagePool, 2 * messageNR * MESSAGE_SIZE, &ctx);
+    sendPool = (char *) messagePool + messageNR * MESSAGE_SIZE;
     messageLkey = messageMR->lkey;
 }
 
@@ -45,7 +44,7 @@ void AbstractMessageConnection::initRecv()
             auto &s = recv_sgl[k][i];
             memset(&s, 0, sizeof(s));
 
-            s.addr = (uint64_t)messagePool + (k * subNR + i) * MESSAGE_SIZE;
+            s.addr = (uint64_t) messagePool + (k * subNR + i) * MESSAGE_SIZE;
             s.length = MESSAGE_SIZE;
             s.lkey = messageLkey;
 
@@ -63,7 +62,7 @@ void AbstractMessageConnection::initRecv()
     {
         if (ibv_post_recv(message, &recvs[i][0], &bad))
         {
-            Debug::notifyError("Receive failed.");
+            error("Receive failed.");
         }
     }
 }
@@ -71,7 +70,7 @@ void AbstractMessageConnection::initRecv()
 char *AbstractMessageConnection::getMessage()
 {
     struct ibv_recv_wr *bad;
-    char *m = (char *)messagePool + curMessage * MESSAGE_SIZE + recvPadding;
+    char *m = (char *) messagePool + curMessage * MESSAGE_SIZE + recvPadding;
 
     ADD_ROUND(curMessage, messageNR);
 
@@ -82,7 +81,7 @@ char *AbstractMessageConnection::getMessage()
                 &recvs[(curMessage / subNR - 1 + kBatchCount) % kBatchCount][0],
                 &bad))
         {
-            Debug::notifyError("Receive failed.");
+            error("Receive failed.");
         }
     }
 
@@ -91,7 +90,7 @@ char *AbstractMessageConnection::getMessage()
 
 char *AbstractMessageConnection::getSendPool()
 {
-    char *s = (char *)sendPool + curSend * MESSAGE_SIZE + sendPadding;
+    char *s = (char *) sendPool + curSend * MESSAGE_SIZE + sendPadding;
 
     ADD_ROUND(curSend, messageNR);
 

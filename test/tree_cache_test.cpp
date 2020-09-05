@@ -39,7 +39,7 @@ void run_warmup(int id)
     dsm->registerThread();
     for (uint64_t i = 1; i < kSpace; ++i)
     {
-        Debug::check(id >= 0, "id should be >= 0, get %d", id);
+        check(id >= 0, "id should be >= 0, get %d", id);
         if (i % kThread == (uint64_t) id)
         {
             tree->insert(to_key(i), i * 2);

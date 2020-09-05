@@ -42,7 +42,7 @@ bool Keeper::connectMemcached()
 
     if (!conf)
     {
-        Debug::notifyError("can't open memchaced.conf at ../memcached.conf");
+        error("can't open memchaced.conf at ../memcached.conf");
         return false;
     }
 
@@ -57,7 +57,7 @@ bool Keeper::connectMemcached()
 
     if (rc != MEMCACHED_SUCCESS)
     {
-        Debug::notifyError("Can't add server:%s", memcached_strerror(memc, rc));
+        error("Can't add server:%s", memcached_strerror(memc, rc));
         return false;
     }
 
@@ -89,14 +89,12 @@ void Keeper::serverEnter()
         {
             myNodeID = serverNum - 1;
 
-            Debug::notifyDebug(
-                "This server get NodeId %d [%s]\n", myNodeID, getIP());
+            dinfo("This server get NodeId %d [%s]\n", myNodeID, getIP());
             return;
         }
-        Debug::notifyError(
-            "Server %d Counld't incr value and get ID: %s, retry...",
-            myNodeID,
-            memcached_strerror(memc, rc));
+        error("Server %d Counld't incr value and get ID: %s, retry...",
+              myNodeID,
+              memcached_strerror(memc, rc));
         usleep(10000);
     }
 }
@@ -114,9 +112,9 @@ void Keeper::serverConnect()
             memc, SERVER_NUM_KEY, strlen(SERVER_NUM_KEY), &l, &flags, &rc);
         if (rc != MEMCACHED_SUCCESS)
         {
-            Debug::notifyError("Server %d Counld't get serverNum: %s, retry\n",
-                               myNodeID,
-                               memcached_strerror(memc, rc));
+            error("Server %d Counld't get serverNum: %s, retry\n",
+                  myNodeID,
+                  memcached_strerror(memc, rc));
             sleep(1);
             continue;
         }
@@ -129,7 +127,7 @@ void Keeper::serverConnect()
             if (k != myNodeID)
             {
                 connectNode(k);
-                Debug::notifyDebug("Connected to server %d", k);
+                dinfo("Connected to server %d", k);
             }
         }
         curServer = serverNum;

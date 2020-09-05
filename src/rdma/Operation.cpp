@@ -3,7 +3,7 @@
 int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
 {
     int count = 0;
-    Debug::dcheck(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
+    dcheck(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
 
     do
     {
@@ -15,17 +15,17 @@ int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
     // TODO(yanbin): why count < 0?
     if (count < 0)
     {
-        Debug::notifyError("Poll Completion failed.");
+        error("Poll Completion failed.");
         sleep(5);
         return -1;
     }
 
     if (wc->status != IBV_WC_SUCCESS)
     {
-        Debug::notifyError("Failed status %s (%d) for wr_id %d",
-                           ibv_wc_status_str(wc->status),
-                           wc->status,
-                           (int) wc->wr_id);
+        error("Failed status %s (%d) for wr_id %d",
+              ibv_wc_status_str(wc->status),
+              wc->status,
+              (int) wc->wr_id);
         sleep(5);
         return -1;
     }
@@ -42,10 +42,10 @@ int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
     }
     if (wc->status != IBV_WC_SUCCESS)
     {
-        Debug::notifyError("Failed status %s (%d) for wr_id %d",
-                           ibv_wc_status_str(wc->status),
-                           wc->status,
-                           (int) wc->wr_id);
+        error("Failed status %s (%d) for wr_id %d",
+              ibv_wc_status_str(wc->status),
+              wc->status,
+              (int) wc->wr_id);
         return -1;
     }
     else
@@ -128,7 +128,7 @@ bool rdmaSend(ibv_qp *qp,
     }
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with RDMA_SEND failed.");
+        error("Send with RDMA_SEND failed.");
         return false;
     }
     return true;
@@ -157,7 +157,7 @@ bool rdmaSend(
     wr.send_flags = IBV_SEND_SIGNALED;
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with RDMA_SEND failed.");
+        error("Send with RDMA_SEND failed.");
         return false;
     }
     return true;
@@ -176,7 +176,7 @@ bool rdmaReceive(
 
     if (ibv_post_recv(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Receive with RDMA_RECV failed.");
+        error("Receive with RDMA_RECV failed.");
         return false;
     }
     return true;
@@ -192,7 +192,7 @@ bool rdmaReceive(ibv_srq *srq, uint64_t source, uint64_t size, uint32_t lkey)
 
     if (ibv_post_srq_recv(srq, &wr, &wrBad))
     {
-        Debug::notifyError("Receive with RDMA_RECV failed.");
+        error("Receive with RDMA_RECV failed.");
         return false;
     }
     return true;
@@ -235,7 +235,7 @@ bool rdmaRead(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with RDMA_READ failed.");
+        error("Send with RDMA_READ failed.");
         return false;
     }
     return true;
@@ -269,7 +269,7 @@ bool rdmaRead(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with RDMA_READ failed.");
+        error("Send with RDMA_READ failed.");
         return false;
     }
     return true;
@@ -313,7 +313,7 @@ bool rdmaWrite(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad) != 0)
     {
-        Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");
+        error("Send with RDMA_WRITE(WITH_IMM) failed.");
         sleep(10);
         return false;
     }
@@ -357,7 +357,7 @@ bool rdmaWrite(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad) != 0)
     {
-        Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");
+        error("Send with RDMA_WRITE(WITH_IMM) failed.");
         sleep(5);
         return false;
     }
@@ -387,7 +387,7 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with ATOMIC_FETCH_AND_ADD failed.");
+        error("Send with ATOMIC_FETCH_AND_ADD failed.");
         return false;
     }
     return true;
@@ -428,7 +428,7 @@ bool rdmaFetchAndAddBoundary(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with MASK FETCH_AND_ADD failed.");
+        error("Send with MASK FETCH_AND_ADD failed.");
         return false;
     }
     return true;
@@ -463,7 +463,7 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with ATOMIC_FETCH_AND_ADD failed.");
+        error("Send with ATOMIC_FETCH_AND_ADD failed.");
         return false;
     }
     return true;
@@ -501,7 +501,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with ATOMIC_CMP_AND_SWP failed.");
+        error("Send with ATOMIC_CMP_AND_SWP failed.");
         sleep(5);
         return false;
     }
@@ -545,7 +545,7 @@ bool rdmaCompareAndSwapMask(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with MASK ATOMIC_CMP_AND_SWP failed.");
+        error("Send with MASK ATOMIC_CMP_AND_SWP failed.");
         return false;
     }
     return true;
@@ -582,7 +582,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        Debug::notifyError("Send with ATOMIC_CMP_AND_SWP failed.");
+        error("Send with ATOMIC_CMP_AND_SWP failed.");
         return false;
     }
     return true;
@@ -591,7 +591,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 bool rdmaWriteBatch(
     ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled, uint64_t wrID)
 {
-    Debug::dcheck(k < kOroMax, "overflow detected at k = %d", k);
+    dcheck(k < kOroMax, "overflow detected at k = %d", k);
 
     struct ibv_sge sg[kOroMax];
     struct ibv_send_wr wr[kOroMax];
@@ -617,7 +617,7 @@ bool rdmaWriteBatch(
 
     if (ibv_post_send(qp, &wr[0], &wrBad) != 0)
     {
-        Debug::notifyError("Send with RDMA_WRITE(WITH_IMM) failed.");
+        error("Send with RDMA_WRITE(WITH_IMM) failed.");
         sleep(10);
         return false;
     }
@@ -657,7 +657,7 @@ bool rdmaCasRead(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        Debug::notifyError("Send with CAS_READs failed.");
+        error("Send with CAS_READs failed.");
         sleep(10);
         return false;
     }
@@ -698,7 +698,7 @@ bool rdmaWriteFaa(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        Debug::notifyError("Send with Write Faa failed.");
+        error("Send with Write Faa failed.");
         sleep(10);
         return false;
     }
@@ -738,7 +738,7 @@ bool rdmaWriteCas(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        Debug::notifyError("Send with Write Cas failed.");
+        error("Send with Write Cas failed.");
         sleep(10);
         return false;
     }

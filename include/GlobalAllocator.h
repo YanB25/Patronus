@@ -41,7 +41,7 @@ public:
         if (bitmap_tail >= bitmap_len)
         {
             assert(false);
-            Debug::notifyError("shared memory space run out");
+            warn("shared memory space run out");
         }
 
         if (bitmap[bitmap_tail] == false)
@@ -54,7 +54,7 @@ public:
         else
         {
             assert(false);
-            Debug::notifyError("TODO");
+            warn("TODO");
         }
 
         return res;

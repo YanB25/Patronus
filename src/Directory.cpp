@@ -50,7 +50,7 @@ Directory::~Directory()
 void Directory::dirThread()
 {
     bindCore(23 - dirID);
-    Debug::notifyInfo("dir %d launch!\n", dirID);
+    info("dir %d launch!\n", dirID);
 
     while (true)
     {

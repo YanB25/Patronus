@@ -57,13 +57,13 @@ public:
               uint32_t maxServer = 12)
         : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
     {
-        Debug::notifyDebug("DSMKeeper::initLocalMeta()");
+        dinfo("DSMKeeper::initLocalMeta()");
         initLocalMeta();
 
-        Debug::notifyDebug("DSMKeeper::connectMemcached");
+        dinfo("DSMKeeper::connectMemcached");
         if (!connectMemcached())
         {
-            Debug::notifyPanic("DSMKeeper:: unable to connect to memcached");
+            panic("DSMKeeper:: unable to connect to memcached");
             return;
         }
         serverEnter();
