@@ -26,10 +26,10 @@ DirectoryConnection::DirectoryConnection(
     // on-chip lock memory
     if (dirID == 0)
     {
-        this->lockPool = (void *) define::kLockStartAddr;
+        this->dmPool = (void *) define::kLockStartAddr;
         this->lockSize = define::kLockChipMemSize;
         this->lockMR = createMemoryRegionOnChip(
-            (uint64_t) this->lockPool, this->lockSize, &ctx);
+            (uint64_t) this->dmPool, this->lockSize, &ctx);
         this->lockLKey = lockMR->lkey;
     }
 

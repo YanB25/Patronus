@@ -22,7 +22,7 @@ struct ThreadConnection
     /**
      * data contains NR_DIRECTORY * machineNR QP
      */
-    ibv_qp **data[NR_DIRECTORY];
+    std::vector<std::vector<ibv_qp *>> data;
 
     ibv_mr *cacheMR;
     void *cachePool;

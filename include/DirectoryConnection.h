@@ -24,7 +24,7 @@ struct DirectoryConnection
     uint32_t dsmLKey;
 
     ibv_mr *lockMR;
-    void *lockPool;  // address on-chip
+    void *dmPool;  // address on-chip
     uint64_t lockSize;
     uint32_t lockLKey;
 

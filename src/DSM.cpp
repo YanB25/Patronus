@@ -1,4 +1,3 @@
-
 #include "DSM.h"
 
 #include <algorithm>
@@ -24,7 +23,7 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize * define::GB);
 
-    info("shared memory size: %lluGB, 0x%lx", conf.dsmSize, baseAddr);
+    info("shared memory size: %" PRIu64 "GB, 0x%lx", conf.dsmSize, baseAddr);
     info("cache size: %dGB", conf.cacheConfig.cacheSize);
 
     // warmup
@@ -65,7 +64,7 @@ void DSM::registerThread()
     iCon->message->initSend();
 
     check(thread_id * define::kRDMABufferSize < cache.size,
-          "Run out of cache size for offset = %llu",
+          "Run out of cache size for offset = %" PRIu32,
           thread_id * define::kRDMABufferSize);
     rdma_buffer = (char *) cache.data + thread_id * define::kRDMABufferSize;
 
@@ -202,8 +201,8 @@ void DSM::fill_keys_dest(RdmaOpRegion &ror, GlobalAddress gaddr, bool is_chip)
     ror.lkey = iCon->cacheLKey;
     if (is_chip)
     {
-        ror.dest = remoteInfo[gaddr.nodeID].lockBase + gaddr.offset;
-        ror.remoteRKey = remoteInfo[gaddr.nodeID].lockRKey[0];
+        ror.dest = remoteInfo[gaddr.nodeID].dmBase + gaddr.offset;
+        ror.remoteRKey = remoteInfo[gaddr.nodeID].dmRKey[0];
     }
     else
     {
@@ -539,20 +538,20 @@ void DSM::read_dm(char *buffer,
     {
         rdmaRead(iCon->data[0][gaddr.nodeID],
                  (uint64_t) buffer,
-                 remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
+                 remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                  size,
                  iCon->cacheLKey,
-                 remoteInfo[gaddr.nodeID].lockRKey[0],
+                 remoteInfo[gaddr.nodeID].dmRKey[0],
                  signal);
     }
     else
     {
         rdmaRead(iCon->data[0][gaddr.nodeID],
                  (uint64_t) buffer,
-                 remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
+                 remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                  size,
                  iCon->cacheLKey,
-                 remoteInfo[gaddr.nodeID].lockRKey[0],
+                 remoteInfo[gaddr.nodeID].dmRKey[0],
                  true,
                  ctx->coro_id);
         (*ctx->yield)(*ctx->master);
@@ -583,10 +582,10 @@ void DSM::write_dm(const char *buffer,
     {
         rdmaWrite(iCon->data[0][gaddr.nodeID],
                   (uint64_t) buffer,
-                  remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
+                  remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                   size,
                   iCon->cacheLKey,
-                  remoteInfo[gaddr.nodeID].lockRKey[0],
+                  remoteInfo[gaddr.nodeID].dmRKey[0],
                   -1,
                   signal);
     }
@@ -594,10 +593,10 @@ void DSM::write_dm(const char *buffer,
     {
         rdmaWrite(iCon->data[0][gaddr.nodeID],
                   (uint64_t) buffer,
-                  remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
+                  remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                   size,
                   iCon->cacheLKey,
-                  remoteInfo[gaddr.nodeID].lockRKey[0],
+                  remoteInfo[gaddr.nodeID].dmRKey[0],
                   -1,
                   true,
                   ctx->coro_id);
@@ -630,22 +629,22 @@ void DSM::cas_dm(GlobalAddress gaddr,
     {
         rdmaCompareAndSwap(iCon->data[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
-                           remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
+                           remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].lockRKey[0],
+                           remoteInfo[gaddr.nodeID].dmRKey[0],
                            signal);
     }
     else
     {
         rdmaCompareAndSwap(iCon->data[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
-                           remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
+                           remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].lockRKey[0],
+                           remoteInfo[gaddr.nodeID].dmRKey[0],
                            true,
                            ctx->coro_id);
         (*ctx->yield)(*ctx->master);
@@ -678,11 +677,11 @@ void DSM::cas_dm_mask(GlobalAddress gaddr,
 {
     rdmaCompareAndSwapMask(iCon->data[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
-                           remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
+                           remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].lockRKey[0],
+                           remoteInfo[gaddr.nodeID].dmRKey[0],
                            mask,
                            signal);
 }
@@ -709,28 +708,26 @@ void DSM::faa_dm_boundary(GlobalAddress gaddr,
 {
     if (ctx == nullptr)
     {
-        rdmaFetchAndAddBoundary(
-            iCon->data[0][gaddr.nodeID],
-            (uint64_t) rdma_buffer,
-            remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
-            add_val,
-            iCon->cacheLKey,
-            remoteInfo[gaddr.nodeID].lockRKey[0],
-            mask,
-            signal);
+        rdmaFetchAndAddBoundary(iCon->data[0][gaddr.nodeID],
+                                (uint64_t) rdma_buffer,
+                                remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
+                                add_val,
+                                iCon->cacheLKey,
+                                remoteInfo[gaddr.nodeID].dmRKey[0],
+                                mask,
+                                signal);
     }
     else
     {
-        rdmaFetchAndAddBoundary(
-            iCon->data[0][gaddr.nodeID],
-            (uint64_t) rdma_buffer,
-            remoteInfo[gaddr.nodeID].lockBase + gaddr.offset,
-            add_val,
-            iCon->cacheLKey,
-            remoteInfo[gaddr.nodeID].lockRKey[0],
-            mask,
-            true,
-            ctx->coro_id);
+        rdmaFetchAndAddBoundary(iCon->data[0][gaddr.nodeID],
+                                (uint64_t) rdma_buffer,
+                                remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
+                                add_val,
+                                iCon->cacheLKey,
+                                remoteInfo[gaddr.nodeID].dmRKey[0],
+                                mask,
+                                true,
+                                ctx->coro_id);
         (*ctx->yield)(*ctx->master);
     }
 }

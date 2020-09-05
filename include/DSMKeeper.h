@@ -26,8 +26,8 @@ struct ExPerThread
 struct ExchangeMeta
 {
     uint64_t dsmBase;
-    uint64_t cacheBase;
-    uint64_t lockBase;
+    // uint64_t cacheBase;
+    uint64_t dmBase;
 
     ExPerThread appTh[MAX_APP_THREAD];
     ExPerThread dirTh[NR_DIRECTORY];
@@ -92,7 +92,7 @@ private:
     std::vector<DirectoryConnection> &dirCon;
     std::vector<RemoteConnection> &remoteCon;
 
-    ExchangeMeta localMeta;
+    ExchangeMeta exchangeMeta;
 
     std::vector<std::string> serverList;
 
@@ -118,22 +118,22 @@ private:
      * @brief set remote machine's qp_num to local's meta data cache
      * @param remoteID the remote machine to set with
      */
-    void setDataToRemote(uint16_t remoteID);
+    void setExchangeMeta(uint16_t remoteID);
 
     /**
-     * @brief init and setup each QPs in @see ThreadConnection and @see
-     * DirectoryConnection and @see RemoteConnection according to remote meta
-     * data.
+     * @brief This function does the real and dirty jobs to modify the QP state.
+     * @see ThreadConnection and @see DirectoryConnection and @see
+     * RemoteConnection according to remote meta data.
      * @param remoteID the id of the remote machine
      * @param remoteMeta the remote meta data to refer to
      */
-    void setDataFromRemote(uint16_t remoteID, const ExchangeMeta &remoteMeta);
+    void applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &remoteMeta);
 
 protected:
     /**
      * @brief connect to the actual node.
      *
-     * This function will call @see setDataToRemote and @see setDataFromRemote.
+     * This function will call @see setExchangeMeta and @see applyExchangeMeta.
      *
      * @param remoteID the node to connect
      */

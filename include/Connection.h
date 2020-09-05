@@ -22,9 +22,9 @@ struct RemoteConnection
     // cache
     uint64_t cacheBase;
 
-    // lock memory
-    uint64_t lockBase;
-    uint32_t lockRKey[NR_DIRECTORY];
+    // device memory
+    uint64_t dmBase;
+    uint32_t dmRKey[NR_DIRECTORY];
 
     // app thread
     uint32_t appRKey[MAX_APP_THREAD];
