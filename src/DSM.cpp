@@ -24,7 +24,7 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize * define::GB);
 
-    info("shared memory size: %dGB, 0x%lx", conf.dsmSize, baseAddr);
+    info("shared memory size: %lluGB, 0x%lx", conf.dsmSize, baseAddr);
     info("cache size: %dGB", conf.cacheConfig.cacheSize);
 
     // warmup

@@ -17,7 +17,7 @@ struct ExPerThread
 
     uint32_t rKey;
 
-    uint32_t lock_rkey;  // for directory on-chip memory
+    uint32_t dm_rkey;  // for directory on-chip memory
 } __attribute__((packed));
 
 /**
