@@ -245,7 +245,7 @@ private:
     std::vector<RemoteConnection> remoteInfo;
     std::vector<ThreadConnection> thCon;
     std::vector<DirectoryConnection> dirCon;
-    DSMKeeper *keeper;
+    std::unique_ptr<DSMKeeper> keeper;
 
     std::vector<std::shared_ptr<Directory>> dirAgent;
 

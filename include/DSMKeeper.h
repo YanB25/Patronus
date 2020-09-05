@@ -41,6 +41,16 @@ struct ExchangeMeta
 class DSMKeeper : public Keeper
 {
 public:
+    static std::unique_ptr<DSMKeeper> newInstance(
+        std::vector<ThreadConnection> &thCon,
+        std::vector<DirectoryConnection> &dirCon,
+        std::vector<RemoteConnection> &remoteCon,
+        uint32_t maxServer = 12)
+    {
+        return future::make_unique<DSMKeeper>(
+            thCon, dirCon, remoteCon, maxServer);
+    }
+
     DSMKeeper(std::vector<ThreadConnection> &thCon,
               std::vector<DirectoryConnection> &dirCon,
               std::vector<RemoteConnection> &remoteCon,
