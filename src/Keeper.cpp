@@ -1,4 +1,5 @@
 #include "Keeper.h"
+
 #include <fstream>
 #include <iostream>
 #include <random>
@@ -18,8 +19,7 @@ std::string trim(const std::string &s)
 
 const char *Keeper::SERVER_NUM_KEY = "serverNum";
 
-Keeper::Keeper(uint32_t maxServer)
-    : maxServer(maxServer), curServer(0), memc(NULL)
+Keeper::Keeper(uint32_t maxServer) : maxServer(maxServer), memc(NULL)
 {
 }
 
@@ -30,6 +30,9 @@ Keeper::~Keeper()
     disconnectMemcached();
 }
 
+/**
+ * @brief connect this machine into memcached.
+ */
 bool Keeper::connectMemcached()
 {
     memcached_server_st *servers = NULL;
@@ -39,7 +42,7 @@ bool Keeper::connectMemcached()
 
     if (!conf)
     {
-        fprintf(stderr, "can't open memcached.conf\n");
+        Debug::notifyError("can't open memchaced.conf at ../memcached.conf");
         return false;
     }
 
@@ -54,9 +57,7 @@ bool Keeper::connectMemcached()
 
     if (rc != MEMCACHED_SUCCESS)
     {
-        fprintf(
-            stderr, "Counld't add server:%s\n", memcached_strerror(memc, rc));
-        sleep(1);
+        Debug::notifyError("Can't add server:%s", memcached_strerror(memc, rc));
         return false;
     }
 
@@ -86,23 +87,23 @@ void Keeper::serverEnter()
             memc, SERVER_NUM_KEY, strlen(SERVER_NUM_KEY), 1, &serverNum);
         if (rc == MEMCACHED_SUCCESS)
         {
-
             myNodeID = serverNum - 1;
 
-            printf("I am servers %d [%s]\n", myNodeID, getIP());
+            Debug::notifyDebug(
+                "This server get NodeId %d [%s]\n", myNodeID, getIP());
             return;
         }
-        fprintf(stderr,
-                "Server %d Counld't incr value and get ID: %s, retry...\n",
-                myNodeID,
-                memcached_strerror(memc, rc));
+        Debug::notifyError(
+            "Server %d Counld't incr value and get ID: %s, retry...",
+            myNodeID,
+            memcached_strerror(memc, rc));
         usleep(10000);
     }
 }
 
 void Keeper::serverConnect()
 {
-
+    uint32_t curServer = 0;
     size_t l;
     uint32_t flags;
     memcached_return rc;
@@ -113,10 +114,10 @@ void Keeper::serverConnect()
             memc, SERVER_NUM_KEY, strlen(SERVER_NUM_KEY), &l, &flags, &rc);
         if (rc != MEMCACHED_SUCCESS)
         {
-            fprintf(stderr,
-                    "Server %d Counld't get serverNum: %s, retry\n",
-                    myNodeID,
-                    memcached_strerror(memc, rc));
+            Debug::notifyError("Server %d Counld't get serverNum: %s, retry\n",
+                               myNodeID,
+                               memcached_strerror(memc, rc));
+            sleep(1);
             continue;
         }
         uint32_t serverNum = atoi(serverNumStr);
@@ -128,7 +129,7 @@ void Keeper::serverConnect()
             if (k != myNodeID)
             {
                 connectNode(k);
-                printf("I connect server %zu\n", k);
+                Debug::notifyDebug("Connected to server %d", k);
             }
         }
         curServer = serverNum;
@@ -140,11 +141,11 @@ void Keeper::memSet(const char *key,
                     const char *val,
                     uint32_t vlen)
 {
-
     memcached_return rc;
     while (true)
     {
-        rc = memcached_set(memc, key, klen, val, vlen, (time_t)0, (uint32_t)0);
+        rc =
+            memcached_set(memc, key, klen, val, vlen, (time_t) 0, (uint32_t) 0);
         if (rc == MEMCACHED_SUCCESS)
         {
             break;
@@ -155,7 +156,6 @@ void Keeper::memSet(const char *key,
 
 char *Keeper::memGet(const char *key, uint32_t klen, size_t *v_size)
 {
-
     size_t l;
     char *res;
     uint32_t flags;
@@ -163,7 +163,6 @@ char *Keeper::memGet(const char *key, uint32_t klen, size_t *v_size)
 
     while (true)
     {
-
         res = memcached_get(memc, key, klen, &l, &flags, &rc);
         if (rc == MEMCACHED_SUCCESS)
         {

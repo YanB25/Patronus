@@ -57,10 +57,13 @@ public:
               uint32_t maxServer = 12)
         : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
     {
+        Debug::notifyDebug("DSMKeeper::initLocalMeta()");
         initLocalMeta();
 
+        Debug::notifyDebug("DSMKeeper::connectMemcached");
         if (!connectMemcached())
         {
+            Debug::notifyPanic("DSMKeeper:: unable to connect to memcached");
             return;
         }
         serverEnter();
@@ -101,14 +104,36 @@ private:
     }
 
     void initLocalMeta();
-
+    /**
+     * @brief similar to @see connectNode, but this function init connections of
+     * itself.
+     */
     void connectMySelf();
     void initRouteRule();
 
+    /**
+     * @brief set remote machine's qp_num to local's meta data cache
+     * @param remoteID the remote machine to set with
+     */
     void setDataToRemote(uint16_t remoteID);
-    void setDataFromRemote(uint16_t remoteID, ExchangeMeta *remoteMeta);
+
+    /**
+     * @brief init and setup each QPs in @see ThreadConnection and @see
+     * DirectoryConnection and @see RemoteConnection according to remote meta
+     * data.
+     * @param remoteID the id of the remote machine
+     * @param remoteMeta the remote meta data to refer to
+     */
+    void setDataFromRemote(uint16_t remoteID, ExchangeMeta &remoteMeta);
 
 protected:
+    /**
+     * @brief connect to the actual node.
+     *
+     * This function will call @see setDataToRemote and @see setDataFromRemote.
+     *
+     * @param remoteID the node to connect
+     */
     virtual bool connectNode(uint16_t remoteID) override;
 };
 

@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <infiniband/verbs.h>
+#include <libmemcached/memcached.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
@@ -12,20 +13,16 @@
 #include <string>
 #include <thread>
 
-#include <libmemcached/memcached.h>
-
 #include "Config.h"
 #include "Debug.h"
 #include "Rdma.h"
 
 class Keeper
 {
-
 private:
     static const char *SERVER_NUM_KEY;
 
     uint32_t maxServer;
-    uint16_t curServer;
     uint16_t myNodeID;
     std::string myIP;
     uint16_t myPort;
@@ -36,6 +33,9 @@ protected:
     bool connectMemcached();
     bool disconnectMemcached();
     void serverConnect();
+    /**
+     * @brief Get server node id
+     */
     void serverEnter();
     virtual bool connectNode(uint16_t remoteID) = 0;
 

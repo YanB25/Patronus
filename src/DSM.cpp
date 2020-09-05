@@ -92,6 +92,7 @@ void DSM::initRDMAConnection()
                             remoteInfo);
     }
 
+    // thCon, dirCon, remoteInfo set up here.
     keeper = DSMKeeper::newInstance(thCon, dirCon, remoteInfo, conf.machineNR);
 
     myNodeID = keeper->getMyNodeID();

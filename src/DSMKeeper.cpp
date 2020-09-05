@@ -12,7 +12,7 @@ void DSMKeeper::initLocalMeta()
     localMeta.cacheBase = (uint64_t) thCon[0].cachePool;
 
     // per thread APP
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    for (size_t i = 0; i < thCon.size(); ++i)
     {
         localMeta.appTh[i].lid = thCon[i].ctx.lid;
         localMeta.appTh[i].rKey = thCon[i].cacheMR->rkey;
@@ -24,7 +24,7 @@ void DSMKeeper::initLocalMeta()
     }
 
     // per thread DIR
-    for (int i = 0; i < NR_DIRECTORY; ++i)
+    for (size_t i = 0; i < dirCon.size(); ++i)
     {
         localMeta.dirTh[i].lid = dirCon[i].ctx.lid;
         localMeta.dirTh[i].rKey = dirCon[i].dsmMR->rkey;
@@ -48,7 +48,7 @@ bool DSMKeeper::connectNode(uint16_t remoteID)
     ExchangeMeta *remoteMeta =
         (ExchangeMeta *) memGet(getK.c_str(), getK.size());
 
-    setDataFromRemote(remoteID, remoteMeta);
+    setDataFromRemote(remoteID, *remoteMeta);
 
     free(remoteMeta);
     return true;
@@ -76,8 +76,9 @@ void DSMKeeper::setDataToRemote(uint16_t remoteID)
     }
 }
 
-void DSMKeeper::setDataFromRemote(uint16_t remoteID, ExchangeMeta *remoteMeta)
+void DSMKeeper::setDataFromRemote(uint16_t remoteID, ExchangeMeta &remoteMeta)
 {
+    // init directory qp
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
         auto &c = dirCon[i];
@@ -89,15 +90,16 @@ void DSMKeeper::setDataFromRemote(uint16_t remoteID, ExchangeMeta *remoteMeta)
             assert(qp->qp_type == IBV_QPT_RC);
             modifyQPtoInit(qp, &c.ctx);
             modifyQPtoRTR(qp,
-                          remoteMeta->appRcQpn2dir[k][i],
-                          remoteMeta->appTh[k].lid,
-                          remoteMeta->appTh[k].gid,
+                          remoteMeta.appRcQpn2dir[k][i],
+                          remoteMeta.appTh[k].lid,
+                          remoteMeta.appTh[k].gid,
                           &c.ctx);
             modifyQPtoRTS(qp);
         }
     }
 
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    // init application qp
+    for (size_t i = 0; i < thCon.size(); ++i)
     {
         auto &c = thCon[i];
         for (int k = 0; k < NR_DIRECTORY; ++k)
@@ -107,31 +109,32 @@ void DSMKeeper::setDataFromRemote(uint16_t remoteID, ExchangeMeta *remoteMeta)
             assert(qp->qp_type == IBV_QPT_RC);
             modifyQPtoInit(qp, &c.ctx);
             modifyQPtoRTR(qp,
-                          remoteMeta->dirRcQpn2app[k][i],
-                          remoteMeta->dirTh[k].lid,
-                          remoteMeta->dirTh[k].gid,
+                          remoteMeta.dirRcQpn2app[k][i],
+                          remoteMeta.dirTh[k].lid,
+                          remoteMeta.dirTh[k].gid,
                           &c.ctx);
             modifyQPtoRTS(qp);
         }
     }
 
+    // init remote connections
     auto &info = remoteCon[remoteID];
-    info.dsmBase = remoteMeta->dsmBase;
-    info.cacheBase = remoteMeta->cacheBase;
-    info.lockBase = remoteMeta->lockBase;
+    info.dsmBase = remoteMeta.dsmBase;
+    info.cacheBase = remoteMeta.cacheBase;
+    info.lockBase = remoteMeta.lockBase;
 
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
-        info.dsmRKey[i] = remoteMeta->dirTh[i].rKey;
-        info.lockRKey[i] = remoteMeta->dirTh[i].lock_rkey;
-        info.dirMessageQPN[i] = remoteMeta->dirUdQpn[i];
+        info.dsmRKey[i] = remoteMeta.dirTh[i].rKey;
+        info.lockRKey[i] = remoteMeta.dirTh[i].lock_rkey;
+        info.dirMessageQPN[i] = remoteMeta.dirUdQpn[i];
 
         for (int k = 0; k < MAX_APP_THREAD; ++k)
         {
             struct ibv_ah_attr ahAttr;
             fillAhAttr(&ahAttr,
-                       remoteMeta->dirTh[i].lid,
-                       remoteMeta->dirTh[i].gid,
+                       remoteMeta.dirTh[i].lid,
+                       remoteMeta.dirTh[i].gid,
                        &thCon[k].ctx);
             info.appToDirAh[k][i] = ibv_create_ah(thCon[k].ctx.pd, &ahAttr);
 
@@ -141,15 +144,15 @@ void DSMKeeper::setDataFromRemote(uint16_t remoteID, ExchangeMeta *remoteMeta)
 
     for (int i = 0; i < MAX_APP_THREAD; ++i)
     {
-        info.appRKey[i] = remoteMeta->appTh[i].rKey;
-        info.appMessageQPN[i] = remoteMeta->appUdQpn[i];
+        info.appRKey[i] = remoteMeta.appTh[i].rKey;
+        info.appMessageQPN[i] = remoteMeta.appUdQpn[i];
 
         for (int k = 0; k < NR_DIRECTORY; ++k)
         {
             struct ibv_ah_attr ahAttr;
             fillAhAttr(&ahAttr,
-                       remoteMeta->appTh[i].lid,
-                       remoteMeta->appTh[i].gid,
+                       remoteMeta.appTh[i].lid,
+                       remoteMeta.appTh[i].gid,
                        &dirCon[k].ctx);
             info.dirToAppAh[k][i] = ibv_create_ah(dirCon[k].ctx.pd, &ahAttr);
 
@@ -161,7 +164,7 @@ void DSMKeeper::setDataFromRemote(uint16_t remoteID, ExchangeMeta *remoteMeta)
 void DSMKeeper::connectMySelf()
 {
     setDataToRemote(getMyNodeID());
-    setDataFromRemote(getMyNodeID(), &localMeta);
+    setDataFromRemote(getMyNodeID(), localMeta);
 }
 
 void DSMKeeper::initRouteRule()
