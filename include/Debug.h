@@ -1,11 +1,5 @@
-/*
- * @Author: your name
- * @Date: 2020-09-04 15:49:10
- * @LastEditTime: 2020-09-04 17:09:01
- * @LastEditors: Please set LastEditors
- * @Description: In User Settings Edit
- * @FilePath: /Sherman/include/Debug.h
- * @file Debug util functions
+/**
+    @file debug helper functions.
  */
 /*** Debug header. ***/
 
@@ -21,13 +15,17 @@
 #include <sys/time.h> /* Time functions. E.g. gettimeofday() */
 
 /** Defninitions. **/
-#define MAX_FORMAT_LEN 255
-#define DEBUG false
-#define TITLE false
-#define TIMER false
-#define CUR false
+namespace config
+{
+namespace debug
+{
+constexpr static int MAX_FORMAT_LEN = 255;
+constexpr static bool TITLE = false;
+constexpr static bool TIMER = false;
+constexpr static bool CUR = false;
+}  // namespace debug
+}  // namespace config
 
-#define DEBUG_ON true
 /** Classes. **/
 
 class Debug
@@ -41,10 +39,12 @@ public:
                           ...); /* Print debug item string. */
     static void debugCur(const char *format,
                          ...); /* Print debug item string. */
+    static void notifyDebug(const char *format, ...);
     static void notifyInfo(const char *format,
                            ...); /* Print normal notification. */
     static void notifyError(const char *format,
-                            ...);         /* Print error information. */
+                            ...); /* Print error information. */
+    static void notifyPanic(const char *format, ...);
     static void startTimer(const char *); /* Start timer and display
                                              information. */
     static void endTimer(); /* End timer and display information. */
@@ -58,4 +58,5 @@ public:
 };
 
 /** Redundance check. **/
+
 #endif
