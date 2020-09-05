@@ -24,13 +24,13 @@ static_assert(sizeof(CacheEntry) == 2 * sizeof(Key) + sizeof(uint64_t), "XXX");
 
 inline std::ostream &operator<<(std::ostream &os, const CacheEntry &obj)
 {
-    os << "[" << (int)obj.from << ", " << obj.to + 1 << ")";
+    os << "Cache Entry [" << (int) obj.from << ", " << obj.to + 1 << ")";
     return os;
 }
 
 inline static CacheEntry Decode(const char *val)
 {
-    return *(CacheEntry *)val;
+    return *(CacheEntry *) val;
 }
 
 struct CacheEntryComparator

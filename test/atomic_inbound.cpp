@@ -36,7 +36,9 @@ void send_cas(int node_id, int thread_id)
     GlobalAddress gaddr;
     const uint64_t offset_start =
         node_id * (thread_nr * buffer_size) + buffer_size * thread_id;
-    printf("[%lx %lx)\n", offset_start, offset_start + buffer_size);
+    printf("global address is [%lx %lx)\n",
+           offset_start,
+           offset_start + buffer_size);
     gaddr.nodeID = node_nr - 1;
 
     memset(buffer, 0, buffer_size);
@@ -142,7 +144,9 @@ void send_write(int node_id, int thread_id)
     memset(buffer, 0, buffer_size);
     const uint64_t offset_start =
         node_id * (thread_nr * buffer_size) + buffer_size * thread_id;
-    printf("[%lx %lx)\n", offset_start, offset_start + buffer_size);
+    printf("global address is [%lx %lx)\n",
+           offset_start,
+           offset_start + buffer_size);
 
     while (true)
     {

@@ -25,7 +25,7 @@ bool createContext(RdmaContext *context,
         Debug::notifyInfo("found %d device(s)", devicesNum);
         goto CreateResourcesExit;
     }
-    Debug::notifyInfo("Open IB Device");
+    Debug::notifyDebug("Open IB Device");
 
     for (int i = 0; i < devicesNum; ++i)
     {
@@ -81,7 +81,7 @@ bool createContext(RdmaContext *context,
     }
 
     // Success :)
-    Debug::notifyInfo("setup succeed.");
+    Debug::notifyDebug("setup succeed.");
     context->devIndex = devIndex;
     context->gidIndex = gidIndex;
     context->port = port;
