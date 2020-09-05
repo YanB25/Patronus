@@ -247,8 +247,6 @@ private:
     std::vector<DirectoryConnection> dirCon;
     std::unique_ptr<DSMKeeper> keeper;
 
-    std::vector<std::shared_ptr<Directory>> dirAgent;
-
 public:
     bool is_register()
     {

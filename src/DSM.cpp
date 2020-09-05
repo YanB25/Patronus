@@ -20,8 +20,7 @@ std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
     return future::make_unique<DSM>(conf);
 }
 
-DSM::DSM(const DSMConfig &conf)
-    : conf(conf), appID(0), cache(conf.cacheConfig), dirAgent(NR_DIRECTORY)
+DSM::DSM(const DSMConfig &conf) : conf(conf), appID(0), cache(conf.cacheConfig)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize * define::GB);
 
@@ -41,12 +40,6 @@ DSM::DSM(const DSMConfig &conf)
     memset((char *) baseAddr, 0, define::kChunkSize);
 
     initRDMAConnection();
-
-    for (int i = 0; i < NR_DIRECTORY; ++i)
-    {
-        dirAgent[i] = Directory::newInstance(
-            dirCon[i], remoteInfo, conf.machineNR, i, myNodeID);
-    }
 
     keeper->barrier("DSM-init");
 }
