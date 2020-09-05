@@ -39,12 +39,13 @@ void DSMKeeper::initLocalMeta()
 
 bool DSMKeeper::connectNode(uint16_t remoteID)
 {
+    // press data into local cache
     setDataToRemote(remoteID);
 
-    std::string setK = setKey(remoteID);
+    std::string setK = connMetaPersonalKey(remoteID);
     memSet(setK.c_str(), setK.size(), (char *) (&localMeta), sizeof(localMeta));
 
-    std::string getK = getKey(remoteID);
+    std::string getK = connMetaRemoteKey(remoteID);
     ExchangeMeta *remoteMeta =
         (ExchangeMeta *) memGet(getK.c_str(), getK.size());
 

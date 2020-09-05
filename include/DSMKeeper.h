@@ -20,6 +20,9 @@ struct ExPerThread
     uint32_t lock_rkey;  // for directory on-chip memory
 } __attribute__((packed));
 
+/**
+ * Keep the struct POD to be memcpy-able
+ */
 struct ExchangeMeta
 {
     uint64_t dsmBase;
@@ -93,12 +96,12 @@ private:
 
     std::vector<std::string> serverList;
 
-    std::string setKey(uint16_t remoteID)
+    std::string connMetaPersonalKey(uint16_t remoteID)
     {
         return std::to_string(getMyNodeID()) + "-" + std::to_string(remoteID);
     }
 
-    std::string getKey(uint16_t remoteID)
+    std::string connMetaRemoteKey(uint16_t remoteID)
     {
         return std::to_string(remoteID) + "-" + std::to_string(getMyNodeID());
     }
