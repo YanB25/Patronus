@@ -40,6 +40,33 @@ struct ExchangeMeta
 
 class DSMKeeper : public Keeper
 {
+public:
+    DSMKeeper(ThreadConnection **thCon,
+              DirectoryConnection **dirCon,
+              std::vector<RemoteConnection> &remoteCon,
+              uint32_t maxServer = 12)
+        : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
+    {
+        initLocalMeta();
+
+        if (!connectMemcached())
+        {
+            return;
+        }
+        serverEnter();
+
+        serverConnect();
+        connectMySelf();
+
+        initRouteRule();
+    }
+
+    ~DSMKeeper()
+    {
+        disconnectMemcached();
+    }
+    void barrier(const std::string &barrierKey);
+    uint64_t sum(const std::string &sum_key, uint64_t value);
 
 private:
     static const char *OK;
@@ -47,7 +74,7 @@ private:
 
     ThreadConnection **thCon;
     DirectoryConnection **dirCon;
-    RemoteConnection *remoteCon;
+    std::vector<RemoteConnection> &remoteCon;
 
     ExchangeMeta localMeta;
 
@@ -73,35 +100,6 @@ private:
 
 protected:
     virtual bool connectNode(uint16_t remoteID) override;
-
-public:
-    DSMKeeper(ThreadConnection **thCon,
-              DirectoryConnection **dirCon,
-              RemoteConnection *remoteCon,
-              uint32_t maxServer = 12)
-        : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
-    {
-
-        initLocalMeta();
-
-        if (!connectMemcached())
-        {
-            return;
-        }
-        serverEnter();
-
-        serverConnect();
-        connectMySelf();
-
-        initRouteRule();
-    }
-
-    ~DSMKeeper()
-    {
-        disconnectMemcached();
-    }
-    void barrier(const std::string &barrierKey);
-    uint64_t sum(const std::string &sum_key, uint64_t value);
 };
 
 #endif

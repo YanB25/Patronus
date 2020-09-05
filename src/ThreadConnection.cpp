@@ -2,11 +2,12 @@
 
 #include "Connection.h"
 
-ThreadConnection::ThreadConnection(uint16_t threadID,
-                                   void *cachePool,
-                                   uint64_t cacheSize,
-                                   uint32_t machineNR,
-                                   RemoteConnection *remoteInfo)
+ThreadConnection::ThreadConnection(
+    uint16_t threadID,
+    void *cachePool,
+    uint64_t cacheSize,
+    uint32_t machineNR,
+    const std::vector<RemoteConnection> &remoteInfo)
     : threadID(threadID), remoteInfo(remoteInfo)
 {
     createContext(&ctx);

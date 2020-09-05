@@ -1,11 +1,13 @@
-#include "IndexCache.h"
 #include <iostream>
+
+#include "IndexCache.h"
 
 int main()
 {
     auto cache = new IndexCache(1);
 
-    InternalPage *page = (InternalPage *)11;
+    InternalPage *page = (InternalPage *) 11;
+    __maybe_unused(page);
     assert(cache->add_entry(1, 100, page));
 
     assert(cache->add_entry(1, 43, page));

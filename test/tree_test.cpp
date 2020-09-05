@@ -34,6 +34,7 @@ int main()
     {
         auto res = tree->search(i, v);
         assert(res && v == i * 3);
+        __maybe_unused(res);
         // std::cout << "search result:  " << res << " v: " << v << std::endl;
     }
 
@@ -46,11 +47,13 @@ int main()
     {
         auto res = tree->search(i, v);
         assert(!res);
+        __maybe_unused(res);
         // std::cout << "search result:  " << res << " v: " << v << std::endl;
     }
 
     auto res = tree->search(23333, v);
     assert(!res);
+    __maybe_unused(res);
 
     printf("Hello\n");
 

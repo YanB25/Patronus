@@ -59,6 +59,11 @@
 #define DIR_MESSAGE_NR 128
 // }
 
+/**
+ * Equivalent to c++14 [[maybe_unused]]
+ */
+#define __maybe_unused(x) ((void) (x))
+
 void bindCore(uint16_t core);
 char *getIP();
 char *getMac();
@@ -154,6 +159,11 @@ template <typename T, typename... Args>
 std::unique_ptr<T> make_unique(Args &&... args)
 {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+template <typename T, typename... Args>
+std::shared_ptr<T> make_shared(Args &&... args)
+{
+    return std::shared_ptr<T>(new T(std::forward<Args>(args)...));
 }
 
 }  // namespace future

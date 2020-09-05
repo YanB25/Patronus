@@ -241,12 +241,13 @@ private:
     uint64_t baseAddr;
     uint32_t myNodeID;
 
-    RemoteConnection *remoteInfo;
+    // RemoteConnection *remoteInfo;
+    std::vector<RemoteConnection> remoteInfo;
     ThreadConnection *thCon[MAX_APP_THREAD];
     DirectoryConnection *dirCon[NR_DIRECTORY];
     DSMKeeper *keeper;
 
-    Directory *dirAgent[NR_DIRECTORY];
+    std::vector<std::shared_ptr<Directory>> dirAgent;
 
 public:
     bool is_register()

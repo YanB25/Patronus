@@ -14,9 +14,9 @@ struct DirectoryConnection
     RdmaContext ctx;
     ibv_cq *cq;
 
-    RawMessageConnection *message;
+    std::shared_ptr<RawMessageConnection> message;
 
-    ibv_qp **data2app[MAX_APP_THREAD];
+    std::vector<std::vector<ibv_qp *>> data2app;
 
     ibv_mr *dsmMR;
     void *dsmPool;
@@ -28,13 +28,13 @@ struct DirectoryConnection
     uint64_t lockSize;
     uint32_t lockLKey;
 
-    RemoteConnection *remoteInfo;
+    const std::vector<RemoteConnection> remoteInfo;
 
     DirectoryConnection(uint16_t dirID,
                         void *dsmPool,
                         uint64_t dsmSize,
                         uint32_t machineNR,
-                        RemoteConnection *remoteInfo);
+                        const std::vector<RemoteConnection> &remoteInfo);
 
     void sendMessage2App(RawMessage *m, uint16_t node_id, uint16_t th_id);
 };

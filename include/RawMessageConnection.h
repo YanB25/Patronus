@@ -1,10 +1,18 @@
+/*
+ * @Author: your name
+ * @Date: 2020-09-04 21:50:54
+ * @LastEditTime: 2020-09-04 21:59:24
+ * @LastEditors: your name
+ * @Description: In User Settings Edit
+ * @FilePath: /Sherman/include/RawMessageConnection.h
+ */
 #ifndef __RAWMESSAGECONNECTION_H__
 #define __RAWMESSAGECONNECTION_H__
 
+#include <thread>
+
 #include "AbstractMessageConnection.h"
 #include "GlobalAddress.h"
-
-#include <thread>
 
 enum RpcType : uint8_t
 {
@@ -27,9 +35,10 @@ struct RawMessage
 
 class RawMessageConnection : public AbstractMessageConnection
 {
-
 public:
     RawMessageConnection(RdmaContext &ctx, ibv_cq *cq, uint32_t messageNR);
+    static std::shared_ptr<RawMessageConnection> newInstance(
+        RdmaContext &ctx, ibv_cq *cq, uint32_t messageNR);
 
     void initSend();
     void sendRawMessage(RawMessage *m, uint32_t remoteQPN, ibv_ah *ah);

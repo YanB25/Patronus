@@ -2,11 +2,9 @@
 #define __DIRECTORY_H__
 
 #include <thread>
-
 #include <unordered_map>
 
 #include "Common.h"
-
 #include "Connection.h"
 #include "GlobalAllocator.h"
 
@@ -14,24 +12,32 @@ class Directory
 {
 public:
     Directory(DirectoryConnection *dCon,
-              RemoteConnection *remoteInfo,
+              const std::vector<RemoteConnection> &remoteInfo,
               uint32_t machineNR,
               uint16_t dirID,
               uint16_t nodeID);
+    static std::shared_ptr<Directory> newInstance(
+        DirectoryConnection *dCon,
+        const std::vector<RemoteConnection> &remoteInfo,
+        uint32_t machineNR,
+        uint64_t dirID,
+        uint16_t nodeID
+
+    );
 
     ~Directory();
 
 private:
     DirectoryConnection *dCon;
-    RemoteConnection *remoteInfo;
+    const std::vector<RemoteConnection> remoteInfo;
 
     uint32_t machineNR;
     uint16_t dirID;
     uint16_t nodeID;
 
-    std::thread *dirTh;
+    std::thread dirTh;
 
-    GlobalAllocator *chunckAlloc;
+    std::unique_ptr<GlobalAllocator> chunckAlloc;
 
     void dirThread();
 
