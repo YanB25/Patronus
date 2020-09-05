@@ -228,7 +228,7 @@ private:
     void fill_keys_dest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip);
 
     DSMConfig conf;
-    std::atomic_int appID;
+    std::atomic<int> appID{0};
     Cache cache;
 
     static thread_local int thread_id;

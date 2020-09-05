@@ -20,7 +20,7 @@ std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
     return future::make_unique<DSM>(conf);
 }
 
-DSM::DSM(const DSMConfig &conf) : conf(conf), appID(0), cache(conf.cacheConfig)
+DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize * define::GB);
 
@@ -51,7 +51,10 @@ DSM::~DSM()
 void DSM::registerThread()
 {
     if (thread_id != -1)
+    {
+        Debug::notifyError("Thread already registered.");
         return;
+    }
 
     thread_id = appID.fetch_add(1);
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
@@ -60,10 +63,17 @@ void DSM::registerThread()
 
     iCon->message->initRecv();
     iCon->message->initSend();
-    rdma_buffer = (char *) cache.data + thread_id * 12 * define::MB;
+
+    Debug::check(thread_id * define::kRDMABufferSize < cache.size,
+                 "Run out of cache size for offset = %llu",
+                 thread_id * define::kRDMABufferSize);
+    rdma_buffer = (char *) cache.data + thread_id * define::kRDMABufferSize;
 
     for (int i = 0; i < define::kMaxCoro; ++i)
     {
+        Debug::check(
+            i * define::kPerCoroRdmaBuf < define::kRDMABufferSize,
+            "Run out of RDMA buffer when allocating coroutine buffer.");
         rbuf[i].set_buffer(rdma_buffer + i * define::kPerCoroRdmaBuf);
     }
 }

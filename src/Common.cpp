@@ -1,23 +1,22 @@
 #include "Common.h"
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <netinet/in.h>
-#include <net/if.h>
-#include <unistd.h>
 #include <arpa/inet.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 void bindCore(uint16_t core)
 {
-
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(core, &cpuset);
     int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
     if (rc != 0)
     {
-        Debug::notifyError("can't bind core!");
+        Debug::notifyError("can't bind core %d!", core);
     }
 }
 
@@ -32,7 +31,7 @@ char *getIP()
     ioctl(fd, SIOCGIFADDR, &ifr);
     close(fd);
 
-    return inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+    return inet_ntoa(((struct sockaddr_in *) &ifr.ifr_addr)->sin_addr);
 }
 
 char *getMac()
@@ -46,5 +45,5 @@ char *getMac()
     ioctl(fd, SIOCGIFHWADDR, &ifr);
     close(fd);
 
-    return (char *)ifr.ifr_hwaddr.sa_data;
+    return (char *) ifr.ifr_hwaddr.sa_data;
 }

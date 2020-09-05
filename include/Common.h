@@ -88,7 +88,8 @@ struct CoroContext
 
 namespace define
 {
-constexpr uint64_t MB = 1024ull * 1024;
+constexpr uint64_t KB = 1024ull;
+constexpr uint64_t MB = 1024ull * KB;
 constexpr uint64_t GB = 1024ull * MB;
 constexpr uint16_t kCacheLineSize = 64;
 
@@ -110,11 +111,14 @@ constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
 constexpr uint64_t kMaxLevelOfTree = 7;
 
 constexpr uint16_t kMaxCoro = 8;
-constexpr int64_t kPerCoroRdmaBuf = 32 * 1024;
 
 constexpr uint8_t kMaxHandOverTime = 8;
 
 constexpr int kIndexCacheSize = 1024;  // MB
+
+// for dsm
+constexpr static uint32_t kRDMABufferSize = 12 * define::MB;
+constexpr int64_t kPerCoroRdmaBuf = 32 * define::KB;
 }  // namespace define
 
 static inline unsigned long long asm_rdtsc(void)

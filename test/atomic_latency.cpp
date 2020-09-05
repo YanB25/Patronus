@@ -24,7 +24,7 @@ int main()
     {
         while (true)
         {
-            std::this_thread::yield();
+            sleep(1);
         }
     }
 
