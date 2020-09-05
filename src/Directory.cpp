@@ -10,7 +10,7 @@ int g_root_level = -1;
 bool enable_cache;
 
 std::shared_ptr<Directory> Directory::newInstance(
-    DirectoryConnection *dCon,
+    DirectoryConnection &dCon,
     const std::vector<RemoteConnection> &remoteInfo,
     uint32_t machineNR,
     uint64_t dirID,
@@ -20,7 +20,7 @@ std::shared_ptr<Directory> Directory::newInstance(
         dCon, remoteInfo, machineNR, dirID, nodeID);
 }
 
-Directory::Directory(DirectoryConnection *dCon,
+Directory::Directory(DirectoryConnection &dCon,
                      const std::vector<RemoteConnection> &remoteInfo,
                      uint32_t machineNR,
                      uint16_t dirID,
@@ -33,7 +33,7 @@ Directory::Directory(DirectoryConnection *dCon,
 {
     {  // chunck alloctor
         GlobalAddress dsm_start;
-        uint64_t per_directory_dsm_size = dCon->dsmSize / NR_DIRECTORY;
+        uint64_t per_directory_dsm_size = dCon.dsmSize / NR_DIRECTORY;
         dsm_start.nodeID = nodeID;
         dsm_start.offset = per_directory_dsm_size * dirID;
         chunckAlloc =
@@ -55,13 +55,13 @@ void Directory::dirThread()
     while (true)
     {
         struct ibv_wc wc;
-        pollWithCQ(dCon->cq, 1, &wc);
+        pollWithCQ(dCon.cq, 1, &wc);
 
         switch (int(wc.opcode))
         {
         case IBV_WC_RECV:  // control message
         {
-            auto *m = (RawMessage *) dCon->message->getMessage();
+            auto *m = (RawMessage *) dCon.message->getMessage();
 
             process_message(m);
 
@@ -88,7 +88,7 @@ void Directory::process_message(const RawMessage *m)
     {
     case RpcType::MALLOC:
     {
-        send = (RawMessage *) dCon->message->getSendPool();
+        send = (RawMessage *) dCon.message->getSendPool();
 
         send->addr = chunckAlloc->alloc_chunck();
         break;
@@ -115,7 +115,7 @@ void Directory::process_message(const RawMessage *m)
 
     if (send)
     {
-        dCon->sendMessage2App(send, m->node_id, m->app_id);
+        dCon.sendMessage2App(send, m->node_id, m->app_id);
     }
 }
 

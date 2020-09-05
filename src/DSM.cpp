@@ -63,7 +63,7 @@ void DSM::registerThread()
     thread_id = appID.fetch_add(1);
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
 
-    iCon = thCon[thread_id];
+    iCon = &thCon[thread_id];
 
     iCon->message->initRecv();
     iCon->message->initSend();
@@ -83,20 +83,20 @@ void DSM::initRDMAConnection()
 
     for (int i = 0; i < MAX_APP_THREAD; ++i)
     {
-        thCon[i] = new ThreadConnection(i,
-                                        (void *) cache.data,
-                                        cache.size * define::GB,
-                                        conf.machineNR,
-                                        remoteInfo);
+        thCon.emplace_back(i,
+                           (void *) cache.data,
+                           cache.size * define::GB,
+                           conf.machineNR,
+                           remoteInfo);
     }
 
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
-        dirCon[i] = new DirectoryConnection(i,
-                                            (void *) baseAddr,
-                                            conf.dsmSize * define::GB,
-                                            conf.machineNR,
-                                            remoteInfo);
+        dirCon.emplace_back(i,
+                            (void *) baseAddr,
+                            conf.dsmSize * define::GB,
+                            conf.machineNR,
+                            remoteInfo);
     }
 
     keeper = new DSMKeeper(thCon, dirCon, remoteInfo, conf.machineNR);

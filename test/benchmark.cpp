@@ -297,6 +297,7 @@ int main(int argc, char *argv[])
     timespec s, e;
     uint64_t pre_tp = 0;
     uint64_t pre_ths[MAX_APP_THREAD];
+    __maybe_unused(pre_ths);
     for (int i = 0; i < MAX_APP_THREAD; ++i)
     {
         pre_ths[i] = 0;

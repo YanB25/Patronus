@@ -11,13 +11,13 @@
 class Directory
 {
 public:
-    Directory(DirectoryConnection *dCon,
+    Directory(DirectoryConnection &dCon,
               const std::vector<RemoteConnection> &remoteInfo,
               uint32_t machineNR,
               uint16_t dirID,
               uint16_t nodeID);
     static std::shared_ptr<Directory> newInstance(
-        DirectoryConnection *dCon,
+        DirectoryConnection &dCon,
         const std::vector<RemoteConnection> &remoteInfo,
         uint32_t machineNR,
         uint64_t dirID,
@@ -28,7 +28,7 @@ public:
     ~Directory();
 
 private:
-    DirectoryConnection *dCon;
+    DirectoryConnection &dCon;
     const std::vector<RemoteConnection> remoteInfo;
 
     uint32_t machineNR;

@@ -1,11 +1,3 @@
-/*
- * @Author: your name
- * @Date: 2020-09-04 21:48:34
- * @LastEditTime: 2020-09-05 09:31:11
- * @LastEditors: Please set LastEditors
- * @Description: In User Settings Edit
- * @FilePath: /Sherman/src/DirectoryConnection.cpp
- */
 #include "DirectoryConnection.h"
 
 #include "Connection.h"

@@ -41,8 +41,8 @@ struct ExchangeMeta
 class DSMKeeper : public Keeper
 {
 public:
-    DSMKeeper(ThreadConnection **thCon,
-              DirectoryConnection **dirCon,
+    DSMKeeper(std::vector<ThreadConnection> &thCon,
+              std::vector<DirectoryConnection> &dirCon,
               std::vector<RemoteConnection> &remoteCon,
               uint32_t maxServer = 12)
         : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
@@ -72,8 +72,8 @@ private:
     static const char *OK;
     static const char *ServerPrefix;
 
-    ThreadConnection **thCon;
-    DirectoryConnection **dirCon;
+    std::vector<ThreadConnection> &thCon;
+    std::vector<DirectoryConnection> &dirCon;
     std::vector<RemoteConnection> &remoteCon;
 
     ExchangeMeta localMeta;

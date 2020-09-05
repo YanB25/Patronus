@@ -243,8 +243,8 @@ private:
 
     // RemoteConnection *remoteInfo;
     std::vector<RemoteConnection> remoteInfo;
-    ThreadConnection *thCon[MAX_APP_THREAD];
-    DirectoryConnection *dirCon[NR_DIRECTORY];
+    std::vector<ThreadConnection> thCon;
+    std::vector<DirectoryConnection> dirCon;
     DSMKeeper *keeper;
 
     std::vector<std::shared_ptr<Directory>> dirAgent;
