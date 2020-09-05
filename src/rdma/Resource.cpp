@@ -307,7 +307,7 @@ bool createDCTarget(ibv_exp_dct **dct,
 
 void fillAhAttr(ibv_ah_attr *attr,
                 uint32_t remoteLid,
-                uint8_t *remoteGid,
+                const uint8_t *remoteGid,
                 RdmaContext *context)
 {
     (void) remoteGid;

@@ -1,7 +1,6 @@
 #include "Rdma.h"
 bool modifyQPtoInit(struct ibv_qp *qp, RdmaContext *context)
 {
-
     struct ibv_qp_attr attr;
     memset(&attr, 0, sizeof(attr));
 
@@ -43,10 +42,9 @@ bool modifyQPtoInit(struct ibv_qp *qp, RdmaContext *context)
 bool modifyQPtoRTR(struct ibv_qp *qp,
                    uint32_t remoteQPN,
                    uint16_t remoteLid,
-                   uint8_t *remoteGid,
+                   const uint8_t *remoteGid,
                    RdmaContext *context)
 {
-
     struct ibv_qp_attr attr;
     memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTR;
@@ -213,7 +211,6 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                               IBV_EXP_QP_RETRY_CNT | IBV_EXP_QP_RNR_RETRY |
                               IBV_EXP_QP_MAX_QP_RD_ATOMIC))
     {
-
         Debug::notifyError("failed to modify QP state to RTS");
         return false;
     }

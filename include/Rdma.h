@@ -99,7 +99,7 @@ bool createDCTarget(ibv_exp_dct **dct,
                     uint32_t maxInlineData = 0);
 void fillAhAttr(ibv_ah_attr *attr,
                 uint32_t remoteLid,
-                uint8_t *remoteGid,
+                const uint8_t *remoteGid,
                 RdmaContext *context);
 
 //// StateTrans.cpp
@@ -107,7 +107,7 @@ bool modifyQPtoInit(struct ibv_qp *qp, RdmaContext *context);
 bool modifyQPtoRTR(struct ibv_qp *qp,
                    uint32_t remoteQPN,
                    uint16_t remoteLid,
-                   uint8_t *gid,
+                   const uint8_t *gid,
                    RdmaContext *context);
 bool modifyQPtoRTS(struct ibv_qp *qp);
 

@@ -124,7 +124,7 @@ private:
      * @param remoteID the id of the remote machine
      * @param remoteMeta the remote meta data to refer to
      */
-    void setDataFromRemote(uint16_t remoteID, ExchangeMeta &remoteMeta);
+    void setDataFromRemote(uint16_t remoteID, const ExchangeMeta &remoteMeta);
 
 protected:
     /**

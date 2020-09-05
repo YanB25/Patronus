@@ -76,7 +76,8 @@ void DSMKeeper::setDataToRemote(uint16_t remoteID)
     }
 }
 
-void DSMKeeper::setDataFromRemote(uint16_t remoteID, ExchangeMeta &remoteMeta)
+void DSMKeeper::setDataFromRemote(uint16_t remoteID,
+                                  const ExchangeMeta &remoteMeta)
 {
     // init directory qp
     for (int i = 0; i < NR_DIRECTORY; ++i)
