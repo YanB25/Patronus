@@ -263,6 +263,8 @@ public:
     }
     RdmaBuffer &get_rbuf(int coro_id)
     {
+        Debug::dcheck(coro_id < define::kMaxCoro,
+                      "coro_id should be < define::kMaxCoro");
         return rbuf[coro_id];
     }
 

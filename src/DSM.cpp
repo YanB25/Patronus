@@ -57,6 +57,8 @@ void DSM::registerThread()
     }
 
     thread_id = appID.fetch_add(1);
+    Debug::check(thread_id < (int) thCon.size(),
+                 "Can not allocate more threads");
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
 
     iCon = &thCon[thread_id];
