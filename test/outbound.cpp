@@ -69,10 +69,10 @@ void read_args(int argc, char **argv)
     thread_nr = std::atoi(argv[2]);
     kPacketSize = std::atof(argv[3]);
 
-    printf("node_nr [%d], thread_nr [%d], packsize [%d]\n",
-           node_nr,
-           thread_nr,
-           kPacketSize);
+    info("node_nr [%d], thread_nr [%d], packsize [%d]\n",
+         node_nr,
+         thread_nr,
+         kPacketSize);
 }
 
 int main(int argc, char **argv)
