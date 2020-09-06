@@ -127,7 +127,7 @@ void Keeper::serverConnect()
             if (k != myNodeID)
             {
                 connectNode(k);
-                dinfo("Connected to server %d", k);
+                dinfo("Connected to server %zu", k);
             }
         }
         curServer = serverNum;

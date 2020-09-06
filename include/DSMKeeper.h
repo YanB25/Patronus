@@ -21,7 +21,8 @@ struct ExPerThread
 } __attribute__((packed));
 
 /**
- * Keep the struct POD to be memcpy-able
+ * @brief an exchange data used in building connection for each `pair` of
+ * machines in the system. Keep the struct POD to be memcpy-able
  */
 struct ExchangeMeta
 {
@@ -29,14 +30,36 @@ struct ExchangeMeta
     // uint64_t cacheBase;
     uint64_t dmBase;
 
+    /**
+     * ThreadConnection exchange data used by DirectoryConnection
+     */
     ExPerThread appTh[MAX_APP_THREAD];
+    /***
+     * DirectoryConnection exchange data used by ThreadConnection
+     */
     ExPerThread dirTh[NR_DIRECTORY];
 
+    /**
+     * @brief Unreliable Datagram QPN used in raw message transmission.
+     * app QPN is used by @see DirectoryConnection
+     */
     uint32_t appUdQpn[MAX_APP_THREAD];
+    /**
+     * @brief Unreliable Datagram QPN used in raw message transmission.
+     * dir QPN is used by @see ThreadConnection
+     */
     uint32_t dirUdQpn[NR_DIRECTORY];
 
+    /**
+     * @brief Reliable Connection QPN used for each local ThreadConnection to
+     * remote DirectoryConnetion
+     */
     uint32_t appRcQpn2dir[MAX_APP_THREAD][NR_DIRECTORY];
 
+    /**
+     * @brief Reliable Connection QPN used for each local DirectoryConnection to
+     * remote ThreadConnetion
+     */
     uint32_t dirRcQpn2app[NR_DIRECTORY][MAX_APP_THREAD];
 
 } __attribute__((packed));

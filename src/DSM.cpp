@@ -63,7 +63,10 @@ void DSM::registerThread()
     iCon->message->initRecv();
     iCon->message->initSend();
 
-    check(thread_id * define::kRDMABufferSize < cache.size,
+    dinfo("cache size is %" PRIu64 ", thread_id is %d ", cache.size, thread_id);
+
+    // TODO: cache size is measured in GB.
+    check(thread_id * define::kRDMABufferSize < cache.size * define::GB,
           "Run out of cache size for offset = %" PRIu32,
           thread_id * define::kRDMABufferSize);
     rdma_buffer = (char *) cache.data + thread_id * define::kRDMABufferSize;

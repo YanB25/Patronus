@@ -51,5 +51,4 @@ void DirectoryConnection::sendMessage2App(RawMessage *m,
     message->sendRawMessage(m,
                             remoteInfo[node_id].appMessageQPN[th_id],
                             remoteInfo[node_id].dirToAppAh[dirID][th_id]);
-    ;
 }
