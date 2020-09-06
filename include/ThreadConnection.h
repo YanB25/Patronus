@@ -14,7 +14,13 @@ struct ThreadConnection
     uint16_t threadID;
 
     RdmaContext ctx;
-    ibv_cq *cq;  // for one-side verbs
+    /**
+     * cq is a shared completion queue used in Reliable Connection QPs
+     */
+    ibv_cq *cq;
+    /**
+     * cq is a completion queue used in Unreliable Datagram QP
+     */
     ibv_cq *rpc_cq;
 
     RawMessageConnection *message;

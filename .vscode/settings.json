@@ -52,6 +52,7 @@
         "utility": "cpp",
         "typeindex": "cpp",
         "typeinfo": "cpp",
-        "string": "cpp"
+        "string": "cpp",
+        "csignal": "cpp"
     }
 }

@@ -6,7 +6,7 @@
 
 namespace smart
 {
-std::string smartSize(uint64_t size)
+inline std::string smartSize(uint64_t size)
 {
     if (size < 1 * define::KB)
     {
@@ -29,7 +29,7 @@ std::string smartSize(uint64_t size)
         return std::to_string(size / define::TB) + " TB";
     }
 }
-std::string smartOps(uint64_t ops)
+inline std::string smartOps(uint64_t ops)
 {
     if (ops < 1 * define::K)
     {

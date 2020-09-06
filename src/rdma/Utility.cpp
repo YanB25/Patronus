@@ -62,6 +62,7 @@ void checkDctSupported(struct ibv_context *ctx)
     else
     {
         kMaxDeviceMemorySize = attrs.max_dm_size;
-        info("NIC Device Memory is %s", smart::smartSize(kMaxDeviceMemorySize));
+        info("NIC Device Memory is %s",
+             smart::smartSize(kMaxDeviceMemorySize).c_str());
     }
 }

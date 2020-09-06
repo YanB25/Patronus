@@ -12,7 +12,8 @@ DirectoryConnection::DirectoryConnection(
 {
     createContext(&ctx);
     cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
-    message = RawMessageConnection::newInstance(ctx, cq, DIR_MESSAGE_NR);
+    rpc_cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
+    message = RawMessageConnection::newInstance(ctx, rpc_cq, DIR_MESSAGE_NR);
 
     message->initRecv();
     message->initSend();

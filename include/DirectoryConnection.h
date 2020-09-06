@@ -12,7 +12,14 @@ struct DirectoryConnection
     uint16_t dirID;
 
     RdmaContext ctx;
+    /**
+     * cq is a shared completion queue used in Reliable Connection QPs
+     */
     ibv_cq *cq;
+    /**
+     * cq is a completion queue used in Unreliable Datagram QP
+     */
+    ibv_cq *rpc_cq;
 
     std::shared_ptr<RawMessageConnection> message;
 
