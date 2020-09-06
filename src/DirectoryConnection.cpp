@@ -36,10 +36,10 @@ DirectoryConnection::DirectoryConnection(
     // app, RC
     for (int i = 0; i < MAX_APP_THREAD; ++i)
     {
-        data2app.emplace_back(machineNR);
+        QPs.emplace_back(machineNR);
         for (size_t k = 0; k < machineNR; ++k)
         {
-            createQueuePair(&data2app.back()[k], IBV_QPT_RC, cq, &ctx);
+            createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
         }
     }
 }

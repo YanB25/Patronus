@@ -16,7 +16,10 @@ struct DirectoryConnection
 
     std::shared_ptr<RawMessageConnection> message;
 
-    std::vector<std::vector<ibv_qp *>> data2app;
+    /**
+     * @brief maintain QPs for every MAX_APP_THREAD of every machineNR
+     */
+    std::vector<std::vector<ibv_qp *>> QPs;
 
     ibv_mr *dsmMR;
     void *dsmPool;

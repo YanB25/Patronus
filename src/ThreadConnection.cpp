@@ -25,10 +25,10 @@ ThreadConnection::ThreadConnection(
     // dir, RC
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
-        data.emplace_back(machineNR);
+        QPs.emplace_back(machineNR);
         for (size_t k = 0; k < machineNR; ++k)
         {
-            createQueuePair(&data.back()[k], IBV_QPT_RC, cq, &ctx);
+            createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
         }
     }
 }

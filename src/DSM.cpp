@@ -114,7 +114,7 @@ void DSM::read(char *buffer,
 {
     if (ctx == nullptr)
     {
-        rdmaRead(iCon->data[0][gaddr.nodeID],
+        rdmaRead(iCon->QPs[0][gaddr.nodeID],
                  (uint64_t) buffer,
                  remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                  size,
@@ -124,7 +124,7 @@ void DSM::read(char *buffer,
     }
     else
     {
-        rdmaRead(iCon->data[0][gaddr.nodeID],
+        rdmaRead(iCon->QPs[0][gaddr.nodeID],
                  (uint64_t) buffer,
                  remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                  size,
@@ -158,7 +158,7 @@ void DSM::write(const char *buffer,
 {
     if (ctx == nullptr)
     {
-        rdmaWrite(iCon->data[0][gaddr.nodeID],
+        rdmaWrite(iCon->QPs[0][gaddr.nodeID],
                   (uint64_t) buffer,
                   remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                   size,
@@ -169,7 +169,7 @@ void DSM::write(const char *buffer,
     }
     else
     {
-        rdmaWrite(iCon->data[0][gaddr.nodeID],
+        rdmaWrite(iCon->QPs[0][gaddr.nodeID],
                   (uint64_t) buffer,
                   remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                   size,
@@ -224,11 +224,11 @@ void DSM::write_batch(RdmaOpRegion *rs, int k, bool signal, CoroContext *ctx)
 
     if (ctx == nullptr)
     {
-        rdmaWriteBatch(iCon->data[0][node_id], rs, k, signal);
+        rdmaWriteBatch(iCon->QPs[0][node_id], rs, k, signal);
     }
     else
     {
-        rdmaWriteBatch(iCon->data[0][node_id], rs, k, true, ctx->coro_id);
+        rdmaWriteBatch(iCon->QPs[0][node_id], rs, k, true, ctx->coro_id);
         (*ctx->yield)(*ctx->master);
     }
 }
@@ -267,11 +267,11 @@ void DSM::write_faa(RdmaOpRegion &write_ror,
     if (ctx == nullptr)
     {
         rdmaWriteFaa(
-            iCon->data[0][node_id], write_ror, faa_ror, add_val, signal);
+            iCon->QPs[0][node_id], write_ror, faa_ror, add_val, signal);
     }
     else
     {
-        rdmaWriteFaa(iCon->data[0][node_id],
+        rdmaWriteFaa(iCon->QPs[0][node_id],
                      write_ror,
                      faa_ror,
                      add_val,
@@ -317,11 +317,11 @@ void DSM::write_cas(RdmaOpRegion &write_ror,
     if (ctx == nullptr)
     {
         rdmaWriteCas(
-            iCon->data[0][node_id], write_ror, cas_ror, equal, val, signal);
+            iCon->QPs[0][node_id], write_ror, cas_ror, equal, val, signal);
     }
     else
     {
-        rdmaWriteCas(iCon->data[0][node_id],
+        rdmaWriteCas(iCon->QPs[0][node_id],
                      write_ror,
                      cas_ror,
                      equal,
@@ -368,11 +368,11 @@ void DSM::cas_read(RdmaOpRegion &cas_ror,
     if (ctx == nullptr)
     {
         rdmaCasRead(
-            iCon->data[0][node_id], cas_ror, read_ror, equal, val, signal);
+            iCon->QPs[0][node_id], cas_ror, read_ror, equal, val, signal);
     }
     else
     {
-        rdmaCasRead(iCon->data[0][node_id],
+        rdmaCasRead(iCon->QPs[0][node_id],
                     cas_ror,
                     read_ror,
                     equal,
@@ -409,7 +409,7 @@ void DSM::cas(GlobalAddress gaddr,
 {
     if (ctx == nullptr)
     {
-        rdmaCompareAndSwap(iCon->data[0][gaddr.nodeID],
+        rdmaCompareAndSwap(iCon->QPs[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                            equal,
@@ -420,7 +420,7 @@ void DSM::cas(GlobalAddress gaddr,
     }
     else
     {
-        rdmaCompareAndSwap(iCon->data[0][gaddr.nodeID],
+        rdmaCompareAndSwap(iCon->QPs[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                            equal,
@@ -457,7 +457,7 @@ void DSM::cas_mask(GlobalAddress gaddr,
                    uint64_t mask,
                    bool signal)
 {
-    rdmaCompareAndSwapMask(iCon->data[0][gaddr.nodeID],
+    rdmaCompareAndSwapMask(iCon->QPs[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                            equal,
@@ -490,7 +490,7 @@ void DSM::faa_boundary(GlobalAddress gaddr,
 {
     if (ctx == nullptr)
     {
-        rdmaFetchAndAddBoundary(iCon->data[0][gaddr.nodeID],
+        rdmaFetchAndAddBoundary(iCon->QPs[0][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
                                 remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                                 add_val,
@@ -501,7 +501,7 @@ void DSM::faa_boundary(GlobalAddress gaddr,
     }
     else
     {
-        rdmaFetchAndAddBoundary(iCon->data[0][gaddr.nodeID],
+        rdmaFetchAndAddBoundary(iCon->QPs[0][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
                                 remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                                 add_val,
@@ -536,7 +536,7 @@ void DSM::read_dm(char *buffer,
 {
     if (ctx == nullptr)
     {
-        rdmaRead(iCon->data[0][gaddr.nodeID],
+        rdmaRead(iCon->QPs[0][gaddr.nodeID],
                  (uint64_t) buffer,
                  remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                  size,
@@ -546,7 +546,7 @@ void DSM::read_dm(char *buffer,
     }
     else
     {
-        rdmaRead(iCon->data[0][gaddr.nodeID],
+        rdmaRead(iCon->QPs[0][gaddr.nodeID],
                  (uint64_t) buffer,
                  remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                  size,
@@ -580,7 +580,7 @@ void DSM::write_dm(const char *buffer,
 {
     if (ctx == nullptr)
     {
-        rdmaWrite(iCon->data[0][gaddr.nodeID],
+        rdmaWrite(iCon->QPs[0][gaddr.nodeID],
                   (uint64_t) buffer,
                   remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                   size,
@@ -591,7 +591,7 @@ void DSM::write_dm(const char *buffer,
     }
     else
     {
-        rdmaWrite(iCon->data[0][gaddr.nodeID],
+        rdmaWrite(iCon->QPs[0][gaddr.nodeID],
                   (uint64_t) buffer,
                   remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                   size,
@@ -627,7 +627,7 @@ void DSM::cas_dm(GlobalAddress gaddr,
 {
     if (ctx == nullptr)
     {
-        rdmaCompareAndSwap(iCon->data[0][gaddr.nodeID],
+        rdmaCompareAndSwap(iCon->QPs[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
@@ -638,7 +638,7 @@ void DSM::cas_dm(GlobalAddress gaddr,
     }
     else
     {
-        rdmaCompareAndSwap(iCon->data[0][gaddr.nodeID],
+        rdmaCompareAndSwap(iCon->QPs[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
@@ -675,7 +675,7 @@ void DSM::cas_dm_mask(GlobalAddress gaddr,
                       uint64_t mask,
                       bool signal)
 {
-    rdmaCompareAndSwapMask(iCon->data[0][gaddr.nodeID],
+    rdmaCompareAndSwapMask(iCon->QPs[0][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
@@ -708,7 +708,7 @@ void DSM::faa_dm_boundary(GlobalAddress gaddr,
 {
     if (ctx == nullptr)
     {
-        rdmaFetchAndAddBoundary(iCon->data[0][gaddr.nodeID],
+        rdmaFetchAndAddBoundary(iCon->QPs[0][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
                                 remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                                 add_val,
@@ -719,7 +719,7 @@ void DSM::faa_dm_boundary(GlobalAddress gaddr,
     }
     else
     {
-        rdmaFetchAndAddBoundary(iCon->data[0][gaddr.nodeID],
+        rdmaFetchAndAddBoundary(iCon->QPs[0][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
                                 remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                                 add_val,

@@ -68,7 +68,7 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
 
         for (int k = 0; k < MAX_APP_THREAD; ++k)
         {
-            exchangeMeta.dirRcQpn2app[i][k] = c.data2app[k][remoteID]->qp_num;
+            exchangeMeta.dirRcQpn2app[i][k] = c.QPs[k][remoteID]->qp_num;
         }
     }
 
@@ -77,7 +77,8 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
         const auto &c = thCon[i];
         for (int k = 0; k < NR_DIRECTORY; ++k)
         {
-            exchangeMeta.appRcQpn2dir[i][k] = c.data[k][remoteID]->qp_num;
+            //  = thCon[i].QPs[k][remoteID]->qp_num;
+            exchangeMeta.appRcQpn2dir[i][k] = c.QPs[k][remoteID]->qp_num;
         }
     }
 }
@@ -91,7 +92,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
 
         for (int k = 0; k < MAX_APP_THREAD; ++k)
         {
-            auto &qp = c.data2app[k][remoteID];
+            auto &qp = c.QPs[k][remoteID];
 
             assert(qp->qp_type == IBV_QPT_RC);
             modifyQPtoInit(qp, &c.ctx);
@@ -110,7 +111,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
         auto &c = thCon[i];
         for (int k = 0; k < NR_DIRECTORY; ++k)
         {
-            auto &qp = c.data[k][remoteID];
+            auto &qp = c.QPs[k][remoteID];
 
             check(qp->qp_type == IBV_QPT_RC);
             modifyQPtoInit(qp, &c.ctx);

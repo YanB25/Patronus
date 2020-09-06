@@ -120,7 +120,7 @@ void Directory::process_message(const RawMessage *m)
 }
 
 // void Directory::sendData2App(const RawMessage *m) {
-//   rdmaWrite(dCon->data2app[m->appID][m->nodeID], (uint64_t)dCon->dsmPool,
+//   rdmaWrite(dCon->QPs[m->appID][m->nodeID], (uint64_t)dCon->dsmPool,
 //             m->destAddr, 1024, dCon->dsmLKey,
 //             remoteInfo[m->nodeID].appRKey[m->appID], 11, true, 0);
 // }

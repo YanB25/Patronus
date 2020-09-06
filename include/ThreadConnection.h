@@ -20,9 +20,9 @@ struct ThreadConnection
     RawMessageConnection *message;
 
     /**
-     * data contains NR_DIRECTORY * machineNR QP
+     * @brief maintain QP for every NR_DIRECTORY in every machineNR
      */
-    std::vector<std::vector<ibv_qp *>> data;
+    std::vector<std::vector<ibv_qp *>> QPs;
 
     ibv_mr *cacheMR;
     void *cachePool;
