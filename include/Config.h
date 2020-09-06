@@ -6,26 +6,25 @@
 class CacheConfig
 {
 public:
-    uint32_t cacheSize;
+    uint64_t cacheSize;
 
-    CacheConfig(uint32_t cacheSize = 1) : cacheSize(cacheSize)
+    CacheConfig(uint64_t cacheSize = 1 * define::GB) : cacheSize(cacheSize)
     {
     }
 };
-
 class DSMConfig
 {
 public:
     DSMConfig(const CacheConfig &cacheConfig = CacheConfig(),
               uint32_t machineNR = 2,
-              uint64_t dsmSize = 48)
+              uint64_t dsmSize = 48 * define::GB)
         : cacheConfig(cacheConfig), machineNR(machineNR), dsmSize(dsmSize)
     {
     }
 
     CacheConfig cacheConfig;
     uint32_t machineNR;
-    uint64_t dsmSize;  // G
+    uint64_t dsmSize;
 };
 
 #endif /* __CONFIG_H__ */

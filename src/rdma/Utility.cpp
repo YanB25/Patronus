@@ -1,12 +1,6 @@
-/*
- * @Author: your name
- * @Date: 2020-09-04 16:59:56
- * @LastEditTime: 2020-09-04 17:08:26
- * @LastEditors: your name
- * @Description: In User Settings Edit
- * @FilePath: /Sherman/src/rdma/Utility.cpp
- */
+#include "Debug.h"
 #include "Rdma.h"
+#include "Util.h"
 
 int kMaxDeviceMemorySize = 0;
 
@@ -68,7 +62,6 @@ void checkDctSupported(struct ibv_context *ctx)
     else
     {
         kMaxDeviceMemorySize = attrs.max_dm_size;
-        printf("NIC Device Memory is %dKB\n", kMaxDeviceMemorySize / 1024);
-        // printf("DM %d\n", maxMemic);
+        info("NIC Device Memory is %s", smart::smartSize(kMaxDeviceMemorySize));
     }
 }

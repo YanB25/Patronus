@@ -279,9 +279,6 @@ bool rdmaBatchRead(ibv_qp *qp,
     uint32_t batchSize = regions.size();
     for (size_t w_i = 0; w_i < batchSize; ++w_i, ++iter)
     {
-        // TODO:
-        // why we need to pollwithcq and why the condition is counter &
-        // signalBatch
         if ((counter & signalBatch) == 0 && counter > 0)
         {
             pollWithCQ(qp->send_cq, 1, &wc);

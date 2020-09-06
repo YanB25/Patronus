@@ -198,7 +198,7 @@ void read_args(int argc, char **argv)
 
     info(
         "node_nr [%d], thread_nr [%d], zipfan [%.3f], cas sleep ns [%ld], "
-        "packsize [%d]\n",
+        "packsize [%d]",
         node_nr,
         thread_nr,
         kZipfan,

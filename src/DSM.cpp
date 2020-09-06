@@ -6,6 +6,7 @@
 #include "DSMKeeper.h"
 #include "Directory.h"
 #include "HugePageAlloc.h"
+#include "Util.h"
 
 thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
@@ -21,10 +22,14 @@ std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
 
 DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
-    baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize * define::GB);
+    baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize);
 
-    info("shared memory size: %" PRIu64 "GB, 0x%lx", conf.dsmSize, baseAddr);
-    info("cache size: %dGB", conf.cacheConfig.cacheSize);
+    // TODO: use smart print
+    info("shared memory size: %s, 0x%lx",
+         smart::smartSize(conf.dsmSize).c_str(),
+         baseAddr);
+    info("cache size: %s",
+         smart::smartSize(conf.cacheConfig.cacheSize).c_str());
 
     // warmup
     // memset((char *)baseAddr, 0, conf.dsmSize * define::GB);
@@ -63,10 +68,7 @@ void DSM::registerThread()
     iCon->message->initRecv();
     iCon->message->initSend();
 
-    dinfo("cache size is %" PRIu64 ", thread_id is %d ", cache.size, thread_id);
-
-    // TODO: cache size is measured in GB.
-    check(thread_id * define::kRDMABufferSize < cache.size * define::GB,
+    check(thread_id * define::kRDMABufferSize < cache.size,
           "Run out of cache size for offset = %" PRIu32,
           thread_id * define::kRDMABufferSize);
     rdma_buffer = (char *) cache.data + thread_id * define::kRDMABufferSize;
@@ -87,20 +89,14 @@ void DSM::initRDMAConnection()
 
     for (int i = 0; i < MAX_APP_THREAD; ++i)
     {
-        thCon.emplace_back(i,
-                           (void *) cache.data,
-                           cache.size * define::GB,
-                           conf.machineNR,
-                           remoteInfo);
+        thCon.emplace_back(
+            i, (void *) cache.data, cache.size, conf.machineNR, remoteInfo);
     }
 
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
-        dirCon.emplace_back(i,
-                            (void *) baseAddr,
-                            conf.dsmSize * define::GB,
-                            conf.machineNR,
-                            remoteInfo);
+        dirCon.emplace_back(
+            i, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
     }
 
     // thCon, dirCon, remoteInfo set up here.
