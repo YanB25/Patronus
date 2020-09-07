@@ -219,7 +219,9 @@ int main(int argc, char **argv)
     if (dsm->getMyNodeID() == node_nr - 1)
     {
         while (true)
-            ;
+        {
+            sleep(1);
+        }
     }
 
     bindCore(20);
