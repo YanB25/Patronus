@@ -95,7 +95,7 @@ void Keeper::serverEnter()
         error("Server %d Counld't incr value and get ID: %s, retry...",
               myNodeID,
               memcached_strerror(memc, rc));
-        usleep(10000);
+        sleep(1);
     }
 }
 
