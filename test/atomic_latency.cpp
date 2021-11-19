@@ -9,9 +9,9 @@ constexpr uint32_t kMachineNr = 2;
 
 int main(int argc, char** argv)
 {
-    if (argc <= 2)
+    if (argc < 2)
     {
-        fprintf(stderr, "./%s [conf file]\n", argv[0]);
+        fprintf(stderr, "%s [conf file]\n", argv[0]);
         return false;
     }
     std::string conf_file = argv[1];
