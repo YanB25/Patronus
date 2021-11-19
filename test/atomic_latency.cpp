@@ -7,8 +7,19 @@
 constexpr uint16_t kTargetNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc <= 2)
+    {
+        fprintf(stderr, "./%s [conf file]\n", argv[0]);
+        return false;
+    }
+    std::string conf_file = argv[1];
+    auto& c = ConfigRegister::ins();
+    printf("open conf file: %s\n", conf_file.c_str());
+    
+    c.reg_conf_file(conf_file);
+
     bindCore(0);
 
     DSMConfig config;

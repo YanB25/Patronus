@@ -38,11 +38,22 @@ bool Keeper::connectMemcached()
     memcached_server_st *servers = NULL;
     memcached_return rc;
 
-    std::ifstream conf("../memcached.conf");
+    auto &c = ConfigRegister::ins();
+
+    if (c.conf_file() == "")
+    {
+        error(
+            "conf_file is empty. did you set it by "
+            "ConfigRegister::ins().reg_conf_file()");
+        return false;
+    }
+
+    std::ifstream conf(c.conf_file());
 
     if (!conf)
     {
-        error("can't open memchaced.conf at ../memcached.conf");
+        fprintf(
+            stderr, "can't open memcache.conf at %s", c.conf_file().c_str());
         return false;
     }
 

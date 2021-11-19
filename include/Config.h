@@ -12,12 +12,35 @@ public:
     {
     }
 };
+
+class ConfigRegister
+{
+public:
+    ConfigRegister() = default;
+    bool operator=(const ConfigRegister&) = delete;
+    ConfigRegister(const ConfigRegister&) = delete;
+    static ConfigRegister& ins()
+    {
+        static ConfigRegister ins;
+        return ins;
+    }
+    void reg_conf_file(const std::string& conf)
+    {
+        conf_ = conf;
+    }
+    std::string conf_file()
+    {
+        return conf_;
+    }
+private:
+    std::string conf_;
+};
 class DSMConfig
 {
 public:
     DSMConfig(const CacheConfig &cacheConfig = CacheConfig(),
               uint32_t machineNR = 2,
-              uint64_t dsmSize = 48 * define::GB)
+              uint64_t dsmSize = 16 * define::GB)
         : cacheConfig(cacheConfig), machineNR(machineNR), dsmSize(dsmSize)
     {
     }
