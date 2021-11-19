@@ -33,7 +33,7 @@ bool modifyQPtoInit(struct ibv_qp *qp, RdmaContext *context)
                       IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
                           IBV_QP_ACCESS_FLAGS))
     {
-        error("Failed to modify QP state to INIT");
+        perror("Failed to modify QP state to INIT");
         return false;
     }
     return true;
@@ -64,10 +64,10 @@ bool modifyQPtoRTR(struct ibv_qp *qp,
         attr.min_rnr_timer = 12;
         flags |= IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
     }
-
-    if (ibv_modify_qp(qp, &attr, flags))
+    int ret = ibv_modify_qp(qp, &attr, flags);
+    if (ret)
     {
-        error("failed to modify QP state to RTR");
+        perror("failed to modify QP state to RTR. ");
         return false;
     }
     return true;
@@ -92,10 +92,10 @@ bool modifyQPtoRTS(struct ibv_qp *qp)
         flags |= IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
                  IBV_QP_MAX_QP_RD_ATOMIC;
     }
-
-    if (ibv_modify_qp(qp, &attr, flags))
+    int ret = ibv_modify_qp(qp, &attr, flags);
+    if (ret)
     {
-        error("failed to modify QP state to RTS");
+        perror("failed to modify QP state to RTS. ret");
         return false;
     }
     return true;
@@ -120,7 +120,7 @@ bool modifyUDtoRTS(struct ibv_qp *qp, RdmaContext *context)
                 &attr,
                 IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_QKEY))
         {
-            error("Failed to modify QP state to INIT");
+            perror("Failed to modify QP state to INIT");
             return false;
         }
     }
@@ -128,7 +128,7 @@ bool modifyUDtoRTS(struct ibv_qp *qp, RdmaContext *context)
     {
         if (ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_PORT))
         {
-            error("Failed to modify QP state to INIT");
+            perror("Failed to modify QP state to INIT");
             return false;
         }
     }
@@ -137,7 +137,7 @@ bool modifyUDtoRTS(struct ibv_qp *qp, RdmaContext *context)
     attr.qp_state = IBV_QPS_RTR;
     if (ibv_modify_qp(qp, &attr, IBV_QP_STATE))
     {
-        error("failed to modify QP state to RTR");
+        perror("failed to modify QP state to RTR");
         return false;
     }
 
@@ -149,7 +149,7 @@ bool modifyUDtoRTS(struct ibv_qp *qp, RdmaContext *context)
     {
         if (ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_SQ_PSN))
         {
-            error("failed to modify QP state to RTS");
+            perror("failed to modify QP state to RTS");
             return false;
         }
     }
@@ -157,7 +157,7 @@ bool modifyUDtoRTS(struct ibv_qp *qp, RdmaContext *context)
     {
         if (ibv_modify_qp(qp, &attr, IBV_QP_STATE))
         {
-            error("failed to modify QP state to RTS");
+            perror("failed to modify QP state to RTS");
             return false;
         }
     }
@@ -185,7 +185,7 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                           IBV_EXP_QP_STATE | IBV_EXP_QP_PKEY_INDEX |
                               IBV_EXP_QP_PORT | IBV_EXP_QP_DC_KEY))
     {
-        error("failed to modify QP state to INI");
+        perror("failed to modify QP state to INI");
         return false;
     }
 
@@ -196,7 +196,7 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
     if (ibv_exp_modify_qp(
             qp, &attr, IBV_EXP_QP_STATE | IBV_EXP_QP_PATH_MTU | IBV_EXP_QP_AV))
     {
-        error("failed to modify QP state to RTR");
+        perror("failed to modify QP state to RTR");
         return false;
     }
 
@@ -211,7 +211,7 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                               IBV_EXP_QP_RETRY_CNT | IBV_EXP_QP_RNR_RETRY |
                               IBV_EXP_QP_MAX_QP_RD_ATOMIC))
     {
-        error("failed to modify QP state to RTS");
+        perror("failed to modify QP state to RTS");
         return false;
     }
 
