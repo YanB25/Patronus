@@ -148,6 +148,7 @@ void Keeper::memSet(const char *key,
         {
             break;
         }
+        sleep(400);
         std::this_thread::yield();
     }
 }
@@ -166,7 +167,7 @@ char *Keeper::memGet(const char *key, uint32_t klen, size_t *v_size)
         {
             break;
         }
-        std::this_thread::yield();
+        usleep(400 * myNodeID);
     }
 
     if (v_size != nullptr)
@@ -187,6 +188,7 @@ uint64_t Keeper::memFetchAndAdd(const char *key, uint32_t klen)
         {
             return res;
         }
+        usleep(10000);
         std::this_thread::yield();
     }
 }
