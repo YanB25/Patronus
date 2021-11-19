@@ -33,9 +33,6 @@
 
 #define LATENCY_WINDOWS 1000000
 
-#define STRUCT_OFFSET(type, field) \
-    (char *) &((type *) (0))->field - (char *) ((type *) (0))
-
 #define MAX_MACHINE 8
 
 #define ADD_ROUND(x, n) ((x) = ((x) + 1) % (n))
@@ -76,8 +73,8 @@ inline int bits_in(std::uint64_t u)
 
 #include <boost/coroutine/all.hpp>
 
-using CoroYield = boost::coroutines::symmetric_coroutine<void>::yield_type;
-using CoroCall = boost::coroutines::symmetric_coroutine<void>::call_type;
+using CoroYield = typename boost::coroutines::symmetric_coroutine<void>::yield_type;
+using CoroCall = typename boost::coroutines::symmetric_coroutine<void>::call_type;
 
 struct CoroContext
 {

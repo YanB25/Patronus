@@ -5,12 +5,15 @@ option(BUILD_TEST "Whether or not build the tests" ON)
 option(BUILD_BENCH "Whether or not build the benchmark" OFF)
 option(SANITIZE "Turn on sanitization" OFF)
 
-set (CMAKE_C_COMPILER "/usr/local/openmpi/bin/mpicxx")
+set (CMAKE_C_COMPILER "/usr/bin/mpicxx")
 set (CMAKE_CXX_COMPILER ${CMAKE_C_COMPILER})
 
 #Compiler options
 set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare")
 set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++11 ")
+
+# disable boost warning
+add_definitions(-DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
 find_package(
     Boost

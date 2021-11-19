@@ -97,8 +97,10 @@ Tree::Tree(std::shared_ptr<DSM> dsm, uint16_t tree_id)
 
 void Tree::print_verbose()
 {
-    constexpr int kLeafHdrOffset = STRUCT_OFFSET(LeafPage, hdr);
-    constexpr int kInternalHdrOffset = STRUCT_OFFSET(InternalPage, hdr);
+    // constexpr int kLeafHdrOffset = STRUCT_OFFSET(LeafPage, hdr);
+    constexpr int kLeafHdrOffset = offsetof(LeafPage, hdr);
+    // constexpr int kInternalHdrOffset = STRUCT_OFFSET(InternalPage, hdr);
+    constexpr int kInternalHdrOffset = offsetof(InternalPage, hdr);
     static_assert(kLeafHdrOffset == kInternalHdrOffset, "XXX");
 
     if (dsm->getMyNodeID() == 0)
@@ -245,7 +247,7 @@ void Tree::print_and_check_tree(CoroContext *cxt, int coro_id)
 next_level:
 
     dsm->read_sync(page_buffer, p, kLeafPageSize);
-    auto header = (Header *) (page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
+    auto header = (Header *) (page_buffer + (offsetof(LeafPage, hdr)));
     levels[level_cnt++] = p;
     if (header->level != 0)
     {
@@ -914,7 +916,7 @@ bool Tree::page_search(GlobalAddress page_addr,
                        bool from_cache)
 {
     auto page_buffer = (dsm->get_rbuf(coro_id)).get_page_buffer();
-    auto header = (Header *) (page_buffer + (STRUCT_OFFSET(LeafPage, hdr)));
+    auto header = (Header *) (page_buffer + (offsetof(LeafPage, hdr)));
     auto &pattern_cnt = pattern[dsm->getMyThreadID()][page_addr.nodeID];
 
     int counter = 0;
