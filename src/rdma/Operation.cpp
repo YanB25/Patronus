@@ -490,12 +490,14 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     mw_bind.bind_info.length = mmSize;
     mw_bind.bind_info.mw_access_flags = mw_access_flag;
 
-    if (ibv_bind_mw(qp, mw, &mw_bind))
+    int ret;
+    if (ret = ibv_bind_mw(qp, mw, &mw_bind))
     {
         perror("failed to bind memory window.");
         error(
-            "failed to bind memory window: qp: %p, mw: %p, mr: %p, mr.lkey: %u, mm: %p, "
+            "failed to bind memory window. errno: %d.\nqp: %p, mw: %p, mr: %p, mr.lkey: %u, mm: %p, "
             "size: %lu",
+            ret,
             qp,
             mw,
             mr,
