@@ -784,5 +784,6 @@ void DSM::free_mw(struct ibv_mw* mw)
 
 void DSM::bind_memory_region(struct ibv_mw* mw, const char* buffer, size_t size, size_t target_node_id)
 {
+    dinfo("iCon->QPS[%d][%d]. accessing[0][%d]", iCon->QPs.size(), iCon->QPs[0].size(), target_node_id);
     rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id], mw, iCon->cacheMR, (uint64_t) buffer, size);
 }
