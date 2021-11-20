@@ -25,7 +25,7 @@ bool createContext(RdmaContext *context,
         info("found %d device(s)", devicesNum);
         goto CreateResourcesExit;
     }
-    dinfo("Open IB Device");
+    // dinfo("Open IB Device");
 
     for (int i = 0; i < devicesNum; ++i)
     {
@@ -80,7 +80,7 @@ bool createContext(RdmaContext *context,
     }
 
     // Success :)
-    dinfo("setup succeed.");
+    // dinfo("setup succeed.");
     context->devIndex = devIndex;
     context->gidIndex = gidIndex;
     context->port = port;

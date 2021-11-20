@@ -1,4 +1,5 @@
 #include "Rdma.h"
+#include <inttypes.h>
 
 int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
 {
@@ -743,4 +744,79 @@ bool rdmaWriteCas(ibv_qp *qp,
         return false;
     }
     return true;
+}
+
+void rdmaQueryDevice()
+{
+    ibv_device *dev = NULL;
+    ibv_context *ctx = NULL;
+    uint8_t devIndex = 0;
+
+    // get device names in the system
+    int devicesNum;
+    struct ibv_device **deviceList = ibv_get_device_list(&devicesNum);
+    if (!deviceList)
+    {
+        error("failed to get IB devices list");
+        return;
+    }
+
+    // if there isn't any IB device in host
+    if (!devicesNum)
+    {
+        info("found %d device(s)", devicesNum);
+        return;
+    }
+    // dinfo("Open IB Device");
+
+    for (int i = 0; i < devicesNum; ++i)
+    {
+        // printf("Device %d: %s\n", i, ibv_get_device_name(deviceList[i]));
+        if (ibv_get_device_name(deviceList[i])[3] == '5')
+        {
+            devIndex = i;
+            break;
+        }
+    }
+
+    if (devIndex >= devicesNum)
+    {
+        error("ib device wasn't found");
+        return;
+    }
+
+    dev = deviceList[devIndex];
+    ctx = ibv_open_device(dev);
+    if (!ctx)
+    {
+        error("failed to open device");
+        return;
+    }
+
+    struct ibv_device_attr attr;
+    memset(&attr, 0, sizeof(struct ibv_device_attr));
+    if (ibv_query_device(ctx, &attr))
+    {
+        perror("failed to query device attr");
+    }
+    printf("======= device attr ========\n");
+    printf("max_mr_size: %" PRIu64 "\n", attr.max_mr_size);
+    printf("max_qp: %d\n", attr.max_qp);
+    printf("max_qp_wr: %d\n", attr.max_qp_wr);
+    printf("max_sge: %d\n", attr.max_sge);
+    printf("max_cq: %d\n", attr.max_cq);
+    printf("max_cqe: %d\n", attr.max_cqe);
+    printf("max_mr: %d\n", attr.max_mr);
+    printf("max_mr_pd: %d\n", attr.max_pd);
+    printf("max_mw: %d\n", attr.max_mw);
+    printf("max_srq: %d\n", attr.max_srq);
+    printf("max_srq_wr: %d\n", attr.max_srq_wr);
+    printf("max_srq_sge: %d\n", attr.max_srq_sge);
+    printf("max_pkeys: %d\n", attr.max_pkeys);
+    printf("max_srq_wr: %d\n", attr.max_srq_wr);
+    printf("max_qp_rd_atom: %d\n", attr.max_qp_rd_atom);
+    printf("max_res_rd_atom: %d\n", attr.max_res_rd_atom);
+    printf("atomic_cap: %d\n", attr.atomic_cap);
+    printf("max_fmr: %d\n", attr.max_fmr);
+    printf("======= device attr end ====\n");
 }

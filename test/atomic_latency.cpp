@@ -11,6 +11,8 @@ int main()
 {
     bindCore(0);
 
+    rdmaQueryDevice();
+
     DSMConfig config;
     config.machineNR = kMachineNr;
 

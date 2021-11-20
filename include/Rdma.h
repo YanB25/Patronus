@@ -346,6 +346,10 @@ bool rdmaBatchWrite(ibv_qp *qp,
 //// Utility.cpp
 void rdmaQueryQueuePair(ibv_qp *qp);
 void checkDctSupported(struct ibv_context *ctx);
+/**
+ * print out the information of devices
+ */
+void rdmaQueryDevice();
 
 //// specified
 bool rdmaWriteBatch(
