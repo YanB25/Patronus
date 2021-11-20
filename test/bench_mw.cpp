@@ -1,6 +1,8 @@
+#include <algorithm>
+
 #include "DSM.h"
 #include "Timer.h"
-#include <algorithm>
+#include "util/monitor.h"
 
 // Two nodes
 // one node issues cas operations
@@ -13,6 +15,10 @@ void client(std::shared_ptr<DSM> dsm)
 {
     info("client: TODO");
 }
+
+std::atomic<double> alloc_mw_ns;
+std::atomic<double> free_mw_ns;
+std::atomic<double> bind_mw_ns;
 
 void server(std::shared_ptr<DSM> dsm, size_t mw_nr, size_t window_size)
 {
@@ -66,7 +72,7 @@ void server(std::shared_ptr<DSM> dsm, size_t mw_nr, size_t window_size)
         timer.end_print(mw_nr);
     }
 }
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
     if (argc < 3)
     {
@@ -83,6 +89,12 @@ int main(int argc, char** argv)
     bindCore(0);
 
     rdmaQueryDevice();
+
+    auto &m = bench::BenchManager::ins();
+    m.reg("memory-window")
+        .add_column("alloc-mw", &alloc_mw_ns)
+        .add_column("bind-mw", &bind_mw_ns)
+        .add_column("free-mw", &free_mw_ns);
 
     DSMConfig config;
     config.machineNR = kMachineNr;
@@ -103,6 +115,7 @@ int main(int argc, char** argv)
     {
         server(dsm, window_nr, window_size);
     }
+    m.report("memory-window");
     while (1)
     {
         sleep(1);

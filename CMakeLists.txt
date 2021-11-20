@@ -22,6 +22,8 @@ find_package(
     coroutine
     system
 )
+# find_package(benchmark REQUIRED)
+# link_libraries(benchmark::benchmark)
 
 # Link Options
 set(LINKS_FLAGS "-lcityhash -lpthread -libverbs -lmemcached")
