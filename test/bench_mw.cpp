@@ -1,5 +1,6 @@
 #include "DSM.h"
 #include "Timer.h"
+#include <algorithm>
 
 // Two nodes
 // one node issues cas operations
@@ -37,16 +38,23 @@ void server(std::shared_ptr<DSM> dsm, size_t mw_nr, size_t window_size)
               "mw_nr %lu too large, overflow an rdma buffer.",
               mw_nr);
         timer.begin();
+        size_t nr_per_poll = 100;
+        size_t remain_nr = mw_nr;
         size_t window_nr = max_size / window_size;
-        for (size_t i = 0; i < mw_nr; ++i)
+        while (remain_nr > 0)
         {
-            // if i too large, we roll back i to 0.
-            const char *buffer_start =
-                buffer + (i % window_nr) * window_size;
-            dsm->bind_memory_region(
-                mws[i], buffer_start, window_size, kClientNodeId);
+            size_t work_nr = std::min(remain_nr, nr_per_poll);
+            for (size_t i = 0; i < work_nr; ++i)
+            {
+                // if i too large, we roll back i to 0.
+                const char *buffer_start =
+                    buffer + (i % window_nr) * window_size;
+                dsm->bind_memory_region(
+                    mws[i], buffer_start, window_size, kClientNodeId);
+            }
+            dsm->poll_rdma_cq(work_nr);
+            remain_nr -= work_nr;
         }
-        dsm->poll_rdma_cq(mw_nr);
         timer.end_print(mw_nr);
 
         printf("\n-------- free mw ----------\n");
