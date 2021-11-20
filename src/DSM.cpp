@@ -750,6 +750,7 @@ void DSM::faa_dm_boundary_sync(GlobalAddress gaddr,
 uint64_t DSM::poll_rdma_cq(int count)
 {
     ibv_wc wc;
+    dinfo("Polling cq %p", iCon->cq);
     pollWithCQ(iCon->cq, count, &wc);
 
     return wc.wr_id;
