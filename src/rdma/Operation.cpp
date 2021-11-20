@@ -490,10 +490,14 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     mw_bind.bind_info.length = mmSize;
     mw_bind.bind_info.mw_access_flags = mw_access_flag;
 
-    int ret;
-    if (ret = ibv_bind_mw(qp, mw, &mw_bind))
+    int ret = ibv_bind_mw(qp, mw, &mw_bind);
+    if (ret == -EINVAL)
     {
-        perror("failed to bind memory window.");
+        error("library not support TYPE_2 memory window.");
+        return 0;
+    }
+    if (ret)
+    {
         error(
             "failed to bind memory window. errno: %d.\nqp: %p, mw: %p, mr: %p, mr.lkey: %u, mm: %p, "
             "size: %lu",
