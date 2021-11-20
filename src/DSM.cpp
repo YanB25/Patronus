@@ -65,7 +65,7 @@ void DSM::registerThread()
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
 
     iCon = &thCon[thread_id];
-    dinfo("register tid %d, iCon: %p, PDs[0][1]: %p", thread_id, iCon, iCon->QPs[0][1]);
+    dinfo("register tid %d, iCon: %p, QPs[0][1]: %p", thread_id, iCon, iCon->QPs[0][1]);
 
     iCon->message->initRecv();
     iCon->message->initSend();
@@ -785,6 +785,6 @@ void DSM::free_mw(struct ibv_mw* mw)
 
 void DSM::bind_memory_region(struct ibv_mw* mw, const char* buffer, size_t size, size_t target_node_id)
 {
-    dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(), iCon->QPs[0].size(), iCon);
+    // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(), iCon->QPs[0].size(), iCon);
     rdmaAsyncBindMemoryWindow(iCon->QPs[0][1], mw, iCon->cacheMR, (uint64_t) buffer, size);
 }
