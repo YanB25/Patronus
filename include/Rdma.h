@@ -396,6 +396,7 @@ uint32_t rdmaAsyncBindMemoryWindow(
     struct ibv_mr *mr,
     uint64_t mm,
     uint64_t mmSize,
+    bool signal,
     uint64_t wrID = 0,
     unsigned int mw_access_flag = IBV_ACCESS_CUSTOM_REMOTE_ALL);
 #endif

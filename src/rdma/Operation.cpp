@@ -478,13 +478,17 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
                                    struct ibv_mr *mr,
                                    uint64_t mm,
                                    uint64_t mmSize,
+                                   bool signal,
                                    uint64_t wrID,
                                    unsigned int mw_access_flag)
 {
     struct ibv_mw_bind mw_bind;
     memset(&mw_bind, 0, sizeof(mw_bind));
 
-    mw_bind.send_flags |= IBV_SEND_SIGNALED;
+    if (signal)
+    {
+        mw_bind.send_flags |= IBV_SEND_SIGNALED;
+    }
     mw_bind.wr_id = wrID;
     mw_bind.bind_info.mr = mr;
     mw_bind.bind_info.addr = mm;
@@ -511,7 +515,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
             mmSize);
         return 0;
     }
-    dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p", qp->send_cq, qp->recv_cq, qp->srq);
+    // dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p", qp->send_cq, qp->recv_cq, qp->srq);
     return mw->rkey;
 }
 
