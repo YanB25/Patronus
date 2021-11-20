@@ -31,11 +31,11 @@ public:
 
         if (ns < 1000)
         {
-            printf("%ldns per loop\n", ns);
+            printf("%ld ns per loop\n", ns);
         }
         else
         {
-            printf("%lfus per loop\n", ns * 1.0 / 1000);
+            printf("%lf us per loop\n", ns * 1.0 / 1000);
         }
     }
 

@@ -46,7 +46,7 @@ void server(std::shared_ptr<DSM> dsm)
                 mws[i], buffer_start, kMemoryWindowSize, kClientNodeId);
         }
         dsm->poll_rdma_cq(mw_nr);
-        timer.end(mw_nr);
+        timer.end_print(mw_nr);
 
         printf("\n-------- free mw ----------\n");
         timer.begin();
