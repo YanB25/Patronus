@@ -4,8 +4,8 @@
 // Two nodes
 // one node issues cas operations
 
-constexpr uint16_t kClientNodeId = 2;
-constexpr uint16_t kServerNodeId = 1;
+constexpr uint16_t kClientNodeId = 1;
+constexpr uint16_t kServerNodeId = 0;
 constexpr uint32_t kMachineNr = 2;
 
 void client()
@@ -46,7 +46,7 @@ int main()
 
         printf("\n-------- alloc mw ----------\n");
         timer.begin();
-        size_t mw_nr = 1000;
+        size_t mw_nr = 10;
         std::vector<ibv_mw *> mws;
         mws.resize(mw_nr);
         for (size_t i = 0; i < mw_nr; ++i)
