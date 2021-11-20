@@ -31,7 +31,7 @@ ThreadConnection::ThreadConnection(
         for (size_t k = 0; k < machineNR; ++k)
         {
             createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
-            dinfo("QPs[%d][%d]: qp: %p, cq: %p, lkey: %u", QPs.size() - 1, k, (char*) &QPs.back()[k], (char*)cq, cacheLKey);
+            dinfo("QPs[%lu][%lu]: qp: %p, cq: %p, lkey: %u", QPs.size() - 1, k, (char*) &QPs.back()[k], (char*)cq, cacheLKey);
         }
     }
 }
