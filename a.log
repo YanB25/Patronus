@@ -1,0 +1,123 @@
+======= device attr end ====
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:31 - shared memory size: 16 GB, 0x7fbcd0600000
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:33 - cache size: 1 GB
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:87 - Machine NR: 2
+[Info]  /home/yanbin/Sherman/src/rdma/Utility.cpp:66 - NIC Device Memory is 256 KB
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e393f4820, cq: 0x559e393f1e20, lkey: 936774
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e393f4828, cq: 0x559e393f1e20, lkey: 936774
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39409d20, cq: 0x559e39409350, lkey: 937518
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39409d28, cq: 0x559e39409350, lkey: 937518
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e3941c650, cq: 0x559e3941e950, lkey: 938810
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e3941c658, cq: 0x559e3941e950, lkey: 938810
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e394345d0, cq: 0x559e39433c00, lkey: 941138
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e394345d8, cq: 0x559e39433c00, lkey: 941138
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39449e10, cq: 0x559e39449440, lkey: 945758
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39449e18, cq: 0x559e39449440, lkey: 945758
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39449e30, cq: 0x559e3945e730, lkey: 949610
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39449e38, cq: 0x559e3945e730, lkey: 949610
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e394743a0, cq: 0x559e394739d0, lkey: 952694
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e394743a8, cq: 0x559e394739d0, lkey: 952694
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39486a10, cq: 0x559e39488c70, lkey: 953467
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39486a18, cq: 0x559e39488c70, lkey: 953467
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e3949f1f0, cq: 0x559e3949e820, lkey: 956807
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e3949f1f8, cq: 0x559e3949e820, lkey: 956807
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39446cb0, cq: 0x559e394b36b0, lkey: 960403
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39446cb8, cq: 0x559e394b36b0, lkey: 960403
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e394c92e0, cq: 0x559e394c8910, lkey: 965291
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e394c92e8, cq: 0x559e394c8910, lkey: 965291
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e394db910, cq: 0x559e394ddb70, lkey: 968095
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e394db918, cq: 0x559e394ddb70, lkey: 968095
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e394f37a0, cq: 0x559e394f2dd0, lkey: 968887
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e394f37a8, cq: 0x559e394f2dd0, lkey: 968887
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39505dd0, cq: 0x559e39508030, lkey: 972739
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39505dd8, cq: 0x559e39508030, lkey: 972739
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e3951dc60, cq: 0x559e3951d290, lkey: 974287
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e3951dc68, cq: 0x559e3951d290, lkey: 974287
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39530290, cq: 0x559e395324f0, lkey: 978139
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39530298, cq: 0x559e395324f0, lkey: 978139
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39549330, cq: 0x559e39548960, lkey: 979424
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39549338, cq: 0x559e39548960, lkey: 979424
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e3949bcd0, cq: 0x559e3955d2f0, lkey: 982508
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e3949bcd8, cq: 0x559e3955d2f0, lkey: 982508
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39572f20, cq: 0x559e39572550, lkey: 986872
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39572f28, cq: 0x559e39572550, lkey: 986872
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39585550, cq: 0x559e395877b0, lkey: 988420
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39585558, cq: 0x559e395877b0, lkey: 988420
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e3959d3e0, cq: 0x559e3959ca10, lkey: 992784
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e3959d3e8, cq: 0x559e3959ca10, lkey: 992784
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e395afa10, cq: 0x559e395b1c70, lkey: 995100
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e395afa18, cq: 0x559e395b1c70, lkey: 995100
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e395c78a0, cq: 0x559e395c6ed0, lkey: 997672
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e395c78a8, cq: 0x559e395c6ed0, lkey: 997672
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e395d9ed0, cq: 0x559e395dc130, lkey: 999476
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e395d9ed8, cq: 0x559e395dc130, lkey: 999476
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e395f1d60, cq: 0x559e395f1390, lkey: 1004352
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e395f1d68, cq: 0x559e395f1390, lkey: 1004352
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:23 - Create memory region at 0x7fc0d0600000, size 1073741824
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][0]: qp: 0x559e39604390, cq: 0x559e396065f0, lkey: 1006667
+[Info]  /home/yanbin/Sherman/src/ThreadConnection.cpp:34 - QPs[0][1]: qp: 0x559e39604398, cq: 0x559e396065f0, lkey: 1006667
+[Info]  /home/yanbin/Sherman/include/DSMKeeper.h:86 - DSMKeeper::initLocalMeta()
+[Info]  /home/yanbin/Sherman/include/DSMKeeper.h:89 - DSMKeeper::connectMemcached
+[Info]  /home/yanbin/Sherman/src/Keeper.cpp:92 - This server get NodeId 0 [192.168.2.152]
+
+[Info]  /home/yanbin/Sherman/src/Keeper.cpp:130 - Connected to server 1
+
+-------- alloc mw ----------
+107.677000us per loop
+
+-------- bind mw ----------
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e3969ce50, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0600000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396a1690, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0601000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396a5ed0, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0602000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396aa710, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0603000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396aef50, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0604000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396b3790, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0605000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396bcb10, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0606000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396c1350, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0607000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396c5b90, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0608000, size: 4096
+[Info]  /home/yanbin/Sherman/src/DSM.cpp:787 - iCon->QPS[1][2]. accessing[0][1]
+failed to bind memory window.: Resource temporarily unavailable
+[Error] /home/yanbin/Sherman/src/rdma/Operation.cpp:504 - failed to bind memory window: qp: 0x559e39402688, mw: 0x559e396ca3d0, mr: 0x559e393fdd60, mr.lkey: 936774, mm: 0x7fc0d0609000, size: 4096
