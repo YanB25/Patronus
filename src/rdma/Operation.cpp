@@ -491,9 +491,9 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     mw_bind.bind_info.mw_access_flags = mw_access_flag;
 
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
-    if (ret == -EINVAL)
+    if (ret == EINVAL)
     {
-        error("library not support TYPE_2 memory window.");
+        error("library not support TYPE_2 memory window. ret: ", ret);
         return 0;
     }
     if (ret)
