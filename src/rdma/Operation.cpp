@@ -1,7 +1,8 @@
 #include <inttypes.h>
 
-#include "Rdma.h"
 #include <atomic>
+
+#include "Rdma.h"
 
 int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
 {
@@ -473,12 +474,12 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
 }
 
 uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
-                              ibv_mw *mw,
-                              struct ibv_mr *mr,
-                              uint64_t mm,
-                              uint64_t mmSize,
-                              uint64_t wrID,
-                              unsigned int mw_access_flag)
+                                   ibv_mw *mw,
+                                   struct ibv_mr *mr,
+                                   uint64_t mm,
+                                   uint64_t mmSize,
+                                   uint64_t wrID,
+                                   unsigned int mw_access_flag)
 {
     struct ibv_mw_bind mw_bind;
     memset(&mw_bind, 0, sizeof(mw_bind));
@@ -492,6 +493,15 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     if (ibv_bind_mw(qp, mw, &mw_bind))
     {
         perror("failed to bind memory window.");
+        error(
+            "failed to bind memory window: qp: %p, mw: %p, mr: %p, mr.lkey: %u, mm: %p, "
+            "size: %lu",
+            qp,
+            mw,
+            mr,
+            mr->lkey,
+            (char *) mm,
+            mmSize);
         return 0;
     }
     return mw->rkey;

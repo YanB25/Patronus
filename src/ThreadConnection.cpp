@@ -20,6 +20,8 @@ ThreadConnection::ThreadConnection(
 
     this->cachePool = cachePool;
     cacheMR = createMemoryRegion((uint64_t) cachePool, cacheSize, &ctx);
+    dinfo("Create memory region at %p, size %lu", (char*) cachePool, cacheSize);
+
     cacheLKey = cacheMR->lkey;
 
     // dir, RC
@@ -29,6 +31,7 @@ ThreadConnection::ThreadConnection(
         for (size_t k = 0; k < machineNR; ++k)
         {
             createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
+            dinfo("qp: %p, cq: %p, lkey: %u", (char*) &QPs.back()[k], (char*)cq, cacheLKey);
         }
     }
 }
