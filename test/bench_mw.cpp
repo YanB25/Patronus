@@ -25,7 +25,7 @@ void server(std::shared_ptr<DSM> dsm)
 
         printf("\n-------- alloc mw ----------\n");
         timer.begin();
-        size_t mw_nr = 10;
+        size_t mw_nr = 100 * 1000;
         std::vector<ibv_mw *> mws;
         mws.resize(mw_nr);
         for (size_t i = 0; i < mw_nr; ++i)
@@ -35,13 +35,16 @@ void server(std::shared_ptr<DSM> dsm)
         timer.end_print(mw_nr);
 
         printf("\n-------- bind mw ----------\n");
-        check(kMemoryWindowSize * mw_nr < max_size,
+        check(kMemoryWindowSize < max_size,
               "mw_nr %lu too large, overflow an rdma buffer.",
               mw_nr);
         timer.begin();
+        size_t window_nr = max_size / kMemoryWindowSize;
         for (size_t i = 0; i < mw_nr; ++i)
         {
-            const char *buffer_start = buffer + i * kMemoryWindowSize;
+            // if i too large, we roll back i to 0.
+            const char *buffer_start =
+                buffer + (i % window_nr) * kMemoryWindowSize;
             dsm->bind_memory_region(
                 mws[i], buffer_start, kMemoryWindowSize, kClientNodeId);
         }
