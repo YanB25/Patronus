@@ -192,7 +192,7 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     memset(&mr_in, 0, sizeof(mr_in));
     mr_in.pd = ctx->pd, mr_in.addr = (void *) mm, mr_in.length = mmSize,
     mr_in.exp_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-                       IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND,
+                       IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
     mr_in.create_flags = 0;
     mr_in.dm = dm;
     mr_in.comp_mask = IBV_EXP_REG_MR_DM;
