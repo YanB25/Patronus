@@ -191,9 +191,12 @@ public:
                               uint64_t *rdma_buffer,
                               uint64_t mask = 63,
                               CoroContext *ctx = nullptr);
-    ibv_mw* alloc_mw();
-    void free_mw(struct ibv_mw* mw);
-    void bind_memory_region(struct ibv_mw* mw, const char* buffer, size_t size, size_t target_node_id);
+    ibv_mw *alloc_mw();
+    void free_mw(struct ibv_mw *mw);
+    void bind_memory_region(struct ibv_mw *mw,
+                            const char *buffer,
+                            size_t size,
+                            size_t target_node_id);
 
     uint64_t poll_rdma_cq(int count = 1);
     bool poll_rdma_cq_once(uint64_t &wr_id);
@@ -263,6 +266,14 @@ public:
     char *get_rdma_buffer()
     {
         return rdma_buffer;
+    }
+    Cache &get_internal_buffer()
+    {
+        return cache;
+    }
+    const Cache &get_internal_buffer() const
+    {
+        return cache;
     }
     RdmaBuffer &get_rbuf(int coro_id)
     {

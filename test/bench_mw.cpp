@@ -38,7 +38,9 @@ int main()
         client();
     }
 
-    auto *buffer = dsm->get_rdma_buffer();
+    auto& cache = dsm->get_internal_buffer();
+    char *buffer = (char*) cache.data;
+    size_t max_size = cache.size;
     constexpr static size_t kMemoryWindowSize = 4 * 1024;
 
     {
@@ -56,7 +58,7 @@ int main()
         timer.end_print(mw_nr);
 
         printf("\n-------- bind mw ----------\n");
-        check(kMemoryWindowSize * mw_nr < define::kRDMABufferSize,
+        check(kMemoryWindowSize * mw_nr < max_size,
               "mw_nr %lu too large, overflow an rdma buffer.", mw_nr);
         timer.begin();
         for (size_t i = 0; i < mw_nr; ++i)
