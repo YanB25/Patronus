@@ -862,7 +862,7 @@ void rdmaQueryDevice()
     printf("atomic_cap: %d\n", attr.atomic_cap);
     printf("max_fmr: %d\n", attr.max_fmr);
     printf("IBV_DEVICE_MEM_WINDOW: %d\n",
-           attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW);
+           attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW ? 1 : 0);
     printf("IBV_DEVICE_MEM_WINDOW_TYPE_2A: %d\n",
            attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW_TYPE_2A ? 1 : 0);
     printf("IBV_DEVICE_MEM_WINDOW_TYPE_2B: %d\n",
