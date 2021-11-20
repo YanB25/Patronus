@@ -484,6 +484,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     struct ibv_mw_bind mw_bind;
     memset(&mw_bind, 0, sizeof(mw_bind));
 
+    mw_bind.send_flags |= IBV_SEND_SIGNALED;
     mw_bind.wr_id = wrID;
     mw_bind.bind_info.mr = mr;
     mw_bind.bind_info.addr = mm;
