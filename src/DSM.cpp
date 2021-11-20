@@ -7,6 +7,7 @@
 #include "Directory.h"
 #include "HugePageAlloc.h"
 #include "Util.h"
+#include "Rdma.h"
 
 thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
@@ -761,4 +762,27 @@ bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
     wr_id = wc.wr_id;
 
     return res == 1;
+}
+ibv_mw *DSM::alloc_mw()
+{
+    struct RdmaContext* ctx = &iCon->ctx;
+    struct ibv_mw* mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
+    if (!mw)
+    {
+        perror("failed to create memory window.");
+    }
+    return mw;
+}
+
+void DSM::free_mw(struct ibv_mw* mw)
+{
+    if (ibv_dealloc_mw(mw))
+    {
+        perror("failed to destroy memory window");
+    }
+}
+
+void DSM::bind_memory_region(struct ibv_mw* mw, const char* buffer, size_t size, size_t target_node_id)
+{
+    rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id], mw, iCon->cacheMR, (uint64_t) buffer, size);
 }

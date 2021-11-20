@@ -88,6 +88,21 @@ bool createContext(RdmaContext *context,
     context->pd = pd;
     context->lid = portAttr.lid;
 
+    struct ibv_device_attr attr;
+    if (ibv_query_device(context->ctx, &attr))
+    {
+        perror("failed to query device.");
+    }
+    else
+    {
+        auto flag = attr.device_cap_flags;
+        if ((flag & IBV_DEVICE_MEM_WINDOW_TYPE_2A) ||
+            (flag & IBV_DEVICE_MEM_WINDOW_TYPE_2B))
+        {
+            context->mw_type = IBV_MW_TYPE_2;
+        }
+    }
+
     // check device memory support
     if (kMaxDeviceMemorySize == 0)
     {

@@ -51,8 +51,11 @@ struct RdmaContext
 
     uint16_t lid;
     union ibv_gid gid;
+    ibv_mw_type mw_type;
 
-    RdmaContext() : ctx(NULL), pd(NULL)
+    // default to use type 1, because it is always supported
+    // will query and change to TYPE_2 if supported.
+    RdmaContext() : ctx(NULL), pd(NULL), mw_type(IBV_MW_TYPE_1)
     {
     }
 };
@@ -374,4 +377,25 @@ bool rdmaWriteCas(ibv_qp *qp,
                   uint64_t swap,
                   bool isSignaled,
                   uint64_t wrID = 0);
+
+constexpr int IBV_ACCESS_CUSTOM_REMOTE_ALL =
+    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+    IBV_ACCESS_REMOTE_ATOMIC;
+
+/**
+ * bind a memory window to a part of memory region.
+ * @param mw from createMemoryWindow
+ * @param mm
+ * @param mmSize the part of memory region to bind
+ * @param mw_access_flag the access permission like memory region
+ * @return the RKey to the memory window. return 0 on failure
+ */
+uint32_t rdmaAsyncBindMemoryWindow(
+    ibv_qp *qp,
+    ibv_mw *mw,
+    struct ibv_mr *mr,
+    uint64_t mm,
+    uint64_t mmSize,
+    uint64_t wrID = 0,
+    unsigned int mw_access_flag = IBV_ACCESS_CUSTOM_REMOTE_ALL);
 #endif

@@ -1,5 +1,7 @@
-#include "Rdma.h"
 #include <inttypes.h>
+
+#include "Rdma.h"
+#include <atomic>
 
 int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
 {
@@ -470,6 +472,31 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
     return true;
 }
 
+uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
+                              ibv_mw *mw,
+                              struct ibv_mr *mr,
+                              uint64_t mm,
+                              uint64_t mmSize,
+                              uint64_t wrID,
+                              unsigned int mw_access_flag)
+{
+    struct ibv_mw_bind mw_bind;
+    memset(&mw_bind, 0, sizeof(mw_bind));
+
+    mw_bind.wr_id = wrID;
+    mw_bind.bind_info.mr = mr;
+    mw_bind.bind_info.addr = mm;
+    mw_bind.bind_info.length = mmSize;
+    mw_bind.bind_info.mw_access_flags = mw_access_flag;
+
+    if (ibv_bind_mw(qp, mw, &mw_bind))
+    {
+        perror("failed to bind memory window.");
+        return 0;
+    }
+    return mw->rkey;
+}
+
 // for RC & UC
 bool rdmaCompareAndSwap(ibv_qp *qp,
                         uint64_t source,
@@ -818,5 +845,13 @@ void rdmaQueryDevice()
     printf("max_res_rd_atom: %d\n", attr.max_res_rd_atom);
     printf("atomic_cap: %d\n", attr.atomic_cap);
     printf("max_fmr: %d\n", attr.max_fmr);
+    printf("IBV_DEVICE_MEM_WINDOW: %d\n",
+           attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW);
+    printf("IBV_DEVICE_MEM_WINDOW_TYPE_2A: %d\n",
+           attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW_TYPE_2A ? 1 : 0);
+    printf("IBV_DEVICE_MEM_WINDOW_TYPE_2B: %d\n",
+           attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW_TYPE_2B ? 1 : 0);
+    printf("IBV_DEVICE_MEM_MGT_EXTENTIONS: %d\n",
+           attr.device_cap_flags & IBV_DEVICE_MEM_MGT_EXTENSIONS ? 1 : 0);
     printf("======= device attr end ====\n");
 }
