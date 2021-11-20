@@ -380,7 +380,7 @@ bool rdmaWriteCas(ibv_qp *qp,
 
 constexpr int IBV_ACCESS_CUSTOM_REMOTE_ALL =
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
-    IBV_ACCESS_REMOTE_ATOMIC;
+    IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND;
 
 /**
  * bind a memory window to a part of memory region.
