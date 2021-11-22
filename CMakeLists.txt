@@ -5,8 +5,8 @@ option(BUILD_TEST "Whether or not build the tests" ON)
 option(BUILD_BENCH "Whether or not build the benchmark" OFF)
 option(SANITIZE "Turn on sanitization" OFF)
 
-set (CMAKE_C_COMPILER "mpicxx")
-set (CMAKE_CXX_COMPILER ${CMAKE_C_COMPILER})
+# set (CMAKE_C_COMPILER "mpicxx")
+# set (CMAKE_CXX_COMPILER ${CMAKE_C_COMPILER})
 
 #Compiler options
 set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare")
