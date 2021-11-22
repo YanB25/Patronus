@@ -99,9 +99,9 @@ bool createContext(RdmaContext *context,
         if ((flag & IBV_DEVICE_MEM_WINDOW_TYPE_2A) ||
             (flag & IBV_DEVICE_MEM_WINDOW_TYPE_2B))
         {
-            warn("TODO: Although device seems to support memory window TYPE_2, we fall back to TYPE_1");
-            context->mw_type = IBV_MW_TYPE_1;
-            // context->mw_type = IBV_MW_TYPE_2;
+            // warn("TODO: Although device seems to support memory window TYPE_2, we fall back to TYPE_1");
+            // context->mw_type = IBV_MW_TYPE_1;
+            context->mw_type = IBV_MW_TYPE_2;
         }
     }
 
