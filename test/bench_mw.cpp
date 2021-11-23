@@ -19,6 +19,8 @@ void client(std::shared_ptr<DSM> dsm)
 std::atomic<double> alloc_mw_ns;
 std::atomic<double> free_mw_ns;
 std::atomic<double> bind_mw_ns;
+std::atomic<double> window_nr_;
+std::atomic<double> window_size_;
 
 void server(std::shared_ptr<DSM> dsm, size_t mw_nr, size_t window_size)
 {
@@ -95,7 +97,9 @@ int main(int argc, char **argv)
 
     auto &m = bench::BenchManager::ins();
     auto &bench = m.reg("memory-window");
-    bench.add_column("alloc-mw", &alloc_mw_ns)
+    bench.add_column("window_nr", &window_nr_)
+        .add_column("window_size", &window_size_)
+        .add_column("alloc-mw", &alloc_mw_ns)
         .add_column("bind-mw", &bind_mw_ns)
         .add_column("free-mw", &free_mw_ns);
 
@@ -118,19 +122,21 @@ int main(int argc, char **argv)
     {
         // 150 us to alloc one mw.
         // 10000000 mws need 16 min, so we don't bench it.
-        std::vector<size_t> window_nr_arr{
-            100, 1000, 10000, 100000, 1000000ull};
-        std::vector<size_t> window_size_arr{4096};
+        std::vector<size_t> window_nr_arr{100, 1000, 10000, 100000};
+        std::vector<size_t> window_size_arr{1024, 2048, 4096, 2 * 1024 * 1024};
         for (auto window_nr : window_nr_arr)
         {
             for (auto window_size : window_size_arr)
             {
+                window_nr_ = window_nr;
+                window_size_ = window_size;
                 server(dsm, window_nr, window_size);
                 bench.snapshot();
             }
         }
     }
     m.report("memory-window");
+    m.to_csv("memory-window");
 
     info("finished. ctrl+C to quit.");
     while (1)

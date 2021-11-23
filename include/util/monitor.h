@@ -5,6 +5,7 @@
 #include <mutex>
 #include <atomic>
 #include <iostream>
+#include <fstream>
 namespace bench
 {
 class BenchResult
@@ -76,6 +77,13 @@ public:
     {
         std::lock_guard<std::mutex> lk(mu_);
         bench_result_[name].report(os);
+    }
+    void to_csv(const std::string& name)
+    {
+        std::fstream fout;
+        fout.open(name + ".csv", std::ios::out | std::ios::trunc);
+        report(name, fout);
+        fout.close();
     }
 private:
     std::unordered_map<std::string, BenchResult> bench_result_;
