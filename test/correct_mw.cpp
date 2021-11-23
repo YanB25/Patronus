@@ -61,9 +61,8 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    auto &cache = dsm->get_server_buffer();
-    char *buffer = (char *) cache.data;
-    size_t max_size = cache.size;
+    char *buffer = dsm->get_server_internal_buffer(kClientNodeId);
+    size_t max_size = 16 * define::GB;
 
     while (true)
     {
@@ -100,7 +99,7 @@ void server(std::shared_ptr<DSM> dsm)
         {
             printf("Still not found. test server write.");
             *(uint64_t *) buffer = 0xabababababababab;
-            printf("Server write at %p: %lx\n", buffer, *(uint64_t *)buffer);
+            printf("Server write at %p: %lx\n", buffer, *(uint64_t *) buffer);
         }
         sleep(1);
     }

@@ -271,11 +271,12 @@ public:
     {
         return rdma_buffer;
     }
-    Cache &get_server_buffer()
+    Cache &get_internal_buffer()
     {
         return cache;
     }
-    const Cache &get_server_buffer() const
+    char* get_server_internal_buffer(uint32_t node_id);
+    const Cache &get_internal_buffer() const
     {
         return cache;
     }

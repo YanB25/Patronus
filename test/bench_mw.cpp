@@ -55,7 +55,7 @@ void server(std::shared_ptr<DSM> dsm,
             int random_addr,
             size_t batch_poll_size)
 {
-    auto &cache = dsm->get_server_buffer();
+    auto &cache = dsm->get_internal_buffer();
     char *buffer = (char *) cache.data;
     size_t max_size = cache.size;
 
