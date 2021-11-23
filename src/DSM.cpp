@@ -6,8 +6,8 @@
 #include "DSMKeeper.h"
 #include "Directory.h"
 #include "HugePageAlloc.h"
-#include "Util.h"
 #include "Rdma.h"
+#include "Util.h"
 
 thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
@@ -65,7 +65,8 @@ void DSM::registerThread()
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
 
     iCon = &thCon[thread_id];
-    // dinfo("register tid %d, iCon: %p, QPs[0][1]: %p", thread_id, iCon, iCon->QPs[0][1]);
+    // dinfo("register tid %d, iCon: %p, QPs[0][1]: %p", thread_id, iCon,
+    // iCon->QPs[0][1]);
 
     iCon->message->initRecv();
     iCon->message->initSend();
@@ -767,8 +768,8 @@ bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
 }
 ibv_mw *DSM::alloc_mw()
 {
-    struct RdmaContext* ctx = &iCon->ctx;
-    struct ibv_mw* mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
+    struct RdmaContext *ctx = &iCon->ctx;
+    struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
     if (!mw)
     {
         perror("failed to create memory window.");
@@ -776,7 +777,7 @@ ibv_mw *DSM::alloc_mw()
     return mw;
 }
 
-void DSM::free_mw(struct ibv_mw* mw)
+void DSM::free_mw(struct ibv_mw *mw)
 {
     if (ibv_dealloc_mw(mw))
     {
@@ -784,8 +785,17 @@ void DSM::free_mw(struct ibv_mw* mw)
     }
 }
 
-void DSM::bind_memory_region(struct ibv_mw* mw, const char* buffer, size_t size, size_t target_node_id)
+void DSM::bind_memory_region(struct ibv_mw *mw,
+                             const char *buffer,
+                             size_t size,
+                             size_t target_node_id)
 {
-    // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(), iCon->QPs[0].size(), iCon);
-    rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id], mw, iCon->cacheMR, (uint64_t) buffer, size, true);
+    // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
+    // iCon->QPs[0].size(), iCon);
+    rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id],
+                              mw,
+                              iCon->cacheMR,
+                              (uint64_t) buffer,
+                              size,
+                              true);
 }
