@@ -127,6 +127,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
     // init remote connections
     auto &remote = remoteCon[remoteID];
     remote.dsmBase = exMeta.dsmBase;
+    dinfo("remote %p set dsmBase to %p", &remote, (char*) remote.dsmBase);
     // remote.cacheBase = exMeta.cacheBase;
     remote.dmBase = exMeta.dmBase;
 

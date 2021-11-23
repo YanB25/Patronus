@@ -517,6 +517,9 @@ void DSM::faa_boundary(GlobalAddress gaddr,
 }
 char *DSM::get_server_internal_buffer(uint32_t node_id)
 {
+    dinfo("remote: %p, dsmBase: %p",
+          &remoteInfo[node_id],
+          remoteInfo[node_id].dsmBase);
     return (char *) remoteInfo[node_id].dsmBase;
 }
 

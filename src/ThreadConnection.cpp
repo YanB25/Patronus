@@ -20,7 +20,7 @@ ThreadConnection::ThreadConnection(
 
     this->cachePool = cachePool;
     cacheMR = createMemoryRegion((uint64_t) cachePool, cacheSize, &ctx);
-    dinfo("Create memory region at %p, size %lu", (char*) cachePool, cacheSize);
+    // dinfo("Create memory region at %p, size %lu", (char*) cachePool, cacheSize);
 
     cacheLKey = cacheMR->lkey;
 
