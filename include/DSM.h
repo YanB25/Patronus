@@ -269,8 +269,8 @@ public:
     }
     /**
      * @brief The per-thread temporary buffer for client.
-     * 
-     * @return char* 
+     *
+     * @return char*
      */
     char *get_rdma_buffer()
     {
@@ -298,6 +298,23 @@ public:
         buffer->app_id = thread_id;
 
         iCon->sendMessage2Dir(buffer, node_id, dir_id);
+    }
+    RawMessage *recv()
+    {
+        check(dirCon.size() == 1);
+        struct ibv_wc wc;
+        pollWithCQ(&dirCon[0].cq[0], 1, &wc);
+        switch (int(wc.opcode))
+        {
+        case IBV_WC_RECV:
+        {
+            return (RawMessage *) dirCon[0].message->getMessage();
+        }
+        default:
+        {
+            assert(false);
+        }
+        }
     }
 
     RawMessage *rpc_wait()

@@ -21,7 +21,7 @@ public:
         return val;
     }
 
-    GlobalAddress(): val(0)
+    GlobalAddress() : val(0)
     {
     }
 
@@ -33,6 +33,13 @@ public:
 } __attribute__((packed));
 
 static_assert(sizeof(GlobalAddress) == sizeof(uint64_t), "XXX");
+
+static inline std::ostream &operator<<(std::ostream &os,
+                                       const GlobalAddress &addr)
+{
+    os << "{GA nodeId: " << addr.nodeID << ", off: " << addr.offset << "} ";
+    return os;
+}
 
 inline GlobalAddress GADD(const GlobalAddress &addr, int off)
 {
@@ -49,12 +56,6 @@ inline bool operator==(const GlobalAddress &lhs, const GlobalAddress &rhs)
 inline bool operator!=(const GlobalAddress &lhs, const GlobalAddress &rhs)
 {
     return !(lhs == rhs);
-}
-
-inline std::ostream &operator<<(std::ostream &os, const GlobalAddress &obj)
-{
-    os << "Global Address [" << (int) obj.nodeID << ", " << obj.offset << "]";
-    return os;
 }
 
 #endif /* __GLOBALADDRESS_H__ */

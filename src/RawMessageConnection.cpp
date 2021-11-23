@@ -38,3 +38,12 @@ void RawMessageConnection::sendRawMessage(RawMessage *m,
 
     ++sendCounter;
 }
+
+std::ostream &operator<<(std::ostream &os, const RawMessage &msg)
+{
+    os << "{RawMessage Type: " << msg.type << ", node_id: " << msg.node_id
+       << ", app_id: " << msg.app_id << ", addr: " << msg.addr
+       << ", level: " << msg.level
+       << ", inlined_buffer[0]: " << msg.inlined_buffer[0] << "}";
+    return os;
+}

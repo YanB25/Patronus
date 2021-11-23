@@ -35,8 +35,17 @@ void client(std::shared_ptr<DSM> dsm)
         dsm->read_sync(read_buffer, gaddr, sizeof(gaddr));
         printf("read at offset %lu: %lx\n", kOffset, *(uint64_t *) read_buffer);
         *(uint64_t *) read_buffer = 0;
+        if (*(uint64_t *) read_buffer == kMagic)
+        {
+            break;
+        }
         sleep(1);
     }
+    info("calling rpc");
+    RawMessage msg;
+    msg.inlined_buffer[0] = 'a';
+    std::cout << "Sending " << msg << std::endl;
+    dsm->rpc_call_dir(msg, kServerNodeId);
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -61,7 +70,7 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    const auto& buf_conf = dsm->get_server_internal_buffer();
+    const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
     info("get buffer addr: %p", buffer);
     size_t max_size = buf_conf.size;
@@ -89,6 +98,9 @@ void server(std::shared_ptr<DSM> dsm)
     // {
     //     mws[i] = dsm->alloc_mw();
     // }
+    info("waiting rpc...");
+    auto* msg = dsm->recv();
+    std::cout << "get msg: " << *msg;
 }
 int main(int argc, char **argv)
 {

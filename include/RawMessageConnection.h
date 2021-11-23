@@ -31,7 +31,12 @@ struct RawMessage
 
     GlobalAddress addr;  // for malloc
     int level;
+    char inlined_buffer[32];
 } __attribute__((packed));
+
+static_assert(sizeof(RawMessage) < MESSAGE_SIZE, "failed");
+
+std::ostream& operator<<(std::ostream&, const RawMessage& msg);
 
 class RawMessageConnection : public AbstractMessageConnection
 {
