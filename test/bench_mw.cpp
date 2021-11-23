@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <random>
 
 #include "DSM.h"
 #include "Timer.h"
@@ -15,14 +16,39 @@ void client(std::shared_ptr<DSM> dsm)
 {
     info("client: TODO");
 }
+std::atomic<double> window_nr_;
+std::atomic<double> window_size_;
+std::atomic<bool> random_addr_{false};
 
 std::atomic<double> alloc_mw_ns;
 std::atomic<double> free_mw_ns;
 std::atomic<double> bind_mw_ns;
-std::atomic<double> window_nr_;
-std::atomic<double> window_size_;
 
-void server(std::shared_ptr<DSM> dsm, size_t mw_nr, size_t window_size)
+// Notice: TLS object is created only once for each combination of type and
+// thread. Only use this when you prefer multiple callers share the same
+// instance.
+template <class T, class... Args>
+inline T &TLS(Args &&...args)
+{
+    thread_local T _tls_item(std::forward<Args>(args)...);
+    return _tls_item;
+}
+inline std::mt19937 &rand_generator()
+{
+    return TLS<std::mt19937>();
+}
+
+// [min, max]
+uint64_t rand_int(uint64_t min, uint64_t max)
+{
+    std::uniform_int_distribution<uint64_t> dist(min, max);
+    return dist(rand_generator());
+}
+
+void server(std::shared_ptr<DSM> dsm,
+            size_t mw_nr,
+            size_t window_size,
+            bool random_addr)
 {
     auto &cache = dsm->get_internal_buffer();
     char *buffer = (char *) cache.data;
@@ -55,9 +81,19 @@ void server(std::shared_ptr<DSM> dsm, size_t mw_nr, size_t window_size)
             size_t work_nr = std::min(remain_nr, nr_per_poll);
             for (size_t i = 0; i < work_nr; ++i)
             {
-                // if i too large, we roll back i to 0.
-                const char *buffer_start =
-                    buffer + (i % window_nr) * window_size;
+                const char *buffer_start = 0;
+                if (random_addr)
+                {
+                    size_t rand_min = 0;
+                    size_t rand_max = max_size - window_size - 1;
+
+                    buffer_start = buffer + rand_int(rand_min, rand_max);
+                }
+                else
+                {
+                    // if i too large, we roll back i to 0.
+                    buffer_start = buffer + (i % window_nr) * window_size;
+                }
                 dsm->bind_memory_region(
                     mws[i], buffer_start, window_size, kClientNodeId);
             }
@@ -99,9 +135,9 @@ int main(int argc, char **argv)
     auto &bench = m.reg("memory-window");
     bench.add_column("window_nr", &window_nr_)
         .add_column("window_size", &window_size_)
-        .add_column("alloc-mw", &alloc_mw_ns)
-        .add_column("bind-mw", &bind_mw_ns)
-        .add_column("free-mw", &free_mw_ns);
+        .add_column("alloc-mw(ns)", &alloc_mw_ns)
+        .add_column("bind-mw(ns)", &bind_mw_ns)
+        .add_column("free-mw(ns)", &free_mw_ns);
 
     DSMConfig config;
     config.machineNR = kMachineNr;
@@ -122,21 +158,27 @@ int main(int argc, char **argv)
     {
         // 150 us to alloc one mw.
         // 10000000 mws need 16 min, so we don't bench it.
-        std::vector<size_t> window_nr_arr{100, 1000, 10000, 100000};
-        std::vector<size_t> window_size_arr{1024, 2048, 4096, 2 * 1024 * 1024};
+        std::vector<size_t> window_nr_arr{1, 100, 1000, 10000, 100000};
+        std::vector<size_t> window_size_arr{
+            1024, 2048, 4096, 2ull * define::MB, 1ull * define::GB};
+        std::vector<bool> random_addr_arr{true, false};
         for (auto window_nr : window_nr_arr)
         {
             for (auto window_size : window_size_arr)
             {
-                window_nr_ = window_nr;
-                window_size_ = window_size;
-                server(dsm, window_nr, window_size);
-                bench.snapshot();
+                for (bool random_addr : random_addr_arr)
+                {
+                    window_nr_ = window_nr;
+                    window_size_ = window_size;
+                    random_addr_ = random_addr;
+                    server(dsm, window_nr, window_size, random_addr);
+                    bench.snapshot();
+                }
             }
         }
+        m.report("memory-window");
+        m.to_csv("memory-window");
     }
-    m.report("memory-window");
-    m.to_csv("memory-window");
 
     info("finished. ctrl+C to quit.");
     while (1)
