@@ -62,6 +62,7 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 void server(std::shared_ptr<DSM> dsm)
 {
     char *buffer = dsm->get_server_internal_buffer(kClientNodeId);
+    info("get buffer addr: %p", buffer);
     size_t max_size = 16 * define::GB;
 
     while (true)
