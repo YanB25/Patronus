@@ -99,8 +99,8 @@ void server(std::shared_ptr<DSM> dsm)
     //     mws[i] = dsm->alloc_mw();
     // }
     info("waiting rpc...");
-    auto* msg = dsm->recv();
-    std::cout << "get msg: " << *msg;
+    auto *msg = dsm->recv();
+    std::cout << "get msg: " << (void *) msg << ": " << *msg << std::endl;
 }
 int main(int argc, char **argv)
 {
