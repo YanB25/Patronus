@@ -303,7 +303,7 @@ public:
     {
         check(dirCon.size() == 1);
         struct ibv_wc wc;
-        pollWithCQ(&dirCon[0].cq[0], 1, &wc);
+        pollWithCQ(dirCon[0].rpc_cq, 1, &wc);
         switch (int(wc.opcode))
         {
         case IBV_WC_RECV:
