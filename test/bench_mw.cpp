@@ -18,7 +18,11 @@ void client(std::shared_ptr<DSM> dsm)
 }
 std::atomic<double> window_nr_;
 std::atomic<double> window_size_;
-std::atomic<bool> random_addr_{false};
+// 0 for sequential addr
+// 1 for random addr
+// 2 for random but 4KB aligned addr
+std::atomic<int> random_addr_;
+std::atomic<size_t> batch_poll_size_;
 
 std::atomic<double> alloc_mw_ns;
 std::atomic<double> free_mw_ns;
@@ -48,12 +52,12 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 void server(std::shared_ptr<DSM> dsm,
             size_t mw_nr,
             size_t window_size,
-            bool random_addr)
+            int random_addr,
+            size_t batch_poll_size)
 {
     auto &cache = dsm->get_internal_buffer();
     char *buffer = (char *) cache.data;
     size_t max_size = cache.size;
-    info("cache size is %lu", cache.size);
 
     {
         Timer timer;
@@ -74,24 +78,31 @@ void server(std::shared_ptr<DSM> dsm,
               "mw_nr %lu too large, overflow an rdma buffer.",
               mw_nr);
         timer.begin();
-        size_t nr_per_poll = 100;
         size_t remain_nr = mw_nr;
         size_t window_nr = max_size / window_size;
         while (remain_nr > 0)
         {
-            size_t work_nr = std::min(remain_nr, nr_per_poll);
+            size_t work_nr = std::min(remain_nr, batch_poll_size);
             for (size_t i = 0; i < work_nr; ++i)
             {
                 const char *buffer_start = 0;
-                if (random_addr)
+                if (random_addr == 1 || random_addr == 2)
                 {
+                    // random address
                     size_t rand_min = 0;
                     size_t rand_max = max_size - window_size;
 
                     buffer_start = buffer + rand_int(rand_min, rand_max);
+                    if (random_addr == 2)
+                    {
+                        // ... but with 4KB aligned
+                        buffer_start =
+                            (char *) (((uint64_t) buffer_start) % 4096);
+                    }
                 }
                 else
                 {
+                    check(random_addr == 0);
                     // if i too large, we roll back i to 0.
                     buffer_start = buffer + (i % window_nr) * window_size;
                 }
@@ -136,6 +147,7 @@ int main(int argc, char **argv)
     auto &bench = m.reg("memory-window");
     bench.add_column("window_nr", &window_nr_)
         .add_column("window_size", &window_size_)
+        .add_column("addr-access-type", &random_addr_)
         .add_column("alloc-mw(ns)", &alloc_mw_ns)
         .add_column("bind-mw(ns)", &bind_mw_ns)
         .add_column("free-mw(ns)", &free_mw_ns);
@@ -159,21 +171,25 @@ int main(int argc, char **argv)
     {
         // 150 us to alloc one mw.
         // 10000000 mws need 16 min, so we don't bench it.
-        std::vector<size_t> window_nr_arr{1, 100, 1000, 10000, 100000};
+        std::vector<size_t> window_nr_arr{1000, 10000};
         std::vector<size_t> window_size_arr{
-            1024, 2048, 4096, 2ull * define::MB, 512 * define::MB};
+            1, 64, 1024, 4096, 2ull * define::MB, 512 * define::MB};
         std::vector<bool> random_addr_arr{true, false};
         for (auto window_nr : window_nr_arr)
         {
             for (auto window_size : window_size_arr)
             {
-                for (bool random_addr : random_addr_arr)
+                for (int random_addr : {0, 1, 2})
                 {
-                    window_nr_ = window_nr;
-                    window_size_ = window_size;
-                    random_addr_ = random_addr;
-                    server(dsm, window_nr, window_size, random_addr);
-                    bench.snapshot();
+                    for (size_t batch_poll_size: {1, 10, 100})
+                    {
+                        window_nr_ = window_nr;
+                        window_size_ = window_size;
+                        random_addr_ = random_addr;
+                        batch_poll_size_ = batch_poll_size;
+                        server(dsm, window_nr, window_size, random_addr, batch_poll_size);
+                        bench.snapshot();
+                    }
                 }
             }
         }
