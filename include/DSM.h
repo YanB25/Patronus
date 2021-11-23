@@ -262,16 +262,20 @@ public:
     {
         keeper->barrier(ss);
     }
-
+    /**
+     * @brief The per-thread temporary buffer for client.
+     * 
+     * @return char* 
+     */
     char *get_rdma_buffer()
     {
         return rdma_buffer;
     }
-    Cache &get_internal_buffer()
+    Cache &get_server_buffer()
     {
         return cache;
     }
-    const Cache &get_internal_buffer() const
+    const Cache &get_server_buffer() const
     {
         return cache;
     }

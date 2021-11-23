@@ -12,11 +12,13 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
+constexpr static size_t kOffset = 0;
+
 void client(std::shared_ptr<DSM> dsm)
 {
     GlobalAddress gaddr;
     gaddr.nodeID = kServerNodeId;
-    gaddr.offset = 1024;
+    gaddr.offset = kOffset;
 
     auto *buffer = dsm->get_rdma_buffer();
 
@@ -24,13 +26,14 @@ void client(std::shared_ptr<DSM> dsm)
     *(uint64_t *) buffer = magic;
 
     dsm->write(buffer, gaddr, sizeof(magic));
-    info("write finished at offset 1024: %lx.", magic);
+    info("write finished at offset %lu: %lx.", kOffset, magic);
 
     while (true)
     {
         auto *read_buffer = buffer + 4096;
         dsm->read_sync(read_buffer, gaddr, sizeof(gaddr));
-        printf("read at offset 1024: %lx\n", *(uint64_t *) read_buffer);
+        printf("read at offset %lu: %lx\n", kOffset, *(uint64_t *) read_buffer);
+        *(uint64_t *) read_buffer = 0;
         sleep(1);
     }
 }
@@ -57,15 +60,15 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    auto &cache = dsm->get_internal_buffer();
+    auto &cache = dsm->get_server_buffer();
     char *buffer = (char *) cache.data;
     size_t max_size = cache.size;
 
     while (true)
     {
         uint64_t read;
-        read = buffer[1024];
-        printf("Read at offset 1024 : %lx\n", read);
+        read = buffer[kOffset];
+        printf("Read at offset %lu: %lx\n", kOffset, read);
         sleep(1);
     }
 
