@@ -53,6 +53,7 @@ void server(std::shared_ptr<DSM> dsm,
     auto &cache = dsm->get_internal_buffer();
     char *buffer = (char *) cache.data;
     size_t max_size = cache.size;
+    info("cache size is %lu", cache.size);
 
     {
         Timer timer;
@@ -85,7 +86,7 @@ void server(std::shared_ptr<DSM> dsm,
                 if (random_addr)
                 {
                     size_t rand_min = 0;
-                    size_t rand_max = max_size - window_size - 1;
+                    size_t rand_max = max_size - window_size;
 
                     buffer_start = buffer + rand_int(rand_min, rand_max);
                 }
@@ -160,7 +161,7 @@ int main(int argc, char **argv)
         // 10000000 mws need 16 min, so we don't bench it.
         std::vector<size_t> window_nr_arr{1, 100, 1000, 10000, 100000};
         std::vector<size_t> window_size_arr{
-            1024, 2048, 4096, 2ull * define::MB, 1ull * define::GB};
+            1024, 2048, 4096, 2ull * define::MB, 512 * define::MB};
         std::vector<bool> random_addr_arr{true, false};
         for (auto window_nr : window_nr_arr)
         {
