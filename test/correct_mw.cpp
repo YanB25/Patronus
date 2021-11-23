@@ -68,7 +68,7 @@ void server(std::shared_ptr<DSM> dsm)
     {
         uint64_t read;
         read = buffer[kOffset];
-        printf("Read at offset %lu: %lx\n", kOffset, read);
+        printf("Read at offset %lu: %lx. actual addr: %p\n", kOffset, read, &buffer[kOffset]);
         sleep(1);
     }
 
