@@ -27,6 +27,7 @@ std::atomic<size_t> batch_poll_size_;
 std::atomic<size_t> alloc_mw_ns;
 std::atomic<size_t> free_mw_ns;
 std::atomic<size_t> bind_mw_ns;
+std::atomic<size_t> thread_nr_;
 
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -70,7 +71,7 @@ void server(std::shared_ptr<DSM> dsm,
         {
             mws[i] = dsm->alloc_mw();
         }
-        alloc_mw_ns = timer.end(mw_nr);
+        alloc_mw_ns += timer.end(mw_nr);
         timer.print();
 
         printf("\n-------- bind mw ----------\n");
@@ -112,7 +113,7 @@ void server(std::shared_ptr<DSM> dsm,
             dsm->poll_rdma_cq(work_nr);
             remain_nr -= work_nr;
         }
-        bind_mw_ns = timer.end(mw_nr);
+        bind_mw_ns += timer.end(mw_nr);
         timer.print();
 
         printf("\n-------- free mw ----------\n");
@@ -121,7 +122,7 @@ void server(std::shared_ptr<DSM> dsm,
         {
             dsm->free_mw(mws[i]);
         }
-        free_mw_ns = timer.end(mw_nr);
+        free_mw_ns += timer.end(mw_nr);
         timer.print();
     }
 }
@@ -149,9 +150,11 @@ int main(int argc, char **argv)
         .add_column("window_size", &window_size_)
         .add_column("addr-access-type", &random_addr_)
         .add_column("batch-poll-size", &batch_poll_size_)
-        .add_column("alloc-mw(ns)", &alloc_mw_ns)
-        .add_column("bind-mw(ns)", &bind_mw_ns)
-        .add_column("free-mw(ns)", &free_mw_ns);
+        .add_column("thread-nr", &thread_nr_)
+        .add_column_ns("alloc-mw", &alloc_mw_ns)
+        .add_column_ns("bind-mw", &bind_mw_ns)
+        .add_column_ns("free-mw", &free_mw_ns)
+        .add_dependent_throughput("bind-mw");
 
     DSMConfig config;
     config.machineNR = kMachineNr;
@@ -182,14 +185,24 @@ int main(int argc, char **argv)
             {
                 for (int random_addr : {0, 1, 2})
                 {
-                    for (size_t batch_poll_size: {1, 10, 100})
+                    for (size_t batch_poll_size : {1, 10, 100})
                     {
-                        window_nr_ = window_nr;
-                        window_size_ = window_size;
-                        random_addr_ = random_addr;
-                        batch_poll_size_ = batch_poll_size;
-                        server(dsm, window_nr, window_size, random_addr, batch_poll_size);
-                        bench.snapshot();
+                        for (size_t thread_nr : {1, 2, 4, 8, 16})
+                        {
+                            window_nr_ = window_nr;
+                            window_size_ = window_size;
+                            random_addr_ = random_addr;
+                            batch_poll_size_ = batch_poll_size;
+                            thread_nr_ = thread_nr;
+
+                            server(dsm,
+                                   window_nr / thread_nr,
+                                   window_size,
+                                   random_addr,
+                                   batch_poll_size);
+                            bench.snapshot();
+                            bench.clear();
+                        }
                     }
                 }
             }

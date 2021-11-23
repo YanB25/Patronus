@@ -3,11 +3,11 @@
 #include <atomic>
 #include <fstream>
 #include <iostream>
+#include <list>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
-#include <memory>
-#include <list>
 
 #include "Common.h"
 namespace bench
@@ -17,10 +17,12 @@ class ColumnBase
 public:
     virtual std::string get_printable_value() const = 0;
     virtual std::string name() const = 0;
+    virtual double get_value() const = 0;
     virtual ~ColumnBase() = default;
+    virtual void clear() = 0;
 };
 template <typename T>
-class Column: public ColumnBase
+class Column : public ColumnBase
 {
 public:
     Column(const std::string &name, std::atomic<T> *val)
@@ -31,7 +33,7 @@ public:
     {
         return name_;
     }
-    T get_value() const
+    double get_value() const override
     {
         return val_->load();
     }
@@ -39,10 +41,43 @@ public:
     {
         return std::to_string(get_value());
     }
+    void clear() override
+    {
+        val_->store({});
+    }
 
 private:
     std::string name_;
-    std::atomic<T>* val_;
+    std::atomic<T> *val_;
+};
+class DependentColumn : public ColumnBase
+{
+public:
+    using Transformer = std::function<double(double)>;
+    DependentColumn(const std::string &name, ColumnBase *dep, Transformer t)
+        : name_(name), dep_(dep), t_(t)
+    {
+    }
+    std::string name() const override
+    {
+        return name_;
+    }
+    double get_value() const override
+    {
+        return t_(dep_->get_value());
+    }
+    std::string get_printable_value() const override
+    {
+        return std::to_string(get_value());
+    }
+    void clear() override
+    {
+    }
+
+private:
+    std::string name_;
+    ColumnBase *dep_;
+    Transformer t_;
 };
 class BenchResult
 {
@@ -54,11 +89,61 @@ public:
         columns_.emplace_back(std::move(pcolumn));
         return *this;
     }
+    template <typename T>
+    BenchResult &add_column_ns(const std::string &col, std::atomic<T> *val)
+    {
+        return add_column(col + " (ns)", val);
+    }
+    template <typename T>
+    BenchResult &add_column_ops(const std::string &col, std::atomic<T> *val)
+    {
+        return add_column(col + " (ops)", val);
+    }
+    /**
+     * @param depend_col the name of the referenced latency column in
+     * nanosecond.
+     * @return BenchResult&
+     */
+    BenchResult &add_dependent_throughput(const std::string &depend_col)
+    {
+        auto *inner = search(depend_col);
+        if (inner == nullptr)
+        {
+            throw std::runtime_error("Can not found dependent column: `" +
+                                     depend_col + "`");
+        }
+        auto pcolumn = future::make_unique<DependentColumn>(
+            inner->name() + " (ops)",
+            inner,
+            [](double input) { return input == 0 ? 0 : 1e9 / input; });
+        columns_.emplace_back(std::move(pcolumn));
+        return *this;
+    }
+    /**
+     * @brief calculate the latency from a column
+     *
+     * @param depend_col the referenced column for ops.
+     * @return BenchResult&
+     */
+    BenchResult &add_dependent_latency(const std::string &depend_col)
+    {
+        auto *inner = search(depend_col);
+        if (inner == nullptr)
+        {
+            throw std::runtime_error("Can not found dependent column: `" +
+                                     depend_col + "`");
+        }
+        auto pcolumn = future::make_unique<DependentColumn>(
+            inner->name() + " (ns)",
+            inner,
+            [](double input) { return input == 0 ? 0 : 1e9 / input; });
+        return *this;
+    }
     void snapshot()
     {
         std::vector<std::string> row;
         row.reserve(columns_.size());
-        for (auto&& pcol: columns_)
+        for (auto &&pcol : columns_)
         {
             row.push_back(pcol->get_printable_value());
         }
@@ -89,8 +174,26 @@ public:
             os << std::endl;
         }
     }
+    void clear()
+    {
+        for (auto &&column : columns_)
+        {
+            column->clear();
+        }
+    }
 
 private:
+    ColumnBase *search(const std::string &name)
+    {
+        for (auto &&column : columns_)
+        {
+            if (column->name() == name)
+            {
+                return column.get();
+            }
+        }
+        return nullptr;
+    }
     std::vector<std::unique_ptr<ColumnBase>> columns_;
     std::list<std::vector<std::string>> buffered_output_;
 };
@@ -115,14 +218,16 @@ public:
         std::lock_guard<std::mutex> lk(mu_);
         bench_result_[name].report(os);
     }
-    void to_csv(const std::string &name, std::string location_dir="./")
+    void to_csv(const std::string &name, std::string location_dir = "./")
     {
         std::fstream fout;
-        if (!location_dir.empty() && location_dir[location_dir.size() -1] != '/')
+        if (!location_dir.empty() &&
+            location_dir[location_dir.size() - 1] != '/')
         {
             location_dir += "/";
         }
-        fout.open(location_dir + name + ".csv", std::ios::out | std::ios::trunc);
+        fout.open(location_dir + name + ".csv",
+                  std::ios::out | std::ios::trunc);
         report(name, fout);
         fout.close();
     }
