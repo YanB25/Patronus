@@ -101,7 +101,7 @@ void server(std::shared_ptr<DSM> dsm)
     dsm->bind_memory_region(mws[0], buffer, 4096, kClientNodeId);
     info("bind memory window success. Rkey: %u", mws[0]->rkey);
 
-    dsm->send((char *) mws[0]->rkey, sizeof(mws[0]->rkey), kClientNodeId);
+    dsm->send((char *) &mws[0]->rkey, sizeof(mws[0]->rkey), kClientNodeId);
 }
 int main(int argc, char **argv)
 {
