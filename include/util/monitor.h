@@ -6,6 +6,10 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#include <memory>
+#include <list>
+
+#include "Common.h"
 namespace bench
 {
 class ColumnBase

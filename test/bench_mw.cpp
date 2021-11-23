@@ -16,17 +16,17 @@ void client(std::shared_ptr<DSM> dsm)
 {
     info("client: TODO");
 }
-std::atomic<double> window_nr_;
-std::atomic<double> window_size_;
+std::atomic<size_t> window_nr_;
+std::atomic<size_t> window_size_;
 // 0 for sequential addr
 // 1 for random addr
 // 2 for random but 4KB aligned addr
 std::atomic<int> random_addr_;
 std::atomic<size_t> batch_poll_size_;
 
-std::atomic<double> alloc_mw_ns;
-std::atomic<double> free_mw_ns;
-std::atomic<double> bind_mw_ns;
+std::atomic<size_t> alloc_mw_ns;
+std::atomic<size_t> free_mw_ns;
+std::atomic<size_t> bind_mw_ns;
 
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -148,6 +148,7 @@ int main(int argc, char **argv)
     bench.add_column("window_nr", &window_nr_)
         .add_column("window_size", &window_size_)
         .add_column("addr-access-type", &random_addr_)
+        .add_column("batch-poll-size", &batch_poll_size_)
         .add_column("alloc-mw(ns)", &alloc_mw_ns)
         .add_column("bind-mw(ns)", &bind_mw_ns)
         .add_column("free-mw(ns)", &free_mw_ns);
