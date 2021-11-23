@@ -515,11 +515,12 @@ void DSM::faa_boundary(GlobalAddress gaddr,
         (*ctx->yield)(*ctx->master);
     }
 }
-char *DSM::get_server_internal_buffer(uint32_t node_id)
+char *DSM::get_server_internal_buffer()
 {
+    size_t node_id = get_node_id();
     dinfo("remote: %p, dsmBase: %p",
           &remoteInfo[node_id],
-          remoteInfo[node_id].dsmBase);
+          (void *) remoteInfo[node_id].dsmBase);
     return (char *) remoteInfo[node_id].dsmBase;
 }
 

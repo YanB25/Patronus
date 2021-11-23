@@ -229,6 +229,11 @@ public:
     DSM(const DSMConfig &conf);
     virtual ~DSM();
 
+    size_t get_node_id() const
+    {
+        return keeper->getMyNodeID();
+    }
+
 private:
     void initRDMAConnection();
     void fill_keys_dest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip);
@@ -275,7 +280,7 @@ public:
     {
         return cache;
     }
-    char* get_server_internal_buffer(uint32_t node_id);
+    char* get_server_internal_buffer();
     const Cache &get_internal_buffer() const
     {
         return cache;
