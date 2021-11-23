@@ -27,7 +27,6 @@ std::atomic<size_t> batch_poll_size_;
 std::atomic<size_t> alloc_mw_ns;
 std::atomic<size_t> free_mw_ns;
 std::atomic<size_t> bind_mw_ns;
-std::atomic<size_t> thread_nr_;
 
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -150,7 +149,6 @@ int main(int argc, char **argv)
         .add_column("window_size", &window_size_)
         .add_column("addr-access-type", &random_addr_)
         .add_column("batch-poll-size", &batch_poll_size_)
-        .add_column("thread-nr", &thread_nr_)
         .add_column_ns("alloc-mw", &alloc_mw_ns)
         .add_column_ns("bind-mw", &bind_mw_ns)
         .add_column_ns("free-mw", &free_mw_ns)
@@ -187,22 +185,18 @@ int main(int argc, char **argv)
                 {
                     for (size_t batch_poll_size : {1, 10, 100})
                     {
-                        for (size_t thread_nr : {1, 2, 4, 8, 16})
-                        {
-                            window_nr_ = window_nr;
-                            window_size_ = window_size;
-                            random_addr_ = random_addr;
-                            batch_poll_size_ = batch_poll_size;
-                            thread_nr_ = thread_nr;
+                        window_nr_ = window_nr;
+                        window_size_ = window_size;
+                        random_addr_ = random_addr;
+                        batch_poll_size_ = batch_poll_size;
 
-                            server(dsm,
-                                   window_nr / thread_nr,
-                                   window_size,
-                                   random_addr,
-                                   batch_poll_size);
-                            bench.snapshot();
-                            bench.clear();
-                        }
+                        server(dsm,
+                               window_nr,
+                               window_size,
+                               random_addr,
+                               batch_poll_size);
+                        bench.snapshot();
+                        bench.clear();
                     }
                 }
             }
