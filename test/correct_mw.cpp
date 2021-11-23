@@ -13,6 +13,7 @@ constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kOffset = 0;
+constexpr static size_t kMagic = 0xabcdef0123456789;
 
 void client(std::shared_ptr<DSM> dsm)
 {
@@ -22,7 +23,7 @@ void client(std::shared_ptr<DSM> dsm)
 
     auto *buffer = dsm->get_rdma_buffer();
 
-    uint64_t magic = 0xabcdef0123456789;
+    uint64_t magic = kMagic;
     *(uint64_t *) buffer = magic;
 
     dsm->write(buffer, gaddr, sizeof(magic));
@@ -30,7 +31,7 @@ void client(std::shared_ptr<DSM> dsm)
 
     while (true)
     {
-        auto *read_buffer = buffer + 4096;
+        auto *read_buffer = buffer + 40960;
         dsm->read_sync(read_buffer, gaddr, sizeof(gaddr));
         printf("read at offset %lu: %lx\n", kOffset, *(uint64_t *) read_buffer);
         *(uint64_t *) read_buffer = 0;
@@ -81,7 +82,15 @@ void server(std::shared_ptr<DSM> dsm)
         }
         if (!found)
         {
-            printf("Buffer are all zero.\n");
+            printf("Buffer are all zero. try backward\n");
+            for (size_t i = 0; i < 1024; ++i)
+            {
+                read = *(uint64_t *) (buffer - i);
+                if (read == kMagic)
+                {
+                    printf("Found at offset %ld: %lx\n", -i, read);
+                }
+            }
         }
         sleep(1);
     }
