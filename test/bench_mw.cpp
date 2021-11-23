@@ -77,17 +77,17 @@ void server(std::shared_ptr<DSM> dsm, size_t mw_nr, size_t window_size)
 }
 int main(int argc, char **argv)
 {
-    if (argc < 3)
-    {
-        fprintf(stderr, "%s [window_nr] [window_size]\n", argv[0]);
-        return -1;
-    }
-    size_t window_nr = 0;
-    size_t window_size = 0;
-    sscanf(argv[1], "%lu", &window_nr);
-    sscanf(argv[2], "%lu", &window_size);
+    // if (argc < 3)
+    // {
+    //     fprintf(stderr, "%s [window_nr] [window_size]\n", argv[0]);
+    //     return -1;
+    // }
+    // size_t window_nr = 0;
+    // size_t window_size = 0;
+    // sscanf(argv[1], "%lu", &window_nr);
+    // sscanf(argv[2], "%lu", &window_size);
 
-    printf("window_nr: %lu, window_size: %lu\n", window_nr, window_size);
+    // printf("window_nr: %lu, window_size: %lu\n", window_nr, window_size);
 
     bindCore(0);
 

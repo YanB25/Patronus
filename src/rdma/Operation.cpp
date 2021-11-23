@@ -26,7 +26,7 @@ int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
 
     if (wc->status != IBV_WC_SUCCESS)
     {
-        error("Failed status %s (%d) for wr_id %d",
+        error("Failed status `%s (%d)` for wr_id %d",
               ibv_wc_status_str(wc->status),
               wc->status,
               (int) wc->wr_id);
