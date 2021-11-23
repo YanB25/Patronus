@@ -69,7 +69,10 @@ void server(std::shared_ptr<DSM> dsm)
     {
         uint64_t read;
         read = *(uint64_t *) (buffer + kOffset);
-        printf("Read at offset %lu: %lx. actual addr: %p\n", kOffset, read, &buffer[kOffset]);
+        printf("Read at offset %lu: %lx. actual addr: %p\n",
+               kOffset,
+               read,
+               &buffer[kOffset]);
         bool found = false;
         for (size_t i = 0; i < max_size; ++i)
         {
@@ -89,8 +92,15 @@ void server(std::shared_ptr<DSM> dsm)
                 if (read == kMagic)
                 {
                     printf("Found at offset %ld: %lx\n", -i, read);
+                    found = true;
                 }
             }
+        }
+        if (!found)
+        {
+            printf("Still not found. test server write.");
+            *(uint64_t *) buffer = 0xabababababababab;
+            printf("Server write at %p: %lx\n", buffer, *(uint64_t *)buffer);
         }
         sleep(1);
     }
