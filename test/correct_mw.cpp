@@ -22,7 +22,7 @@ void client(std::shared_ptr<DSM> dsm)
 
     uint64_t magic = 0xabcdef0123456789;
     dsm->write_sync(buffer, gaddr, sizeof(magic));
-    info("write finished.");
+    info("write finished at offset 1024: %lx.", magic);
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -55,7 +55,7 @@ void server(std::shared_ptr<DSM> dsm)
     {
         uint64_t read;
         read = buffer[1024];
-        printf("Read: %x\n", read);
+        printf("Read at offset 1024 : %lx\n", read);
         sleep(1);
     }
 
