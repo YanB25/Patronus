@@ -21,8 +21,18 @@ void client(std::shared_ptr<DSM> dsm)
     auto *buffer = dsm->get_rdma_buffer();
 
     uint64_t magic = 0xabcdef0123456789;
-    dsm->write_sync(buffer, gaddr, sizeof(magic));
+    *(uint64_t *) buffer = magic;
+
+    dsm->write(buffer, gaddr, sizeof(magic));
     info("write finished at offset 1024: %lx.", magic);
+
+    while (true)
+    {
+        auto *read_buffer = buffer + 4096;
+        dsm->read_sync(read_buffer, gaddr, sizeof(gaddr));
+        printf("read at offset 1024: %lx\n", *(uint64_t *) read_buffer);
+        sleep(1);
+    }
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -59,7 +69,6 @@ void server(std::shared_ptr<DSM> dsm)
         sleep(1);
     }
 
-    
     constexpr static size_t kMWSize = 1024;
 
     // std::array<ibv_mw *, kMWSize> mws;
