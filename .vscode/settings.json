@@ -53,6 +53,16 @@
         "typeindex": "cpp",
         "typeinfo": "cpp",
         "string": "cpp",
-        "csignal": "cpp"
+        "csignal": "cpp",
+        "algorithm": "cpp",
+        "iterator": "cpp",
+        "map": "cpp",
+        "memory": "cpp",
+        "memory_resource": "cpp",
+        "optional": "cpp",
+        "random": "cpp",
+        "set": "cpp",
+        "string_view": "cpp",
+        "shared_mutex": "cpp"
     }
 }

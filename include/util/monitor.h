@@ -17,6 +17,7 @@ class ColumnBase
 public:
     virtual std::string get_printable_value() const = 0;
     virtual std::string name() const = 0;
+    virtual std::string print_name() const = 0;
     virtual double get_value() const = 0;
     virtual ~ColumnBase() = default;
     virtual void clear() = 0;
@@ -25,13 +26,19 @@ template <typename T>
 class Column : public ColumnBase
 {
 public:
-    Column(const std::string &name, std::atomic<T> *val)
-        : name_(name), val_(val)
+    Column(const std::string &name,
+           const std::string &print_name,
+           std::atomic<T> *val)
+        : name_(name), print_name_(print_name), val_(val)
     {
     }
     std::string name() const override
     {
         return name_;
+    }
+    std::string print_name() const override
+    {
+        return print_name_;
     }
     double get_value() const override
     {
@@ -48,19 +55,27 @@ public:
 
 private:
     std::string name_;
+    std::string print_name_;
     std::atomic<T> *val_;
 };
 class DependentColumn : public ColumnBase
 {
 public:
     using Transformer = std::function<double(double)>;
-    DependentColumn(const std::string &name, ColumnBase *dep, Transformer t)
-        : name_(name), dep_(dep), t_(t)
+    DependentColumn(const std::string &name,
+                    const std::string &print_name,
+                    ColumnBase *dep,
+                    Transformer t)
+        : name_(name), print_name_(print_name), dep_(dep), t_(t)
     {
     }
     std::string name() const override
     {
         return name_;
+    }
+    std::string print_name() const override
+    {
+        return print_name_;
     }
     double get_value() const override
     {
@@ -76,6 +91,7 @@ public:
 
 private:
     std::string name_;
+    std::string print_name_;
     ColumnBase *dep_;
     Transformer t_;
 };
@@ -85,19 +101,17 @@ public:
     template <typename T>
     BenchResult &add_column(const std::string &col, std::atomic<T> *val)
     {
-        auto pcolumn = future::make_unique<Column<T>>(col, val);
-        columns_.emplace_back(std::move(pcolumn));
-        return *this;
+        return add(col, col, val);
     }
     template <typename T>
     BenchResult &add_column_ns(const std::string &col, std::atomic<T> *val)
     {
-        return add_column(col + " (ns)", val);
+        return add(col, col + " (ns)", val);
     }
     template <typename T>
     BenchResult &add_column_ops(const std::string &col, std::atomic<T> *val)
     {
-        return add_column(col + " (ops)", val);
+        return add(col, col + " (ops)", val);
     }
     /**
      * @param depend_col the name of the referenced latency column in
@@ -113,6 +127,7 @@ public:
                                      depend_col + "`");
         }
         auto pcolumn = future::make_unique<DependentColumn>(
+            inner->name(), 
             inner->name() + " (ops)",
             inner,
             [](double input) { return input == 0 ? 0 : 1e9 / input; });
@@ -134,6 +149,7 @@ public:
                                      depend_col + "`");
         }
         auto pcolumn = future::make_unique<DependentColumn>(
+            inner->name(), 
             inner->name() + " (ns)",
             inner,
             [](double input) { return input == 0 ? 0 : 1e9 / input; });
@@ -153,7 +169,7 @@ public:
     {
         for (size_t i = 0; i < columns_.size(); ++i)
         {
-            os << columns_[i]->name();
+            os << columns_[i]->print_name();
             if (i + 1 < columns_.size())
             {
                 os << ",";
@@ -183,6 +199,15 @@ public:
     }
 
 private:
+    template <typename T>
+    BenchResult &add(const std::string &name,
+                     const std::string &print_name,
+                     std::atomic<T> *val)
+    {
+        auto pcolumn = future::make_unique<Column<T>>(name, print_name, val);
+        columns_.emplace_back(std::move(pcolumn));
+        return *this;
+    }
     ColumnBase *search(const std::string &name)
     {
         for (auto &&column : columns_)
