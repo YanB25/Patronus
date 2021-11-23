@@ -116,8 +116,10 @@ int main(int argc, char **argv)
     }
     else
     {
+        // 150 us to alloc one mw.
+        // 10000000 mws need 16 min, so we don't bench it.
         std::vector<size_t> window_nr_arr{
-            100, 1000, 10000, 100000, 1000000ull, 10000000ull};
+            100, 1000, 10000, 100000, 1000000ull};
         std::vector<size_t> window_size_arr{4096};
         for (auto window_nr : window_nr_arr)
         {
