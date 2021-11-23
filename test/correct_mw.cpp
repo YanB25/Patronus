@@ -13,7 +13,7 @@ constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kOffset = 0;
-constexpr static size_t kMagic = 0xabcdef0123456789;
+constexpr static size_t kMagic = 0xffffffffffffffff;
 
 void client(std::shared_ptr<DSM> dsm)
 {
@@ -74,7 +74,7 @@ void server(std::shared_ptr<DSM> dsm)
         for (size_t i = 0; i < max_size; ++i)
         {
             read = *(uint64_t *) (buffer + i);
-            if (read != 0)
+            if (read == kMagic)
             {
                 printf("Read at offset %lu: %lx.\n", i, read);
                 found = true;
