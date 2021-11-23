@@ -34,11 +34,11 @@ void client(std::shared_ptr<DSM> dsm)
         auto *read_buffer = buffer + 40960;
         dsm->read_sync(read_buffer, gaddr, sizeof(gaddr));
         printf("read at offset %lu: %lx\n", kOffset, *(uint64_t *) read_buffer);
-        *(uint64_t *) read_buffer = 0;
         if (*(uint64_t *) read_buffer == kMagic)
         {
             break;
         }
+        *(uint64_t *) read_buffer = 0;
         sleep(1);
     }
     info("calling rpc");
