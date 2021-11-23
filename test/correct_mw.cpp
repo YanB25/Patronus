@@ -61,9 +61,10 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    char *buffer = dsm->get_server_internal_buffer();
+    const auto& buf_conf = dsm->get_server_internal_buffer();
+    char *buffer = buf_conf.buffer;
     info("get buffer addr: %p", buffer);
-    size_t max_size = 16 * define::GB;
+    size_t max_size = buf_conf.size;
 
     while (true)
     {
@@ -73,34 +74,10 @@ void server(std::shared_ptr<DSM> dsm)
                kOffset,
                read,
                &buffer[kOffset]);
-        bool found = false;
-        for (size_t i = 0; i < max_size; ++i)
+        if (read == kMagic)
         {
-            read = *(uint64_t *) (buffer + i);
-            if (read == kMagic)
-            {
-                printf("Read at offset %lu: %lx.\n", i, read);
-                found = true;
-            }
-        }
-        if (!found)
-        {
-            printf("Buffer are all zero. try backward\n");
-            for (size_t i = 0; i < 1024; ++i)
-            {
-                read = *(uint64_t *) (buffer - i);
-                if (read == kMagic)
-                {
-                    printf("Found at offset %ld: %lx\n", -i, read);
-                    found = true;
-                }
-            }
-        }
-        if (!found)
-        {
-            printf("Still not found. test server write.");
-            *(uint64_t *) buffer = 0xabababababababab;
-            printf("Server write at %p: %lx\n", buffer, *(uint64_t *) buffer);
+            printf("Found.\n");
+            break;
         }
         sleep(1);
     }

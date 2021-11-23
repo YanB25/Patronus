@@ -276,15 +276,7 @@ public:
     {
         return rdma_buffer;
     }
-    Cache &get_internal_buffer()
-    {
-        return cache;
-    }
-    char* get_server_internal_buffer();
-    const Cache &get_internal_buffer() const
-    {
-        return cache;
-    }
+    Buffer get_server_internal_buffer();
     RdmaBuffer &get_rbuf(int coro_id)
     {
         dcheck(coro_id < define::kMaxCoro,
