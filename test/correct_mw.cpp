@@ -67,8 +67,22 @@ void server(std::shared_ptr<DSM> dsm)
     while (true)
     {
         uint64_t read;
-        read = buffer[kOffset];
+        read = *(uint64_t *) (buffer + kOffset);
         printf("Read at offset %lu: %lx. actual addr: %p\n", kOffset, read, &buffer[kOffset]);
+        bool found = false;
+        for (size_t i = 0; i < max_size; ++i)
+        {
+            read = *(uint64_t *) (buffer + i);
+            if (read != 0)
+            {
+                printf("Read at offset %lu: %lx.\n", i, read);
+                found = true;
+            }
+        }
+        if (!found)
+        {
+            printf("Buffer are all zero.\n");
+        }
         sleep(1);
     }
 
