@@ -299,7 +299,19 @@ public:
 
         iCon->sendMessage2Dir(buffer, node_id, dir_id);
     }
-    RawMessage *recv()
+    void send(const char *buf,
+              size_t size,
+              uint16_t node_id,
+              uint16_t dir_id = 0)
+    {
+        auto buffer = (RawMessage *) iCon->message->getSendPool();
+        buffer->node_id = myNodeID;
+        buffer->app_id = thread_id;
+        check(size < sizeof(RawMessage::inlined_buffer));
+        memcpy(buffer->inlined_buffer, buf, size);
+        iCon->sendMessage2Dir(buffer, node_id, dir_id);
+    }
+    char *recv()
     {
         check(dirCon.size() == 1);
         struct ibv_wc wc;
@@ -308,7 +320,8 @@ public:
         {
         case IBV_WC_RECV:
         {
-            return (RawMessage *) dirCon[0].message->getMessage();
+            auto* m = (RawMessage *) dirCon[0].message->getMessage();
+            return m->inlined_buffer;
         }
         default:
         {

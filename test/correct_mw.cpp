@@ -41,11 +41,10 @@ void client(std::shared_ptr<DSM> dsm)
         *(uint64_t *) read_buffer = 0;
         sleep(1);
     }
-    info("calling rpc");
-    RawMessage msg;
-    msg.inlined_buffer[0] = 'a';
-    std::cout << "Sending " << msg << std::endl;
-    dsm->rpc_call_dir(msg, kServerNodeId);
+    info("waiting for rkey...");
+    char* msg = dsm->recv();
+    uint32_t rkey = *(uint32_t *)msg;
+    info("get rkey %u", rkey);
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -93,14 +92,16 @@ void server(std::shared_ptr<DSM> dsm)
 
     constexpr static size_t kMWSize = 1024;
 
-    // std::array<ibv_mw *, kMWSize> mws;
-    // for (size_t i = 0; i < kMWSize; ++i)
-    // {
-    //     mws[i] = dsm->alloc_mw();
-    // }
-    info("waiting rpc...");
-    auto *msg = dsm->recv();
-    std::cout << "get msg: " << (void *) msg << ": " << *msg << std::endl;
+    std::array<ibv_mw *, kMWSize> mws;
+    for (size_t i = 0; i < kMWSize; ++i)
+    {
+        mws[i] = dsm->alloc_mw();
+    }
+
+    dsm->bind_memory_region(mws[0], buffer, 4096, kClientNodeId);
+    info("bind memory window success. Rkey: %u", mws[0]->rkey);
+
+    dsm->send((char *) mws[0]->rkey, sizeof(mws[0]->rkey), kClientNodeId);
 }
 int main(int argc, char **argv)
 {
