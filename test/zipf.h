@@ -105,7 +105,7 @@ static void mehcached_zipf_init(struct zipf_gen_state *state, uint64_t n,
     state->rand_state = rand_seed;
 }
 
-static void mehcached_zipf_init_copy(struct zipf_gen_state *state,
+static inline void mehcached_zipf_init_copy(struct zipf_gen_state *state,
                                      const struct zipf_gen_state *src_state,
                                      uint64_t rand_seed) {
 
@@ -118,7 +118,7 @@ static void mehcached_zipf_init_copy(struct zipf_gen_state *state,
     state->rand_state = rand_seed;
 }
 
-static void mehcached_zipf_change_n(struct zipf_gen_state *state, uint64_t n) {
+static inline void mehcached_zipf_change_n(struct zipf_gen_state *state, uint64_t n) {
     (void)mehcached_zipf_change_n;
     state->n = n;
 }

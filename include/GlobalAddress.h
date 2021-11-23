@@ -21,9 +21,13 @@ public:
         return val;
     }
 
+    GlobalAddress(): val(0)
+    {
+    }
+
     static GlobalAddress Null()
     {
-        static GlobalAddress zero{0, 0};
+        static GlobalAddress zero;
         return zero;
     };
 } __attribute__((packed));

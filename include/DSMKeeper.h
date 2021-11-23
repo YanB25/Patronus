@@ -100,7 +100,7 @@ public:
         initRouteRule();
     }
 
-    ~DSMKeeper()
+    virtual ~DSMKeeper()
     {
         disconnectMemcached();
     }

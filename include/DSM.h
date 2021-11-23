@@ -227,7 +227,7 @@ public:
     }
 
     DSM(const DSMConfig &conf);
-    ~DSM();
+    virtual ~DSM();
 
 private:
     void initRDMAConnection();

@@ -9,7 +9,7 @@ option(SANITIZE "Turn on sanitization" OFF)
 # set (CMAKE_CXX_COMPILER ${CMAKE_C_COMPILER})
 
 #Compiler options
-set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare")
+set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wno-unused-private-field -Wsign-compare")
 set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++11 ")
 
 # disable boost warning

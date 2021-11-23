@@ -498,13 +498,17 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     if (ret == EINVAL)
     {
-        error("failed to bind mw: maybe library not support TYPE_2 memory window: errno %d", ret);
+        error(
+            "failed to bind mw: maybe library not support TYPE_2 memory "
+            "window: errno %d",
+            ret);
         return 0;
     }
     if (ret)
     {
         error(
-            "failed to bind memory window. errno: %d.\nqp: %p, mw: %p, mr: %p, mr.lkey: %u, mm: %p, "
+            "failed to bind memory window. errno: %d.\nqp: %p, mw: %p, mr: %p, "
+            "mr.lkey: %u, mm: %p, "
             "size: %lu",
             ret,
             qp,
@@ -515,7 +519,8 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
             mmSize);
         return 0;
     }
-    // dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p", qp->send_cq, qp->recv_cq, qp->srq);
+    // dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p",
+    // qp->send_cq, qp->recv_cq, qp->srq);
     return mw->rkey;
 }
 
@@ -875,5 +880,22 @@ void rdmaQueryDevice()
            attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW_TYPE_2B ? 1 : 0);
     printf("IBV_DEVICE_MEM_MGT_EXTENTIONS: %d\n",
            attr.device_cap_flags & IBV_DEVICE_MEM_MGT_EXTENSIONS ? 1 : 0);
+
+    struct ibv_exp_device_attr exp_attr;
+    memset(&exp_attr, 0, sizeof(exp_attr));
+    exp_attr.comp_mask = IBV_EXP_DEVICE_ATTR_ODP |
+                         IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS |
+                         IBV_EXP_DEVICE_ATTR_INLINE_RECV_SZ |
+                         IBV_EXP_DEVICE_ATTR_TUNNELED_ATOMIC |
+                         IBV_EXP_DEVICE_ATTR_TUNNEL_OFFLOADS_CAPS;
+    if (ibv_exp_query_device(ctx, &exp_attr))
+    {
+        perror("failed to query device attr");
+    }
+    printf("IBV_EXP_DEVICE_ODP: %d\n",
+           exp_attr.exp_device_cap_flags & IBV_EXP_DEVICE_ODP ? 1 : 0);
+    printf("inline_recv_sz: %d\n", exp_attr.inline_recv_sz);
+    printf("IBV_EXP_TUNNELED_ATOMIC_SUPPORTED: %d\n",
+           exp_attr.tunneled_atomic_caps & IBV_EXP_TUNNELED_ATOMIC_SUPPORTED);
     printf("======= device attr end ====\n");
 }

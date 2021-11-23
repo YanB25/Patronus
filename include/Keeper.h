@@ -41,7 +41,7 @@ protected:
 
 public:
     Keeper(uint32_t maxServer = 12);
-    ~Keeper();
+    virtual ~Keeper();
 
     uint16_t getMyNodeID() const
     {
