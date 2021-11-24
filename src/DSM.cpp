@@ -108,11 +108,12 @@ void DSM::initRDMAConnection()
     myNodeID = keeper->getMyNodeID();
 }
 
-void DSM::read(char *buffer,
-               GlobalAddress gaddr,
-               size_t size,
-               bool signal,
-               CoroContext *ctx)
+void DSM::rkey_read(uint32_t rkey,
+                    char *buffer,
+                    GlobalAddress gaddr,
+                    size_t size,
+                    bool signal,
+                    CoroContext *ctx)
 {
     if (ctx == nullptr)
     {
@@ -121,7 +122,7 @@ void DSM::read(char *buffer,
                  remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                  size,
                  iCon->cacheLKey,
-                 remoteInfo[gaddr.nodeID].dsmRKey[0],
+                 rkey,
                  signal);
     }
     else
@@ -131,19 +132,20 @@ void DSM::read(char *buffer,
                  remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                  size,
                  iCon->cacheLKey,
-                 remoteInfo[gaddr.nodeID].dsmRKey[0],
+                 rkey,
                  true,
                  ctx->coro_id);
         (*ctx->yield)(*ctx->master);
     }
 }
 
-void DSM::read_sync(char *buffer,
-                    GlobalAddress gaddr,
-                    size_t size,
-                    CoroContext *ctx)
+void DSM::rkey_read_sync(uint32_t rkey,
+                         char *buffer,
+                         GlobalAddress gaddr,
+                         size_t size,
+                         CoroContext *ctx)
 {
-    read(buffer, gaddr, size, true, ctx);
+    rkey_read(rkey, buffer, gaddr, size, true, ctx);
 
     if (ctx == nullptr)
     {
@@ -152,11 +154,50 @@ void DSM::read_sync(char *buffer,
     }
 }
 
+void DSM::read(char *buffer,
+               GlobalAddress gaddr,
+               size_t size,
+               bool signal,
+               CoroContext *ctx)
+{
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
+    rkey_read(rkey, buffer, gaddr, size, signal, ctx);
+}
+
+void DSM::read_sync(char *buffer,
+                    GlobalAddress gaddr,
+                    size_t size,
+                    CoroContext *ctx)
+{
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
+    rkey_read_sync(rkey, buffer, gaddr, size, ctx);
+}
+
 void DSM::write(const char *buffer,
                 GlobalAddress gaddr,
                 size_t size,
                 bool signal,
                 CoroContext *ctx)
+{
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
+    return rkey_write(rkey, buffer, gaddr, size, signal, ctx);
+}
+
+void DSM::write_sync(const char *buffer,
+                     GlobalAddress gaddr,
+                     size_t size,
+                     CoroContext *ctx)
+{
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
+    return rkey_write_sync(rkey, buffer, gaddr, size, ctx);
+}
+
+void DSM::rkey_write(uint32_t rkey,
+                     const char *buffer,
+                     GlobalAddress gaddr,
+                     size_t size,
+                     bool signal,
+                     CoroContext *ctx)
 {
     if (ctx == nullptr)
     {
@@ -165,7 +206,7 @@ void DSM::write(const char *buffer,
                   remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                   size,
                   iCon->cacheLKey,
-                  remoteInfo[gaddr.nodeID].dsmRKey[0],
+                  rkey,
                   -1,
                   signal);
     }
@@ -176,7 +217,7 @@ void DSM::write(const char *buffer,
                   remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                   size,
                   iCon->cacheLKey,
-                  remoteInfo[gaddr.nodeID].dsmRKey[0],
+                  rkey,
                   -1,
                   true,
                   ctx->coro_id);
@@ -184,12 +225,13 @@ void DSM::write(const char *buffer,
     }
 }
 
-void DSM::write_sync(const char *buffer,
-                     GlobalAddress gaddr,
-                     size_t size,
-                     CoroContext *ctx)
+void DSM::rkey_write_sync(uint32_t rkey,
+                          const char *buffer,
+                          GlobalAddress gaddr,
+                          size_t size,
+                          CoroContext *ctx)
 {
-    write(buffer, gaddr, size, true, ctx);
+    rkey_write(rkey, buffer, gaddr, size, true, ctx);
 
     if (ctx == nullptr)
     {
@@ -518,7 +560,7 @@ void DSM::faa_boundary(GlobalAddress gaddr,
 Buffer DSM::get_server_internal_buffer()
 {
     size_t node_id = get_node_id();
-    Buffer ret((char*) remoteInfo[node_id].dsmBase, 16 * define::GB);
+    Buffer ret((char *) remoteInfo[node_id].dsmBase, 16 * define::GB);
     return ret;
 }
 

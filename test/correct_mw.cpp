@@ -14,6 +14,7 @@ constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kOffset = 0;
 constexpr static size_t kMagic = 0xffffffffffffffff;
+constexpr static size_t kMagic2 = 0xabcdef1234567890;
 
 void client(std::shared_ptr<DSM> dsm)
 {
@@ -23,11 +24,10 @@ void client(std::shared_ptr<DSM> dsm)
 
     auto *buffer = dsm->get_rdma_buffer();
 
-    uint64_t magic = kMagic;
-    *(uint64_t *) buffer = magic;
+    *(uint64_t *) buffer = kMagic;
 
-    dsm->write(buffer, gaddr, sizeof(magic));
-    info("write finished at offset %lu: %lx.", kOffset, magic);
+    dsm->write(buffer, gaddr, sizeof(kMagic));
+    info("write finished at offset %lu: %lx.", kOffset, kMagic);
 
     while (true)
     {
@@ -41,10 +41,14 @@ void client(std::shared_ptr<DSM> dsm)
         *(uint64_t *) read_buffer = 0;
         sleep(1);
     }
-    info("waiting for rkey...");
-    char* msg = dsm->recv();
-    uint32_t rkey = *(uint32_t *)msg;
+    info("Finish basic RDMA write. Testing memory window. Waiting for rkey...");
+    char *msg = dsm->recv();
+    uint32_t rkey = *(uint32_t *) msg;
     info("get rkey %u", rkey);
+
+    *(uint64_t *) buffer = kMagic2;
+    gaddr.offset = kOffset + 1024;
+    dsm->rkey_write(rkey, buffer, gaddr, sizeof(kMagic2));
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -102,6 +106,22 @@ void server(std::shared_ptr<DSM> dsm)
     info("bind memory window success. Rkey: %u", mws[0]->rkey);
 
     dsm->send((char *) &mws[0]->rkey, sizeof(mws[0]->rkey), kClientNodeId);
+
+    while (true)
+    {
+        uint64_t read;
+        read = *(uint64_t *) (buffer + kOffset + 1024);
+        printf("Read at offset %lu: %lx. actual addr: %p\n",
+               kOffset,
+               read,
+               &buffer[kOffset]);
+        if (read == kMagic2)
+        {
+            printf("Found.\n");
+            break;
+        }
+        sleep(1);
+    }
 }
 int main(int argc, char **argv)
 {

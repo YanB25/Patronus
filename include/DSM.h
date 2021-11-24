@@ -39,6 +39,19 @@ public:
 
     // RDMA operations
     // buffer is registered memory
+
+    // TODO(Bin Yan): finish the rkey_* API for memory windows.
+    void rkey_read(uint32_t rkey,
+                   char *buffer,
+                   GlobalAddress gaddr,
+                   size_t size,
+                   bool signal = true,
+                   CoroContext *ctx = nullptr);
+    void rkey_read_sync(uint32_t rkey,
+                        char *buffer,
+                        GlobalAddress gaddr,
+                        size_t size,
+                        CoroContext *ctx = nullptr);
     void read(char *buffer,
               GlobalAddress gaddr,
               size_t size,
@@ -48,7 +61,17 @@ public:
                    GlobalAddress gaddr,
                    size_t size,
                    CoroContext *ctx = nullptr);
-
+    void rkey_write(uint32_t rkey,
+                    const char *buffer,
+                    GlobalAddress gaddr,
+                    size_t size,
+                    bool signal = true,
+                    CoroContext *ctx = nullptr);
+    void rkey_write_sync(uint32_t rkey,
+                         const char *buffer,
+                         GlobalAddress gaddr,
+                         size_t size,
+                         CoroContext *ctx = nullptr);
     void write(const char *buffer,
                GlobalAddress gaddr,
                size_t size,
@@ -320,7 +343,7 @@ public:
         {
         case IBV_WC_RECV:
         {
-            auto* m = (RawMessage *) dirCon[0].message->getMessage();
+            auto *m = (RawMessage *) dirCon[0].message->getMessage();
             return m->inlined_buffer;
         }
         default:
