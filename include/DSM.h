@@ -220,6 +220,10 @@ public:
                             const char *buffer,
                             size_t size,
                             size_t target_node_id);
+    void bind_memory_region_sync(struct ibv_mw *mw,
+                            const char *buffer,
+                            size_t size,
+                            size_t target_node_id);
 
     uint64_t poll_rdma_cq(int count = 1);
     bool poll_rdma_cq_once(uint64_t &wr_id);

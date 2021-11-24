@@ -847,3 +847,16 @@ void DSM::bind_memory_region(struct ibv_mw *mw,
                               size,
                               true);
 }
+void DSM::bind_memory_region_sync(struct ibv_mw *mw,
+                                  const char *buffer,
+                                  size_t size,
+                                  size_t target_node_id)
+{
+    rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id],
+                              mw,
+                              iCon->cacheMR,
+                              (uint64_t) buffer,
+                              size,
+                              true);
+    poll_rdma_cq(1);
+}

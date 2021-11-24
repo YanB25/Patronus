@@ -32,7 +32,7 @@ void client(std::shared_ptr<DSM> dsm)
     while (true)
     {
         auto *read_buffer = buffer + 40960;
-        dsm->read_sync(read_buffer, gaddr, sizeof(gaddr));
+        dsm->read_sync(read_buffer, gaddr, sizeof(kMagic));
         printf("read at offset %lu: %lx\n", kOffset, *(uint64_t *) read_buffer);
         if (*(uint64_t *) read_buffer == kMagic)
         {
@@ -55,7 +55,7 @@ void client(std::shared_ptr<DSM> dsm)
     {
         auto *read_buffer = buffer + 40960;
         *(uint64_t *) read_buffer = 0;
-        dsm->read_sync(read_buffer, gaddr, sizeof(gaddr));
+        dsm->rkey_read_sync(rkey, read_buffer, gaddr, sizeof(kMagic2));
         printf("read at offset %lu: %lx\n", kOffset, *(uint64_t *) read_buffer);
         if (*(uint64_t *) read_buffer == kMagic2)
         {
@@ -116,7 +116,7 @@ void server(std::shared_ptr<DSM> dsm)
         mws[i] = dsm->alloc_mw();
     }
 
-    dsm->bind_memory_region(mws[0], buffer, 4096, kClientNodeId);
+    dsm->bind_memory_region_sync(mws[0], buffer, 4096, kClientNodeId);
     info("bind memory window success. Rkey: %u", mws[0]->rkey);
 
     dsm->send((char *) &mws[0]->rkey, sizeof(mws[0]->rkey), kClientNodeId);
