@@ -48,7 +48,8 @@ void client(std::shared_ptr<DSM> dsm)
 
     *(uint64_t *) buffer = kMagic2;
     gaddr.offset = kOffset;
-    dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
+    // dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
+    dsm->write_sync(buffer, gaddr, sizeof(kMagic2));
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
