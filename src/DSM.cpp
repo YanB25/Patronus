@@ -25,7 +25,6 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize);
 
-    // TODO: use smart print
     info("shared memory size: %s, 0x%lx",
          smart::smartSize(conf.dsmSize).c_str(),
          baseAddr);
@@ -844,12 +843,14 @@ void DSM::free_mw(struct ibv_mw *mw)
 }
 
 void DSM::bind_memory_region(struct ibv_mw *mw,
+                             size_t target_node_id,
+                             size_t target_thread_id,
                              const char *buffer,
-                             size_t size,
-                             size_t target_node_id)
+                             size_t size)
 {
     // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
     // iCon->QPs[0].size(), iCon);
+    check(dirCon.size() == 1, "currently only support one dirCon");
     rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id],
                               mw,
                               iCon->cacheMR,
@@ -858,10 +859,12 @@ void DSM::bind_memory_region(struct ibv_mw *mw,
                               true);
 }
 void DSM::bind_memory_region_sync(struct ibv_mw *mw,
+                                  size_t target_node_id,
+                                  size_t target_thread_id,
                                   const char *buffer,
-                                  size_t size,
-                                  size_t target_node_id)
+                                  size_t size)
 {
+    check(dirCon.size() == 1, "currently only support one dirCon");
     rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id],
                               mw,
                               iCon->cacheMR,

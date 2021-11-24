@@ -14,6 +14,12 @@
 class DSMKeeper;
 class Directory;
 
+struct Identify
+{
+    int thread_id;
+    int node_id;
+};
+
 class DSM
 {
 public:
@@ -217,13 +223,15 @@ public:
     ibv_mw *alloc_mw();
     void free_mw(struct ibv_mw *mw);
     void bind_memory_region(struct ibv_mw *mw,
+                            size_t target_node_id,
+                            size_t target_thread_id,
                             const char *buffer,
-                            size_t size,
-                            size_t target_node_id);
+                            size_t size);
     void bind_memory_region_sync(struct ibv_mw *mw,
-                            const char *buffer,
-                            size_t size,
-                            size_t target_node_id);
+                                 size_t target_node_id,
+                                 size_t target_thread_id,
+                                 const char *buffer,
+                                 size_t size);
 
     uint64_t poll_rdma_cq(int count = 1);
     bool poll_rdma_cq_once(uint64_t &wr_id);
@@ -259,6 +267,17 @@ public:
     size_t get_node_id() const
     {
         return keeper->getMyNodeID();
+    }
+    int get_thread_id() const
+    {
+        return thread_id;
+    }
+    Identify get_identify() const
+    {
+        Identify id;
+        id.node_id = get_node_id();
+        id.thread_id = get_thread_id();
+        return id;
     }
 
 private:

@@ -106,8 +106,9 @@ void server(std::shared_ptr<DSM> dsm,
                     // if i too large, we roll back i to 0.
                     buffer_start = buffer + (i % window_nr) * window_size;
                 }
+                warn("TODO: check if thread_id == 0 is correct.");
                 dsm->bind_memory_region(
-                    mws[i], buffer_start, window_size, kClientNodeId);
+                    mws[i], kClientNodeId, 0, buffer_start, window_size);
             }
             dsm->poll_rdma_cq(work_nr);
             remain_nr -= work_nr;

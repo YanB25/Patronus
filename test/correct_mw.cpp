@@ -41,10 +41,16 @@ void client(std::shared_ptr<DSM> dsm)
         *(uint64_t *) read_buffer = 0;
         sleep(1);
     }
-    info("Finish basic RDMA write. Testing memory window. Waiting for rkey...");
+    info("Finish basic RDMA write. Testing memory window. ");
+    info("Sending Identify to server");
+
+    auto id = dsm->get_identify();
+    dsm->send((char *) &id, sizeof(id), kServerNodeId);
+
+    info("Waiting for rkey from server...");
     char *msg = dsm->recv();
     uint32_t rkey = *(uint32_t *) msg;
-    info("get rkey %u", rkey);
+    info("Get rkey %u", rkey);
 
     *(uint64_t *) buffer = kMagic2;
     gaddr.offset = kOffset;
@@ -116,7 +122,12 @@ void server(std::shared_ptr<DSM> dsm)
         mws[i] = dsm->alloc_mw();
     }
 
-    dsm->bind_memory_region_sync(mws[0], buffer, 4096, kClientNodeId);
+    Identify* client_id = (Identify*) dsm->recv();
+    int node_id = client_id->node_id;
+    int thread_id = client_id->thread_id;
+    info("Get client node_id: %d, thread_id: %d", node_id, thread_id);
+
+    dsm->bind_memory_region_sync(mws[0], node_id, thread_id, buffer, 4096);
     info("bind memory window success. Rkey: %u", mws[0]->rkey);
 
     dsm->send((char *) &mws[0]->rkey, sizeof(mws[0]->rkey), kClientNodeId);
