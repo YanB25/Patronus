@@ -865,11 +865,13 @@ void DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   size_t size)
 {
     check(dirCon.size() == 1, "currently only support one dirCon");
-    rdmaAsyncBindMemoryWindow(dirCon[0].QPs[target_thread_id][target_node_id],
+    struct ibv_qp* qp = dirCon[0].QPs[target_thread_id][target_node_id];
+    rdmaAsyncBindMemoryWindow(qp,
                               mw,
                               iCon->cacheMR,
                               (uint64_t) buffer,
                               size,
                               true);
-    poll_rdma_cq(1);
+    struct ibv_wc wc;
+    pollWithCQ(dirCon[0].cq, 1, &wc);
 }
