@@ -851,7 +851,7 @@ void DSM::bind_memory_region(struct ibv_mw *mw,
     // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
     // iCon->QPs[0].size(), iCon);
     check(dirCon.size() == 1, "currently only support one dirCon");
-    rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id],
+    rdmaAsyncBindMemoryWindow(dirCon[0].QPs[target_thread_id][target_node_id],
                               mw,
                               iCon->cacheMR,
                               (uint64_t) buffer,
@@ -865,7 +865,7 @@ void DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   size_t size)
 {
     check(dirCon.size() == 1, "currently only support one dirCon");
-    rdmaAsyncBindMemoryWindow(iCon->QPs[0][target_node_id],
+    rdmaAsyncBindMemoryWindow(dirCon[0].QPs[target_thread_id][target_node_id],
                               mw,
                               iCon->cacheMR,
                               (uint64_t) buffer,
