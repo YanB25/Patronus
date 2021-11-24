@@ -115,6 +115,11 @@ void DSM::rkey_read(uint32_t rkey,
                     bool signal,
                     CoroContext *ctx)
 {
+    dinfo("RDMA reading rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
+          rkey,
+          buffer,
+          gaddr.val,
+          size);
     if (ctx == nullptr)
     {
         rdmaRead(iCon->QPs[0][gaddr.nodeID],
@@ -199,6 +204,11 @@ void DSM::rkey_write(uint32_t rkey,
                      bool signal,
                      CoroContext *ctx)
 {
+    dinfo("RDMA writing rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
+          rkey,
+          buffer,
+          gaddr.val,
+          size);
     if (ctx == nullptr)
     {
         rdmaWrite(iCon->QPs[0][gaddr.nodeID],
