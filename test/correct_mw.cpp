@@ -47,8 +47,8 @@ void client(std::shared_ptr<DSM> dsm)
     info("get rkey %u", rkey);
 
     *(uint64_t *) buffer = kMagic2;
-    gaddr.offset = kOffset + 1024;
-    dsm->rkey_write(rkey, buffer, gaddr, sizeof(kMagic2));
+    gaddr.offset = kOffset;
+    dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -110,7 +110,7 @@ void server(std::shared_ptr<DSM> dsm)
     while (true)
     {
         uint64_t read;
-        read = *(uint64_t *) (buffer + kOffset + 1024);
+        read = *(uint64_t *) (buffer + kOffset);
         printf("Read at offset %lu: %lx. actual addr: %p\n",
                kOffset,
                read,
