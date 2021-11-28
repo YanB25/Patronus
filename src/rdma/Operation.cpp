@@ -496,10 +496,13 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     mw_bind.bind_info.length = mmSize;
     mw_bind.bind_info.mw_access_flags = mw_access_flag;
 
-    dinfo("[MW] Binding memory window. qp: %p, mm: %p, size: %lu",
+    dinfo("[MW] Binding memory window. qp: %p, mm: %p, size: %lu, mr: %p, lkey: %u, rkey: %u",
           qp,
           (char *) mm,
-          mmSize);
+          mmSize,
+          mr,
+          mr->lkey,
+          mr->rkey);
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     if (ret == EINVAL)
     {

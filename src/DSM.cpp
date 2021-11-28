@@ -859,6 +859,7 @@ void DSM::bind_memory_region(struct ibv_mw *mw,
                               (uint64_t) buffer,
                               size,
                               true);
+    check(false, "TODO: don't use default flag");
 }
 void DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   size_t target_node_id,
@@ -873,7 +874,9 @@ void DSM::bind_memory_region_sync(struct ibv_mw *mw,
                               dirCon[0].dsmMR,
                               (uint64_t) buffer,
                               size,
-                              true);
+                              true,
+                              1,
+                              IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
     struct ibv_wc wc;
     pollWithCQ(dirCon[0].cq, 1, &wc);
 }
