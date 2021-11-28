@@ -825,7 +825,8 @@ bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
 }
 ibv_mw *DSM::alloc_mw()
 {
-    struct RdmaContext *ctx = &iCon->ctx;
+    dcheck(dirCon.size() == 1, "Only support 1 dir currently.");
+    struct RdmaContext *ctx = &dirCon[0].ctx;
     struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
     if (!mw)
     {

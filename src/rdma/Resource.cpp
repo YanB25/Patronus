@@ -171,6 +171,7 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     if (!mr)
     {
         error("Memory registration failed");
+        exit(-1);
     }
 
     return mr;
