@@ -114,23 +114,17 @@ void server(std::shared_ptr<DSM> dsm)
         sleep(1);
     }
 
-    constexpr static size_t kMWSize = 1024;
-
-    std::array<ibv_mw *, kMWSize> mws;
-    for (size_t i = 0; i < kMWSize; ++i)
-    {
-        mws[i] = dsm->alloc_mw();
-    }
+    struct ibv_mw* mw = dsm->alloc_mw();
 
     Identify* client_id = (Identify*) dsm->recv();
     int node_id = client_id->node_id;
     int thread_id = client_id->thread_id;
     info("Get client node_id: %d, thread_id: %d", node_id, thread_id);
 
-    dsm->bind_memory_region_sync(mws[0], node_id, thread_id, buffer, 4096);
-    info("bind memory window success. Rkey: %u", mws[0]->rkey);
+    dsm->bind_memory_region_sync(mw, node_id, thread_id, buffer, 4096);
+    info("bind memory window success. Rkey: %u", mw->rkey);
 
-    dsm->send((char *) &mws[0]->rkey, sizeof(mws[0]->rkey), kClientNodeId);
+    dsm->send((char *) &mw->rkey, sizeof(mw->rkey), kClientNodeId);
 
     while (true)
     {

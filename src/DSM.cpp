@@ -832,6 +832,7 @@ ibv_mw *DSM::alloc_mw()
     {
         perror("failed to create memory window.");
     }
+    dinfo("allocating mw at pd: %p, type: %d", ctx->pd, ctx->mw_type);
     return mw;
 }
 
@@ -869,7 +870,7 @@ void DSM::bind_memory_region_sync(struct ibv_mw *mw,
     struct ibv_qp* qp = dirCon[0].QPs[target_thread_id][target_node_id];
     rdmaAsyncBindMemoryWindow(qp,
                               mw,
-                              iCon->cacheMR,
+                              dirCon[0].dsmMR,
                               (uint64_t) buffer,
                               size,
                               true);
