@@ -60,11 +60,12 @@ void client(std::shared_ptr<DSM> dsm)
 
     while (true)
     {
-        auto *read_buffer = buffer + 40960;
-        *(uint64_t *) read_buffer = 0;
-        dsm->rkey_read_sync(rkey, read_buffer, gaddr, sizeof(kMagic2));
-        printf("read at offset %lu: %lx\n", kOffset2, *(uint64_t *) read_buffer);
-        if (*(uint64_t *) read_buffer == kMagic2)
+        auto *read_buf = buffer + 40960;
+        volatile uint64_t* read_buffer = (uint64_t*) read_buf;
+        *read_buffer = 0;
+        dsm->rkey_read_sync(rkey, (char*) read_buffer, gaddr, sizeof(kMagic2));
+        printf("read at offset %lu: %lx\n", kOffset2, *read_buffer);
+        if (*read_buffer == kMagic2)
         {
             break;
         }
