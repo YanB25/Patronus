@@ -114,11 +114,11 @@ void DSM::rkey_read(uint32_t rkey,
                     bool signal,
                     CoroContext *ctx)
 {
-    dinfo("RDMA reading rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
-          rkey,
-          buffer,
-          gaddr.val,
-          size);
+    // dinfo("RDMA reading rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
+    //       rkey,
+    //       buffer,
+    //       gaddr.val,
+    //       size);
     if (ctx == nullptr)
     {
         rdmaRead(iCon->QPs[0][gaddr.nodeID],
@@ -203,11 +203,11 @@ void DSM::rkey_write(uint32_t rkey,
                      bool signal,
                      CoroContext *ctx)
 {
-    dinfo("RDMA writing rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
-          rkey,
-          buffer,
-          gaddr.val,
-          size);
+    // dinfo("RDMA writing rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
+    //       rkey,
+    //       buffer,
+    //       gaddr.val,
+    //       size);
     if (ctx == nullptr)
     {
         rdmaWrite(iCon->QPs[0][gaddr.nodeID],
@@ -832,7 +832,7 @@ ibv_mw *DSM::alloc_mw()
     {
         perror("failed to create memory window.");
     }
-    dinfo("allocating mw at pd: %p, type: %d", ctx->pd, ctx->mw_type);
+    // dinfo("allocating mw at pd: %p, type: %d", ctx->pd, ctx->mw_type);
     return mw;
 }
 
@@ -852,14 +852,13 @@ void DSM::bind_memory_region(struct ibv_mw *mw,
 {
     // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
     // iCon->QPs[0].size(), iCon);
-    check(dirCon.size() == 1, "currently only support one dirCon");
+    dcheck(dirCon.size() == 1, "currently only support one dirCon");
     rdmaAsyncBindMemoryWindow(dirCon[0].QPs[target_thread_id][target_node_id],
                               mw,
                               iCon->cacheMR,
                               (uint64_t) buffer,
                               size,
                               true);
-    check(false, "TODO: don't use default flag");
 }
 void DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   size_t target_node_id,
@@ -874,10 +873,7 @@ void DSM::bind_memory_region_sync(struct ibv_mw *mw,
                               dirCon[0].dsmMR,
                               (uint64_t) buffer,
                               size,
-                              true,
-                              1,
-                              IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
-                                  IBV_ACCESS_REMOTE_ATOMIC);
+                              trues);
     struct ibv_wc wc;
     pollWithCQ(dirCon[0].cq, 1, &wc);
 }

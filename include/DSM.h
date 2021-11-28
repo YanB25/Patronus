@@ -345,6 +345,11 @@ public:
 
         iCon->sendMessage2Dir(buffer, node_id, dir_id);
     }
+    /**
+     * Do not use in the critical path.
+     * A handy control path for sending/recving messages.
+     * msg should be no longer than 32 byte.
+     */
     void send(const char *buf,
               size_t size,
               uint16_t node_id,

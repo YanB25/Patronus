@@ -22,7 +22,7 @@ void RawMessageConnection::sendRawMessage(RawMessage *m,
                                           uint32_t remoteQPN,
                                           ibv_ah *ah)
 {
-    info("Send message. qpn: %u\n", remoteQPN);
+    // info("Send messages qpn: %u\n", remoteQPN);
     if ((sendCounter & SIGNAL_BATCH) == 0 && sendCounter > 0)
     {
         ibv_wc wc;

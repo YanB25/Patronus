@@ -22,14 +22,14 @@ DirectoryConnection::DirectoryConnection(
     this->dsmPool = dsmPool;
     this->dsmSize = dsmSize;
     this->dsmMR = createMemoryRegion((uint64_t) dsmPool, dsmSize, &ctx);
-    dinfo(
-        "[DSM] CreateMemoryRegion at %p, size %ld. mr: %p, lkey: %u, rkey: %u. pd: %p",
-        dsmPool,
-        dsmSize,
-        dsmMR,
-        dsmMR->lkey,
-        dsmMR->rkey,
-        ctx.pd);
+    // dinfo(
+    //     "[DSM] CreateMemoryRegion at %p, size %ld. mr: %p, lkey: %u, rkey: %u. pd: %p",
+    //     dsmPool,
+    //     dsmSize,
+    //     dsmMR,
+    //     dsmMR->lkey,
+    //     dsmMR->rkey,
+    //     ctx.pd);
     this->dsmLKey = dsmMR->lkey;
 
     // on-chip lock memory
@@ -49,16 +49,16 @@ DirectoryConnection::DirectoryConnection(
         for (size_t k = 0; k < machineNR; ++k)
         {
             createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
-            dinfo(
-                "Directory: bingding QP: QPs[%lu][%lu]: qp: %p, cq: %p, lkey: "
-                "%u. mr: %p. pd: %p",
-                QPs.size() - 1,
-                k,
-                QPs.back()[k],
-                (char *) cq,
-                dsmLKey,
-                dsmMR,
-                ctx.pd);
+            // dinfo(
+            //     "Directory: bingding QP: QPs[%lu][%lu]: qp: %p, cq: %p, lkey: "
+            //     "%u. mr: %p. pd: %p",
+            //     QPs.size() - 1,
+            //     k,
+            //     QPs.back()[k],
+            //     (char *) cq,
+            //     dsmLKey,
+            //     dsmMR,
+            //     ctx.pd);
         }
     }
 }

@@ -12,9 +12,10 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-constexpr static size_t kOffset = 0;
 constexpr static size_t kMagic = 0xffffffffffffffff;
 constexpr static size_t kMagic2 = 0xabcdef1234567890;
+constexpr static size_t kOffset = 0;
+constexpr static size_t kOffset2 = 0;
 
 void client(std::shared_ptr<DSM> dsm)
 {
@@ -53,7 +54,7 @@ void client(std::shared_ptr<DSM> dsm)
     info("Get rkey %u", rkey);
 
     *(uint64_t *) buffer = kMagic2;
-    gaddr.offset = kOffset;
+    gaddr.offset = kOffset2;
     dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
     // dsm->write_sync(buffer, gaddr, sizeof(kMagic2));
 
@@ -62,7 +63,7 @@ void client(std::shared_ptr<DSM> dsm)
         auto *read_buffer = buffer + 40960;
         *(uint64_t *) read_buffer = 0;
         dsm->rkey_read_sync(rkey, read_buffer, gaddr, sizeof(kMagic2));
-        printf("read at offset %lu: %lx\n", kOffset, *(uint64_t *) read_buffer);
+        printf("read at offset %lu: %lx\n", kOffset2, *(uint64_t *) read_buffer);
         if (*(uint64_t *) read_buffer == kMagic2)
         {
             break;
@@ -116,7 +117,7 @@ void server(std::shared_ptr<DSM> dsm)
 
     struct ibv_mw* mw = dsm->alloc_mw();
     dinfo("the allocated mw with pd: %p", mw->pd);
-    
+
     Identify* client_id = (Identify*) dsm->recv();
     int node_id = client_id->node_id;
     int thread_id = client_id->thread_id;
@@ -130,11 +131,11 @@ void server(std::shared_ptr<DSM> dsm)
     while (true)
     {
         uint64_t read;
-        read = *(uint64_t *) (buffer + kOffset);
+        read = *(uint64_t *) (buffer + kOffset2);
         printf("Read at offset %lu: %lx. actual addr: %p\n",
-               kOffset,
+               kOffset2,
                read,
-               &buffer[kOffset]);
+               &buffer[kOffset2]);
         if (read == kMagic2)
         {
             printf("Found.\n");
