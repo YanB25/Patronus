@@ -15,6 +15,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++11 -g3")
 # disable boost warning
 add_definitions(-DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
+set(Boost_USE_STATIC_LIBS ONss)
 find_package(
     Boost
     1.59
@@ -26,7 +27,10 @@ find_package(
 # link_libraries(benchmark::benchmark)
 
 # Link Options
-set(LINKS_FLAGS "-lcityhash -lpthread -libverbs -lmemcached")
+set(LINKS_FLAGS "-lpthread -libverbs -lmemcached")
+find_library(CITYHASH_LIB NAMES libcityhash.a REQUIRED)
+
+link_libraries(${CITYHASH_LIB})
 
 if (${SANITIZE})
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
