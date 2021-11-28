@@ -61,13 +61,14 @@ void client(std::shared_ptr<DSM> dsm)
     while (true)
     {
         auto *read_buf = buffer + 40960;
-        volatile uint64_t* read_buffer = (uint64_t*) read_buf;
-        dsm->rkey_read_sync(rkey, (char*) read_buffer, gaddr, sizeof(kMagic2));
-        printf("read at offset %lu: %lx\n", kOffset2, *read_buffer);
+        volatile uint64_t *read_buffer = (uint64_t *) read_buf;
+        dsm->rkey_read_sync(rkey, (char *) read_buffer, gaddr, sizeof(kMagic2));
         if (*read_buffer == kMagic2)
         {
+            printf("read at offset %lu: %lx\n", kOffset2, *read_buffer);
             break;
         }
+        printf("read at offset %lu: %lx\n", kOffset2, *read_buffer);
         read_buffer = 0;
         sleep(1);
     }
@@ -116,10 +117,10 @@ void server(std::shared_ptr<DSM> dsm)
         sleep(1);
     }
 
-    struct ibv_mw* mw = dsm->alloc_mw();
+    struct ibv_mw *mw = dsm->alloc_mw();
     dinfo("the allocated mw with pd: %p", mw->pd);
 
-    Identify* client_id = (Identify*) dsm->recv();
+    Identify *client_id = (Identify *) dsm->recv();
     int node_id = client_id->node_id;
     int thread_id = client_id->thread_id;
     info("Get client node_id: %d, thread_id: %d", node_id, thread_id);
