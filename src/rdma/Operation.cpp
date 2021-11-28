@@ -486,7 +486,6 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
           qp->qp_type == IBV_QPT_XRC_SEND);
     struct ibv_mw_bind mw_bind;
     memset(&mw_bind, 0, sizeof(mw_bind));
-    mw->rkey = 0;
 
     if (signal)
     {
