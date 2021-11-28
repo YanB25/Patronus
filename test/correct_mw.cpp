@@ -115,7 +115,8 @@ void server(std::shared_ptr<DSM> dsm)
     }
 
     struct ibv_mw* mw = dsm->alloc_mw();
-
+    dinfo("the allocated mw with pd: %p", mw->pd);
+    
     Identify* client_id = (Identify*) dsm->recv();
     int node_id = client_id->node_id;
     int thread_id = client_id->thread_id;

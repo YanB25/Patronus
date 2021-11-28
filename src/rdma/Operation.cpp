@@ -482,6 +482,8 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
                                    uint64_t wrID,
                                    unsigned int mw_access_flag)
 {
+    check(qp->qp_type == IBV_QPT_RC || qp->qp_type == IBV_QPT_UC ||
+          qp->qp_type == IBV_QPT_XRC_SEND);
     struct ibv_mw_bind mw_bind;
     memset(&mw_bind, 0, sizeof(mw_bind));
     mw->rkey = 0;
@@ -496,13 +498,18 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     mw_bind.bind_info.length = mmSize;
     mw_bind.bind_info.mw_access_flags = mw_access_flag;
 
-    dinfo("[MW] Binding memory window. qp: %p, mm: %p, size: %lu, mr: %p, lkey: %u, rkey: %u",
-          qp,
-          (char *) mm,
-          mmSize,
-          mr,
-          mr->lkey,
-          mr->rkey);
+    dinfo(
+        "[MW] Binding memory window. qp: %p, mm: %p, size: %lu, mr: %p, "
+        "mr.lkey: %u, mr.rkey: %u, mr.pd: %p, mr.addr: %p, mr.length: %lu",
+        qp,
+        (char *) mm,
+        mmSize,
+        mr,
+        mr->lkey,
+        mr->rkey,
+        mr->pd,
+        mr->addr,
+        mr->length);
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     if (ret == EINVAL)
     {

@@ -868,7 +868,7 @@ void DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   size_t size)
 {
     check(dirCon.size() == 1, "currently only support one dirCon");
-    struct ibv_qp* qp = dirCon[0].QPs[target_thread_id][target_node_id];
+    struct ibv_qp *qp = dirCon[0].QPs[target_thread_id][target_node_id];
     rdmaAsyncBindMemoryWindow(qp,
                               mw,
                               dirCon[0].dsmMR,
@@ -876,7 +876,8 @@ void DSM::bind_memory_region_sync(struct ibv_mw *mw,
                               size,
                               true,
                               1,
-                              IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
+                              IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+                                  IBV_ACCESS_REMOTE_ATOMIC);
     struct ibv_wc wc;
     pollWithCQ(dirCon[0].cq, 1, &wc);
 }
