@@ -222,12 +222,12 @@ public:
                               CoroContext *ctx = nullptr);
     ibv_mw *alloc_mw();
     void free_mw(struct ibv_mw *mw);
-    void bind_memory_region(struct ibv_mw *mw,
+    bool bind_memory_region(struct ibv_mw *mw,
                             size_t target_node_id,
                             size_t target_thread_id,
                             const char *buffer,
                             size_t size);
-    void bind_memory_region_sync(struct ibv_mw *mw,
+    bool bind_memory_region_sync(struct ibv_mw *mw,
                                  size_t target_node_id,
                                  size_t target_thread_id,
                                  const char *buffer,
