@@ -72,20 +72,19 @@ void client(std::shared_ptr<DSM> dsm)
     uint32_t rkey = *(uint32_t *) msg;
     info("Get rkey %u", rkey);
 
-    info("Trying to loop until failed.");
+    info("Trying to loop. Expect 8 success and 2 failure.");
     for (size_t i = 0; i < 10; ++i)
     {
         *(uint64_t *) buffer = kMagic2;
         gaddr.offset = kOffset2 + i * sizeof(kMagic2);
         dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
     }
-    info("We do it again.");
-    for (size_t i = 0; i < 10; ++i)
+    info("We do it again. Expect the rkey still work: 8 success.");
+    for (size_t i = 0; i < 8; ++i)
     {
         *(uint64_t *) buffer = kMagic2;
         gaddr.offset = kOffset2 + i * sizeof(kMagic2);
-        // dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
-        dsm->write_sync(buffer, gaddr, sizeof(kMagic2));
+        dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
     }
 }
 // Notice: TLS object is created only once for each combination of type and
@@ -135,10 +134,10 @@ void server(std::shared_ptr<DSM> dsm)
 
     while (true)
     {
-        if (rdmaQueryQueuePair(dsm->get_dir_qp(node_id, thread_id)) == IBV_QPS_ERR)
+        if (rdmaQueryQueuePair(dsm->get_dir_qp(node_id, thread_id)) ==
+            IBV_QPS_ERR)
         {
             check(dsm->recover_dir_qp(node_id, thread_id));
-            break;
         }
         fflush(stdout);
         sleep(1);
