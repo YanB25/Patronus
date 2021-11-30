@@ -112,7 +112,7 @@ void send_rkeys(std::shared_ptr<DSM> dsm, std::vector<ibv_mw *> &mws)
         remain_sync_mw -= should_sync;
     }
     info(
-        "regular: rkey %u, index %u likely to crash. so skip it. handle: "
+        "one of regular rkey: %u, index %u, handle: "
         "%u, pd: %p",
         mws[0]->rkey,
         0,
@@ -131,40 +131,76 @@ void bind_rkeys(std::shared_ptr<DSM> dsm,
 
     check(size < buffer_size);
 
-    for (size_t i = 0; i < mws.size(); ++i)
+    for (size_t t = 0; t < mws.size(); ++t)
     {
-        dsm->bind_memory_region_sync(mws[i], kClientNodeId, 0, buffer, size);
+        dsm->bind_memory_region_sync(mws[t], kClientNodeId, 0, buffer, size);
     }
+}
 
-    // size_t remain_nr = mws.size();
-    // size_t idx = 0;
-    // while (remain_nr > 0)
-    // {
-    //     size_t kPollSize = 32;
-    //     size_t work = std::min(remain_nr, kPollSize);
-    //     if (work > 1)
-    //     {
-    //         for (size_t i = 0; i < work - 1; ++i)
-    //         {
-    //             check(idx < mws.size());
-    //             // TODO: here should not be sync, but I am debugging.
-    //             bool succ = dsm->bind_memory_region_sync(
-    //                 mws[idx], kClientNodeId, 0 /* thread */, buffer, size);
-    //             check(succ);
-    //             idx++;
-    //         }
-    //     }
-    //     check(idx < mws.size());
-    //     bool succ = dsm->bind_memory_region_sync(
-    //         mws[idx], kClientNodeId, 0, buffer, size);
-    //     check(succ);
-    //     idx++;
-    //     remain_nr -= work;
-    // }
-    // for (size_t i = 0; i < mws.size(); ++i)
-    // {
-    //     fprintf(stderr, "##%u\n", mws[i]->rkey);
-    // }
+void client_burn(std::shared_ptr<DSM> dsm,
+                 std::vector<uint32_t> &rkeys,
+                 size_t size,
+                 size_t io_size,
+                 bool sequential_select_mw)
+{
+    constexpr static size_t test_times = 10 * define::K;
+    Timer timer;
+
+    auto *buffer = dsm->get_rdma_buffer();
+    size_t dsm_size = size;
+    size_t io_rng = dsm_size / io_size;
+
+    GlobalAddress gaddr;
+    gaddr.nodeID = kServerNodeId;
+
+    uint32_t mw_nr = rkeys.size();
+
+    info("Benchmarking random write with mw_nr: %u, io_size: %lu at size: %lu",
+         mw_nr,
+         io_size,
+         size);
+
+    auto handler = [&rkeys](ibv_wc *wc)
+    {
+        Data data;
+        check(sizeof(Data) == sizeof(uint64_t));
+        memcpy(&data, &wc->wr_id, sizeof(uint64_t));
+        error("Failed for rkey: %u, rkey_idx: %u. Remove from the rkey pool.",
+              data.lower,
+              data.upper);
+        rkeys[data.upper] = 0;
+    };
+
+    timer.begin();
+    size_t rkey_idx = 0;
+    for (size_t i = 0; i < test_times; ++i)
+    {
+        size_t io_block_nth = rand_int(0, io_rng - 1);
+        dcheck(io_block_nth >= 0);
+        gaddr.offset = io_block_nth * io_size;
+        dcheck(gaddr.offset + io_size < size);
+        if (sequential_select_mw)
+        {
+            rkey_idx = (rkey_idx + 1) % rkeys.size();
+        }
+        else
+        {
+            rkey_idx = rand_int(0, rkeys.size() - 1);
+        }
+        dcheck(rkey_idx < rkeys.size());
+        uint32_t rkey = rkeys[rkey_idx];
+        if (rkey == 0)
+        {
+            continue;
+        }
+
+        Data data;
+        data.lower = rkey;
+        data.upper = rkey_idx;
+        dsm->rkey_write_sync(
+            rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
+    }
+    timer.end_print(test_times);
 }
 
 void client(std::shared_ptr<DSM> dsm,
@@ -172,60 +208,17 @@ void client(std::shared_ptr<DSM> dsm,
             size_t size,
             size_t io_size)
 {
-    constexpr static size_t test_times = 10 * define::K;
-    Timer timer;
-
     info("requiring: mw_nr: %u", mw_nr);
     dsm->send((char *) &mw_nr, sizeof(uint32_t), kServerNodeId);
 
     auto rkeys = recv_rkeys(dsm, mw_nr);
     check(rkeys.size() == mw_nr);
 
-    auto *buffer = dsm->get_rdma_buffer();
+    info("warm up...");
+    client_burn(dsm, rkeys, size, io_size, true);
 
-    size_t dsm_size = size;
-    size_t io_rng = dsm_size / io_size;
-
-    GlobalAddress gaddr;
-    gaddr.nodeID = kServerNodeId;
-
-    info("Benchmarking random write with mw_nr: %u, io_size: %lu at size: %lu",
-         mw_nr,
-         io_size,
-         size);
-
-    timer.begin();
-    for (size_t i = 0; i < test_times; ++i)
-    {
-        size_t io_block_nth = rand_int(0, io_rng - 2);
-        dcheck(io_block_nth >= 0);
-        dcheck(io_block_nth <= io_rng - 1);
-        gaddr.offset = io_block_nth * io_size;
-        dcheck(gaddr.offset + io_size < size);
-        size_t rkey_idx = rand_int(0, rkeys.size() - 1);
-        dcheck(rkey_idx < rkeys.size());
-        uint32_t rkey = rkeys.at(rkey_idx);
-        if (rkey == 0)
-        {
-            continue;
-        }
-        Data data;
-        data.lower = rkey;
-        data.upper = rkey_idx;
-
-        auto handler = [&rkeys](ibv_wc *wc)
-        {
-            Data data;
-            check(sizeof(Data) == sizeof(uint64_t));
-            memcpy(&data, &wc->wr_id, sizeof(uint64_t));
-            error("Failed at rkey: %u, rkey_idx: %u", data.lower, data.upper);
-            rkeys[data.upper] = 0;
-        };
-        dsm->rkey_write_sync(
-            rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
-        // dsm->write_sync(buffer, gaddr, io_size);
-    }
-    timer.end_print(test_times);
+    info("benchmarking...");
+    client_burn(dsm, rkeys, size, io_size, false);
 
     dsm->send(nullptr, 0, kServerNodeId);
 }
@@ -261,7 +254,7 @@ void server(std::shared_ptr<DSM> dsm, size_t size)
             timer.end_print(1);
         }
         fflush(stdout);
-        sleep(1);
+        usleep(100);
     }
 
     // wait and sync

@@ -390,6 +390,7 @@ public:
             assert(false);
         }
         }
+        return nullptr;
     }
 
     RawMessage *rpc_wait()
