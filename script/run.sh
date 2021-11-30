@@ -2,6 +2,9 @@
 # ./run.sh <script>
 . env.sh
 
+cmd=$1
+shift
+
 declare -a vms=()
 declare -a inets=()
 for vm in `cat vm.conf`; do
@@ -14,9 +17,9 @@ done
 for (( i=1; i<${#vms[@]}; i++ )); do
     echo [start service on ${vms[$i]} \(inet ${inets[$i]}\) ...]
     # ./ssh.sh ${inets[$i]} "cd ${BIN_DIR}; nohup ${BIN_DIR}/$1 1>${WORK_DIR}/LOG 2>&1 &"
-    nohup ssh root@${inets[$i]} "cd ${BIN_DIR}; unbuffer ${BIN_DIR}/$1 1>${WORK_DIR}/LOG 2>&1" &
+    nohup ssh root@${inets[$i]} "cd ${BIN_DIR}; source /etc/profile; unbuffer ${BIN_DIR}/$cmd $@ 1>${WORK_DIR}/LOG 2>&1" &
 done
 
-./ssh.sh ${inets[0]} "cd ${BIN_DIR}; unbuffer ${BIN_DIR}/$1 2>&1 | tee ../LOG"
-echo [Waiting peers to finish]
-wait
+./ssh.sh ${inets[0]} "cd ${BIN_DIR}; source /etc/profile; unbuffer ${BIN_DIR}/$cmd $@ 2>&1 | tee ../LOG"
+# echo [Waiting peers to finish]
+# wait

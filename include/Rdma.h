@@ -15,6 +15,7 @@
 #include <cstring>
 #include <list>
 #include <string>
+#include <functional>
 
 #include "Debug.h"
 
@@ -130,6 +131,8 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                    RdmaContext *context);
 
 //// Operation.cpp
+using WcErrHandler = std::function<void(ibv_wc*)>;
+static WcErrHandler empty_wc_err_handler = [](ibv_wc *) {};
 /**
  * @brief block and poll the CQ until the specified number
  * @param cq the CQ to polled with
@@ -137,7 +140,11 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
  * @param wc the polling results
  * @return the number of wc actually polled.
  */
-int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc);
+int pollWithCQ(
+    ibv_cq *cq,
+    int pollNumber,
+    struct ibv_wc *wc,
+    const WcErrHandler& handler = empty_wc_err_handler);
 /**
  * @brief non-blocking and try to poll the CQ and return immediately if get
  * nothing.

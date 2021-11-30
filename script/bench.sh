@@ -7,7 +7,7 @@ cd ../build; make -j; cd ../script
 ./restartMemc.sh
 ./for_each.sh ./sync.sh
 wait
-./run.sh $1
+./run.sh $@
 wait
 ./fetch_log.sh
 # ./for_each.sh ./cleanup.sh

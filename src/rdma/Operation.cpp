@@ -2,9 +2,13 @@
 
 #include <atomic>
 
+#include "Common.h"
 #include "Rdma.h"
 
-int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
+int pollWithCQ(ibv_cq *cq,
+               int pollNumber,
+               struct ibv_wc *wc,
+               const WcErrHandler &handler)
 {
     int count = 0;
     dcheck(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
@@ -32,6 +36,7 @@ int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
               (int) wc->wr_id,
               wc->qp_num,
               wc->vendor_err);
+        handler(wc);
         return -1;
     }
 
@@ -474,6 +479,9 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
     return true;
 }
 
+static uint32_t magic = 0b1010101010;
+static uint16_t mask = 0b1111111111;
+
 uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
                                    ibv_mw *mw,
                                    struct ibv_mr *mr,
@@ -483,8 +491,10 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
                                    uint64_t wrID,
                                    unsigned int mw_access_flag)
 {
+    static std::atomic<size_t> id_{0};
+
     dcheck(qp->qp_type == IBV_QPT_RC || qp->qp_type == IBV_QPT_UC ||
-          qp->qp_type == IBV_QPT_XRC_SEND);
+           qp->qp_type == IBV_QPT_XRC_SEND);
     struct ibv_mw_bind mw_bind;
     memset(&mw_bind, 0, sizeof(mw_bind));
 
@@ -536,6 +546,15 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     }
     // dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p",
     // qp->send_cq, qp->recv_cq, qp->srq);
+
+    // size_t id = id_.fetch_add(1);
+    // if ((id & mask) == magic)
+    // {
+    //     warn("TODO: Strange bug: reallocate mw: %p, idx: %lu", mw, id);
+    //     return rdmaAsyncBindMemoryWindow(
+    //         qp, mw, mr, mm, mmSize, signal, wrID, mw_access_flag);
+    // }
+
     return mw->rkey;
 }
 

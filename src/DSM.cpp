@@ -55,10 +55,7 @@ bool DSM::recover_th_qp(int node_id)
 {
     auto tid = get_thread_id();
     ibv_qp *qp = get_th_qp(node_id);
-    dinfo("Recovering th qp: %p. node_id: %d, thread_id: %d",
-          qp,
-          node_id,
-          tid);
+    dinfo("Recovering th qp: %p. node_id: %d, thread_id: %d", qp, node_id, tid);
     const auto &ex = keeper->getExchangeMeta(node_id);
     if (!modifyErrQPtoNormal(qp,
                              ex.dirRcQpn2app[0][tid],
@@ -216,7 +213,7 @@ bool DSM::rkey_read_sync(uint32_t rkey,
         if (ret < 0)
         {
             dcheck(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
-                  IBV_QPS_ERR);
+                   IBV_QPS_ERR);
             if (!recover_th_qp(gaddr.nodeID))
             {
                 return false;
@@ -259,10 +256,12 @@ void DSM::write(const char *buffer,
 bool DSM::write_sync(const char *buffer,
                      GlobalAddress gaddr,
                      size_t size,
-                     CoroContext *ctx)
+                     CoroContext *ctx,
+                     uint64_t wc_id,
+                     const WcErrHandler& handler)
 {
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    return rkey_write_sync(rkey, buffer, gaddr, size, ctx);
+    return rkey_write_sync(rkey, buffer, gaddr, size, ctx, wc_id, handler);
 }
 
 void DSM::rkey_write(uint32_t rkey,
@@ -270,7 +269,8 @@ void DSM::rkey_write(uint32_t rkey,
                      GlobalAddress gaddr,
                      size_t size,
                      bool signal,
-                     CoroContext *ctx)
+                     CoroContext *ctx,
+                     uint64_t wr_id)
 {
     // dinfo("RDMA writing rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
     //       rkey,
@@ -286,7 +286,8 @@ void DSM::rkey_write(uint32_t rkey,
                   iCon->cacheLKey,
                   rkey,
                   -1,
-                  signal);
+                  signal,
+                  wr_id);
     }
     else
     {
@@ -307,18 +308,20 @@ bool DSM::rkey_write_sync(uint32_t rkey,
                           const char *buffer,
                           GlobalAddress gaddr,
                           size_t size,
-                          CoroContext *ctx)
+                          CoroContext *ctx,
+                          uint64_t wr_id,
+                          const WcErrHandler& handler)
 {
-    rkey_write(rkey, buffer, gaddr, size, true, ctx);
+    rkey_write(rkey, buffer, gaddr, size, true, ctx, wr_id);
 
     if (ctx == nullptr)
     {
         ibv_wc wc;
-        int ret = pollWithCQ(iCon->cq, 1, &wc);
+        int ret = pollWithCQ(iCon->cq, 1, &wc, handler);
         if (ret < 0)
         {
             dcheck(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
-                  IBV_QPS_ERR);
+                   IBV_QPS_ERR);
             if (!recover_th_qp(gaddr.nodeID))
             {
                 return false;
@@ -903,6 +906,7 @@ bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
 
     return res == 1;
 }
+
 ibv_mw *DSM::alloc_mw()
 {
     dcheck(dirCon.size() == 1, "Only support 1 dir currently.");
@@ -933,13 +937,9 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
     // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
     // iCon->QPs[0].size(), iCon);
     dcheck(dirCon.size() == 1, "currently only support one dirCon");
+    struct ibv_qp *qp = dirCon[0].QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
-        dirCon[0].QPs[target_thread_id][target_node_id],
-        mw,
-        iCon->cacheMR,
-        (uint64_t) buffer,
-        size,
-        false);
+        qp, mw, dirCon[0].dsmMR, (uint64_t) buffer, size, false);
     return rkey != 0;
 }
 bool DSM::bind_memory_region_sync(struct ibv_mw *mw,

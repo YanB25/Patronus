@@ -23,6 +23,8 @@ struct Identify
 class DSM
 {
 public:
+    using WcErrHandler = WcErrHandler;
+
     void registerThread();
     static std::shared_ptr<DSM> getInstance(const DSMConfig &conf);
 
@@ -72,12 +74,15 @@ public:
                     GlobalAddress gaddr,
                     size_t size,
                     bool signal = true,
-                    CoroContext *ctx = nullptr);
+                    CoroContext *ctx = nullptr,
+                    uint64_t wr_id = 0);
     bool rkey_write_sync(uint32_t rkey,
                          const char *buffer,
                          GlobalAddress gaddr,
                          size_t size,
-                         CoroContext *ctx = nullptr);
+                         CoroContext *ctx = nullptr,
+                         uint64_t wr_id = 0,
+                         const WcErrHandler& handler = empty_wc_err_handler);
     void write(const char *buffer,
                GlobalAddress gaddr,
                size_t size,
@@ -86,7 +91,9 @@ public:
     bool write_sync(const char *buffer,
                     GlobalAddress gaddr,
                     size_t size,
-                    CoroContext *ctx = nullptr);
+                    CoroContext *ctx = nullptr,
+                    uint64_t wc_id = 0,
+                    const WcErrHandler& handler = empty_wc_err_handler);
 
     void write_batch(RdmaOpRegion *rs,
                      int k,
@@ -115,8 +122,8 @@ public:
                         uint64_t equal,
                         uint64_t val,
                         CoroContext *ctx = nullptr);
-    ibv_qp* get_dir_qp(int node_id, int thread_id);
-    ibv_qp* get_th_qp(int node_id);
+    ibv_qp *get_dir_qp(int node_id, int thread_id);
+    ibv_qp *get_th_qp(int node_id);
 
     void cas(GlobalAddress gaddr,
              uint64_t equal,

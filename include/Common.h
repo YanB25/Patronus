@@ -175,4 +175,17 @@ std::shared_ptr<T> make_shared(Args &&... args)
 
 }  // namespace future
 
+struct Data
+{
+    union
+    {
+        struct
+        {
+            uint32_t lower;
+            uint32_t upper;
+        };
+        uint64_t val;
+    };
+} __attribute__((packed));
+
 #endif /* __COMMON_H__ */
