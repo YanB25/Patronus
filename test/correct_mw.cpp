@@ -4,6 +4,7 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "util/monitor.h"
+#include "Timer.h"
 
 // Two nodes
 // one node issues cas operations
@@ -110,6 +111,8 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 
 void server(std::shared_ptr<DSM> dsm)
 {
+    Timer timer;
+
     const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
     info("get buffer addr: %p", buffer);
@@ -137,7 +140,10 @@ void server(std::shared_ptr<DSM> dsm)
         if (rdmaQueryQueuePair(dsm->get_dir_qp(node_id, thread_id)) ==
             IBV_QPS_ERR)
         {
+            info("Benchmarking latency of QP recovery");
+            timer.begin();
             check(dsm->recover_dir_qp(node_id, thread_id));
+            timer.end_print(1);
         }
         fflush(stdout);
         sleep(1);
