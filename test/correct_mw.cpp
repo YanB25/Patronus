@@ -185,8 +185,4 @@ int main(int argc, char **argv)
     }
 
     info("finished. ctrl+C to quit.");
-    while (1)
-    {
-        sleep(1);
-    }
 }

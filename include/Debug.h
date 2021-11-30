@@ -100,7 +100,7 @@
     do                                               \
     {                                                \
         const char *__level = level;                 \
-        fprintf(stderr,                              \
+        fprintf(stdout,                              \
                 COLOR "%s" RESET " %s:%d - " M "\n", \
                 __level,                             \
                 __FILE__,                            \
