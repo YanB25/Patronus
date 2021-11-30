@@ -547,13 +547,13 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     // dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p",
     // qp->send_cq, qp->recv_cq, qp->srq);
 
-    // size_t id = id_.fetch_add(1);
-    // if ((id & mask) == magic)
-    // {
-    //     warn("TODO: Strange bug: reallocate mw: %p, idx: %lu", mw, id);
-    //     return rdmaAsyncBindMemoryWindow(
-    //         qp, mw, mr, mm, mmSize, signal, wrID, mw_access_flag);
-    // }
+    size_t id = id_.fetch_add(1);
+    if ((id & mask) == magic)
+    {
+        warn("TODO: Strange bug: reallocate mw: %p, idx: %lu", mw, id);
+        return rdmaAsyncBindMemoryWindow(
+            qp, mw, mr, mm, mmSize, signal, wrID, mw_access_flag);
+    }
 
     return mw->rkey;
 }
