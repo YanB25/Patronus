@@ -17,6 +17,25 @@ constexpr static size_t kMagic2 = 0xabcdef1234567890;
 constexpr static size_t kOffset = 0;
 constexpr static size_t kOffset2 = 0;
 
+void loop_expect(const char *lhs_buf, const char *rhs_buf, size_t size)
+{
+    while (memcmp(lhs_buf, rhs_buf, size) != 0)
+    {
+        printf("buf %p != expect\n", lhs_buf);
+        sleep(1);
+    }
+    printf("buf %p == expect!\n", lhs_buf);
+}
+
+void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
+{
+    if (memcmp(lhs_buf, rhs_buf, size) != 0)
+    {
+        error("buf %p != expect\n", lhs_buf);
+    }
+    printf("buf %p == expect!\n", lhs_buf);
+}
+
 void client(std::shared_ptr<DSM> dsm)
 {
     GlobalAddress gaddr;
@@ -27,7 +46,7 @@ void client(std::shared_ptr<DSM> dsm)
 
     *(uint64_t *) buffer = kMagic;
 
-    dsm->write(buffer, gaddr, sizeof(kMagic));
+    dsm->write_sync(buffer, gaddr, sizeof(kMagic));
     info("write finished at offset %lu: %lx.", kOffset, kMagic);
 
     while (true)
@@ -53,24 +72,20 @@ void client(std::shared_ptr<DSM> dsm)
     uint32_t rkey = *(uint32_t *) msg;
     info("Get rkey %u", rkey);
 
-    *(uint64_t *) buffer = kMagic2;
-    gaddr.offset = kOffset2;
-    dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
-    // dsm->write_sync(buffer, gaddr, sizeof(kMagic2));
-
-    while (true)
+    info("Trying to loop until failed.");
+    for (size_t i = 0; i < 10; ++i)
     {
-        auto *read_buf = buffer + 40960;
-        volatile uint64_t *read_buffer = (uint64_t *) read_buf;
-        dsm->rkey_read_sync(rkey, (char *) read_buffer, gaddr, sizeof(kMagic2));
-        if (*read_buffer == kMagic2)
-        {
-            printf("read at offset %lu: %lx\n", kOffset2, *read_buffer);
-            break;
-        }
-        printf("read at offset %lu: %lx\n", kOffset2, *read_buffer);
-        read_buffer = 0;
-        sleep(1);
+        *(uint64_t *) buffer = kMagic2;
+        gaddr.offset = kOffset2 + i * sizeof(kMagic2);
+        dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
+    }
+    info("We do it again.");
+    for (size_t i = 0; i < 10; ++i)
+    {
+        *(uint64_t *) buffer = kMagic2;
+        gaddr.offset = kOffset2 + i * sizeof(kMagic2);
+        // dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
+        dsm->write_sync(buffer, gaddr, sizeof(kMagic2));
     }
 }
 // Notice: TLS object is created only once for each combination of type and
@@ -101,21 +116,7 @@ void server(std::shared_ptr<DSM> dsm)
     info("get buffer addr: %p", buffer);
     size_t max_size = buf_conf.size;
 
-    while (true)
-    {
-        uint64_t read;
-        read = *(uint64_t *) (buffer + kOffset);
-        printf("Read at offset %lu: %lx. actual addr: %p\n",
-               kOffset,
-               read,
-               &buffer[kOffset]);
-        if (read == kMagic)
-        {
-            printf("Found.\n");
-            break;
-        }
-        sleep(1);
-    }
+    loop_expect(buffer + kOffset, (char *) &kMagic, sizeof(kMagic));
 
     struct ibv_mw *mw = dsm->alloc_mw();
     dinfo("the allocated mw with pd: %p", mw->pd);
@@ -125,24 +126,21 @@ void server(std::shared_ptr<DSM> dsm)
     int thread_id = client_id->thread_id;
     info("Get client node_id: %d, thread_id: %d", node_id, thread_id);
 
-    dsm->bind_memory_region_sync(mw, node_id, thread_id, buffer, 4096);
+    dsm->bind_memory_region_sync(mw, node_id, thread_id, buffer, 64);
     info("bind memory window success. Rkey: %u", mw->rkey);
 
     dsm->send((char *) &mw->rkey, sizeof(mw->rkey), kClientNodeId);
 
+    loop_expect(buffer + kOffset2, (char *) &kMagic2, sizeof(kMagic2));
+
     while (true)
     {
-        uint64_t read;
-        read = *(uint64_t *) (buffer + kOffset2);
-        printf("Read at offset %lu: %lx. actual addr: %p\n",
-               kOffset2,
-               read,
-               &buffer[kOffset2]);
-        if (read == kMagic2)
+        if (rdmaQueryQueuePair(dsm->get_dir_qp(node_id, thread_id)) == IBV_QPS_ERR)
         {
-            printf("Found.\n");
+            check(dsm->recover_dir_qp(node_id, thread_id));
             break;
         }
+        fflush(stdout);
         sleep(1);
     }
 }

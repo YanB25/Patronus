@@ -20,17 +20,18 @@ int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
     if (count < 0)
     {
         error("Poll Completion failed.");
-        sleep(5);
+        // sleep(5);
         return -1;
     }
 
     if (wc->status != IBV_WC_SUCCESS)
     {
-        error("Failed status `%s (%d)` for wr_id %d",
+        error("Failed status `%s (%d)` for wr_id %d at QP: %u. vendor err: %u",
               ibv_wc_status_str(wc->status),
               wc->status,
-              (int) wc->wr_id);
-        sleep(5);
+              (int) wc->wr_id,
+              wc->qp_num,
+              wc->vendor_err);
         return -1;
     }
 
@@ -318,7 +319,7 @@ bool rdmaWrite(ibv_qp *qp,
     if (ibv_post_send(qp, &wr, &wrBad) != 0)
     {
         error("Send with RDMA_WRITE(WITH_IMM) failed.");
-        sleep(10);
+        // sleep(10);
         return false;
     }
     return true;
@@ -362,7 +363,7 @@ bool rdmaWrite(ibv_qp *qp,
     if (ibv_exp_post_send(qp, &wr, &wrBad) != 0)
     {
         error("Send with RDMA_WRITE(WITH_IMM) failed.");
-        sleep(5);
+        // sleep(5);
         return false;
     }
     return true;
@@ -571,7 +572,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
     if (ibv_post_send(qp, &wr, &wrBad))
     {
         error("Send with ATOMIC_CMP_AND_SWP failed.");
-        sleep(5);
+        // sleep(5);
         return false;
     }
     return true;
@@ -687,7 +688,7 @@ bool rdmaWriteBatch(
     if (ibv_post_send(qp, &wr[0], &wrBad) != 0)
     {
         error("Send with RDMA_WRITE(WITH_IMM) failed.");
-        sleep(10);
+        // sleep(10);
         return false;
     }
     return true;
@@ -727,7 +728,7 @@ bool rdmaCasRead(ibv_qp *qp,
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
         error("Send with CAS_READs failed.");
-        sleep(10);
+        // sleep(10);
         return false;
     }
     return true;
@@ -768,7 +769,7 @@ bool rdmaWriteFaa(ibv_qp *qp,
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
         error("Send with Write Faa failed.");
-        sleep(10);
+        // sleep(10);
         return false;
     }
     return true;
@@ -808,7 +809,7 @@ bool rdmaWriteCas(ibv_qp *qp,
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
         error("Send with Write Cas failed.");
-        sleep(10);
+        // sleep(10);
         return false;
     }
     return true;

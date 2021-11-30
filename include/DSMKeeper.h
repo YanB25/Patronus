@@ -2,6 +2,7 @@
 #define __LINEAR_KEEPER__H__
 
 #include <vector>
+#include <unordered_map>
 
 #include "Keeper.h"
 
@@ -107,6 +108,8 @@ public:
     void barrier(const std::string &barrierKey);
     uint64_t sum(const std::string &sum_key, uint64_t value);
 
+    const ExchangeMeta& getExchangeMeta(uint16_t remoteID) const;
+
 private:
     static const char *OK;
     static const char *ServerPrefix;
@@ -114,6 +117,8 @@ private:
     std::vector<ThreadConnection> &thCon;
     std::vector<DirectoryConnection> &dirCon;
     std::vector<RemoteConnection> &remoteCon;
+
+    std::unordered_map<uint16_t, ExchangeMeta> snapshot_exchange_meta_;
 
     ExchangeMeta exchangeMeta;
 
@@ -142,6 +147,7 @@ private:
      * @param remoteID the remote machine to set with
      */
     void setExchangeMeta(uint16_t remoteID);
+    void snapshotExchangeMeta(uint16_t remoteID, const ExchangeMeta& meta);
 
     /**
      * @brief This function does the real and dirty jobs to modify the QP state.

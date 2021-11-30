@@ -1,4 +1,63 @@
 #include "Rdma.h"
+bool modifyErrQPtoNormal(struct ibv_qp *qp,
+                         uint32_t remoteQPN,
+                         uint16_t remoteLid,
+                         const uint8_t* remoteGid,
+                         RdmaContext *context)
+{
+    if (!modifyQPtoReset(qp))
+    {
+        return false;
+    }
+    if (!modifyQPtoInit(qp, context))
+    {
+        return false;
+    }
+    if (!modifyQPtoRTR(qp, remoteQPN, remoteLid, remoteGid, context))
+    {
+        return false;
+    }
+    if (!modifyQPtoRTS(qp))
+    {
+        return false;
+    }
+    dinfo("Succeed in switch QP: %p to normal state.", qp);
+    return true;
+}
+bool modifyQPtoReset(struct ibv_qp* qp)
+{
+    struct ibv_qp_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.qp_state = IBV_QPS_RESET;
+
+    switch (qp->qp_type)
+    {
+    case IBV_QPT_RC:
+        attr.qp_access_flags = IBV_ACCESS_REMOTE_READ |
+                               IBV_ACCESS_REMOTE_WRITE |
+                               IBV_ACCESS_REMOTE_ATOMIC;
+        break;
+
+    case IBV_QPT_UC:
+        attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE;
+        break;
+
+    case IBV_EXP_QPT_DC_INI:
+        error("implement me:)");
+        break;
+
+    default:
+        error("implement me:)");
+    }
+    int ret;
+    if ((ret = ibv_modify_qp(qp, &attr, IBV_QP_STATE)))
+    {
+        perror("Failed to modify QP state to RESET");
+        fprintf(stderr, "failed to modify QP. ret: %d\n", ret);
+        return false;
+    }
+    return true;
+}
 bool modifyQPtoInit(struct ibv_qp *qp, RdmaContext *context)
 {
     struct ibv_qp_attr attr;

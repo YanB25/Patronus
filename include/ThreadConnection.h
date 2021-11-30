@@ -27,7 +27,7 @@ struct ThreadConnection
     RawMessageConnection *message;
 
     /**
-     * @brief maintain QP for every NR_DIRECTORY in every machineNR
+     * @brief maintain QPs[NR_DIRECTORY][machineNR]
      */
     std::vector<std::vector<ibv_qp *>> QPs;
 

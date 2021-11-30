@@ -6,6 +6,8 @@ cd ../build; make -j; cd ../script
 ./for_each.sh ./cleanup.sh
 ./restartMemc.sh
 ./for_each.sh ./sync.sh
+wait
 ./run.sh $1
+wait
 ./fetch_log.sh
-./for_each.sh ./cleanup.sh
+# ./for_each.sh ./cleanup.sh

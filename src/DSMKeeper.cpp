@@ -60,6 +60,26 @@ bool DSMKeeper::connectNode(uint16_t remoteID)
     return true;
 }
 
+void DSMKeeper::snapshotExchangeMeta(uint16_t remoteID, const ExchangeMeta& meta)
+{
+    snapshot_exchange_meta_[remoteID] = meta;
+    // should be bit-wise equal.
+    dcheck(memcmp(&snapshot_exchange_meta_[remoteID],
+                  &meta,
+                  sizeof(ExchangeMeta)) == 0);
+}
+
+const ExchangeMeta &DSMKeeper::getExchangeMeta(uint16_t remoteID) const
+{
+    auto it = snapshot_exchange_meta_.find(remoteID);
+    if (it == snapshot_exchange_meta_.end())
+    {
+        error("failed to fetch exchange meta data for server %u", remoteID);
+        throw std::runtime_error("Exchange metadata not found.");
+    }
+    return it->second;
+}
+
 void DSMKeeper::setExchangeMeta(uint16_t remoteID)
 {
     for (int i = 0; i < NR_DIRECTORY; ++i)
@@ -85,6 +105,10 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
 
 void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
 {
+    // I believe the exMeta is correct here.
+    // so do a snapshot for later retrieval
+    snapshotExchangeMeta(remoteID, exMeta);
+
     // init directory qp
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
@@ -127,7 +151,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
     // init remote connections
     auto &remote = remoteCon[remoteID];
     remote.dsmBase = exMeta.dsmBase;
-    dinfo("remote %p set dsmBase to %p", &remote, (char*) remote.dsmBase);
+    dinfo("remote %p set dsmBase to %p", &remote, (char *) remote.dsmBase);
     // remote.cacheBase = exMeta.cacheBase;
     remote.dmBase = exMeta.dmBase;
 

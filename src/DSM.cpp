@@ -51,6 +51,64 @@ DSM::~DSM()
 {
 }
 
+bool DSM::recover_th_qp(int node_id)
+{
+    auto tid = get_thread_id();
+    ibv_qp *qp = get_th_qp(node_id);
+    dinfo("Recovering th qp: %p. node_id: %d, thread_id: %d",
+          qp,
+          node_id,
+          tid);
+    const auto &ex = keeper->getExchangeMeta(node_id);
+    if (!modifyErrQPtoNormal(qp,
+                             ex.dirRcQpn2app[0][tid],
+                             ex.dirTh[0].lid,
+                             ex.dirTh[0].gid,
+                             &iCon->ctx))
+    {
+        error(
+            "failed to modify th QP to normal state. node_id: %d, thread_id: "
+            "%d",
+            node_id,
+            tid);
+        return false;
+    }
+    rdmaQueryQueuePair(qp);
+    return true;
+}
+
+bool DSM::recover_dir_qp(int node_id, int thread_id)
+{
+    ibv_qp *qp = get_dir_qp(node_id, thread_id);
+    dinfo("Recovering dir qp %p. node_id: %d, thread_id: %d",
+          qp,
+          node_id,
+          thread_id);
+    const auto &ex = keeper->getExchangeMeta(node_id);
+    if (!modifyErrQPtoNormal(qp,
+                             ex.appRcQpn2dir[thread_id][0],
+                             ex.appTh[thread_id].lid,
+                             ex.appTh[thread_id].gid,
+                             &dirCon[0].ctx))
+    {
+        error("failed to modify dir QP to normal state. node: %d, tid: %d",
+              node_id,
+              thread_id);
+        return false;
+    }
+    rdmaQueryQueuePair(qp);
+    return true;
+}
+
+ibv_qp *DSM::get_dir_qp(int node_id, int thread_id)
+{
+    return dirCon[0].QPs[thread_id][node_id];
+}
+ibv_qp *DSM::get_th_qp(int node_id)
+{
+    return iCon->QPs[0][node_id];
+}
+
 void DSM::registerThread()
 {
     if (thread_id != -1)
@@ -143,7 +201,7 @@ void DSM::rkey_read(uint32_t rkey,
     }
 }
 
-void DSM::rkey_read_sync(uint32_t rkey,
+bool DSM::rkey_read_sync(uint32_t rkey,
                          char *buffer,
                          GlobalAddress gaddr,
                          size_t size,
@@ -154,8 +212,19 @@ void DSM::rkey_read_sync(uint32_t rkey,
     if (ctx == nullptr)
     {
         ibv_wc wc;
-        pollWithCQ(iCon->cq, 1, &wc);
+        int ret = pollWithCQ(iCon->cq, 1, &wc);
+        if (ret < 0)
+        {
+            dcheck(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
+                  IBV_QPS_ERR);
+            if (!recover_th_qp(gaddr.nodeID))
+            {
+                return false;
+            }
+            return false;
+        }
     }
+    return true;
 }
 
 void DSM::read(char *buffer,
@@ -168,13 +237,13 @@ void DSM::read(char *buffer,
     rkey_read(rkey, buffer, gaddr, size, signal, ctx);
 }
 
-void DSM::read_sync(char *buffer,
+bool DSM::read_sync(char *buffer,
                     GlobalAddress gaddr,
                     size_t size,
                     CoroContext *ctx)
 {
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    rkey_read_sync(rkey, buffer, gaddr, size, ctx);
+    return rkey_read_sync(rkey, buffer, gaddr, size, ctx);
 }
 
 void DSM::write(const char *buffer,
@@ -187,7 +256,7 @@ void DSM::write(const char *buffer,
     return rkey_write(rkey, buffer, gaddr, size, signal, ctx);
 }
 
-void DSM::write_sync(const char *buffer,
+bool DSM::write_sync(const char *buffer,
                      GlobalAddress gaddr,
                      size_t size,
                      CoroContext *ctx)
@@ -234,7 +303,7 @@ void DSM::rkey_write(uint32_t rkey,
     }
 }
 
-void DSM::rkey_write_sync(uint32_t rkey,
+bool DSM::rkey_write_sync(uint32_t rkey,
                           const char *buffer,
                           GlobalAddress gaddr,
                           size_t size,
@@ -245,8 +314,19 @@ void DSM::rkey_write_sync(uint32_t rkey,
     if (ctx == nullptr)
     {
         ibv_wc wc;
-        pollWithCQ(iCon->cq, 1, &wc);
+        int ret = pollWithCQ(iCon->cq, 1, &wc);
+        if (ret < 0)
+        {
+            dcheck(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
+                  IBV_QPS_ERR);
+            if (!recover_th_qp(gaddr.nodeID))
+            {
+                return false;
+            }
+            return false;
+        }
     }
+    return true;
 }
 
 void DSM::fill_keys_dest(RdmaOpRegion &ror, GlobalAddress gaddr, bool is_chip)
@@ -853,12 +933,13 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
     // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
     // iCon->QPs[0].size(), iCon);
     dcheck(dirCon.size() == 1, "currently only support one dirCon");
-    uint32_t rkey = rdmaAsyncBindMemoryWindow(dirCon[0].QPs[target_thread_id][target_node_id],
-                              mw,
-                              iCon->cacheMR,
-                              (uint64_t) buffer,
-                              size,
-                              false);
+    uint32_t rkey = rdmaAsyncBindMemoryWindow(
+        dirCon[0].QPs[target_thread_id][target_node_id],
+        mw,
+        iCon->cacheMR,
+        (uint64_t) buffer,
+        size,
+        false);
     return rkey != 0;
 }
 bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
@@ -869,16 +950,18 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
 {
     check(dirCon.size() == 1, "currently only support one dirCon");
     struct ibv_qp *qp = dirCon[0].QPs[target_thread_id][target_node_id];
-    uint32_t rkey = rdmaAsyncBindMemoryWindow(qp,
-                              mw,
-                              dirCon[0].dsmMR,
-                              (uint64_t) buffer,
-                              size,
-                              true);
+    uint32_t rkey = rdmaAsyncBindMemoryWindow(
+        qp, mw, dirCon[0].dsmMR, (uint64_t) buffer, size, true);
     if (rkey == 0)
     {
         return false;
     }
     struct ibv_wc wc;
-    return pollWithCQ(dirCon[0].cq, 1, &wc) == 1;
+    int ret = pollWithCQ(dirCon[0].cq, 1, &wc) == 1;
+    if (ret < 0)
+    {
+        rdmaQueryQueuePair(qp);
+        return false;
+    }
+    return true;
 }

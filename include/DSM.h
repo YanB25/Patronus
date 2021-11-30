@@ -53,7 +53,7 @@ public:
                    size_t size,
                    bool signal = true,
                    CoroContext *ctx = nullptr);
-    void rkey_read_sync(uint32_t rkey,
+    bool rkey_read_sync(uint32_t rkey,
                         char *buffer,
                         GlobalAddress gaddr,
                         size_t size,
@@ -63,7 +63,7 @@ public:
               size_t size,
               bool signal = true,
               CoroContext *ctx = nullptr);
-    void read_sync(char *buffer,
+    bool read_sync(char *buffer,
                    GlobalAddress gaddr,
                    size_t size,
                    CoroContext *ctx = nullptr);
@@ -73,7 +73,7 @@ public:
                     size_t size,
                     bool signal = true,
                     CoroContext *ctx = nullptr);
-    void rkey_write_sync(uint32_t rkey,
+    bool rkey_write_sync(uint32_t rkey,
                          const char *buffer,
                          GlobalAddress gaddr,
                          size_t size,
@@ -83,7 +83,7 @@ public:
                size_t size,
                bool signal = true,
                CoroContext *ctx = nullptr);
-    void write_sync(const char *buffer,
+    bool write_sync(const char *buffer,
                     GlobalAddress gaddr,
                     size_t size,
                     CoroContext *ctx = nullptr);
@@ -115,6 +115,8 @@ public:
                         uint64_t equal,
                         uint64_t val,
                         CoroContext *ctx = nullptr);
+    ibv_qp* get_dir_qp(int node_id, int thread_id);
+    ibv_qp* get_th_qp(int node_id);
 
     void cas(GlobalAddress gaddr,
              uint64_t equal,
@@ -279,6 +281,8 @@ public:
         id.thread_id = get_thread_id();
         return id;
     }
+    bool recover_dir_qp(int node_id, int thread_id);
+    bool recover_th_qp(int node_id);
 
 private:
     void initRDMAConnection();

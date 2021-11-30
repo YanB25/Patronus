@@ -106,6 +106,15 @@ void fillAhAttr(ibv_ah_attr *attr,
                 RdmaContext *context);
 
 //// StateTrans.cpp
+/**
+ * used in error handling
+ */
+bool modifyErrQPtoNormal(struct ibv_qp *qp,
+                         uint32_t remoteQPN,
+                         uint16_t remoteLid,
+                         const uint8_t *remoteGid,
+                         RdmaContext *context);
+bool modifyQPtoReset(struct ibv_qp *qp);
 bool modifyQPtoInit(struct ibv_qp *qp, RdmaContext *context);
 bool modifyQPtoRTR(struct ibv_qp *qp,
                    uint32_t remoteQPN,
@@ -347,7 +356,8 @@ bool rdmaBatchWrite(ibv_qp *qp,
                     int32_t imm = -1);
 
 //// Utility.cpp
-void rdmaQueryQueuePair(ibv_qp *qp);
+ibv_qp_state rdmaQueryQueuePair(ibv_qp *qp);
+void rdmaReportQueuePair(ibv_qp *qp);
 void checkDctSupported(struct ibv_context *ctx);
 /**
  * print out the information of devices
