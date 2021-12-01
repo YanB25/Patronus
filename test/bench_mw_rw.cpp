@@ -139,7 +139,7 @@ void bind_rkeys(std::shared_ptr<DSM> dsm,
     char *buffer = buf_conf.buffer;
     size_t buffer_size = buf_conf.size;
 
-    CHECK(size < buffer_size);
+    CHECK(size <= buffer_size);
 
     for (size_t t = 0; t < mws.size(); ++t)
     {
@@ -166,8 +166,6 @@ void client_burn(std::shared_ptr<DSM> dsm,
 
     GlobalAddress gaddr;
     gaddr.nodeID = kServerNodeId;
-
-    uint32_t mw_nr = rkeys.size();
 
     auto handler = [warmup](ibv_wc *wc)
     {
@@ -380,7 +378,7 @@ void thread_main(std::shared_ptr<DSM> dsm,
         }
     }
 }
-int main(int argc, char **argv)
+int main()
 {
     // if (argc < 2)
     // {
@@ -392,7 +390,7 @@ int main(int argc, char **argv)
     // sscanf(argv[1], "%lu", &window_nr);
     // sscanf(argv[2], "%lu", &window_size);
 
-    constexpr static size_t kSize = 1 * define::GB;
+    constexpr static size_t kSize = 2 * define::GB;
 
     // printf("window_nr: %lu, window_size: %lu\n", window_nr, window_size);
     // info("memory window nr: %lu from %s", window_nr, argv[1]);
@@ -490,4 +488,7 @@ int main(int argc, char **argv)
     }
 
     info("finished. ctrl+C to quit.");
+    warn("TODO: There is still bug: the server bind mw for only thread 0, but 24 threads at the client use the rkeys.");
+    warn("TODO: Because we are using TYPE_1 MW, and it binds to pd instead of QP, so the bug does not take effect");
+    warn("TODO: If we start to use TYPE_2, the bug may cause failing");
 }

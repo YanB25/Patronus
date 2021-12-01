@@ -535,6 +535,10 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
               "Failed to bind mw: Memory has been used up. errno: %d",
               ret);
     }
+    if (ret == ENOTSUP)
+    {
+        CHECK(false, "Failed to bind mw: Operation not supported. Is it too large? errno: %d", ret);
+    }
     if (ret)
     {
         error(
@@ -556,7 +560,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     size_t id = id_.fetch_add(1);
     if ((id & mask) == magic)
     {
-        warn("TODO: Strange bug: reallocate mw: %p, idx: %lu", mw, id);
+        dwarn("TODO: Strange bug: reallocate mw: %p, idx: %lu", mw, id);
         return rdmaAsyncBindMemoryWindow(
             qp, mw, mr, mm, mmSize, signal, wrID, mw_access_flag);
     }
