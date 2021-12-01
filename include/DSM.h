@@ -54,21 +54,27 @@ public:
                    GlobalAddress gaddr,
                    size_t size,
                    bool signal = true,
-                   CoroContext *ctx = nullptr);
+                   CoroContext *ctx = nullptr,
+                   uint64_t wr_id = 0);
     bool rkey_read_sync(uint32_t rkey,
                         char *buffer,
                         GlobalAddress gaddr,
                         size_t size,
-                        CoroContext *ctx = nullptr);
+                        CoroContext *ctx = nullptr,
+                        uint64_t wr_id = 0,
+                        const WcErrHandler& handler = empty_wc_err_handler);
     void read(char *buffer,
               GlobalAddress gaddr,
               size_t size,
               bool signal = true,
-              CoroContext *ctx = nullptr);
+              CoroContext *ctx = nullptr,
+              uint64_t wr_id = 0);
     bool read_sync(char *buffer,
                    GlobalAddress gaddr,
                    size_t size,
-                   CoroContext *ctx = nullptr);
+                   CoroContext *ctx = nullptr,
+                   uint64_t wr_id = 0,
+                   const WcErrHandler& handler = empty_wc_err_handler);
     void rkey_write(uint32_t rkey,
                     const char *buffer,
                     GlobalAddress gaddr,
@@ -87,7 +93,8 @@ public:
                GlobalAddress gaddr,
                size_t size,
                bool signal = true,
-               CoroContext *ctx = nullptr);
+               CoroContext *ctx = nullptr,
+               uint64_t wr_id = 0);
     bool write_sync(const char *buffer,
                     GlobalAddress gaddr,
                     size_t size,

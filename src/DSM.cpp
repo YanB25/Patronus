@@ -167,7 +167,8 @@ void DSM::rkey_read(uint32_t rkey,
                     GlobalAddress gaddr,
                     size_t size,
                     bool signal,
-                    CoroContext *ctx)
+                    CoroContext *ctx,
+                    uint64_t wr_id)
 {
     // dinfo("RDMA reading rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
     //       rkey,
@@ -182,7 +183,8 @@ void DSM::rkey_read(uint32_t rkey,
                  size,
                  iCon->cacheLKey,
                  rkey,
-                 signal);
+                 signal,
+                 wr_id);
     }
     else
     {
@@ -202,14 +204,16 @@ bool DSM::rkey_read_sync(uint32_t rkey,
                          char *buffer,
                          GlobalAddress gaddr,
                          size_t size,
-                         CoroContext *ctx)
+                         CoroContext *ctx,
+                         uint64_t wr_id,
+                         const WcErrHandler& handler)
 {
-    rkey_read(rkey, buffer, gaddr, size, true, ctx);
+    rkey_read(rkey, buffer, gaddr, size, true, ctx, wr_id);
 
     if (ctx == nullptr)
     {
         ibv_wc wc;
-        int ret = pollWithCQ(iCon->cq, 1, &wc);
+        int ret = pollWithCQ(iCon->cq, 1, &wc, handler);
         if (ret < 0)
         {
             DCHECK(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
@@ -228,29 +232,33 @@ void DSM::read(char *buffer,
                GlobalAddress gaddr,
                size_t size,
                bool signal,
-               CoroContext *ctx)
+               CoroContext *ctx,
+               uint64_t wr_id)
 {
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    rkey_read(rkey, buffer, gaddr, size, signal, ctx);
+    rkey_read(rkey, buffer, gaddr, size, signal, ctx, wr_id);
 }
 
 bool DSM::read_sync(char *buffer,
                     GlobalAddress gaddr,
                     size_t size,
-                    CoroContext *ctx)
+                    CoroContext *ctx,
+                    uint64_t wr_id,
+                    const WcErrHandler& handler)
 {
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    return rkey_read_sync(rkey, buffer, gaddr, size, ctx);
+    return rkey_read_sync(rkey, buffer, gaddr, size, ctx, wr_id, handler);
 }
 
 void DSM::write(const char *buffer,
                 GlobalAddress gaddr,
                 size_t size,
                 bool signal,
-                CoroContext *ctx)
+                CoroContext *ctx,
+                uint64_t wc_id)
 {
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    return rkey_write(rkey, buffer, gaddr, size, signal, ctx);
+    return rkey_write(rkey, buffer, gaddr, size, signal, ctx, wc_id);
 }
 
 bool DSM::write_sync(const char *buffer,

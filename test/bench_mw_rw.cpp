@@ -19,6 +19,11 @@ uint16_t mask = 0b1111111111;
 
 constexpr static size_t kSyncBatch = 100;
 
+enum RWType
+{
+    kRO,
+    kWO,
+};
 std::atomic<size_t> window_nr_x;
 std::atomic<size_t> thread_nr_x;
 std::atomic<size_t> io_size_x;
@@ -28,6 +33,7 @@ std::atomic<size_t> avg_lat_y;
 std::atomic<size_t> rkey_warmup_fail_y;
 std::atomic<size_t> rkey_fail_y;
 std::atomic<size_t> expr_id{0};
+std::atomic<RWType> bench_type{kWO};
 
 void loop_expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 {
@@ -156,6 +162,7 @@ std::vector<uint32_t> rkeys;
 void client_burn(std::shared_ptr<DSM> dsm,
                  size_t size,
                  size_t io_size,
+                 RWType bt,
                  bool warmup)
 {
     constexpr static size_t test_times = 100 * define::K;
@@ -213,15 +220,35 @@ void client_burn(std::shared_ptr<DSM> dsm,
         Data data;
         data.lower = rkey;
         data.upper = rkey_idx;
-        if (warmup || (i % kClientBatchWrite == 0))
+        if (bt == kWO)
         {
-            dsm->rkey_write_sync(
-                rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
+            if (warmup || (i % kClientBatchWrite == 0))
+            {
+                dsm->rkey_write_sync(
+                    rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
+            }
+            else
+            {
+                dsm->rkey_write(
+                    rkey, buffer, gaddr, io_size, false, nullptr, data.val);
+            }
+        }
+        else if (bt == kRO)
+        {
+            if (warmup || (i % kClientBatchWrite == 0))
+            {
+                dsm->rkey_read_sync(
+                    rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
+            }
+            else
+            {
+                dsm->rkey_read(
+                    rkey, buffer, gaddr, io_size, false, nullptr, data.val);
+            }
         }
         else
         {
-            dsm->rkey_write(
-                rkey, buffer, gaddr, io_size, false, nullptr, data.val);
+            CHECK(false, "unknown Benchmark type: %d", bt);
         }
     }
 
@@ -232,7 +259,6 @@ void client_burn(std::shared_ptr<DSM> dsm,
         ops_y.fetch_add(my_ops);
         // only the last one will be reported
         avg_lat_y.store(1.0 * ns / test_times);
-       
     }
 }
 
@@ -250,6 +276,7 @@ void client(std::shared_ptr<DSM> dsm,
             size_t io_size,
             size_t thread_nr,
             size_t tid,
+            RWType bt,
             boost::barrier &client_bar)
 {
     // dinfo("[%zu] get rkeys.size() %zu", tid, rkeys.size());
@@ -264,14 +291,14 @@ void client(std::shared_ptr<DSM> dsm,
     info_if(tid == 0, "warm up...");
     if (tid == 0)
     {
-        client_burn(dsm, size, io_size, true);
+        client_burn(dsm, size, io_size, bt, true);
     }
 
     client_bar.wait();
     info_if(tid == 0, "benchmarking...");
     if (tid < thread_nr)
     {
-        client_burn(dsm, size, io_size, false);
+        client_burn(dsm, size, io_size, bt, false);
     }
     client_bar.wait();
     if (tid == 0)
@@ -357,6 +384,7 @@ void thread_main(std::shared_ptr<DSM> dsm,
                  size_t tid,
                  size_t size,
                  size_t io_size,
+                 RWType bt,
                  boost::barrier &client_bar)
 {
     if (nid == kClientNodeId)
@@ -369,7 +397,7 @@ void thread_main(std::shared_ptr<DSM> dsm,
             info("[%zu] rkeys.size(): %zu", tid, rkeys.size());
         }
         client_bar.wait();
-        client(dsm, size, io_size, thread_nr, tid, client_bar);
+        client(dsm, size, io_size, thread_nr, tid, bt, client_bar);
         client_bar.wait();
     }
     else
@@ -421,6 +449,7 @@ int main()
         .add_column("thread-nr", &thread_nr_x)
         .add_column("size", &size_x)
         .add_column("io-size", &io_size_x)
+        .add_column("bench-type", &bench_type)
         .add_column("ops", &ops_y)
         .add_column_ns("avg-latency", &avg_lat_y)
         .add_column("rkey-warmup-fail-nr", &rkey_warmup_fail_y)
@@ -435,45 +464,51 @@ int main()
                 dsm->registerThread();
                 auto nid = dsm->getMyNodeID();
                 auto tid = dsm->get_thread_id();
-
-                for (size_t window_nr : {1, 100, 10000})
-                // for (size_t window_nr : {100, 10000})
+                // for (Type bt : {kRO, kWO})
+                for (RWType bt : {kRO})
                 {
-                    for (size_t thread_nr : {1, 16, int(kMaxThread)})
-                    // for (size_t thread_nr : {24})
+                    for (size_t window_nr : {1, 100, 10000})
+                    // for (size_t window_nr : {100, 10000})
                     {
-                        for (size_t size : {kSize})
+                        for (size_t thread_nr : {1, 16, int(kMaxThread)})
+                        // for (size_t thread_nr : {24})
                         {
-                            for (size_t io_size : {8})
-                            // for (size_t io_size : {8, 64, 256, 1024})
+                            for (size_t size : {kSize})
                             {
-                                if (tid == 0)
+                                for (size_t io_size : {8})
+                                // for (size_t io_size : {8, 64, 256, 1024})
                                 {
-                                    window_nr_x = window_nr;
-                                    thread_nr_x = thread_nr;
-                                    size_x = size;
-                                    io_size_x = io_size;
-                                    expr_id.fetch_add(1);
-                                }
-                                info_if(tid == 0 && nid == kClientNodeId,
+                                    if (tid == 0)
+                                    {
+                                        window_nr_x = window_nr;
+                                        thread_nr_x = thread_nr;
+                                        size_x = size;
+                                        io_size_x = io_size;
+                                        bench_type = bt;
+                                        expr_id.fetch_add(1);
+                                    }
+                                    info_if(
+                                        tid == 0 && nid == kClientNodeId,
                                         "Benchmarking mw: %zu, thread: %zu, "
                                         "io_size: "
                                         "%zu",
                                         window_nr,
                                         thread_nr,
                                         io_size);
-                                thread_main(dsm,
-                                            window_nr,
-                                            thread_nr,
-                                            nid,
-                                            tid,
-                                            kSize,
-                                            io_size,
-                                            client_bar);
-                                if (tid == 0)
-                                {
-                                    b.snapshot();
-                                    b.clear();
+                                    thread_main(dsm,
+                                                window_nr,
+                                                thread_nr,
+                                                nid,
+                                                tid,
+                                                kSize,
+                                                io_size,
+                                                bt,
+                                                client_bar);
+                                    if (tid == 0)
+                                    {
+                                        b.snapshot();
+                                        b.clear();
+                                    }
                                 }
                             }
                         }
