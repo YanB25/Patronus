@@ -336,7 +336,7 @@ public:
     Buffer get_server_internal_buffer();
     RdmaBuffer &get_rbuf(int coro_id)
     {
-        dcheck(coro_id < define::kMaxCoro,
+        DCHECK(coro_id < define::kMaxCoro,
                "coro_id should be < define::kMaxCoro");
         return rbuf[coro_id];
     }
@@ -369,13 +369,34 @@ public:
         auto buffer = (RawMessage *) iCon->message->getSendPool();
         buffer->node_id = myNodeID;
         buffer->app_id = thread_id;
-        check(size < sizeof(RawMessage::inlined_buffer));
+        CHECK(size < sizeof(RawMessage::inlined_buffer));
         memcpy(buffer->inlined_buffer, buf, size);
         iCon->sendMessage2Dir(buffer, node_id, dir_id);
     }
+    char* try_recv()
+    {
+        CHECK(dirCon.size() == 1);
+        struct ibv_wc wc;
+        ibv_cq* cq = dirCon[0].rpc_cq;
+        int ret = ibv_poll_cq(cq, 1, &wc);
+        if (ret < 0)
+        {
+            error("failed to poll cq. cq: %p. ret: %d", cq, ret);
+            return nullptr;
+        }
+        if (ret == 1)
+        {
+            CHECK(wc.status == IBV_WC_SUCCESS);
+            CHECK(wc.opcode == IBV_WC_RECV);
+            auto *m = (RawMessage *) dirCon[0].message->getMessage();
+            return m->inlined_buffer;
+        }
+        return nullptr;
+
+    }
     char *recv()
     {
-        check(dirCon.size() == 1);
+        CHECK(dirCon.size() == 1);
         struct ibv_wc wc;
         pollWithCQ(dirCon[0].rpc_cq, 1, &wc);
         switch (int(wc.opcode))

@@ -5,7 +5,7 @@
 
 /** Version 1 + Functional Model Modification **/
 
-/** Redundance check. **/
+/** Redundance CHECK. **/
 #ifndef DEBUG_HEADER
 #define DEBUG_HEADER
 
@@ -49,16 +49,16 @@
 //                                              information. */
 //     static void endTimer(); /* End timer and display information. */
 
-//     static void check(bool cond,
+//     static void CHECK(bool cond,
 //                       const char *format,
-//                       ...); /* check that an assertion holds */
-//     static void dcheck(bool cond,
+//                       ...); /* CHECK that an assertion holds */
+//     static void DCHECK(bool cond,
 //                        const char *format,
-//                        ...); /* check that an assertion holds on debug mode
+//                        ...); /* CHECK that an assertion holds on debug mode
 //                        */
 // };
 
-/** Redundance check. **/
+/** Redundance CHECK. **/
 
 /**
  * @file this file define the macros used to use or assert
@@ -143,9 +143,9 @@
     }
 
 /**
- * @brief check the condition and print if it's violated
+ * @brief CHECK the condition and print if it's violated
  */
-#define check(cond, ...)          \
+#define CHECK(cond, ...)          \
     do                            \
     {                             \
         const bool __cond = cond; \
@@ -157,7 +157,7 @@
 
 #ifndef NDEBUG
 // Debug mode
-#define dcheck(cond, ...) check(cond, ##__VA_ARGS__)
+#define DCHECK(cond, ...) CHECK(cond, ##__VA_ARGS__)
 #define dinfo(...) info(__VA_ARGS__)
 #define dwarn(...) warn(__VA_ARGS__)
 #define derror(...) error(__VA_ARGS__)
@@ -170,7 +170,7 @@
 
 #else
 // Release Mode
-#define dcheck(cond, ...)
+#define DCHECK(cond, ...)
 #define dinfo(...)
 #define dwarn(...)
 #define derror(...)

@@ -11,7 +11,7 @@ int pollWithCQ(ibv_cq *cq,
                const WcErrHandler &handler)
 {
     int count = 0;
-    dcheck(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
+    DCHECK(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
 
     do
     {
@@ -493,7 +493,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
 {
     static std::atomic<size_t> id_{0};
 
-    dcheck(qp->qp_type == IBV_QPT_RC || qp->qp_type == IBV_QPT_UC ||
+    DCHECK(qp->qp_type == IBV_QPT_RC || qp->qp_type == IBV_QPT_UC ||
            qp->qp_type == IBV_QPT_XRC_SEND);
     struct ibv_mw_bind mw_bind;
     memset(&mw_bind, 0, sizeof(mw_bind));
@@ -528,6 +528,12 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
             "window: errno %d",
             ret);
         return 0;
+    }
+    if (ret == ENOMEM)
+    {
+        CHECK(false,
+              "Failed to bind mw: Memory has been used up. errno: %d",
+              ret);
     }
     if (ret)
     {
@@ -680,7 +686,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 bool rdmaWriteBatch(
     ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled, uint64_t wrID)
 {
-    dcheck(k < kOroMax, "overflow detected at k = %d", k);
+    DCHECK(k < kOroMax, "overflow detected at k = %d", k);
 
     struct ibv_sge sg[kOroMax];
     struct ibv_send_wr wr[kOroMax];

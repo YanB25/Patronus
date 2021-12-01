@@ -74,7 +74,7 @@ void server(std::shared_ptr<DSM> dsm,
         timer.print();
 
         printf("\n-------- bind mw ----------\n");
-        check(window_size < max_size,
+        CHECK(window_size < max_size,
               "mw_nr %lu too large, overflow an rdma buffer.",
               mw_nr);
         timer.begin();
@@ -102,11 +102,11 @@ void server(std::shared_ptr<DSM> dsm,
                 }
                 else
                 {
-                    check(random_addr == 0);
+                    CHECK(random_addr == 0);
                     // if i too large, we roll back i to 0.
                     buffer_start = buffer + (i % window_nr) * window_size;
                 }
-                warn("TODO: check if thread_id == 0 is correct.");
+                warn("TODO: CHECK if thread_id == 0 is correct.");
                 dsm->bind_memory_region(
                     mws[i], kClientNodeId, 0, buffer_start, window_size);
             }

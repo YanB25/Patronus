@@ -64,7 +64,7 @@ void DSMKeeper::snapshotExchangeMeta(uint16_t remoteID, const ExchangeMeta& meta
 {
     snapshot_exchange_meta_[remoteID] = meta;
     // should be bit-wise equal.
-    dcheck(memcmp(&snapshot_exchange_meta_[remoteID],
+    DCHECK(memcmp(&snapshot_exchange_meta_[remoteID],
                   &meta,
                   sizeof(ExchangeMeta)) == 0);
 }
@@ -137,7 +137,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
         {
             auto &qp = c.QPs[k][remoteID];
 
-            check(qp->qp_type == IBV_QPT_RC);
+            CHECK(qp->qp_type == IBV_QPT_RC);
             modifyQPtoInit(qp, &c.ctx);
             modifyQPtoRTR(qp,
                           exMeta.dirRcQpn2app[k][i],
@@ -170,7 +170,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
                        &thCon[k].ctx);
             remote.appToDirAh[k][i] = ibv_create_ah(thCon[k].ctx.pd, &ahAttr);
 
-            check(remote.appToDirAh[k][i]);
+            CHECK(remote.appToDirAh[k][i]);
         }
     }
 

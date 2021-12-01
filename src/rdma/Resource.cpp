@@ -105,7 +105,7 @@ bool createContext(RdmaContext *context,
         }
     }
 
-    // check device memory support
+    // CHECK device memory support
     if (kMaxDeviceMemorySize == 0)
     {
         checkDctSupported(ctx);

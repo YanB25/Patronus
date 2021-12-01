@@ -115,7 +115,7 @@ void DSM::registerThread()
     }
 
     thread_id = appID.fetch_add(1);
-    check(thread_id < (int) thCon.size(), "Can not allocate more threads");
+    CHECK(thread_id < (int) thCon.size(), "Can not allocate more threads");
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
 
     iCon = &thCon[thread_id];
@@ -125,14 +125,14 @@ void DSM::registerThread()
     iCon->message->initRecv();
     iCon->message->initSend();
 
-    check(thread_id * define::kRDMABufferSize < cache.size,
+    CHECK(thread_id * define::kRDMABufferSize < cache.size,
           "Run out of cache size for offset = %" PRIu32,
           thread_id * define::kRDMABufferSize);
     rdma_buffer = (char *) cache.data + thread_id * define::kRDMABufferSize;
 
     for (int i = 0; i < define::kMaxCoro; ++i)
     {
-        check(i * define::kPerCoroRdmaBuf < define::kRDMABufferSize,
+        CHECK(i * define::kPerCoroRdmaBuf < define::kRDMABufferSize,
               "Run out of RDMA buffer when allocating coroutine buffer.");
         rbuf[i].set_buffer(rdma_buffer + i * define::kPerCoroRdmaBuf);
     }
@@ -212,7 +212,7 @@ bool DSM::rkey_read_sync(uint32_t rkey,
         int ret = pollWithCQ(iCon->cq, 1, &wc);
         if (ret < 0)
         {
-            dcheck(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
+            DCHECK(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
                    IBV_QPS_ERR);
             if (!recover_th_qp(gaddr.nodeID))
             {
@@ -320,7 +320,7 @@ bool DSM::rkey_write_sync(uint32_t rkey,
         int ret = pollWithCQ(iCon->cq, 1, &wc, handler);
         if (ret < 0)
         {
-            dcheck(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
+            DCHECK(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
                    IBV_QPS_ERR);
             if (!recover_th_qp(gaddr.nodeID))
             {
@@ -909,7 +909,7 @@ bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
 
 ibv_mw *DSM::alloc_mw()
 {
-    dcheck(dirCon.size() == 1, "Only support 1 dir currently.");
+    DCHECK(dirCon.size() == 1, "Only support 1 dir currently.");
     struct RdmaContext *ctx = &dirCon[0].ctx;
     struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
     if (!mw)
@@ -925,6 +925,7 @@ void DSM::free_mw(struct ibv_mw *mw)
     if (ibv_dealloc_mw(mw))
     {
         perror("failed to destroy memory window");
+        CHECK(false);
     }
 }
 
@@ -936,7 +937,7 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
 {
     // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
     // iCon->QPs[0].size(), iCon);
-    dcheck(dirCon.size() == 1, "currently only support one dirCon");
+    DCHECK(dirCon.size() == 1, "currently only support one dirCon");
     struct ibv_qp *qp = dirCon[0].QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
         qp, mw, dirCon[0].dsmMR, (uint64_t) buffer, size, false);
@@ -948,7 +949,7 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   const char *buffer,
                                   size_t size)
 {
-    check(dirCon.size() == 1, "currently only support one dirCon");
+    CHECK(dirCon.size() == 1, "currently only support one dirCon");
     struct ibv_qp *qp = dirCon[0].QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
         qp, mw, dirCon[0].dsmMR, (uint64_t) buffer, size, true);
