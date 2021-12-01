@@ -24,6 +24,7 @@ std::atomic<size_t> thread_nr_x;
 std::atomic<size_t> io_size_x;
 std::atomic<size_t> size_x;
 std::atomic<size_t> ops_y;
+std::atomic<size_t> avg_lat_y;
 std::atomic<size_t> rkey_warmup_fail_y;
 std::atomic<size_t> rkey_fail_y;
 std::atomic<size_t> expr_id{0};
@@ -147,7 +148,7 @@ void bind_rkeys(std::shared_ptr<DSM> dsm,
     }
 }
 
-constexpr static size_t kClientBatchWrite = 8;
+constexpr static size_t kClientBatchWrite = 1;
 
 std::vector<uint32_t> rkeys;
 
@@ -157,7 +158,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
                  size_t io_size,
                  bool warmup)
 {
-    constexpr static size_t test_times = 10 * define::K;
+    constexpr static size_t test_times = 100 * define::K;
     Timer timer;
 
     auto *buffer = dsm->get_rdma_buffer();
@@ -229,6 +230,9 @@ void client_burn(std::shared_ptr<DSM> dsm,
     {
         double my_ops = test_times * 1e9 / ns;
         ops_y.fetch_add(my_ops);
+        // only the last one will be reported
+        avg_lat_y.store(1.0 * ns / test_times);
+       
     }
 }
 
@@ -418,6 +422,7 @@ int main()
         .add_column("size", &size_x)
         .add_column("io-size", &io_size_x)
         .add_column("ops", &ops_y)
+        .add_column_ns("avg-latency", &avg_lat_y)
         .add_column("rkey-warmup-fail-nr", &rkey_warmup_fail_y)
         .add_column("rkey-fail-nr", &rkey_fail_y);
 
@@ -439,8 +444,8 @@ int main()
                     {
                         for (size_t size : {kSize})
                         {
-                            // for (size_t io_size : {64})
-                            for (size_t io_size : {8, 64, 256, 1024})
+                            for (size_t io_size : {8})
+                            // for (size_t io_size : {8, 64, 256, 1024})
                             {
                                 if (tid == 0)
                                 {
@@ -488,7 +493,11 @@ int main()
     }
 
     info("finished. ctrl+C to quit.");
-    warn("TODO: There is still bug: the server bind mw for only thread 0, but 24 threads at the client use the rkeys.");
-    warn("TODO: Because we are using TYPE_1 MW, and it binds to pd instead of QP, so the bug does not take effect");
+    warn(
+        "TODO: There is still bug: the server bind mw for only thread 0, but "
+        "24 threads at the client use the rkeys.");
+    warn(
+        "TODO: Because we are using TYPE_1 MW, and it binds to pd instead of "
+        "QP, so the bug does not take effect");
     warn("TODO: If we start to use TYPE_2, the bug may cause failing");
 }
