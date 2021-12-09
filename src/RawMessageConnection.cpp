@@ -18,6 +18,40 @@ void RawMessageConnection::initSend()
 {
 }
 
+void RawMessageConnection::syncSendRawMessage(RawMessage *m,
+                                              uint32_t remoteQPN,
+                                              ibv_ah *ah)
+{
+    uint64_t magic_wr_id = rand();
+    rdmaSend(message,
+             (uint64_t) m - sendPadding,
+             sizeof(RawMessage) + sendPadding,
+             messageLkey,
+             ah,
+             remoteQPN,
+             true,
+             magic_wr_id);
+    ibv_wc wc;
+
+    std::atomic<bool> found = false;
+    auto handler = [&found, magic_wr_id](ibv_wc *wc)
+    {
+        if (wc->wr_id == magic_wr_id)
+        {
+            found = true;
+        }
+        else
+        {
+            warn("polled unrevelant wc.");
+        }
+    };
+
+    while (!found)
+    {
+        pollWithCQ(send_cq, 1, &wc, empty_wc_err_handler, handler);
+    }
+}
+
 void RawMessageConnection::sendRawMessage(RawMessage *m,
                                           uint32_t remoteQPN,
                                           ibv_ah *ah)

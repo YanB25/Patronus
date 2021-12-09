@@ -42,7 +42,7 @@ struct ThreadConnection
                      uint32_t machineNR,
                      const std::vector<RemoteConnection> &remoteInfo);
 
-    void sendMessage2Dir(RawMessage *m, uint16_t node_id, uint16_t dir_id = 0);
+    void sendMessage2Dir(RawMessage *m, uint16_t node_id, uint16_t dir_id = 0, bool eager_signal = false);
 };
 
 #endif /* __THREADCONNECTION_H__ */

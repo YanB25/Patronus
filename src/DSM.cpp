@@ -21,7 +21,8 @@ std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
     return future::make_unique<DSM>(conf);
 }
 
-DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
+DSM::DSM(const DSMConfig &conf)
+    : conf(conf), cache(conf.cacheConfig), clock_manager_(this)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize);
 
@@ -206,7 +207,7 @@ bool DSM::rkey_read_sync(uint32_t rkey,
                          size_t size,
                          CoroContext *ctx,
                          uint64_t wr_id,
-                         const WcErrHandler& handler)
+                         const WcErrHandler &handler)
 {
     rkey_read(rkey, buffer, gaddr, size, true, ctx, wr_id);
 
@@ -244,7 +245,7 @@ bool DSM::read_sync(char *buffer,
                     size_t size,
                     CoroContext *ctx,
                     uint64_t wr_id,
-                    const WcErrHandler& handler)
+                    const WcErrHandler &handler)
 {
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
     return rkey_read_sync(rkey, buffer, gaddr, size, ctx, wr_id, handler);
@@ -266,7 +267,7 @@ bool DSM::write_sync(const char *buffer,
                      size_t size,
                      CoroContext *ctx,
                      uint64_t wc_id,
-                     const WcErrHandler& handler)
+                     const WcErrHandler &handler)
 {
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
     return rkey_write_sync(rkey, buffer, gaddr, size, ctx, wc_id, handler);
@@ -318,7 +319,7 @@ bool DSM::rkey_write_sync(uint32_t rkey,
                           size_t size,
                           CoroContext *ctx,
                           uint64_t wr_id,
-                          const WcErrHandler& handler)
+                          const WcErrHandler &handler)
 {
     rkey_write(rkey, buffer, gaddr, size, true, ctx, wr_id);
 

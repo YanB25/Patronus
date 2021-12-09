@@ -131,8 +131,10 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                    RdmaContext *context);
 
 //// Operation.cpp
-using WcErrHandler = std::function<void(ibv_wc*)>;
+using WcHandler = std::function<void(ibv_wc*)>;
+using WcErrHandler = WcHandler;
 static WcErrHandler empty_wc_err_handler = [](ibv_wc *) {};
+static WcHandler empty_wc_handler = [](ibv_wc *) {};
 /**
  * @brief block and poll the CQ until the specified number
  * @param cq the CQ to polled with
@@ -144,7 +146,8 @@ int pollWithCQ(
     ibv_cq *cq,
     int pollNumber,
     struct ibv_wc *wc,
-    const WcErrHandler& handler = empty_wc_err_handler);
+    const WcErrHandler& hander = empty_wc_err_handler,
+    const WcHandler& handler = empty_wc_handler);
 /**
  * @brief non-blocking and try to poll the CQ and return immediately if get
  * nothing.
@@ -172,7 +175,8 @@ bool rdmaSend(ibv_qp *qp,
               uint32_t lkey,
               ibv_ah *ah,
               uint32_t remoteQPN,
-              bool isSignaled = false);
+              bool isSignaled = false,
+              uint64_t wr_id = 0);
 
 /**
  * @brief rdma send for RC and UC

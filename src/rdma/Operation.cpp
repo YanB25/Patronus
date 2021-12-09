@@ -8,7 +8,8 @@
 int pollWithCQ(ibv_cq *cq,
                int pollNumber,
                struct ibv_wc *wc,
-               const WcErrHandler &handler)
+               const WcErrHandler &err_handler,
+               const WcHandler &handler)
 {
     int count = 0;
     DCHECK(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
@@ -16,29 +17,36 @@ int pollWithCQ(ibv_cq *cq,
     do
     {
         int new_count = ibv_poll_cq(cq, 1, wc);
+        if (new_count == 1)
+        {
+            if (wc->status == IBV_WC_SUCCESS)
+            {
+                handler(wc);
+            }
+            else
+            {
+                error("Failed status `%s (%d)` for wr_id %d at QP: %u. vendor err: %u",
+                    ibv_wc_status_str(wc->status),
+                    wc->status,
+                    (int) wc->wr_id,
+                    wc->qp_num,
+                    wc->vendor_err);
+                err_handler(wc);
+            }
+        }
+        else if (new_count < 0)
+        {
+            error("Poll Completion failed.");
+            // sleep(5);
+            return -1;
+        }
+        else if (new_count > 1)
+        {
+            CHECK(false, "impossible return value from ibv_poll_cq");
+        }
         count += new_count;
 
     } while (count < pollNumber);
-
-    // TODO(yanbin): why count < 0?
-    if (count < 0)
-    {
-        error("Poll Completion failed.");
-        // sleep(5);
-        return -1;
-    }
-
-    if (wc->status != IBV_WC_SUCCESS)
-    {
-        error("Failed status `%s (%d)` for wr_id %d at QP: %u. vendor err: %u",
-              ibv_wc_status_str(wc->status),
-              wc->status,
-              (int) wc->wr_id,
-              wc->qp_num,
-              wc->vendor_err);
-        handler(wc);
-        return -1;
-    }
 
     return count;
 }
@@ -118,7 +126,8 @@ bool rdmaSend(ibv_qp *qp,
               uint32_t lkey,
               ibv_ah *ah,
               uint32_t remoteQPN /* remote dct_number */,
-              bool isSignaled)
+              bool isSignaled,
+              uint64_t wr_id)
 {
     struct ibv_sge sg;
     struct ibv_send_wr wr;
@@ -131,6 +140,7 @@ bool rdmaSend(ibv_qp *qp,
     wr.wr.ud.ah = ah;
     wr.wr.ud.remote_qpn = remoteQPN;
     wr.wr.ud.remote_qkey = UD_PKEY;
+    wr.wr_id = wr_id;
 
     if (isSignaled)
     {
@@ -537,7 +547,10 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     }
     if (ret == ENOTSUP)
     {
-        CHECK(false, "Failed to bind mw: Operation not supported. Is it too large? errno: %d", ret);
+        CHECK(false,
+              "Failed to bind mw: Operation not supported. Is it too large? "
+              "errno: %d",
+              ret);
     }
     if (ret)
     {

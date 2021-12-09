@@ -4,6 +4,7 @@
 #include <atomic>
 
 #include "Cache.h"
+#include "ClockManager.h"
 #include "Config.h"
 #include "Connection.h"
 #include "DSMKeeper.h"
@@ -20,7 +21,7 @@ struct Identify
     int node_id;
 };
 
-class DSM
+class DSM : public std::enable_shared_from_this<DSM>
 {
 public:
     using WcErrHandler = WcErrHandler;
@@ -62,7 +63,7 @@ public:
                         size_t size,
                         CoroContext *ctx = nullptr,
                         uint64_t wr_id = 0,
-                        const WcErrHandler& handler = empty_wc_err_handler);
+                        const WcErrHandler &handler = empty_wc_err_handler);
     void read(char *buffer,
               GlobalAddress gaddr,
               size_t size,
@@ -74,7 +75,7 @@ public:
                    size_t size,
                    CoroContext *ctx = nullptr,
                    uint64_t wr_id = 0,
-                   const WcErrHandler& handler = empty_wc_err_handler);
+                   const WcErrHandler &handler = empty_wc_err_handler);
     void rkey_write(uint32_t rkey,
                     const char *buffer,
                     GlobalAddress gaddr,
@@ -88,7 +89,7 @@ public:
                          size_t size,
                          CoroContext *ctx = nullptr,
                          uint64_t wr_id = 0,
-                         const WcErrHandler& handler = empty_wc_err_handler);
+                         const WcErrHandler &handler = empty_wc_err_handler);
     void write(const char *buffer,
                GlobalAddress gaddr,
                size_t size,
@@ -100,7 +101,7 @@ public:
                     size_t size,
                     CoroContext *ctx = nullptr,
                     uint64_t wc_id = 0,
-                    const WcErrHandler& handler = empty_wc_err_handler);
+                    const WcErrHandler &handler = empty_wc_err_handler);
 
     void write_batch(RdmaOpRegion *rs,
                      int k,
@@ -277,6 +278,11 @@ public:
         return size;
     }
 
+    ClockManager &clock_manager()
+    {
+        return clock_manager_;
+    }
+
     DSM(const DSMConfig &conf);
     virtual ~DSM();
 
@@ -321,6 +327,8 @@ private:
     std::vector<ThreadConnection> thCon;
     std::vector<DirectoryConnection> dirCon;
     std::unique_ptr<DSMKeeper> keeper;
+
+    ClockManager clock_manager_;
 
 public:
     bool is_register()
@@ -367,24 +375,27 @@ public:
      * Do not use in the critical path.
      * A handy control path for sending/recving messages.
      * msg should be no longer than 32 byte.
+     * 
+     * Do not interleave @sync=true and @sync=false.
      */
     void send(const char *buf,
               size_t size,
               uint16_t node_id,
-              uint16_t dir_id = 0)
+              uint16_t dir_id = 0,
+              bool sync = false)
     {
         auto buffer = (RawMessage *) iCon->message->getSendPool();
         buffer->node_id = myNodeID;
         buffer->app_id = thread_id;
         CHECK(size < sizeof(RawMessage::inlined_buffer));
         memcpy(buffer->inlined_buffer, buf, size);
-        iCon->sendMessage2Dir(buffer, node_id, dir_id);
+        iCon->sendMessage2Dir(buffer, node_id, dir_id, sync);
     }
-    char* try_recv()
+    char *try_recv()
     {
         CHECK(dirCon.size() == 1);
         struct ibv_wc wc;
-        ibv_cq* cq = dirCon[0].rpc_cq;
+        ibv_cq *cq = dirCon[0].rpc_cq;
         int ret = ibv_poll_cq(cq, 1, &wc);
         if (ret < 0)
         {
@@ -399,7 +410,6 @@ public:
             return m->inlined_buffer;
         }
         return nullptr;
-
     }
     char *recv()
     {

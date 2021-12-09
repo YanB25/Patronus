@@ -20,7 +20,8 @@ ThreadConnection::ThreadConnection(
 
     this->cachePool = cachePool;
     cacheMR = createMemoryRegion((uint64_t) cachePool, cacheSize, &ctx);
-    // dinfo("Create memory region at %p, size %lu", (char*) cachePool, cacheSize);
+    // dinfo("Create memory region at %p, size %lu", (char*) cachePool,
+    // cacheSize);
 
     cacheLKey = cacheMR->lkey;
 
@@ -31,16 +32,29 @@ ThreadConnection::ThreadConnection(
         for (size_t k = 0; k < machineNR; ++k)
         {
             createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
-            // dinfo("QPs[%lu][%lu]: qp: %p, cq: %p, lkey: %u. mr: %p", QPs.size() - 1, k, QPs.back()[k], (char*)cq, cacheLKey, cacheMR);
+            // dinfo("QPs[%lu][%lu]: qp: %p, cq: %p, lkey: %u. mr: %p",
+            // QPs.size() - 1, k, QPs.back()[k], (char*)cq, cacheLKey, cacheMR);
         }
     }
 }
 
 void ThreadConnection::sendMessage2Dir(RawMessage *m,
                                        uint16_t node_id,
-                                       uint16_t dir_id)
+                                       uint16_t dir_id,
+                                       bool sync)
 {
-    message->sendRawMessage(m,
-                            remoteInfo[node_id].dirMessageQPN[dir_id],
-                            remoteInfo[node_id].appToDirAh[threadID][dir_id]);
+    if (!sync)
+    {
+        message->sendRawMessage(
+            m,
+            remoteInfo[node_id].dirMessageQPN[dir_id],
+            remoteInfo[node_id].appToDirAh[threadID][dir_id]);
+    }
+    else
+    {
+        message->syncSendRawMessage(
+            m,
+            remoteInfo[node_id].dirMessageQPN[dir_id],
+            remoteInfo[node_id].appToDirAh[threadID][dir_id]);
+    }
 }
