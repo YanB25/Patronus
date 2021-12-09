@@ -163,6 +163,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
                  size_t size,
                  size_t io_size,
                  RWType bt,
+                 bool sequantial,
                  bool warmup)
 {
     constexpr static size_t test_times = 100 * define::K;
@@ -175,7 +176,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
     GlobalAddress gaddr;
     gaddr.nodeID = kServerNodeId;
 
-    auto handler = [warmup](ibv_wc *wc)
+    auto handler = [sequantial, warmup](ibv_wc *wc)
     {
         Data data;
         CHECK(sizeof(Data) == sizeof(uint64_t));
@@ -184,7 +185,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
               data.lower,
               data.upper);
         rkeys[data.upper] = 0;
-        if (warmup)
+        if (sequantial || warmup)
         {
             rkey_warmup_fail_y.fetch_add(1);
         }
@@ -202,7 +203,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
         DCHECK(io_block_nth >= 0);
         gaddr.offset = io_block_nth * io_size;
         DCHECK(gaddr.offset + io_size < size);
-        if (warmup)
+        if (sequantial)
         {
             rkey_idx = (rkey_idx + 1) % rkeys.size();
         }
@@ -222,7 +223,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
         data.upper = rkey_idx;
         if (bt == kWO)
         {
-            if (warmup || (i % kClientBatchWrite == 0))
+            if (sequantial || (i % kClientBatchWrite == 0))
             {
                 dsm->rkey_write_sync(
                     rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
@@ -235,7 +236,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
         }
         else if (bt == kRO)
         {
-            if (warmup || (i % kClientBatchWrite == 0))
+            if (sequantial || (i % kClientBatchWrite == 0))
             {
                 dsm->rkey_read_sync(
                     rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
@@ -288,17 +289,23 @@ void client(std::shared_ptr<DSM> dsm,
 
     client_bar.wait();
 
-    info_if(tid == 0, "warm up...");
+    info_if(tid == 0, "detecting failed rkeys...");
     if (tid == 0)
     {
-        client_burn(dsm, size, io_size, bt, true);
+        client_burn(dsm, size, io_size, bt, true, true);
     }
 
+    client_bar.wait();
+    info_if(tid == 0, "warming up...");
+    if (tid < thread_nr)
+    {
+        client_burn(dsm, size, io_size, bt, false, true);
+    }
     client_bar.wait();
     info_if(tid == 0, "benchmarking...");
     if (tid < thread_nr)
     {
-        client_burn(dsm, size, io_size, bt, false);
+        client_burn(dsm, size, io_size, bt, false, false);
     }
     client_bar.wait();
     if (tid == 0)
@@ -470,10 +477,10 @@ int main()
                     for (size_t window_nr : {1, 100, 10000})
                     // for (size_t window_nr : {100, 10000})
                     {
-                        for (size_t thread_nr : {1, 16, int(kMaxThread)})
-                        // for (size_t thread_nr : {24})
+                        // for (size_t thread_nr : {1, 8, 16, int(kMaxThread)})
+                        for (size_t thread_nr : {1, 8, 16})
                         {
-                            for (size_t size : {kSize})
+                            for (size_t size : {2 * define::MB, kSize})
                             {
                                 for (size_t io_size : {8})
                                 // for (size_t io_size : {8, 64, 256, 1024})
