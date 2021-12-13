@@ -81,7 +81,10 @@ DirectoryConnection::~DirectoryConnection()
             CHECK(destroyQueuePair(qp));
         }
     }
-    CHECK(destroyMemoryRegion(this->lockMR));
+    if (dirID == 0)
+    {
+        CHECK(destroyMemoryRegionOnChip(this->lockMR, ctx.dm));
+    }
     CHECK(destroyMemoryRegion(this->dsmMR));
     if (message)
     {

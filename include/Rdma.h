@@ -54,6 +54,8 @@ struct RdmaContext
     union ibv_gid gid;
     ibv_mw_type mw_type;
 
+    ibv_exp_dm* dm{nullptr};
+
     // default to use type 1, because it is always supported
     // will query and change to TYPE_2 if supported.
     RdmaContext() : ctx(NULL), pd(NULL), mw_type(IBV_MW_TYPE_1)

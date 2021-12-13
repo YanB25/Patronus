@@ -55,6 +55,8 @@ bool Keeper::connectMemcached()
         servers, trim(addr).c_str(), std::stoi(trim(port)), &rc);
     rc = memcached_server_push(memc, servers);
 
+    free(servers);
+    
     if (rc != MEMCACHED_SUCCESS)
     {
         error("Can't add server:%s", memcached_strerror(memc, rc));

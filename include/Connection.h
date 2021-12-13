@@ -30,6 +30,23 @@ struct RemoteConnection
     uint32_t appRKey[MAX_APP_THREAD];
     uint32_t appMessageQPN[MAX_APP_THREAD];
     ibv_ah *dirToAppAh[NR_DIRECTORY][MAX_APP_THREAD];
+    void destroy()
+    {
+        for (size_t i = 0; i < NR_DIRECTORY; ++i)
+        {
+            for (size_t j = 0; j < MAX_APP_THREAD; ++j)
+            {
+                if (ibv_destroy_ah(dirToAppAh[i][j]))
+                {
+                    perror("failed to destroy ah");
+                }
+                if (ibv_destroy_ah(appToDirAh[j][i]))
+                {
+                    perror("failed to destroy ah");
+                }
+            }
+        }
+    }
 };
 
 #endif /* __CONNECTION_H__ */

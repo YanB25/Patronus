@@ -101,10 +101,7 @@ public:
         initRouteRule();
     }
 
-    virtual ~DSMKeeper()
-    {
-        disconnectMemcached();
-    }
+    virtual ~DSMKeeper();
     void barrier(const std::string &barrierKey);
     uint64_t sum(const std::string &sum_key, uint64_t value);
 

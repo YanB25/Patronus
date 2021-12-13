@@ -955,4 +955,10 @@ void rdmaQueryDevice()
     printf("IBV_EXP_TUNNELED_ATOMIC_SUPPORTED: %d\n",
            exp_attr.tunneled_atomic_caps & IBV_EXP_TUNNELED_ATOMIC_SUPPORTED);
     printf("======= device attr end ====\n");
+
+    if (ibv_close_device(ctx))
+    {
+        perror("failed to close device");
+    }
+    ibv_free_device_list(deviceList);
 }

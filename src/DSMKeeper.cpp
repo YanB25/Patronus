@@ -216,7 +216,9 @@ void DSMKeeper::barrier(const std::string &barrierKey)
     memFetchAndAdd(key.c_str(), key.size());
     while (true)
     {
-        uint64_t v = std::stoull(memGet(key.c_str(), key.size()));
+        auto* ret = memGet(key.c_str(), key.size());
+        uint64_t v = std::stoull(ret);
+        free(ret);
         if (v == this->getServerNR())
         {
             return;
@@ -235,8 +237,19 @@ uint64_t DSMKeeper::sum(const std::string &sum_key, uint64_t value)
     for (int i = 0; i < this->getServerNR(); ++i)
     {
         key = key_prefix + std::to_string(i);
-        ret += *(uint64_t *) memGet(key.c_str(), key.size());
+        auto buf_ret = memGet(key.c_str(), key.size());
+        ret += *(uint64_t *) buf_ret;
+        free(buf_ret);
     }
 
     return ret;
+}
+
+DSMKeeper::~DSMKeeper()
+{
+    disconnectMemcached();
+    for (auto& rc: remoteCon)
+    {
+        rc.destroy();
+    }
 }

@@ -89,6 +89,7 @@ bool createContext(RdmaContext *context,
     context->lid = portAttr.lid;
 
     struct ibv_device_attr attr;
+    memset(&attr, 0, sizeof(attr));
     if (ibv_query_device(context->ctx, &attr))
     {
         perror("failed to query device.");
@@ -204,6 +205,7 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
         error("Allocate on-chip memory failed");
         return nullptr;
     }
+    ctx->dm = dm;
 
     /* Device memory registration as memory region */
     struct ibv_exp_reg_mr_in mr_in;
@@ -240,6 +242,13 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
 
 bool destroyMemoryRegionOnChip(ibv_mr *mr, ibv_exp_dm *dm)
 {
+    if (mr)
+    {
+        if (!destroyMemoryRegion(mr))
+        {
+            return false;
+        }
+    }
     if (dm)
     {
         if (ibv_exp_free_dm(dm))
@@ -248,7 +257,7 @@ bool destroyMemoryRegionOnChip(ibv_mr *mr, ibv_exp_dm *dm)
             return false;
         }
     }
-    return destroyMemoryRegion(mr);
+    return true;
 }
 
 bool createQueuePair(ibv_qp **qp,
