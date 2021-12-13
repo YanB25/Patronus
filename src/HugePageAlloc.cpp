@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include "Debug.h"
+#include "Common.h"
 void *hugePageAlloc(size_t size)
 {
     void *res = mmap(NULL,
@@ -21,4 +22,18 @@ void *hugePageAlloc(size_t size)
     }
 
     return res;
+}
+
+bool hugePageFree(void* ptr, size_t size)
+{
+    size_t align = 2 * 1024 * 1024;
+    CHECK((uint64_t) ptr % align == 0);
+    size = ROUND_UP(size, align);
+    CHECK(size % align == 0);
+    if (munmap(ptr, size))
+    {
+        perror("failed to free huge page");
+        return false;
+    }
+    return true;
 }

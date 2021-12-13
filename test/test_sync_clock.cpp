@@ -14,13 +14,13 @@ constexpr uint32_t kMachineNr = 2;
 
 void client(std::shared_ptr<DSM> dsm)
 {
-    auto& cm = dsm->clock_manager();
-    cm.init_sync_clock();
-    while (true)
-    {
-        sleep(1);
-        cm.sync_clock();
-    }
+    // auto& cm = dsm->clock_manager();
+    // cm.init_sync_clock();
+    // while (true)
+    // {
+    //     sleep(1);
+    //     cm.sync_clock();
+    // }
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -45,13 +45,13 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    auto& cm = dsm->clock_manager();
-    cm.init_sync_clock();
-    while (true)
-    {
-        sleep(1);
-        cm.sync_clock();
-    }
+    // auto& cm = dsm->clock_manager();
+    // cm.init_sync_clock();
+    // while (true)
+    // {
+    //     sleep(1);
+    //     cm.sync_clock();
+    // }
 }
 int main(int argc, char **argv)
 {

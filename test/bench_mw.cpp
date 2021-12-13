@@ -9,7 +9,7 @@
 // one node issues cas operations
 
 constexpr uint16_t kClientNodeId = 0;
-constexpr uint16_t kServerNodeId = 1;
+// constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
 void client(std::shared_ptr<DSM> dsm)

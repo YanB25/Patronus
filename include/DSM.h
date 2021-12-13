@@ -278,10 +278,10 @@ public:
         return size;
     }
 
-    ClockManager &clock_manager()
-    {
-        return clock_manager_;
-    }
+    // ClockManager &clock_manager()
+    // {
+    //     return clock_manager_;
+    // }
 
     DSM(const DSMConfig &conf);
     virtual ~DSM();
@@ -328,7 +328,7 @@ private:
     std::vector<DirectoryConnection> dirCon;
     std::unique_ptr<DSMKeeper> keeper;
 
-    ClockManager clock_manager_;
+    // ClockManager clock_manager_;
 
 public:
     bool is_register()

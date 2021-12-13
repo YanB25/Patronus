@@ -8,7 +8,7 @@ ThreadConnection::ThreadConnection(
     uint64_t cacheSize,
     uint32_t machineNR,
     const std::vector<RemoteConnection> &remoteInfo)
-    : threadID(threadID), remoteInfo(remoteInfo)
+    : threadID(threadID), remoteInfo(&remoteInfo)
 {
     createContext(&ctx);
 
@@ -38,23 +38,45 @@ ThreadConnection::ThreadConnection(
     }
 }
 
+ThreadConnection::~ThreadConnection()
+{
+    for (const auto& qps: QPs)
+    {
+        for (ibv_qp* qp: qps)
+        {
+            CHECK(destroyQueuePair(qp));
+        }
+    }
+    CHECK(destroyMemoryRegion(cacheMR));
+    if (message)
+    {
+        message->destroy();
+        delete message;
+    }
+    CHECK(destroyCompleteQueue(rpc_cq));
+    CHECK(destroyCompleteQueue(cq));
+    CHECK(destroyContext(&ctx));
+
+}
+
 void ThreadConnection::sendMessage2Dir(RawMessage *m,
                                        uint16_t node_id,
                                        uint16_t dir_id,
                                        bool sync)
 {
+    const auto& remoteInfoObj = *remoteInfo;
     if (!sync)
     {
         message->sendRawMessage(
             m,
-            remoteInfo[node_id].dirMessageQPN[dir_id],
-            remoteInfo[node_id].appToDirAh[threadID][dir_id]);
+            remoteInfoObj[node_id].dirMessageQPN[dir_id],
+            remoteInfoObj[node_id].appToDirAh[threadID][dir_id]);
     }
     else
     {
         message->syncSendRawMessage(
             m,
-            remoteInfo[node_id].dirMessageQPN[dir_id],
-            remoteInfo[node_id].appToDirAh[threadID][dir_id]);
+            remoteInfoObj[node_id].dirMessageQPN[dir_id],
+            remoteInfoObj[node_id].appToDirAh[threadID][dir_id]);
     }
 }

@@ -71,3 +71,23 @@ void DirectoryConnection::sendMessage2App(RawMessage *m,
                             remoteInfo[node_id].appMessageQPN[th_id],
                             remoteInfo[node_id].dirToAppAh[dirID][th_id]);
 }
+
+DirectoryConnection::~DirectoryConnection()
+{
+    for (const auto& qps: QPs)
+    {
+        for (ibv_qp* qp: qps)
+        {
+            CHECK(destroyQueuePair(qp));
+        }
+    }
+    CHECK(destroyMemoryRegion(this->lockMR));
+    CHECK(destroyMemoryRegion(this->dsmMR));
+    if (message)
+    {
+        message->destroy();
+    }
+    CHECK(destroyCompleteQueue(cq));
+    CHECK(destroyCompleteQueue(rpc_cq));
+    CHECK(destroyContext(&ctx));
+}

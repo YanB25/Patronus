@@ -17,7 +17,7 @@ AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
 
     send_cq = ibv_create_cq(ctx.ctx, 128, NULL, NULL, 0);
 
-    createQueuePair(&message, type, send_cq, cq, &ctx);
+    CHECK(createQueuePair(&message, type, send_cq, cq, &ctx));
     modifyUDtoRTS(message, &ctx);
 
     messagePool = hugePageAlloc(2 * messageNR * MESSAGE_SIZE);
@@ -25,6 +25,26 @@ AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
         (uint64_t) messagePool, 2 * messageNR * MESSAGE_SIZE, &ctx);
     sendPool = (char *) messagePool + messageNR * MESSAGE_SIZE;
     messageLkey = messageMR->lkey;
+
+    for (size_t i = 0; i < kBatchCount; ++i)
+    {
+        recvs[i] = nullptr;
+        recv_sgl[i] = nullptr;
+    }
+}
+
+void AbstractMessageConnection::destroy()
+{
+    CHECK(destroyMemoryRegion(messageMR));
+    CHECK(hugePageFree(messagePool, 2 * messageNR * MESSAGE_SIZE));
+    CHECK(destroyQueuePair(message));
+    CHECK(destroyCompleteQueue(send_cq));
+     
+    for (int i = 0; i < kBatchCount; ++i)
+    {
+        delete[] recvs[i];
+        delete[] recv_sgl[i];
+    }
 }
 
 void AbstractMessageConnection::initRecv()

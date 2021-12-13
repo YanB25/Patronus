@@ -59,6 +59,26 @@ struct RdmaContext
     RdmaContext() : ctx(NULL), pd(NULL), mw_type(IBV_MW_TYPE_1)
     {
     }
+    RdmaContext& operator=(const RdmaContext&) = delete;
+    RdmaContext(const RdmaContext&) = delete;
+    RdmaContext& operator=(RdmaContext&& rhs)
+    {
+        devIndex = std::move(rhs.devIndex);
+        port = std::move(rhs.port);
+        gidIndex = std::move(rhs.gidIndex);
+        ctx = std::move(rhs.ctx);
+        rhs.ctx = nullptr;
+        pd = std::move(rhs.pd);
+        rhs.pd = nullptr;
+        lid = std::move(rhs.lid);
+        gid = std::move(rhs.gid);
+        mw_type = std::move(rhs.mw_type);
+        return *this;
+    }
+    RdmaContext(RdmaContext&& rhs)
+    {
+        *this = std::move(rhs);
+    }
 };
 
 struct Region
@@ -74,12 +94,14 @@ bool createContext(RdmaContext *context,
                    uint8_t port = 1,
                    int gidIndex = 1,
                    uint8_t devIndex = 0);
-bool destoryContext(RdmaContext *context);
+bool destroyContext(RdmaContext *context);
 
 ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx);
+bool destroyMemoryRegion(ibv_mr* mr);
 ibv_mr *createMemoryRegionOnChip(uint64_t mm,
                                  uint64_t mmSize,
                                  RdmaContext *ctx);
+bool destroyMemoryRegionOnChip(struct ibv_mr* mr, struct ibv_exp_dm *dm);
 
 bool createQueuePair(ibv_qp **qp,
                      ibv_qp_type mode,
@@ -95,6 +117,7 @@ bool createQueuePair(ibv_qp **qp,
                      RdmaContext *context,
                      uint32_t qpsMaxDepth = 128,
                      uint32_t maxInlineData = 0);
+bool destroyQueuePair(ibv_qp *qp);
 
 bool createDCTarget(ibv_exp_dct **dct,
                     ibv_cq *cq,
@@ -129,6 +152,7 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                    uint16_t remoteLid,
                    uint8_t *remoteGid,
                    RdmaContext *context);
+bool destroyCompleteQueue(ibv_cq* cq);
 
 //// Operation.cpp
 using WcHandler = std::function<void(ibv_wc*)>;

@@ -18,6 +18,11 @@ void RawMessageConnection::initSend()
 {
 }
 
+void RawMessageConnection::destroy()
+{
+    AbstractMessageConnection::destroy();
+}
+
 void RawMessageConnection::syncSendRawMessage(RawMessage *m,
                                               uint32_t remoteQPN,
                                               ibv_ah *ah)

@@ -21,8 +21,7 @@ std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
     return future::make_unique<DSM>(conf);
 }
 
-DSM::DSM(const DSMConfig &conf)
-    : conf(conf), cache(conf.cacheConfig), clock_manager_(this)
+DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize);
 

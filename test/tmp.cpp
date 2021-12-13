@@ -1,11 +1,32 @@
 #include "util/monitor.h"
+
+class Son
+{
+public:
+	Son() = default;
+	~Son()
+	{
+		std::cerr << "Son" << std::endl;
+	}
+};
+class Father
+{
+public:
+    Father(const int& a): son_(std::make_shared<Son>()), a(a)
+	{
+	}
+    ~Father()
+    {
+        std::cerr << "father" << std::endl;
+    }
+	Father& operator=(Father&& rhs)
+	{
+		// a = std::move(rhs);
+	}
+	std::shared_ptr<Son> son_;
+private:
+	const int& a;
+};
 int main()
 {
-    std::atomic<bool> b{false};
-    std::atomic<size_t> u{100};
-    bench::Column<bool> cb("cb", "cb", &b);
-    bench::Column<size_t> cu("cu", "cu", &u);
-    printf("%s\n", cb.get_printable_value().c_str());
-    printf("%s\n", cu.get_printable_value().c_str());
-
 }

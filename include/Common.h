@@ -189,3 +189,5 @@ struct Data
 } __attribute__((packed));
 
 #endif /* __COMMON_H__ */
+
+#define ROUND_UP(num, multiple) ceil(((double) (num)) / (multiple)) * (multiple)

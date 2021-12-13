@@ -99,7 +99,9 @@ bool createContext(RdmaContext *context,
         if ((flag & IBV_DEVICE_MEM_WINDOW_TYPE_2A) ||
             (flag & IBV_DEVICE_MEM_WINDOW_TYPE_2B))
         {
-            warn("TODO: Although device seems to support memory window TYPE_2, we fall back to TYPE_1");
+            warn(
+                "TODO: Although device seems to support memory window TYPE_2, "
+                "we fall back to TYPE_1");
             context->mw_type = IBV_MW_TYPE_1;
             // context->mw_type = IBV_MW_TYPE_2;
         }
@@ -136,14 +138,14 @@ CreateResourcesExit:
     return false;
 }
 
-bool destoryContext(RdmaContext *context)
+bool destroyContext(RdmaContext *context)
 {
     bool rc = true;
     if (context->pd)
     {
         if (ibv_dealloc_pd(context->pd))
         {
-            error("Failed to deallocate PD");
+            perror("Failed to deallocate PD");
             rc = false;
         }
     }
@@ -151,7 +153,7 @@ bool destoryContext(RdmaContext *context)
     {
         if (ibv_close_device(context->ctx))
         {
-            error("failed to close device context");
+            perror("failed to close device context");
             rc = false;
         }
     }
@@ -166,7 +168,8 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
                     (void *) mm,
                     mmSize,
                     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-                        IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND);
+                        IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC |
+                        IBV_ACCESS_MW_BIND);
 
     if (!mr)
     {
@@ -174,6 +177,19 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     }
 
     return mr;
+}
+
+bool destroyMemoryRegion(ibv_mr *mr)
+{
+    if (mr)
+    {
+        if (ibv_dereg_mr(mr))
+        {
+            perror("failed to destroy mr");
+            return false;
+        }
+    }
+    return true;
 }
 
 ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
@@ -220,6 +236,19 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     free(buffer);
 
     return mr;
+}
+
+bool destroyMemoryRegionOnChip(ibv_mr *mr, ibv_exp_dm *dm)
+{
+    if (dm)
+    {
+        if (ibv_exp_free_dm(dm))
+        {
+            perror("failed to free dm");
+            return false;
+        }
+    }
+    return destroyMemoryRegion(mr);
 }
 
 bool createQueuePair(ibv_qp **qp,
@@ -278,6 +307,18 @@ bool createQueuePair(ibv_qp **qp,
 {
     return createQueuePair(
         qp, mode, cq, cq, context, qpsMaxDepth, maxInlineData);
+}
+bool destroyQueuePair(ibv_qp *qp)
+{
+    if (qp)
+    {
+        if (ibv_destroy_qp(qp))
+        {
+            perror("failed to destroy QP");
+            return false;
+        }
+    }
+    return true;
 }
 
 bool createDCTarget(ibv_exp_dct **dct,
@@ -343,4 +384,17 @@ void fillAhAttr(ibv_ah_attr *attr,
     attr->grh.hop_limit = 1;
     attr->grh.sgid_index = context->gidIndex;
     attr->grh.traffic_class = 0;
+}
+
+bool destroyCompleteQueue(ibv_cq *cq)
+{
+    if (cq)
+    {
+        if (ibv_destroy_cq(cq))
+        {
+            perror("failed to destroy cq");
+            return false;
+        }
+    }
+    return true;
 }
