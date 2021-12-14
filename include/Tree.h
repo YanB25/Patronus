@@ -266,7 +266,7 @@ private:
     Header hdr;
     InternalEntry records[kInternalCardinality];
 
-    uint8_t padding[4];
+    [[maybe_unused]] uint8_t padding[4];
     uint8_t rear_version;
 
     friend class Tree;
@@ -361,7 +361,7 @@ private:
     Header hdr;
     LeafEntry records[kLeafCardinality];
 
-    uint8_t padding[8];
+    [[maybe_unused]] uint8_t padding[8];
     uint8_t rear_version;
 
     friend class Tree;

@@ -53,7 +53,7 @@ private:
         Key k;
         GlobalAddress v;
     };
-    Item *table;
+    [[maybe_unused]] Item *table;
     std::map<Key, GlobalAddress> t;
 };
 

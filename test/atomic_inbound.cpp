@@ -78,7 +78,7 @@ void send_cas(int node_id, int thread_id)
     }
 }
 
-void send_skew_cas(int node_id, int thread_id)
+void send_skew_cas([[maybe_unused]] int node_id, int thread_id)
 {
     const int kCounterBucket = 4096;
     const uint64_t seed = time(nullptr);

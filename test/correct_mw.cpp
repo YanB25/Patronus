@@ -116,7 +116,7 @@ void server(std::shared_ptr<DSM> dsm)
     const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
     info("get buffer addr: %p", buffer);
-    size_t max_size = buf_conf.size;
+    // size_t max_size = buf_conf.size;
 
     loop_expect(buffer + kOffset, (char *) &kMagic, sizeof(kMagic));
 
@@ -149,7 +149,7 @@ void server(std::shared_ptr<DSM> dsm)
         sleep(1);
     }
 }
-int main(int argc, char **argv)
+int main()
 {
     // if (argc < 3)
     // {

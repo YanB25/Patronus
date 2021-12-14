@@ -20,7 +20,8 @@ public:
     {
         return AllocateAligned(bytes);
     }
-    char *AllocateAligned(size_t bytes, size_t huge_page_size = 0)
+    // bytes, huge_page_size
+    char *AllocateAligned(size_t bytes, size_t = 0)
     {
         return (char *)aligned_alloc(8, bytes);
     }

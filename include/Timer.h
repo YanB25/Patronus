@@ -1,9 +1,37 @@
 #if !defined(_TIMER_H_)
 #define _TIMER_H_
 
+#include <time.h>
+
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <time.h>
+#include <iostream>
+#include <string>
+#include <unordered_map>
+
+#define DEFINE_VARNAME(base, line) DEFINE_VARNAME_CONCAT(base, line)
+#define DEFINE_VARNAME_CONCAT(base, line) base##line
+#define VAR_OCCURENCE DEFINE_VARNAME(__occurence, __LINE__)
+#define VAR_MAGIC_ENABLED DEFINE_VARNAME(__enabled, __LINE__)
+
+#define ENABLED_FIRST_N(enabled, n)                     \
+    do                                            \
+    {                                             \
+        static std::atomic<int> VAR_OCCURENCE{0}; \
+        int __entered_time = VAR_OCCURENCE++;     \
+        if (__entered_time < n)                   \
+        {                                         \
+            enabled = true;                       \
+        }                                         \
+        else                                      \
+        {                                         \
+            enabled = false;                      \
+        }                                         \
+    } while (0)
+
+#define ENABLED_ONCE(enabled) ENABLED_FIRST_N(enabled, 1)
 
 class Timer
 {
@@ -28,7 +56,6 @@ public:
 
     void print()
     {
-
         if (ns < 1000)
         {
             printf("%ld ns per loop\n", ns);
@@ -70,6 +97,89 @@ private:
     timespec s, e;
     uint64_t loop;
     uint64_t ns;
+};
+
+template <bool kEnabled = true>
+class ContTimer;
+
+template <>
+class ContTimer<true>
+{
+public:
+    ContTimer(const std::string &name, const std::string &step = "Start");
+    void pin(const std::string this_step);
+    ContTimer operator=(const ContTimer &) = delete;
+    ContTimer(const ContTimer &) = delete;
+
+    void report(std::ostream & = std::cout) const;
+    ~ContTimer();
+
+private:
+    std::string name_;
+    std::string step_;
+    std::chrono::time_point<std::chrono::steady_clock> start_;
+    std::chrono::time_point<std::chrono::steady_clock> pin_;
+    std::unordered_map<std::string, uint64_t> event_ns_;
+};
+
+template <>
+class ContTimer<false>
+{
+public:
+    ContTimer(const std::string &, const std::string & = "Start")
+    {
+    }
+    void pin(const std::string)
+    {
+    }
+    ContTimer operator=(const ContTimer &) = delete;
+    ContTimer(const ContTimer &) = delete;
+    ~ContTimer()
+    {
+    }
+    void report(std::ostream & = std::cout) const;
+
+private:
+};
+
+template <bool Enabled>
+class OnceContTimer;
+
+#define DefOnceContTimer(name, enabled, msg) \
+    bool VAR_MAGIC_ENABLED = false;       \
+    ENABLED_ONCE(VAR_MAGIC_ENABLED);      \
+    OnceContTimer<enabled> name(msg, VAR_MAGIC_ENABLED)
+
+template <bool Enabled>
+class OnceContTimer
+{
+public:
+    OnceContTimer(const std::string &name, bool enabled)
+        : timer_(name, "Start"), enabled_(enabled)
+    {
+    }
+    void pin(const std::string this_step)
+    {
+        if (enabled_)
+        {
+            timer_.pin(this_step);
+        }
+    }
+    OnceContTimer operator=(const OnceContTimer &) = delete;
+    OnceContTimer(const OnceContTimer &) = delete;
+
+    void report(std::ostream &os = std::cout) const
+    {
+        if (enabled_)
+        {
+            timer_.report(os);
+        }
+    }
+    ~OnceContTimer() = default;
+
+private:
+    ContTimer<Enabled> timer_;
+    bool enabled_;
 };
 
 #endif  // _TIMER_H_

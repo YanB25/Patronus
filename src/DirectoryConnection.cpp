@@ -1,6 +1,7 @@
 #include "DirectoryConnection.h"
 
 #include "Connection.h"
+#include "Timer.h"
 
 DirectoryConnection::DirectoryConnection(
     uint16_t dirID,
@@ -74,6 +75,7 @@ void DirectoryConnection::sendMessage2App(RawMessage *m,
 
 DirectoryConnection::~DirectoryConnection()
 {
+    ContTimer<config::kMonitorControlPath> timer("~DirectoryConnection");
     for (const auto& qps: QPs)
     {
         for (ibv_qp* qp: qps)
@@ -81,16 +83,25 @@ DirectoryConnection::~DirectoryConnection()
             CHECK(destroyQueuePair(qp));
         }
     }
+    timer.pin("destroy QPs");
     if (dirID == 0)
     {
         CHECK(destroyMemoryRegionOnChip(this->lockMR, ctx.dm));
     }
+    timer.pin("destroy on-chip MRs");
     CHECK(destroyMemoryRegion(this->dsmMR));
+    timer.pin("destroy off-chip MRs");
+
     if (message)
     {
         message->destroy();
     }
+    timer.pin("destroy message");
+
     CHECK(destroyCompleteQueue(cq));
     CHECK(destroyCompleteQueue(rpc_cq));
+    timer.pin("destroy cqs");
     CHECK(destroyContext(&ctx));
+    timer.pin("destroy context (dealloc PD, close device)");
+    timer.report();
 }

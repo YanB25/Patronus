@@ -89,7 +89,7 @@ void client(std::shared_ptr<DSM> dsm)
         size_t should_recv = std::min(remain_mw, kSyncBatch);
         for (size_t i = 0; i < should_recv; ++i)
         {
-            uint32_t rkey = *(uint32_t *) dsm->recv();
+            [[maybe_unused]] uint32_t rkey = *(uint32_t *) dsm->recv();
         }
         dsm->send(nullptr, 0, kServerNodeId);
         remain_mw -= should_recv;
@@ -106,7 +106,6 @@ void client(std::shared_ptr<DSM> dsm)
     const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
 
-    size_t remain = kMWNr;
     auto *mw = dsm->alloc_mw();
     for (size_t i = 0; i < kMWNr; ++i)
     {
@@ -126,7 +125,7 @@ void client(std::shared_ptr<DSM> dsm)
     }
     dsm->free_mw(mw);
 }
-int main(int argc, char **argv)
+int main()
 {
     // if (argc < 3)
     // {

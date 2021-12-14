@@ -32,7 +32,7 @@ public:
     void bench();
 
 private:
-    uint64_t cache_size;  // MB;
+    [[maybe_unused]] uint64_t cache_size;  // MB;
     std::atomic<int64_t> free_page_cnt;
     std::atomic<int64_t> skiplist_node_cnt;
     int64_t all_page_cnt;

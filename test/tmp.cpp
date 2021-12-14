@@ -19,13 +19,14 @@ public:
     {
         std::cerr << "father" << std::endl;
     }
-	Father& operator=(Father&& rhs)
+	Father& operator=(Father&&)
 	{
 		// a = std::move(rhs);
+		return *this;
 	}
 	std::shared_ptr<Son> son_;
 private:
-	const int& a;
+	[[maybe_unused]] const int& a;
 };
 int main()
 {

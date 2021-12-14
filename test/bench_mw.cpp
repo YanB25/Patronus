@@ -12,7 +12,7 @@ constexpr uint16_t kClientNodeId = 0;
 // constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-void client(std::shared_ptr<DSM> dsm)
+void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
 {
     info("client: TODO");
 }
@@ -126,7 +126,7 @@ void server(std::shared_ptr<DSM> dsm,
         timer.print();
     }
 }
-int main(int argc, char **argv)
+int main()
 {
     // if (argc < 3)
     // {

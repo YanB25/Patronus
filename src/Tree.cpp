@@ -148,7 +148,7 @@ void Tree::print_verbose()
     }
 }
 
-inline void Tree::before_operation(CoroContext *cxt, int coro_id)
+inline void Tree::before_operation(CoroContext *, int coro_id)
 {
     for (size_t i = 0; i < define::kMaxLevelOfTree; ++i)
     {
@@ -297,6 +297,7 @@ next:
 
 GlobalAddress Tree::query_cache(const Key &k)
 {
+    std::ignore = k;
 #ifdef TEST_SINGLE_THREAD
     return mapping.get(k);
 #else
@@ -308,7 +309,7 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr,
                                 uint64_t tag,
                                 uint64_t *buf,
                                 CoroContext *cxt,
-                                int coro_id)
+                                [[maybe_unused]] int coro_id)
 {
     auto &pattern_cnt = pattern[dsm->getMyThreadID()][lock_addr.nodeID];
 
@@ -412,8 +413,8 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr,
 }
 
 inline void Tree::unlock_addr(GlobalAddress lock_addr,
-                              uint64_t tag,
-                              uint64_t *buf,
+                              [[maybe_unused]] uint64_t tag,
+                              [[maybe_unused]] uint64_t *buf,
                               CoroContext *cxt,
                               int coro_id,
                               bool async)

@@ -67,7 +67,7 @@ public:
 
 private:
     GlobalAddress start;
-    size_t size;
+    [[maybe_unused]] size_t size;
 
     bool *bitmap;
     size_t bitmap_len;

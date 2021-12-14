@@ -1,6 +1,7 @@
 #include "ThreadConnection.h"
 
 #include "Connection.h"
+#include "Timer.h"
 
 ThreadConnection::ThreadConnection(
     uint16_t threadID,
@@ -40,6 +41,8 @@ ThreadConnection::ThreadConnection(
 
 ThreadConnection::~ThreadConnection()
 {
+    DefOnceContTimer(timer, config::kMonitorControlPath, "~ThreadConnection");
+
     for (const auto& qps: QPs)
     {
         for (ibv_qp* qp: qps)
@@ -47,16 +50,21 @@ ThreadConnection::~ThreadConnection()
             CHECK(destroyQueuePair(qp));
         }
     }
+    timer.pin("destroy QPs");
     CHECK(destroyMemoryRegion(cacheMR));
+    timer.pin("destroy MRs");
     if (message)
     {
         message->destroy();
         delete message;
     }
+    timer.pin("destroy messages");
     CHECK(destroyCompleteQueue(rpc_cq));
     CHECK(destroyCompleteQueue(cq));
+    timer.pin("destroy CQs");
     CHECK(destroyContext(&ctx));
-
+    timer.pin("destroy ctx");
+    timer.report();
 }
 
 void ThreadConnection::sendMessage2Dir(RawMessage *m,

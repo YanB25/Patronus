@@ -11,7 +11,7 @@
 #include "zipf.h"
 
 // #define USE_CORO
-const int kCoroCnt = 6;
+[[maybe_unused]] const int kCoroCnt = 6;
 
 extern uint64_t cache_miss[MAX_APP_THREAD][8];
 extern uint64_t cache_hit[MAX_APP_THREAD][8];
@@ -74,8 +74,8 @@ public:
     }
 
 private:
-    int coro_id;
-    DSM *dsm;
+    [[maybe_unused]] int coro_id;
+    [[maybe_unused]] DSM *dsm;
     int id;
 
     unsigned int seed;

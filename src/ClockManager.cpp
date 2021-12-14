@@ -8,25 +8,6 @@ ClockManager::ClockManager(DSM *dsm) : dsm_(dsm)
           "has different frequency. Don't want to walk around. Maybe I just "
           "can use std::chrono.");
 }
-uint64_t ClockManager::rdtsc()
-{
-    uint32_t lo = 0;
-    uint32_t hi = 0;
-    // We cannot use "=A", since this would use %rax on x86_64
-    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-    return ((uint64_t) hi << 32) | lo;
-}
-uint64_t ClockManager::clock()
-{
-    return rdtsc() + offset_;
-}
-
-void ClockManager::set_offset(int64_t offset)
-{
-    dinfo("[clock] setting offset to %ld", offset);
-    offset_ = offset;
-}
-
 void ClockManager::init_sync_clock()
 {
     if (dsm_->get_node_id() == 0)

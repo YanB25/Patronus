@@ -10,10 +10,10 @@
 // one node issues cas operations
 
 constexpr uint16_t kClientNodeId = 0;
-constexpr uint16_t kServerNodeId = 1;
+[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-int main(int argc, char **argv)
+int main()
 {
     // if (argc < 3)
     // {

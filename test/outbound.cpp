@@ -5,7 +5,7 @@
 #include "zipf.h"
 
 const int kMaxTestThread = 24;
-const int kBucketPerThread = 32;
+[[maybe_unused]] const int kBucketPerThread = 32;
 
 std::thread th[kMaxTestThread];
 uint64_t tp_write_counter[kMaxTestThread][8];

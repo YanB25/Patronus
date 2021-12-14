@@ -9,10 +9,10 @@
 // one node issues cas operations
 
 constexpr uint16_t kClientNodeId = 0;
-constexpr uint16_t kServerNodeId = 1;
+[[maybe_unused]]constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-void client(std::shared_ptr<DSM> dsm)
+void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
 {
     // auto& cm = dsm->clock_manager();
     // cm.init_sync_clock();
@@ -43,7 +43,7 @@ uint64_t rand_int(uint64_t min, uint64_t max)
     return dist(rand_generator());
 }
 
-void server(std::shared_ptr<DSM> dsm)
+void server([[maybe_unused]] std::shared_ptr<DSM> dsm)
 {
     // auto& cm = dsm->clock_manager();
     // cm.init_sync_clock();
@@ -53,7 +53,7 @@ void server(std::shared_ptr<DSM> dsm)
     //     cm.sync_clock();
     // }
 }
-int main(int argc, char **argv)
+int main()
 {
     // if (argc < 3)
     // {
