@@ -304,9 +304,19 @@ public:
     bool recover_dir_qp(int node_id, int thread_id);
     bool recover_th_qp(int node_id);
 
+    void roll_dir()
+    {
+        cur_dir_ = (cur_dir_ + 1) % NR_DIRECTORY;
+    }
+
 private:
     void initRDMAConnection();
     void fill_keys_dest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip);
+
+    size_t get_cur_dir() const
+    {
+        return cur_dir_;
+    }
 
     DSMConfig conf;
     std::atomic<int> appID{0};
@@ -330,7 +340,7 @@ private:
 
     // if NR_DIRECTORY is not 1, there is multiple dir to use.
     // this val chooses the current in-use dir.
-    size_t cur_dir_{0};
+    std::atomic<size_t> cur_dir_{0};
 
     // ClockManager clock_manager_;
 
@@ -379,7 +389,7 @@ public:
      * Do not use in the critical path.
      * A handy control path for sending/recving messages.
      * msg should be no longer than 32 byte.
-     * 
+     *
      * Do not interleave @sync=true and @sync=false.
      */
     void send(const char *buf,
@@ -388,6 +398,8 @@ public:
               uint16_t dir_id = 0,
               bool sync = false)
     {
+        dwarn(
+            "TODO: now using dir_id = 0 by default. let rpc use distinct dir.");
         auto buffer = (RawMessage *) iCon->message->getSendPool();
         buffer->node_id = myNodeID;
         buffer->app_id = thread_id;
@@ -397,7 +409,8 @@ public:
     }
     char *try_recv()
     {
-        size_t cur_dir = cur_dir_;
+        // size_t cur_dir = get_cur_dir();
+        size_t cur_dir = 0;
         struct ibv_wc wc;
         ibv_cq *cq = dirCon[cur_dir].rpc_cq;
         int ret = ibv_poll_cq(cq, 1, &wc);
@@ -417,7 +430,9 @@ public:
     }
     char *recv()
     {
-        size_t cur_dir = cur_dir_;
+        // size_t cur_dir = get_cur_dir();
+        dwarn("TODO: now always use the first as message dir.");
+        size_t cur_dir = 0;
 
         struct ibv_wc wc;
         pollWithCQ(dirCon[cur_dir].rpc_cq, 1, &wc);

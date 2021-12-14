@@ -76,7 +76,7 @@ bool DSM::recover_th_qp(int node_id)
 
 bool DSM::recover_dir_qp(int node_id, int thread_id)
 {
-    size_t cur_dir = cur_dir_;
+    size_t cur_dir = get_cur_dir();
 
     ibv_qp *qp = get_dir_qp(node_id, thread_id);
     dinfo("Recovering dir qp %p. node_id: %d, thread_id: %d",
@@ -101,12 +101,12 @@ bool DSM::recover_dir_qp(int node_id, int thread_id)
 
 ibv_qp *DSM::get_dir_qp(int node_id, int thread_id)
 {
-    size_t cur_dir = cur_dir_;
+    size_t cur_dir = get_cur_dir();
     return dirCon[cur_dir].QPs[thread_id][node_id];
 }
 ibv_qp *DSM::get_th_qp(int node_id)
 {
-    size_t cur_dir = cur_dir_;
+    size_t cur_dir = get_cur_dir();
     return iCon->QPs[cur_dir][node_id];
 }
 
@@ -921,7 +921,7 @@ bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
 
 ibv_mw *DSM::alloc_mw()
 {
-    size_t cur_dir = cur_dir_;
+    size_t cur_dir = get_cur_dir();
 
     struct RdmaContext *ctx = &dirCon[cur_dir].ctx;
     struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
@@ -950,7 +950,7 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
 {
     // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
     // iCon->QPs[0].size(), iCon);
-    size_t cur_dir = cur_dir_;
+    size_t cur_dir = get_cur_dir();
 
     struct ibv_qp *qp = dirCon[cur_dir].QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
@@ -963,7 +963,7 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   const char *buffer,
                                   size_t size)
 {
-    size_t cur_dir = cur_dir_;
+    size_t cur_dir = get_cur_dir();
     struct ibv_qp *qp = dirCon[cur_dir].QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
         qp, mw, dirCon[cur_dir].dsmMR, (uint64_t) buffer, size, true);
