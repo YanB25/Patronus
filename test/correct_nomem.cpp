@@ -12,8 +12,10 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-constexpr static size_t kRpcNr = 20 * define::M;
-constexpr static size_t kMWNr = 100 * define::M;
+constexpr static size_t kRpcNr = 2 * define::M;
+constexpr static size_t kMWNr = 200 * define::M;
+// constexpr static size_t kRpcNr = 200;
+// constexpr static size_t kMWNr = 1000;
 constexpr static size_t kSyncBatch = 64;
 constexpr static size_t kBindSize = 64;
 
@@ -116,12 +118,12 @@ void client(std::shared_ptr<DSM> dsm)
         {
             info("Finish alloc/free mw for 1k. Now: %zu", i);
         }
-        if (i % (20 * define::K) == 0)
-        {
-            info("Finish 20K. sleep 10s for NIC...");
-            sleep(10);
-            info("Wakeup");
-        }
+        // if (i % (20 * define::K) == 0)
+        // {
+        //     info("Finish 20K. sleep 10s for NIC...");
+        //     sleep(10);
+        //     info("Wakeup");
+        // }
     }
     dsm->free_mw(mw);
 }

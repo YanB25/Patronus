@@ -27,7 +27,15 @@ void DSMKeeper::initLocalMeta()
     {
         exchangeMeta.dirTh[i].lid = dirCon[i].ctx.lid;
         exchangeMeta.dirTh[i].rKey = dirCon[i].dsmMR->rkey;
-        exchangeMeta.dirTh[i].dm_rkey = dirCon[i].lockMR->rkey;
+        // only enable DM for the first DirCon.
+        if (i == 0)
+        {
+            exchangeMeta.dirTh[i].dm_rkey = dirCon[i].lockMR->rkey;
+        }
+        else
+        {
+            exchangeMeta.dirTh[i].dm_rkey = 0;
+        }
         memcpy((char *) exchangeMeta.dirTh[i].gid,
                (char *) (&dirCon[i].ctx.gid),
                16 * sizeof(uint8_t));
@@ -60,7 +68,8 @@ bool DSMKeeper::connectNode(uint16_t remoteID)
     return true;
 }
 
-void DSMKeeper::snapshotExchangeMeta(uint16_t remoteID, const ExchangeMeta& meta)
+void DSMKeeper::snapshotExchangeMeta(uint16_t remoteID,
+                                     const ExchangeMeta &meta)
 {
     snapshot_exchange_meta_[remoteID] = meta;
     // should be bit-wise equal.
@@ -216,7 +225,7 @@ void DSMKeeper::barrier(const std::string &barrierKey)
     memFetchAndAdd(key.c_str(), key.size());
     while (true)
     {
-        auto* ret = memGet(key.c_str(), key.size());
+        auto *ret = memGet(key.c_str(), key.size());
         uint64_t v = std::stoull(ret);
         free(ret);
         if (v == this->getServerNR())
@@ -248,7 +257,7 @@ uint64_t DSMKeeper::sum(const std::string &sum_key, uint64_t value)
 DSMKeeper::~DSMKeeper()
 {
     disconnectMemcached();
-    for (auto& rc: remoteCon)
+    for (auto &rc : remoteCon)
     {
         rc.destroy();
     }

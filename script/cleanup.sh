@@ -1,8 +1,10 @@
 #!/bin/bash
 . env.sh
-ssh root@$1 "killall bench_mw"
-ssh root@$1 "killall correct_mw"
-ssh root@$1 "killall bench_mw_rw"
-ssh root@$1 "killall correct_nomem"
-ssh root@$1 "killall test_sync_clock"
-ssh root@$1 "killall trivial"
+
+cd ../build
+# collect all the files as an array
+arr=(*)
+# equivalent to ' '.join(arr)
+str=$( IFS=$' '; echo "${arr[*]}" )
+# kill them all.
+ssh root@$1 "killall $str"

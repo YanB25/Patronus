@@ -137,7 +137,9 @@ public:
     ~ContTimer()
     {
     }
-    void report(std::ostream & = std::cout) const;
+    void report(std::ostream & = std::cout) const
+    {
+    }
 
 private:
 };

@@ -76,6 +76,8 @@ bool DSM::recover_th_qp(int node_id)
 
 bool DSM::recover_dir_qp(int node_id, int thread_id)
 {
+    size_t cur_dir = cur_dir_;
+
     ibv_qp *qp = get_dir_qp(node_id, thread_id);
     dinfo("Recovering dir qp %p. node_id: %d, thread_id: %d",
           qp,
@@ -86,7 +88,7 @@ bool DSM::recover_dir_qp(int node_id, int thread_id)
                              ex.appRcQpn2dir[thread_id][0],
                              ex.appTh[thread_id].lid,
                              ex.appTh[thread_id].gid,
-                             &dirCon[0].ctx))
+                             &dirCon[cur_dir].ctx))
     {
         error("failed to modify dir QP to normal state. node: %d, tid: %d",
               node_id,
@@ -99,11 +101,13 @@ bool DSM::recover_dir_qp(int node_id, int thread_id)
 
 ibv_qp *DSM::get_dir_qp(int node_id, int thread_id)
 {
-    return dirCon[0].QPs[thread_id][node_id];
+    size_t cur_dir = cur_dir_;
+    return dirCon[cur_dir].QPs[thread_id][node_id];
 }
 ibv_qp *DSM::get_th_qp(int node_id)
 {
-    return iCon->QPs[0][node_id];
+    size_t cur_dir = cur_dir_;
+    return iCon->QPs[cur_dir][node_id];
 }
 
 void DSM::registerThread()
@@ -917,8 +921,9 @@ bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
 
 ibv_mw *DSM::alloc_mw()
 {
-    DCHECK(dirCon.size() == 1, "Only support 1 dir currently.");
-    struct RdmaContext *ctx = &dirCon[0].ctx;
+    size_t cur_dir = cur_dir_;
+
+    struct RdmaContext *ctx = &dirCon[cur_dir].ctx;
     struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
     if (!mw)
     {
@@ -945,10 +950,11 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
 {
     // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
     // iCon->QPs[0].size(), iCon);
-    DCHECK(dirCon.size() == 1, "currently only support one dirCon");
-    struct ibv_qp *qp = dirCon[0].QPs[target_thread_id][target_node_id];
+    size_t cur_dir = cur_dir_;
+
+    struct ibv_qp *qp = dirCon[cur_dir].QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
-        qp, mw, dirCon[0].dsmMR, (uint64_t) buffer, size, false);
+        qp, mw, dirCon[cur_dir].dsmMR, (uint64_t) buffer, size, false);
     return rkey != 0;
 }
 bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
@@ -957,16 +963,16 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   const char *buffer,
                                   size_t size)
 {
-    CHECK(dirCon.size() == 1, "currently only support one dirCon");
-    struct ibv_qp *qp = dirCon[0].QPs[target_thread_id][target_node_id];
+    size_t cur_dir = cur_dir_;
+    struct ibv_qp *qp = dirCon[cur_dir].QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
-        qp, mw, dirCon[0].dsmMR, (uint64_t) buffer, size, true);
+        qp, mw, dirCon[cur_dir].dsmMR, (uint64_t) buffer, size, true);
     if (rkey == 0)
     {
         return false;
     }
     struct ibv_wc wc;
-    int ret = pollWithCQ(dirCon[0].cq, 1, &wc) == 1;
+    int ret = pollWithCQ(dirCon[cur_dir].cq, 1, &wc) == 1;
     if (ret < 0)
     {
         rdmaQueryQueuePair(qp);

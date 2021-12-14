@@ -75,6 +75,8 @@ struct RdmaContext
         lid = std::move(rhs.lid);
         gid = std::move(rhs.gid);
         mw_type = std::move(rhs.mw_type);
+        dm = std::move(rhs.dm);
+        rhs.dm = nullptr;
         return *this;
     }
     RdmaContext(RdmaContext&& rhs)

@@ -328,6 +328,10 @@ private:
     std::vector<DirectoryConnection> dirCon;
     std::unique_ptr<DSMKeeper> keeper;
 
+    // if NR_DIRECTORY is not 1, there is multiple dir to use.
+    // this val chooses the current in-use dir.
+    size_t cur_dir_{0};
+
     // ClockManager clock_manager_;
 
 public:
@@ -393,9 +397,9 @@ public:
     }
     char *try_recv()
     {
-        CHECK(dirCon.size() == 1);
+        size_t cur_dir = cur_dir_;
         struct ibv_wc wc;
-        ibv_cq *cq = dirCon[0].rpc_cq;
+        ibv_cq *cq = dirCon[cur_dir].rpc_cq;
         int ret = ibv_poll_cq(cq, 1, &wc);
         if (ret < 0)
         {
@@ -406,21 +410,22 @@ public:
         {
             CHECK(wc.status == IBV_WC_SUCCESS);
             CHECK(wc.opcode == IBV_WC_RECV);
-            auto *m = (RawMessage *) dirCon[0].message->getMessage();
+            auto *m = (RawMessage *) dirCon[cur_dir].message->getMessage();
             return m->inlined_buffer;
         }
         return nullptr;
     }
     char *recv()
     {
-        CHECK(dirCon.size() == 1);
+        size_t cur_dir = cur_dir_;
+
         struct ibv_wc wc;
-        pollWithCQ(dirCon[0].rpc_cq, 1, &wc);
+        pollWithCQ(dirCon[cur_dir].rpc_cq, 1, &wc);
         switch (int(wc.opcode))
         {
         case IBV_WC_RECV:
         {
-            auto *m = (RawMessage *) dirCon[0].message->getMessage();
+            auto *m = (RawMessage *) dirCon[cur_dir].message->getMessage();
             return m->inlined_buffer;
         }
         default:

@@ -248,9 +248,8 @@ bool destroyMemoryRegionOnChip(ibv_mr *mr, ibv_exp_dm *dm)
         {
             return false;
         }
-    }
-    if (dm)
-    {
+        CHECK(dm != nullptr,
+              "If dm is nullptr, please use regular destroyMemoryRegion.");
         if (ibv_exp_free_dm(dm))
         {
             perror("failed to free dm");
