@@ -11,18 +11,24 @@ ThreadConnection::ThreadConnection(
     const std::vector<RemoteConnection> &remoteInfo)
     : threadID(threadID), remoteInfo(&remoteInfo)
 {
+    DefOnceContTimer(timer, config::kMonitorControlPath, "ThreadConnection::ThreadConnection()");
+
     createContext(&ctx);
+    timer.pin("createContext");
 
     cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
     // rpc_cq = cq;
     rpc_cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
+    timer.pin("2x ibv_create_cq");
 
     message = new RawMessageConnection(ctx, rpc_cq, APP_MESSAGE_NR);
+    timer.pin("RawMessageConnection");
 
     this->cachePool = cachePool;
     cacheMR = createMemoryRegion((uint64_t) cachePool, cacheSize, &ctx);
     // dinfo("Create memory region at %p, size %lu", (char*) cachePool,
     // cacheSize);
+    timer.pin("CreateMemoryRegion");
 
     cacheLKey = cacheMR->lkey;
 
@@ -37,6 +43,8 @@ ThreadConnection::ThreadConnection(
             // QPs.size() - 1, k, QPs.back()[k], (char*)cq, cacheLKey, cacheMR);
         }
     }
+    timer.pin("CreateQPs");
+    timer.report();
 }
 
 ThreadConnection::~ThreadConnection()

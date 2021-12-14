@@ -11,25 +11,30 @@ DirectoryConnection::DirectoryConnection(
     const std::vector<RemoteConnection> &remoteInfo)
     : dirID(dirID), remoteInfo(remoteInfo)
 {
+    DefOnceContTimer(timer,
+                     config::kMonitorControlPath,
+                     "DirectoryConnection::DirectoryConnection()");
+
     createContext(&ctx);
+    timer.pin("createContext");
+
     cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
     rpc_cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
+    timer.pin("2x ibv_create_cq");
     message = RawMessageConnection::newInstance(ctx, rpc_cq, DIR_MESSAGE_NR);
 
     message->initRecv();
     message->initSend();
+    timer.pin("message");
 
     // dsm memory
     this->dsmPool = dsmPool;
     this->dsmSize = dsmSize;
     this->dsmMR = createMemoryRegion((uint64_t) dsmPool, dsmSize, &ctx);
+    timer.pin("createMR");
     // dinfo(
-    //     "[DSM] CreateMemoryRegion at %p, size %ld. mr: %p, lkey: %u, rkey: %u. pd: %p",
-    //     dsmPool,
-    //     dsmSize,
-    //     dsmMR,
-    //     dsmMR->lkey,
-    //     dsmMR->rkey,
+    //     "[DSM] CreateMemoryRegion at %p, size %ld. mr: %p, lkey: %u, rkey:
+    //     %u. pd: %p", dsmPool, dsmSize, dsmMR, dsmMR->lkey, dsmMR->rkey,
     //     ctx.pd);
     this->dsmLKey = dsmMR->lkey;
 
@@ -41,6 +46,7 @@ DirectoryConnection::DirectoryConnection(
         this->lockMR = createMemoryRegionOnChip(
             (uint64_t) this->dmPool, this->lockSize, &ctx);
         this->lockLKey = lockMR->lkey;
+        timer.pin("createMR OnChip");
     }
 
     // app, RC
@@ -51,7 +57,8 @@ DirectoryConnection::DirectoryConnection(
         {
             createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
             // dinfo(
-            //     "Directory: bingding QP: QPs[%lu][%lu]: qp: %p, cq: %p, lkey: "
+            //     "Directory: bingding QP: QPs[%lu][%lu]: qp: %p, cq: %p, lkey:
+            //     "
             //     "%u. mr: %p. pd: %p",
             //     QPs.size() - 1,
             //     k,
@@ -62,6 +69,8 @@ DirectoryConnection::DirectoryConnection(
             //     ctx.pd);
         }
     }
+    timer.pin("create QPs");
+    timer.report();
 }
 
 void DirectoryConnection::sendMessage2App(RawMessage *m,
@@ -76,9 +85,9 @@ void DirectoryConnection::sendMessage2App(RawMessage *m,
 DirectoryConnection::~DirectoryConnection()
 {
     ContTimer<config::kMonitorControlPath> timer("~DirectoryConnection");
-    for (const auto& qps: QPs)
+    for (const auto &qps : QPs)
     {
-        for (ibv_qp* qp: qps)
+        for (ibv_qp *qp : qps)
         {
             CHECK(destroyQueuePair(qp));
         }
