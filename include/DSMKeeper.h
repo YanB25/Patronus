@@ -71,8 +71,8 @@ class DSMKeeper : public Keeper
 {
 public:
     static std::unique_ptr<DSMKeeper> newInstance(
-        std::vector<ThreadConnection> &thCon,
-        std::vector<DirectoryConnection> &dirCon,
+        std::vector<std::unique_ptr<ThreadConnection>> &thCon,
+        std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
         std::vector<RemoteConnection> &remoteCon,
         uint32_t maxServer = 12)
     {
@@ -80,8 +80,8 @@ public:
             thCon, dirCon, remoteCon, maxServer);
     }
 
-    DSMKeeper(std::vector<ThreadConnection> &thCon,
-              std::vector<DirectoryConnection> &dirCon,
+    DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
+              std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
               std::vector<RemoteConnection> &remoteCon,
               uint32_t maxServer = 12)
         : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
@@ -114,6 +114,7 @@ public:
     virtual ~DSMKeeper();
     void barrier(const std::string &barrierKey);
     uint64_t sum(const std::string &sum_key, uint64_t value);
+    void connectDir(DirectoryConnection&);
 
     const ExchangeMeta& getExchangeMeta(uint16_t remoteID) const;
 
@@ -121,8 +122,8 @@ private:
     static const char *OK;
     static const char *ServerPrefix;
 
-    std::vector<ThreadConnection> &thCon;
-    std::vector<DirectoryConnection> &dirCon;
+    std::vector<std::unique_ptr<ThreadConnection>> &thCon;
+    std::vector<std::unique_ptr<DirectoryConnection>> &dirCon;
     std::vector<RemoteConnection> &remoteCon;
 
     std::unordered_map<uint16_t, ExchangeMeta> snapshot_exchange_meta_;

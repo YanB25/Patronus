@@ -109,11 +109,11 @@ void client(std::shared_ptr<DSM> dsm)
     size_t cnt = 0;
     for (size_t dir = 0; dir < NR_DIRECTORY; ++dir)
     {
-        auto *mw = dsm->alloc_mw();
+        auto *mw = dsm->alloc_mw(dir);
         for (size_t i = 0; i < kMWNr; ++i)
         {
             bool succ = dsm->bind_memory_region_sync(
-                mw, kServerNodeId, 0, buffer, kBindSize);
+                mw, kServerNodeId, 0, buffer, kBindSize, dir);
             cnt++;
             CHECK(succ);
             if (cnt % (10 * define::K) == 0)
@@ -122,7 +122,6 @@ void client(std::shared_ptr<DSM> dsm)
             }
         }
         dsm->free_mw(mw);
-        dsm->roll_dir();
         LOG(INFO) << "==== roll to the next dir " << dir << " =====";
     }
 

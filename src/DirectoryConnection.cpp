@@ -1,9 +1,13 @@
 #include "DirectoryConnection.h"
 
-#include "Connection.h"
-#include "Timer.h"
 #include <glog/logging.h>
 
+#include "Connection.h"
+#include "Timer.h"
+
+/** 
+ * every DirectoryConnection has its own protection domain
+ */
 DirectoryConnection::DirectoryConnection(
     uint16_t dirID,
     void *dsmPool,
@@ -83,12 +87,10 @@ void DirectoryConnection::sendMessage2App(RawMessage *m,
                             remoteInfo[node_id].appMessageQPN[th_id],
                             remoteInfo[node_id].dirToAppAh[dirID][th_id]);
 }
-
 DirectoryConnection::~DirectoryConnection()
 {
-    DefOnceContTimer(timer,
-                     config::kMonitorControlPath,
-                     "~DirectoryConnection()");
+    DefOnceContTimer(
+        timer, config::kMonitorControlPath, "~DirectoryConnection()");
     for (const auto &qps : QPs)
     {
         for (ibv_qp *qp : qps)

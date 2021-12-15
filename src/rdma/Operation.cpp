@@ -26,12 +26,18 @@ int pollWithCQ(ibv_cq *cq,
             }
             else
             {
-                LOG(ERROR) << "[qp] Failed status "
+                LOG(ERROR) << "[wc] Failed status "
                            << ibv_wc_status_str(wc->status) << " ("
                            << wc->status << ") for wr_id " << wc->wr_id
                            << " at QP: " << wc->qp_num
                            << ". vendor err: " << wc->vendor_err;
                 err_handler(wc);
+                // it is a QP error, in addition to WC error.
+                // should report to the outer world
+                if (wc->status == IBV_WC_WR_FLUSH_ERR)
+                {
+                    return -1;
+                }
             }
         }
         else if (new_count < 0)

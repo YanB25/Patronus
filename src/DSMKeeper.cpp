@@ -7,40 +7,40 @@ const char *DSMKeeper::ServerPrefix = "SPre";
 
 void DSMKeeper::initLocalMeta()
 {
-    exchangeMeta.dsmBase = (uint64_t) dirCon[0].dsmPool;
-    exchangeMeta.dmBase = (uint64_t) dirCon[0].dmPool;
+    exchangeMeta.dsmBase = (uint64_t) dirCon[0]->dsmPool;
+    exchangeMeta.dmBase = (uint64_t) dirCon[0]->dmPool;
 
     // per thread APP
     for (size_t i = 0; i < thCon.size(); ++i)
     {
-        exchangeMeta.appTh[i].lid = thCon[i].ctx.lid;
-        exchangeMeta.appTh[i].rKey = thCon[i].cacheMR->rkey;
+        exchangeMeta.appTh[i].lid = thCon[i]->ctx.lid;
+        exchangeMeta.appTh[i].rKey = thCon[i]->cacheMR->rkey;
         memcpy((char *) exchangeMeta.appTh[i].gid,
-               (char *) (&thCon[i].ctx.gid),
+               (char *) (&thCon[i]->ctx.gid),
                16 * sizeof(uint8_t));
 
-        exchangeMeta.appUdQpn[i] = thCon[i].message->getQPN();
+        exchangeMeta.appUdQpn[i] = thCon[i]->message->getQPN();
     }
 
     // per thread DIR
     for (size_t i = 0; i < dirCon.size(); ++i)
     {
-        exchangeMeta.dirTh[i].lid = dirCon[i].ctx.lid;
-        exchangeMeta.dirTh[i].rKey = dirCon[i].dsmMR->rkey;
+        exchangeMeta.dirTh[i].lid = dirCon[i]->ctx.lid;
+        exchangeMeta.dirTh[i].rKey = dirCon[i]->dsmMR->rkey;
         // only enable DM for the first DirCon.
         if (i == 0)
         {
-            exchangeMeta.dirTh[i].dm_rkey = dirCon[i].lockMR->rkey;
+            exchangeMeta.dirTh[i].dm_rkey = dirCon[i]->lockMR->rkey;
         }
         else
         {
             exchangeMeta.dirTh[i].dm_rkey = 0;
         }
         memcpy((char *) exchangeMeta.dirTh[i].gid,
-               (char *) (&dirCon[i].ctx.gid),
+               (char *) (&dirCon[i]->ctx.gid),
                16 * sizeof(uint8_t));
 
-        exchangeMeta.dirUdQpn[i] = dirCon[i].message->getQPN();
+        exchangeMeta.dirUdQpn[i] = dirCon[i]->message->getQPN();
     }
 }
 
@@ -97,7 +97,7 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
 
         for (int k = 0; k < MAX_APP_THREAD; ++k)
         {
-            exchangeMeta.dirRcQpn2app[i][k] = c.QPs[k][remoteID]->qp_num;
+            exchangeMeta.dirRcQpn2app[i][k] = c->QPs[k][remoteID]->qp_num;
         }
     }
 
@@ -107,7 +107,32 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
         for (int k = 0; k < NR_DIRECTORY; ++k)
         {
             //  = thCon[i].QPs[k][remoteID]->qp_num;
-            exchangeMeta.appRcQpn2dir[i][k] = c.QPs[k][remoteID]->qp_num;
+            exchangeMeta.appRcQpn2dir[i][k] = c->QPs[k][remoteID]->qp_num;
+        }
+    }
+}
+
+void DSMKeeper::connectDir(DirectoryConnection& dir)
+{
+    for (int remoteID = 0; remoteID < getServerNR(); ++remoteID)
+    {
+        const auto& exMeta = getExchangeMeta(remoteID);
+
+        if (remoteID == getMyNodeID())
+        {
+            continue;
+        }
+        for (int k = 0; k < MAX_APP_THREAD; ++k)
+        {
+            auto& qp = dir.QPs[k][remoteID];
+            DCHECK(qp->qp_type == IBV_QPT_RC);
+            modifyQPtoInit(qp, &dir.ctx);
+            modifyQPtoRTR(qp,
+                          exMeta.appRcQpn2dir[k][dir.dirID],
+                          exMeta.appTh[k].lid,
+                          exMeta.appTh[k].gid,
+                          &dir.ctx);
+            modifyQPtoRTS(qp);
         }
     }
 }
@@ -121,7 +146,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
     // init directory qp
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
-        auto &c = dirCon[i];
+        auto &c = *dirCon[i].get();
 
         for (int k = 0; k < MAX_APP_THREAD; ++k)
         {
@@ -141,7 +166,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
     // init application qp
     for (size_t i = 0; i < thCon.size(); ++i)
     {
-        auto &c = thCon[i];
+        auto &c = *thCon[i].get();
         for (int k = 0; k < NR_DIRECTORY; ++k)
         {
             auto &qp = c.QPs[k][remoteID];
@@ -177,8 +202,8 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
             fillAhAttr(&ahAttr,
                        exMeta.dirTh[i].lid,
                        exMeta.dirTh[i].gid,
-                       &thCon[k].ctx);
-            remote.appToDirAh[k][i] = ibv_create_ah(thCon[k].ctx.pd, &ahAttr);
+                       &thCon[k]->ctx);
+            remote.appToDirAh[k][i] = ibv_create_ah(thCon[k]->ctx.pd, &ahAttr);
 
             CHECK(remote.appToDirAh[k][i]);
         }
@@ -195,8 +220,8 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
             fillAhAttr(&ahAttr,
                        exMeta.appTh[i].lid,
                        exMeta.appTh[i].gid,
-                       &dirCon[k].ctx);
-            remote.dirToAppAh[k][i] = ibv_create_ah(dirCon[k].ctx.pd, &ahAttr);
+                       &dirCon[k]->ctx);
+            remote.dirToAppAh[k][i] = ibv_create_ah(dirCon[k]->ctx.pd, &ahAttr);
 
             assert(remote.dirToAppAh[k][i]);
         }

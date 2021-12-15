@@ -13,6 +13,8 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
+constexpr static size_t dirID = 0;
+
 // TODO: strange bug: if mw_idx & mask == magic, will error
 uint32_t magic = 0b1010101010;
 uint16_t mask = 0b1111111111;
@@ -143,7 +145,7 @@ void bind_rkeys(std::shared_ptr<DSM> dsm,
 
     for (size_t t = 0; t < mws.size(); ++t)
     {
-        dsm->bind_memory_region_sync(mws[t], kClientNodeId, 0, buffer, size);
+        dsm->bind_memory_region_sync(mws[t], kClientNodeId, 0, buffer, size, dirID);
     }
 }
 
@@ -217,12 +219,12 @@ void client_burn(std::shared_ptr<DSM> dsm,
             if (sequantial || (i % kClientBatchWrite == 0))
             {
                 dsm->rkey_write_sync(
-                    rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
+                    rkey, buffer, gaddr, io_size, dirID, nullptr, data.val, handler);
             }
             else
             {
                 dsm->rkey_write(
-                    rkey, buffer, gaddr, io_size, false, nullptr, data.val);
+                    rkey, buffer, gaddr, io_size, dirID, false, nullptr, data.val);
             }
         }
         else if (bt == kRO)
@@ -230,12 +232,12 @@ void client_burn(std::shared_ptr<DSM> dsm,
             if (sequantial || (i % kClientBatchWrite == 0))
             {
                 dsm->rkey_read_sync(
-                    rkey, buffer, gaddr, io_size, nullptr, data.val, handler);
+                    rkey, buffer, gaddr, io_size, dirID, nullptr, data.val, handler);
             }
             else
             {
                 dsm->rkey_read(
-                    rkey, buffer, gaddr, io_size, false, nullptr, data.val);
+                    rkey, buffer, gaddr, io_size, dirID, false, nullptr, data.val);
             }
         }
         else
@@ -325,7 +327,7 @@ std::vector<ibv_mw *> prepare_server(std::shared_ptr<DSM> dsm, size_t size)
     mws.reserve(mw_nr);
     for (size_t i = 0; i < mw_nr; ++i)
     {
-        mws.emplace_back(dsm->alloc_mw());
+        mws.emplace_back(dsm->alloc_mw(dirID));
         CHECK(mws.back() != nullptr);
     }
     bind_rkeys(dsm, mws, size);
@@ -357,14 +359,17 @@ void server(std::shared_ptr<DSM> dsm, size_t thread_nr)
         }
         for (size_t tid = 0; tid < 1 + thread_nr; ++tid)
         {
-            if (rdmaQueryQueuePair(dsm->get_dir_qp(kClientNodeId, tid)) ==
-                IBV_QPS_ERR)
+            for (size_t dir = 0; dir < NR_DIRECTORY; ++dir)
             {
-                Timer timer;
-                LOG(INFO) << ("Benchmarking latency of QP recovery");
-                timer.begin();
-                CHECK(dsm->recover_dir_qp(kClientNodeId, tid));
-                timer.end_print(1);
+                if (rdmaQueryQueuePair(dsm->get_dir_qp(kClientNodeId, tid, dir)) ==
+                    IBV_QPS_ERR)
+                {
+                    Timer timer;
+                    LOG(INFO) << ("Benchmarking latency of QP recovery");
+                    timer.begin();
+                    CHECK(dsm->recover_dir_qp(kClientNodeId, tid, dir));
+                    timer.end_print(1);
+                }
             }
             fflush(stdout);
         }

@@ -38,22 +38,22 @@ void client(std::shared_ptr<DSM> dsm)
     auto *buffer = dsm->get_rdma_buffer();
     *(uint64_t *) buffer = kMagic;
 
-    dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
+    CHECK(dsm->write_sync(buffer, gaddr, sizeof(uint64_t), nullptr, 1));
     LOG(INFO) << "finished writing magic 1";
     // sync
     dsm->recv();
     dsm->roll_dir();
 
     *(uint64_t *) buffer = kMagic2;
-    dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
+    CHECK(dsm->write_sync(buffer, gaddr, sizeof(uint64_t), nullptr, 2));
     LOG(INFO) << "finished writing magic 2";
 
     dsm->recv();
-    // expect to roll back to 0 when NR_DIRECTORY == 2
-    dsm->roll_dir();
+    // test if the 0 QP ready
+    dsm->force_set_dir(0);
 
     *(uint64_t *) buffer = kMagic3;
-    dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
+    CHECK(dsm->write_sync(buffer, gaddr, sizeof(uint64_t), nullptr, 3));
     LOG(INFO) << "finished writing magic 3";
 }
 
@@ -66,6 +66,9 @@ void server(std::shared_ptr<DSM> dsm)
 
     dsm->send(nullptr, 0, kClientNodeId);
 
+    LOG(INFO) << "Server starts to reconnect dir 0";
+    dsm->reinit_dir(0);
+
     loop_expect(buffer, (char *) &kMagic2, sizeof(kMagic2));
 
     // info("start to send 2nd msg");
@@ -75,8 +78,11 @@ void server(std::shared_ptr<DSM> dsm)
     loop_expect(buffer, (char *) &kMagic3, sizeof(kMagic3));
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    google::InitGoogleLogging(argv[0]);
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+
     // if (argc < 3)
     // {
     //     fprintf(stderr, "%s [window_nr] [window_size]\n", argv[0]);

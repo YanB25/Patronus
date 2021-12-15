@@ -12,6 +12,8 @@ constexpr uint16_t kClientNodeId = 0;
 // constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
+constexpr static size_t dirID = 0;
+
 void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
 {
     LOG(INFO) << "client: TODO";
@@ -68,7 +70,7 @@ void server(std::shared_ptr<DSM> dsm,
         mws.resize(mw_nr);
         for (size_t i = 0; i < mw_nr; ++i)
         {
-            mws[i] = dsm->alloc_mw();
+            mws[i] = dsm->alloc_mw(dirID);
         }
         alloc_mw_ns += timer.end(mw_nr);
         timer.print();
@@ -107,7 +109,7 @@ void server(std::shared_ptr<DSM> dsm,
                 }
                 LOG(WARNING) << "TODO: CHECK if thread_id == 0 is correct.";
                 dsm->bind_memory_region(
-                    mws[i], kClientNodeId, 0, buffer_start, window_size);
+                    mws[i], kClientNodeId, 0, buffer_start, window_size, dirID);
             }
             dsm->poll_rdma_cq(work_nr);
             remain_nr -= work_nr;

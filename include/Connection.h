@@ -16,6 +16,7 @@ struct RemoteConnection
     // directory
     uint64_t dsmBase;
 
+    // [NR_DIRECTORY]
     uint32_t dsmRKey[NR_DIRECTORY];
     uint32_t dirMessageQPN[NR_DIRECTORY];
     ibv_ah *appToDirAh[MAX_APP_THREAD][NR_DIRECTORY];

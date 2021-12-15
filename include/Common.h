@@ -191,7 +191,7 @@ struct Data
 
 namespace config
 {
-constexpr static bool kMonitorControlPath = true;
+constexpr static bool kMonitorControlPath = false;
 }
 
 #endif /* __COMMON_H__ */

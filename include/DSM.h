@@ -1,6 +1,8 @@
 #ifndef __DSM_H__
 #define __DSM_H__
 
+#include <glog/logging.h>
+
 #include <atomic>
 
 #include "Cache.h"
@@ -11,8 +13,6 @@
 #include "GlobalAddress.h"
 #include "LocalAllocator.h"
 #include "RdmaBuffer.h"
-
-#include <glog/logging.h>
 
 class DSMKeeper;
 class Directory;
@@ -48,6 +48,23 @@ public:
         return thread_tag;
     }
 
+    bool reinit_dir(size_t dirID)
+    {
+        LOG(WARNING) << "TODO: still have bug. not work";
+        if (dirID > dirCon.size())
+        {
+            return false;
+        }
+        // here destroy connection
+        dirCon[dirID].reset();
+        dirCon[dirID] = std::make_unique<DirectoryConnection>(
+            dirID, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
+        keeper->connectDir(*dirCon[dirID]);
+        LOG(INFO) << "reinit_dir " << dirID << " at "
+                  << (void *) dirCon[dirID].get() << " finish";
+        return true;
+    }
+
     // RDMA operations
     // buffer is registered memory
 
@@ -56,6 +73,7 @@ public:
                    char *buffer,
                    GlobalAddress gaddr,
                    size_t size,
+                   size_t dirID,
                    bool signal = true,
                    CoroContext *ctx = nullptr,
                    uint64_t wr_id = 0);
@@ -63,6 +81,7 @@ public:
                         char *buffer,
                         GlobalAddress gaddr,
                         size_t size,
+                        size_t dirID,
                         CoroContext *ctx = nullptr,
                         uint64_t wr_id = 0,
                         const WcErrHandler &handler = empty_wc_err_handler);
@@ -82,6 +101,7 @@ public:
                     const char *buffer,
                     GlobalAddress gaddr,
                     size_t size,
+                    size_t dirID,
                     bool signal = true,
                     CoroContext *ctx = nullptr,
                     uint64_t wr_id = 0);
@@ -89,6 +109,7 @@ public:
                          const char *buffer,
                          GlobalAddress gaddr,
                          size_t size,
+                         size_t dirID,
                          CoroContext *ctx = nullptr,
                          uint64_t wr_id = 0,
                          const WcErrHandler &handler = empty_wc_err_handler);
@@ -132,8 +153,8 @@ public:
                         uint64_t equal,
                         uint64_t val,
                         CoroContext *ctx = nullptr);
-    ibv_qp *get_dir_qp(int node_id, int thread_id);
-    ibv_qp *get_th_qp(int node_id);
+    ibv_qp *get_dir_qp(int node_id, int thread_id, size_t dirID);
+    ibv_qp *get_th_qp(int node_id, size_t dirID);
 
     void cas(GlobalAddress gaddr,
              uint64_t equal,
@@ -239,18 +260,20 @@ public:
                               uint64_t *rdma_buffer,
                               uint64_t mask = 63,
                               CoroContext *ctx = nullptr);
-    ibv_mw *alloc_mw();
+    ibv_mw *alloc_mw(size_t dirID);
     void free_mw(struct ibv_mw *mw);
     bool bind_memory_region(struct ibv_mw *mw,
                             size_t target_node_id,
                             size_t target_thread_id,
                             const char *buffer,
-                            size_t size);
+                            size_t size,
+                            size_t dirID);
     bool bind_memory_region_sync(struct ibv_mw *mw,
                                  size_t target_node_id,
                                  size_t target_thread_id,
                                  const char *buffer,
-                                 size_t size);
+                                 size_t size,
+                                 size_t dirID);
 
     uint64_t poll_rdma_cq(int count = 1);
     bool poll_rdma_cq_once(uint64_t &wr_id);
@@ -303,17 +326,27 @@ public:
         id.thread_id = get_thread_id();
         return id;
     }
-    bool recover_dir_qp(int node_id, int thread_id);
-    bool recover_th_qp(int node_id);
+    bool recover_dir_qp(int node_id, int thread_id, size_t dirID);
+    bool recover_th_qp(int node_id, size_t dirID);
 
     void roll_dir()
     {
         cur_dir_ = (cur_dir_ + 1) % NR_DIRECTORY;
     }
+    /**
+     * @brief only call this if you know what you are doing.
+     * 
+     * @param dir 
+     */
+    void force_set_dir(size_t dir)
+    {
+        CHECK_LT(dir, dirCon.size());
+        cur_dir_ = dir;
+    }
 
 private:
     void initRDMAConnection();
-    void fill_keys_dest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip);
+    void fill_keys_dest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip, size_t dirID = 0);
 
     size_t get_cur_dir() const
     {
@@ -336,8 +369,8 @@ private:
 
     // RemoteConnection *remoteInfo;
     std::vector<RemoteConnection> remoteInfo;
-    std::vector<ThreadConnection> thCon;
-    std::vector<DirectoryConnection> dirCon;
+    std::vector<std::unique_ptr<ThreadConnection>> thCon;
+    std::vector<std::unique_ptr<DirectoryConnection>> dirCon;
     std::unique_ptr<DSMKeeper> keeper;
 
     // if NR_DIRECTORY is not 1, there is multiple dir to use.
@@ -367,8 +400,8 @@ public:
     Buffer get_server_internal_buffer();
     RdmaBuffer &get_rbuf(int coro_id)
     {
-        DCHECK(coro_id < define::kMaxCoro) << 
-               "coro_id should be < define::kMaxCoro";
+        DCHECK(coro_id < define::kMaxCoro)
+            << "coro_id should be < define::kMaxCoro";
         return rbuf[coro_id];
     }
 
@@ -400,9 +433,6 @@ public:
               uint16_t dir_id = 0,
               bool sync = false)
     {
-        // dwarn(
-        //     "TODO: now using dir_id = 0 by default. let rpc use distinct
-        //     dir.");
         auto buffer = (RawMessage *) iCon->message->getSendPool();
         buffer->node_id = myNodeID;
         buffer->app_id = thread_id;
@@ -415,7 +445,7 @@ public:
         // size_t cur_dir = get_cur_dir();
         size_t cur_dir = 0;
         struct ibv_wc wc;
-        ibv_cq *cq = dirCon[cur_dir].rpc_cq;
+        ibv_cq *cq = dirCon[cur_dir]->rpc_cq;
         int ret = ibv_poll_cq(cq, 1, &wc);
         if (ret < 0)
         {
@@ -426,7 +456,7 @@ public:
         {
             CHECK(wc.status == IBV_WC_SUCCESS);
             CHECK(wc.opcode == IBV_WC_RECV);
-            auto *m = (RawMessage *) dirCon[cur_dir].message->getMessage();
+            auto *m = (RawMessage *) dirCon[cur_dir]->message->getMessage();
             return m->inlined_buffer;
         }
         return nullptr;
@@ -438,12 +468,12 @@ public:
         size_t cur_dir = 0;
 
         struct ibv_wc wc;
-        pollWithCQ(dirCon[cur_dir].rpc_cq, 1, &wc);
+        pollWithCQ(dirCon[cur_dir]->rpc_cq, 1, &wc);
         switch (int(wc.opcode))
         {
         case IBV_WC_RECV:
         {
-            auto *m = (RawMessage *) dirCon[cur_dir].message->getMessage();
+            auto *m = (RawMessage *) dirCon[cur_dir]->message->getMessage();
             return m->inlined_buffer;
         }
         default:

@@ -14,8 +14,12 @@ constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kMagic = 0xffffffffffffffff;
 constexpr static size_t kMagic2 = 0xabcdef1234567890;
+constexpr static size_t kMagic3 = 0xcccdef1aa45ff890;
 constexpr static size_t kOffset = 0;
 constexpr static size_t kOffset2 = 0;
+constexpr static size_t kOffset3 = 0;
+
+constexpr static size_t dirID = 0;
 
 void loop_expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 {
@@ -77,14 +81,37 @@ void client(std::shared_ptr<DSM> dsm)
     {
         *(uint64_t *) buffer = kMagic2;
         gaddr.offset = kOffset2 + i * sizeof(kMagic2);
-        dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
+        dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2), dirID);
     }
+
     LOG(INFO) << "We do it again. Expect the rkey still work: 8 success.";
     for (size_t i = 0; i < 8; ++i)
     {
         *(uint64_t *) buffer = kMagic2;
         gaddr.offset = kOffset2 + i * sizeof(kMagic2);
-        dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
+        dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2), dirID);
+    }
+
+    dsm->send(nullptr, 0, kServerNodeId);
+
+    if constexpr (NR_DIRECTORY >= 2)
+    {
+        size_t second_dir = dirID + 1;
+
+        char *msg = dsm->recv();
+        uint32_t rkey = *(uint32_t *) msg;
+        LOG(INFO) << "Get rkey " << rkey;
+        for (size_t i = 0; i < 8; ++i)
+        {
+            *(uint64_t *) buffer = kMagic3;
+            gaddr.offset = kOffset3 + i * sizeof(kMagic3);
+            dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic3), second_dir);
+        }
+        dsm->send(nullptr, 0, kServerNodeId);
+    }
+    else
+    {
+        LOG(WARNING) << "[system] skip second round test.";
     }
 }
 // Notice: TLS object is created only once for each combination of type and
@@ -119,36 +146,74 @@ void server(std::shared_ptr<DSM> dsm)
 
     loop_expect(buffer + kOffset, (char *) &kMagic, sizeof(kMagic));
 
-    struct ibv_mw *mw = dsm->alloc_mw();
+    struct ibv_mw *mw = dsm->alloc_mw(dirID);
     LOG(INFO) << "the allocated mw with pd: " << mw->pd;
 
     Identify *client_id = (Identify *) dsm->recv();
     int node_id = client_id->node_id;
     int thread_id = client_id->thread_id;
-    LOG(INFO) << "Get client node_id: " << node_id << ", thread_id: " << thread_id;
+    LOG(INFO) << "Get client node_id: " << node_id
+              << ", thread_id: " << thread_id;
 
-    dsm->bind_memory_region_sync(mw, node_id, thread_id, buffer, 64);
+    dsm->bind_memory_region_sync(mw, node_id, thread_id, buffer, 64, dirID);
     LOG(INFO) << "bind memory window success. Rkey: " << mw->rkey;
 
     dsm->send((char *) &mw->rkey, sizeof(mw->rkey), kClientNodeId);
 
     loop_expect(buffer + kOffset2, (char *) &kMagic2, sizeof(kMagic2));
 
-    while (true)
+    while (dsm->try_recv() == nullptr)
     {
-        if (rdmaQueryQueuePair(dsm->get_dir_qp(node_id, thread_id)) ==
+        if (rdmaQueryQueuePair(dsm->get_dir_qp(node_id, thread_id, dirID)) ==
             IBV_QPS_ERR)
         {
             LOG(INFO) << "Benchmarking latency of QP recovery";
             timer.begin();
-            CHECK(dsm->recover_dir_qp(node_id, thread_id));
+            CHECK(dsm->recover_dir_qp(node_id, thread_id, dirID));
             timer.end_print(1);
         }
-        fflush(stdout);
-        sleep(1);
+        usleep(100);
     }
+
+    if constexpr (NR_DIRECTORY >= 2)
+    {
+        size_t second_dir = dirID + 1;
+        LOG(INFO) << "[system] begin testing rolling dir";
+        auto *mw2 = dsm->alloc_mw(second_dir);
+        dsm->bind_memory_region_sync(
+            mw2, node_id, thread_id, buffer, 64, second_dir);
+        LOG(INFO) << "bind memory window 2 success. Rkey: " << mw2->rkey;
+        dsm->send((char *) &mw2->rkey, sizeof(mw2->rkey), kClientNodeId);
+
+
+        while (dsm->try_recv() == nullptr)
+        {
+            if (rdmaQueryQueuePair(dsm->get_dir_qp(
+                    node_id, thread_id, second_dir)) == IBV_QPS_ERR)
+            {
+                LOG(INFO) << "Benchmarking latency of QP recovery";
+                timer.begin();
+                CHECK(dsm->recover_dir_qp(node_id, thread_id, second_dir));
+                timer.end_print(1);
+            }
+            usleep(100);
+        }
+
+        loop_expect(buffer + kOffset3, (char *) &kMagic3, sizeof(kMagic3));
+
+        dsm->free_mw(mw2);
+    }
+    else
+    {
+        LOG(WARNING) << "[system] skip testing rolling dir. NR_DIRECTORY == "
+                     << NR_DIRECTORY;
+    }
+
+    dsm->free_mw(mw);
+
+    LOG(INFO) << "Exiting...";
 }
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);

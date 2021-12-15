@@ -7,8 +7,8 @@
 #include "Directory.h"
 #include "HugePageAlloc.h"
 #include "Rdma.h"
-#include "Util.h"
 #include "Timer.h"
+#include "Util.h"
 
 thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
@@ -50,17 +50,17 @@ DSM::~DSM()
 {
 }
 
-bool DSM::recover_th_qp(int node_id)
+bool DSM::recover_th_qp(int node_id, size_t dirID)
 {
     auto tid = get_thread_id();
-    ibv_qp *qp = get_th_qp(node_id);
+    ibv_qp *qp = get_th_qp(node_id, dirID);
     DLOG(INFO) << "Recovering th qp: " << qp << ". node_id: " << node_id
                << ", thread_id: " << tid;
     const auto &ex = keeper->getExchangeMeta(node_id);
     if (!modifyErrQPtoNormal(qp,
-                             ex.dirRcQpn2app[0][tid],
-                             ex.dirTh[0].lid,
-                             ex.dirTh[0].gid,
+                             ex.dirRcQpn2app[dirID][tid],
+                             ex.dirTh[dirID].lid,
+                             ex.dirTh[dirID].gid,
                              &iCon->ctx))
     {
         LOG(ERROR) << "failed to modify th QP to normal state. node_id: "
@@ -71,19 +71,17 @@ bool DSM::recover_th_qp(int node_id)
     return true;
 }
 
-bool DSM::recover_dir_qp(int node_id, int thread_id)
+bool DSM::recover_dir_qp(int node_id, int thread_id, size_t dirID)
 {
-    size_t cur_dir = get_cur_dir();
-
-    ibv_qp *qp = get_dir_qp(node_id, thread_id);
+    ibv_qp *qp = get_dir_qp(node_id, thread_id, dirID);
     LOG(INFO) << "Recovering dir qp " << qp << ". node_id: " << node_id
               << ", thread_id: " << thread_id;
     const auto &ex = keeper->getExchangeMeta(node_id);
     if (!modifyErrQPtoNormal(qp,
-                             ex.appRcQpn2dir[thread_id][0],
+                             ex.appRcQpn2dir[thread_id][dirID],
                              ex.appTh[thread_id].lid,
                              ex.appTh[thread_id].gid,
-                             &dirCon[cur_dir].ctx))
+                             &dirCon[dirID]->ctx))
     {
         LOG(ERROR) << "failed to modify dir QP to normal state. node: "
                    << node_id << ", tid: " << thread_id;
@@ -93,15 +91,13 @@ bool DSM::recover_dir_qp(int node_id, int thread_id)
     return true;
 }
 
-ibv_qp *DSM::get_dir_qp(int node_id, int thread_id)
+ibv_qp *DSM::get_dir_qp(int node_id, int thread_id, size_t dirID)
 {
-    size_t cur_dir = get_cur_dir();
-    return dirCon[cur_dir].QPs[thread_id][node_id];
+    return dirCon[dirID]->QPs[thread_id][node_id];
 }
-ibv_qp *DSM::get_th_qp(int node_id)
+ibv_qp *DSM::get_th_qp(int node_id, size_t dirID)
 {
-    size_t cur_dir = get_cur_dir();
-    return iCon->QPs[cur_dir][node_id];
+    return iCon->QPs[dirID][node_id];
 }
 
 void DSM::registerThread()
@@ -116,9 +112,7 @@ void DSM::registerThread()
     CHECK(thread_id < (int) thCon.size()) << "Can not allocate more threads";
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
 
-    iCon = &thCon[thread_id];
-    // dinfo("register tid %d, iCon: %p, QPs[0][1]: %p", thread_id, iCon,
-    // iCon->QPs[0][1]);
+    iCon = thCon[thread_id].get();
 
     iCon->message->initRecv();
     iCon->message->initSend();
@@ -146,15 +140,15 @@ void DSM::initRDMAConnection()
 
     for (int i = 0; i < MAX_APP_THREAD; ++i)
     {
-        thCon.emplace_back(
-            i, (void *) cache.data, cache.size, conf.machineNR, remoteInfo);
+        thCon.emplace_back(std::make_unique<ThreadConnection>(
+            i, (void *) cache.data, cache.size, conf.machineNR, remoteInfo));
     }
     timer.pin("thCons " + std::to_string(MAX_APP_THREAD));
 
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
-        dirCon.emplace_back(
-            i, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
+        dirCon.emplace_back(std::make_unique<DirectoryConnection>(
+            i, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo));
     }
     timer.pin("dirCons " + std::to_string(NR_DIRECTORY));
 
@@ -170,6 +164,7 @@ void DSM::rkey_read(uint32_t rkey,
                     char *buffer,
                     GlobalAddress gaddr,
                     size_t size,
+                    size_t dirID,
                     bool signal,
                     CoroContext *ctx,
                     uint64_t wr_id)
@@ -181,7 +176,7 @@ void DSM::rkey_read(uint32_t rkey,
     //       size);
     if (ctx == nullptr)
     {
-        rdmaRead(iCon->QPs[0][gaddr.nodeID],
+        rdmaRead(iCon->QPs[dirID][gaddr.nodeID],
                  (uint64_t) buffer,
                  remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                  size,
@@ -192,7 +187,7 @@ void DSM::rkey_read(uint32_t rkey,
     }
     else
     {
-        rdmaRead(iCon->QPs[0][gaddr.nodeID],
+        rdmaRead(iCon->QPs[dirID][gaddr.nodeID],
                  (uint64_t) buffer,
                  remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                  size,
@@ -208,11 +203,12 @@ bool DSM::rkey_read_sync(uint32_t rkey,
                          char *buffer,
                          GlobalAddress gaddr,
                          size_t size,
+                         size_t dirID,
                          CoroContext *ctx,
                          uint64_t wr_id,
                          const WcErrHandler &handler)
 {
-    rkey_read(rkey, buffer, gaddr, size, true, ctx, wr_id);
+    rkey_read(rkey, buffer, gaddr, size, dirID, true, ctx, wr_id);
 
     if (ctx == nullptr)
     {
@@ -220,10 +216,14 @@ bool DSM::rkey_read_sync(uint32_t rkey,
         int ret = pollWithCQ(iCon->cq, 1, &wc, handler);
         if (ret < 0)
         {
-            DCHECK(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
+            LOG(WARNING) << "[qp] state err. iCon->QPs[" << dirID << "]["
+                         << gaddr.nodeID << "]";
+            DCHECK(rdmaQueryQueuePair(iCon->QPs[dirID][gaddr.nodeID]) ==
                    IBV_QPS_ERR);
-            if (!recover_th_qp(gaddr.nodeID))
+            if (!recover_th_qp(gaddr.nodeID, dirID))
             {
+                LOG(ERROR) << "[qp] failed to recovery. iCon->QPs[" << dirID
+                           << "][" << gaddr.nodeID << "]";
                 return false;
             }
             return false;
@@ -239,8 +239,9 @@ void DSM::read(char *buffer,
                CoroContext *ctx,
                uint64_t wr_id)
 {
-    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    rkey_read(rkey, buffer, gaddr, size, signal, ctx, wr_id);
+    size_t dirID = get_cur_dir();
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    rkey_read(rkey, buffer, gaddr, size, dirID, signal, ctx, wr_id);
 }
 
 bool DSM::read_sync(char *buffer,
@@ -250,8 +251,10 @@ bool DSM::read_sync(char *buffer,
                     uint64_t wr_id,
                     const WcErrHandler &handler)
 {
-    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    return rkey_read_sync(rkey, buffer, gaddr, size, ctx, wr_id, handler);
+    size_t dirID = get_cur_dir();
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    return rkey_read_sync(
+        rkey, buffer, gaddr, size, dirID, ctx, wr_id, handler);
 }
 
 void DSM::write(const char *buffer,
@@ -261,8 +264,9 @@ void DSM::write(const char *buffer,
                 CoroContext *ctx,
                 uint64_t wc_id)
 {
-    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    return rkey_write(rkey, buffer, gaddr, size, signal, ctx, wc_id);
+    size_t dirID = get_cur_dir();
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    return rkey_write(rkey, buffer, gaddr, size, dirID, signal, ctx, wc_id);
 }
 
 bool DSM::write_sync(const char *buffer,
@@ -272,14 +276,17 @@ bool DSM::write_sync(const char *buffer,
                      uint64_t wc_id,
                      const WcErrHandler &handler)
 {
-    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[0];
-    return rkey_write_sync(rkey, buffer, gaddr, size, ctx, wc_id, handler);
+    size_t dirID = get_cur_dir();
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    return rkey_write_sync(
+        rkey, buffer, gaddr, size, dirID, ctx, wc_id, handler);
 }
 
 void DSM::rkey_write(uint32_t rkey,
                      const char *buffer,
                      GlobalAddress gaddr,
                      size_t size,
+                     size_t dirID,
                      bool signal,
                      CoroContext *ctx,
                      uint64_t wr_id)
@@ -291,7 +298,7 @@ void DSM::rkey_write(uint32_t rkey,
     //       size);
     if (ctx == nullptr)
     {
-        rdmaWrite(iCon->QPs[0][gaddr.nodeID],
+        rdmaWrite(iCon->QPs[dirID][gaddr.nodeID],
                   (uint64_t) buffer,
                   remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                   size,
@@ -303,7 +310,7 @@ void DSM::rkey_write(uint32_t rkey,
     }
     else
     {
-        rdmaWrite(iCon->QPs[0][gaddr.nodeID],
+        rdmaWrite(iCon->QPs[dirID][gaddr.nodeID],
                   (uint64_t) buffer,
                   remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                   size,
@@ -320,11 +327,12 @@ bool DSM::rkey_write_sync(uint32_t rkey,
                           const char *buffer,
                           GlobalAddress gaddr,
                           size_t size,
+                          size_t dirID,
                           CoroContext *ctx,
                           uint64_t wr_id,
                           const WcErrHandler &handler)
 {
-    rkey_write(rkey, buffer, gaddr, size, true, ctx, wr_id);
+    rkey_write(rkey, buffer, gaddr, size, dirID, true, ctx, wr_id);
 
     if (ctx == nullptr)
     {
@@ -332,10 +340,14 @@ bool DSM::rkey_write_sync(uint32_t rkey,
         int ret = pollWithCQ(iCon->cq, 1, &wc, handler);
         if (ret < 0)
         {
-            DCHECK(rdmaQueryQueuePair(iCon->QPs[0][gaddr.nodeID]) ==
+            LOG(WARNING) << "[qp] state err. iCon->QPs[" << dirID << "]["
+                         << gaddr.nodeID << "]";
+            DCHECK(rdmaQueryQueuePair(iCon->QPs[dirID][gaddr.nodeID]) ==
                    IBV_QPS_ERR);
-            if (!recover_th_qp(gaddr.nodeID))
+            if (!recover_th_qp(gaddr.nodeID, dirID))
             {
+                LOG(ERROR) << "[qp] failed to recover iCon->QPs[" << dirID
+                           << "][" << gaddr.nodeID << "]";
                 return false;
             }
             return false;
@@ -344,18 +356,18 @@ bool DSM::rkey_write_sync(uint32_t rkey,
     return true;
 }
 
-void DSM::fill_keys_dest(RdmaOpRegion &ror, GlobalAddress gaddr, bool is_chip)
+void DSM::fill_keys_dest(RdmaOpRegion &ror, GlobalAddress gaddr, bool is_chip, size_t dirID)
 {
     ror.lkey = iCon->cacheLKey;
     if (is_chip)
     {
         ror.dest = remoteInfo[gaddr.nodeID].dmBase + gaddr.offset;
-        ror.remoteRKey = remoteInfo[gaddr.nodeID].dmRKey[0];
+        ror.remoteRKey = remoteInfo[gaddr.nodeID].dmRKey[dirID];
     }
     else
     {
         ror.dest = remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset;
-        ror.remoteRKey = remoteInfo[gaddr.nodeID].dsmRKey[0];
+        ror.remoteRKey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
     }
 }
 
@@ -370,13 +382,14 @@ void DSM::write_batch(RdmaOpRegion *rs, int k, bool signal, CoroContext *ctx)
         fill_keys_dest(rs[i], gaddr, rs[i].is_on_chip);
     }
 
+    size_t cur_dir = get_cur_dir();
     if (ctx == nullptr)
     {
-        rdmaWriteBatch(iCon->QPs[0][node_id], rs, k, signal);
+        rdmaWriteBatch(iCon->QPs[cur_dir][node_id], rs, k, signal);
     }
     else
     {
-        rdmaWriteBatch(iCon->QPs[0][node_id], rs, k, true, ctx->coro_id);
+        rdmaWriteBatch(iCon->QPs[cur_dir][node_id], rs, k, true, ctx->coro_id);
         (*ctx->yield)(*ctx->master);
     }
 }
@@ -398,6 +411,8 @@ void DSM::write_faa(RdmaOpRegion &write_ror,
                     bool signal,
                     CoroContext *ctx)
 {
+    size_t cur_dir = get_cur_dir();
+
     int node_id;
     {
         GlobalAddress gaddr;
@@ -415,11 +430,11 @@ void DSM::write_faa(RdmaOpRegion &write_ror,
     if (ctx == nullptr)
     {
         rdmaWriteFaa(
-            iCon->QPs[0][node_id], write_ror, faa_ror, add_val, signal);
+            iCon->QPs[cur_dir][node_id], write_ror, faa_ror, add_val, signal);
     }
     else
     {
-        rdmaWriteFaa(iCon->QPs[0][node_id],
+        rdmaWriteFaa(iCon->QPs[cur_dir][node_id],
                      write_ror,
                      faa_ror,
                      add_val,
@@ -448,6 +463,8 @@ void DSM::write_cas(RdmaOpRegion &write_ror,
                     bool signal,
                     CoroContext *ctx)
 {
+    size_t cur_dir = get_cur_dir();
+
     int node_id;
     {
         GlobalAddress gaddr;
@@ -464,12 +481,16 @@ void DSM::write_cas(RdmaOpRegion &write_ror,
     }
     if (ctx == nullptr)
     {
-        rdmaWriteCas(
-            iCon->QPs[0][node_id], write_ror, cas_ror, equal, val, signal);
+        rdmaWriteCas(iCon->QPs[cur_dir][node_id],
+                     write_ror,
+                     cas_ror,
+                     equal,
+                     val,
+                     signal);
     }
     else
     {
-        rdmaWriteCas(iCon->QPs[0][node_id],
+        rdmaWriteCas(iCon->QPs[cur_dir][node_id],
                      write_ror,
                      cas_ror,
                      equal,
@@ -500,6 +521,7 @@ void DSM::cas_read(RdmaOpRegion &cas_ror,
                    bool signal,
                    CoroContext *ctx)
 {
+    size_t cur_dir = get_cur_dir();
     int node_id;
     {
         GlobalAddress gaddr;
@@ -516,11 +538,11 @@ void DSM::cas_read(RdmaOpRegion &cas_ror,
     if (ctx == nullptr)
     {
         rdmaCasRead(
-            iCon->QPs[0][node_id], cas_ror, read_ror, equal, val, signal);
+            iCon->QPs[cur_dir][node_id], cas_ror, read_ror, equal, val, signal);
     }
     else
     {
-        rdmaCasRead(iCon->QPs[0][node_id],
+        rdmaCasRead(iCon->QPs[cur_dir][node_id],
                     cas_ror,
                     read_ror,
                     equal,
@@ -555,26 +577,27 @@ void DSM::cas(GlobalAddress gaddr,
               bool signal,
               CoroContext *ctx)
 {
+    size_t cur_dir = get_cur_dir();
     if (ctx == nullptr)
     {
-        rdmaCompareAndSwap(iCon->QPs[0][gaddr.nodeID],
+        rdmaCompareAndSwap(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].dsmRKey[0],
+                           remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
                            signal);
     }
     else
     {
-        rdmaCompareAndSwap(iCon->QPs[0][gaddr.nodeID],
+        rdmaCompareAndSwap(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].dsmRKey[0],
+                           remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
                            true,
                            ctx->coro_id);
         (*ctx->yield)(*ctx->master);
@@ -605,13 +628,14 @@ void DSM::cas_mask(GlobalAddress gaddr,
                    uint64_t mask,
                    bool signal)
 {
-    rdmaCompareAndSwapMask(iCon->QPs[0][gaddr.nodeID],
+    size_t cur_dir = get_cur_dir();
+    rdmaCompareAndSwapMask(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].dsmRKey[0],
+                           remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
                            mask,
                            signal);
 }
@@ -636,25 +660,26 @@ void DSM::faa_boundary(GlobalAddress gaddr,
                        bool signal,
                        CoroContext *ctx)
 {
+    size_t cur_dir = get_cur_dir();
     if (ctx == nullptr)
     {
-        rdmaFetchAndAddBoundary(iCon->QPs[0][gaddr.nodeID],
+        rdmaFetchAndAddBoundary(iCon->QPs[cur_dir][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
                                 remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                                 add_val,
                                 iCon->cacheLKey,
-                                remoteInfo[gaddr.nodeID].dsmRKey[0],
+                                remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
                                 mask,
                                 signal);
     }
     else
     {
-        rdmaFetchAndAddBoundary(iCon->QPs[0][gaddr.nodeID],
+        rdmaFetchAndAddBoundary(iCon->QPs[cur_dir][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
                                 remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
                                 add_val,
                                 iCon->cacheLKey,
-                                remoteInfo[gaddr.nodeID].dsmRKey[0],
+                                remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
                                 mask,
                                 true,
                                 ctx->coro_id);
@@ -688,24 +713,27 @@ void DSM::read_dm(char *buffer,
                   bool signal,
                   CoroContext *ctx)
 {
+    // only dirID == 0 has dm
+
+    size_t cur_dir = 0;
     if (ctx == nullptr)
     {
-        rdmaRead(iCon->QPs[0][gaddr.nodeID],
+        rdmaRead(iCon->QPs[cur_dir][gaddr.nodeID],
                  (uint64_t) buffer,
                  remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                  size,
                  iCon->cacheLKey,
-                 remoteInfo[gaddr.nodeID].dmRKey[0],
+                 remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                  signal);
     }
     else
     {
-        rdmaRead(iCon->QPs[0][gaddr.nodeID],
+        rdmaRead(iCon->QPs[cur_dir][gaddr.nodeID],
                  (uint64_t) buffer,
                  remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                  size,
                  iCon->cacheLKey,
-                 remoteInfo[gaddr.nodeID].dmRKey[0],
+                 remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                  true,
                  ctx->coro_id);
         (*ctx->yield)(*ctx->master);
@@ -732,25 +760,26 @@ void DSM::write_dm(const char *buffer,
                    bool signal,
                    CoroContext *ctx)
 {
+    size_t cur_dir = 0;
     if (ctx == nullptr)
     {
-        rdmaWrite(iCon->QPs[0][gaddr.nodeID],
+        rdmaWrite(iCon->QPs[cur_dir][gaddr.nodeID],
                   (uint64_t) buffer,
                   remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                   size,
                   iCon->cacheLKey,
-                  remoteInfo[gaddr.nodeID].dmRKey[0],
+                  remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                   -1,
                   signal);
     }
     else
     {
-        rdmaWrite(iCon->QPs[0][gaddr.nodeID],
+        rdmaWrite(iCon->QPs[cur_dir][gaddr.nodeID],
                   (uint64_t) buffer,
                   remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                   size,
                   iCon->cacheLKey,
-                  remoteInfo[gaddr.nodeID].dmRKey[0],
+                  remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                   -1,
                   true,
                   ctx->coro_id);
@@ -779,26 +808,27 @@ void DSM::cas_dm(GlobalAddress gaddr,
                  bool signal,
                  CoroContext *ctx)
 {
+    size_t cur_dir = 0;
     if (ctx == nullptr)
     {
-        rdmaCompareAndSwap(iCon->QPs[0][gaddr.nodeID],
+        rdmaCompareAndSwap(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].dmRKey[0],
+                           remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                            signal);
     }
     else
     {
-        rdmaCompareAndSwap(iCon->QPs[0][gaddr.nodeID],
+        rdmaCompareAndSwap(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].dmRKey[0],
+                           remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                            true,
                            ctx->coro_id);
         (*ctx->yield)(*ctx->master);
@@ -829,13 +859,14 @@ void DSM::cas_dm_mask(GlobalAddress gaddr,
                       uint64_t mask,
                       bool signal)
 {
-    rdmaCompareAndSwapMask(iCon->QPs[0][gaddr.nodeID],
+    size_t cur_dir = 0;
+    rdmaCompareAndSwapMask(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
                            remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                            equal,
                            val,
                            iCon->cacheLKey,
-                           remoteInfo[gaddr.nodeID].dmRKey[0],
+                           remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                            mask,
                            signal);
 }
@@ -860,25 +891,26 @@ void DSM::faa_dm_boundary(GlobalAddress gaddr,
                           bool signal,
                           CoroContext *ctx)
 {
+    size_t cur_dir = 0;
     if (ctx == nullptr)
     {
-        rdmaFetchAndAddBoundary(iCon->QPs[0][gaddr.nodeID],
+        rdmaFetchAndAddBoundary(iCon->QPs[cur_dir][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
                                 remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                                 add_val,
                                 iCon->cacheLKey,
-                                remoteInfo[gaddr.nodeID].dmRKey[0],
+                                remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                                 mask,
                                 signal);
     }
     else
     {
-        rdmaFetchAndAddBoundary(iCon->QPs[0][gaddr.nodeID],
+        rdmaFetchAndAddBoundary(iCon->QPs[cur_dir][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
                                 remoteInfo[gaddr.nodeID].dmBase + gaddr.offset,
                                 add_val,
                                 iCon->cacheLKey,
-                                remoteInfo[gaddr.nodeID].dmRKey[0],
+                                remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                                 mask,
                                 true,
                                 ctx->coro_id);
@@ -919,11 +951,9 @@ bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
     return res == 1;
 }
 
-ibv_mw *DSM::alloc_mw()
+ibv_mw *DSM::alloc_mw(size_t dirID)
 {
-    size_t cur_dir = get_cur_dir();
-
-    struct RdmaContext *ctx = &dirCon[cur_dir].ctx;
+    struct RdmaContext *ctx = &dirCon[dirID]->ctx;
     // dinfo("[dsm] dirCon ID: %d, pd: %p", dirCon[cur_dir].dirID, ctx->pd);
     struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
     if (!mw)
@@ -943,33 +973,30 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
                              size_t target_node_id,
                              size_t target_thread_id,
                              const char *buffer,
-                             size_t size)
+                             size_t size,
+                             size_t dirID)
 {
-    // dinfo("iCon->QPS[%lu][%lu]. accessing[0][1]. iCon @%p", iCon->QPs.size(),
-    // iCon->QPs[0].size(), iCon);
-    size_t cur_dir = get_cur_dir();
-
-    struct ibv_qp *qp = dirCon[cur_dir].QPs[target_thread_id][target_node_id];
+    struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
-        qp, mw, dirCon[cur_dir].dsmMR, (uint64_t) buffer, size, false);
+        qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, false);
     return rkey != 0;
 }
 bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   size_t target_node_id,
                                   size_t target_thread_id,
                                   const char *buffer,
-                                  size_t size)
+                                  size_t size,
+                                  size_t dirID)
 {
-    size_t cur_dir = get_cur_dir();
-    struct ibv_qp *qp = dirCon[cur_dir].QPs[target_thread_id][target_node_id];
+    struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
-        qp, mw, dirCon[cur_dir].dsmMR, (uint64_t) buffer, size, true);
+        qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, true);
     if (rkey == 0)
     {
         return false;
     }
     struct ibv_wc wc;
-    int ret = pollWithCQ(dirCon[cur_dir].cq, 1, &wc) == 1;
+    int ret = pollWithCQ(dirCon[dirID]->cq, 1, &wc) == 1;
     if (ret < 0)
     {
         rdmaQueryQueuePair(qp);
