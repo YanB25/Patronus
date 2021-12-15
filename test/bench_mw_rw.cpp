@@ -408,8 +408,10 @@ void thread_main(std::shared_ptr<DSM> dsm,
         }
     }
 }
-int main()
+int main(int argc, char* argv[])
 {
+    google::InitGoogleLogging(argv[0]);
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
     // if (argc < 2)
     // {
     //     fprintf(stderr, "%s [window_nr]\n", argv[0]);
