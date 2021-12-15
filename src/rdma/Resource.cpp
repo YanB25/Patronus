@@ -1,5 +1,6 @@
-#include "Rdma.h"
 #include <glog/logging.h>
+
+#include "Rdma.h"
 
 bool createContext(RdmaContext *context,
                    uint8_t port,
@@ -54,6 +55,7 @@ bool createContext(RdmaContext *context,
         LOG(ERROR) << "failed to open device";
         goto CreateResourcesExit;
     }
+
     /* We are now done with device list, free it */
     ibv_free_device_list(deviceList);
     deviceList = NULL;
@@ -65,6 +67,27 @@ bool createContext(RdmaContext *context,
         goto CreateResourcesExit;
     }
 
+    struct ibv_device_attr dev_attr;
+    memset(&dev_attr, 0, sizeof(dev_attr));
+    if (ibv_query_device(ctx, &dev_attr))
+    {
+        PLOG(ERROR) << "failed to query device.";
+    }
+    else
+    {
+        auto flag = dev_attr.device_cap_flags;
+        if ((flag & IBV_DEVICE_MEM_WINDOW_TYPE_2A) ||
+            (flag & IBV_DEVICE_MEM_WINDOW_TYPE_2B))
+        {
+            LOG_FIRST_N(WARNING, 1) << "TODO: Although device seems to support "
+                                       "memory window TYPE_2, "
+                                       "we fall back to TYPE_1";
+            context->mw_type = IBV_MW_TYPE_1;
+            // context->mw_type = IBV_MW_TYPE_2;
+        }
+    }
+
+
     // allocate Protection Domain
     // info("Allocate Protection Domain");
     pd = ibv_alloc_pd(ctx);
@@ -74,9 +97,15 @@ bool createContext(RdmaContext *context,
         goto CreateResourcesExit;
     }
 
+    CHECK(portAttr.state == IBV_PORT_ARMED ||
+          portAttr.state == IBV_PORT_ACTIVE);
+    CHECK_LT(gidIndex, portAttr.gid_tbl_len) << "required from doc";
+    CHECK_GE(port, 1);
+    CHECK_LE(port, dev_attr.phys_port_cnt);
+
     if (ibv_query_gid(ctx, port, gidIndex, &context->gid))
     {
-        LOG(ERROR) << "could not get gid for port: " << port
+        PLOG(ERROR) << "could not get gid for port: " << (int) port
                    << " gidIndex: " << gidIndex;
         goto CreateResourcesExit;
     }
@@ -89,26 +118,6 @@ bool createContext(RdmaContext *context,
     context->ctx = ctx;
     context->pd = pd;
     context->lid = portAttr.lid;
-
-    struct ibv_device_attr attr;
-    memset(&attr, 0, sizeof(attr));
-    if (ibv_query_device(context->ctx, &attr))
-    {
-        PLOG(ERROR) << "failed to query device.";
-    }
-    else
-    {
-        auto flag = attr.device_cap_flags;
-        if ((flag & IBV_DEVICE_MEM_WINDOW_TYPE_2A) ||
-            (flag & IBV_DEVICE_MEM_WINDOW_TYPE_2B))
-        {
-            LOG_FIRST_N(WARNING, 1) << 
-                "TODO: Although device seems to support memory window TYPE_2, "
-                "we fall back to TYPE_1";
-            context->mw_type = IBV_MW_TYPE_1;
-            // context->mw_type = IBV_MW_TYPE_2;
-        }
-    }
 
     // CHECK device memory support
     if (kMaxDeviceMemorySize == 0)
@@ -250,8 +259,8 @@ bool destroyMemoryRegionOnChip(ibv_mr *mr, ibv_exp_dm *dm)
         {
             return false;
         }
-        CHECK(dm != nullptr) << 
-              "If dm is nullptr, please use regular destroyMemoryRegion.";
+        CHECK(dm != nullptr)
+            << "If dm is nullptr, please use regular destroyMemoryRegion.";
         if (ibv_exp_free_dm(dm))
         {
             PLOG(ERROR) << "failed to free dm";

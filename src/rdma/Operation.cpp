@@ -563,7 +563,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     size_t id = id_.fetch_add(1);
     if ((id & mask) == magic)
     {
-        DLOG(WARNING) << "TODO: Strange bug: reallocate mw: " << mw
+        LOG_FIRST_N(WARNING, 1) << "TODO: Strange bug: reallocate mw: " << mw
                       << ", idx: %" << id;
         return rdmaAsyncBindMemoryWindow(
             qp, mw, mr, mm, mmSize, signal, wrID, mw_access_flag);

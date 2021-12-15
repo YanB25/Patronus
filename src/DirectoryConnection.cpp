@@ -16,7 +16,7 @@ DirectoryConnection::DirectoryConnection(
                      config::kMonitorControlPath,
                      "DirectoryConnection::DirectoryConnection()");
 
-    createContext(&ctx);
+    CHECK(createContext(&ctx));
     // dinfo("[dirCon] dirID: %d, ctx->pd: %p", dirID, ctx.pd);
     timer.pin("createContext");
 
@@ -86,7 +86,9 @@ void DirectoryConnection::sendMessage2App(RawMessage *m,
 
 DirectoryConnection::~DirectoryConnection()
 {
-    ContTimer<config::kMonitorControlPath> timer("~DirectoryConnection");
+    DefOnceContTimer(timer,
+                     config::kMonitorControlPath,
+                     "~DirectoryConnection()");
     for (const auto &qps : QPs)
     {
         for (ibv_qp *qp : qps)

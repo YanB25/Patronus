@@ -116,9 +116,9 @@ void client(std::shared_ptr<DSM> dsm)
                 mw, kServerNodeId, 0, buffer, kBindSize);
             cnt++;
             CHECK(succ);
-            if (cnt % (1 * define::K) == 0)
+            if (cnt % (10 * define::K) == 0)
             {
-                LOG(INFO) << "Finish alloc/free mw for 1k. Now: " << cnt;
+                LOG(INFO) << "Finish alloc/free mw for 10k. Now: " << cnt;
             }
         }
         dsm->free_mw(mw);

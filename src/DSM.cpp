@@ -8,6 +8,7 @@
 #include "HugePageAlloc.h"
 #include "Rdma.h"
 #include "Util.h"
+#include "Timer.h"
 
 thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
@@ -137,6 +138,8 @@ void DSM::registerThread()
 
 void DSM::initRDMAConnection()
 {
+    ContTimer<config::kMonitorControlPath> timer("DSM::initRDMAConnection()");
+
     LOG(INFO) << "Machine NR: " << conf.machineNR;
 
     remoteInfo.resize(conf.machineNR);
@@ -146,17 +149,21 @@ void DSM::initRDMAConnection()
         thCon.emplace_back(
             i, (void *) cache.data, cache.size, conf.machineNR, remoteInfo);
     }
+    timer.pin("thCons " + std::to_string(MAX_APP_THREAD));
 
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
         dirCon.emplace_back(
             i, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
     }
+    timer.pin("dirCons " + std::to_string(NR_DIRECTORY));
 
     // thCon, dirCon, remoteInfo set up here.
     keeper = DSMKeeper::newInstance(thCon, dirCon, remoteInfo, conf.machineNR);
+    timer.pin("keeper init");
 
     myNodeID = keeper->getMyNodeID();
+    timer.report();
 }
 
 void DSM::rkey_read(uint32_t rkey,

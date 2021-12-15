@@ -50,7 +50,7 @@
 // }
 
 // { dir thread
-#define NR_DIRECTORY 256
+#define NR_DIRECTORY 2
 
 #define DIR_MESSAGE_NR 128
 // }
@@ -191,7 +191,7 @@ struct Data
 
 namespace config
 {
-constexpr static bool kMonitorControlPath = false;
+constexpr static bool kMonitorControlPath = true;
 }
 
 #endif /* __COMMON_H__ */

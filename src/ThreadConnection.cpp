@@ -14,7 +14,7 @@ ThreadConnection::ThreadConnection(
 {
     DefOnceContTimer(timer, config::kMonitorControlPath, "ThreadConnection::ThreadConnection()");
 
-    createContext(&ctx);
+    CHECK(createContext(&ctx));
     timer.pin("createContext");
 
     cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);

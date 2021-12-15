@@ -6,6 +6,7 @@
 
 #include "Keeper.h"
 #include <glog/logging.h>
+#include "Timer.h"
 
 struct ThreadConnection;
 struct DirectoryConnection;
@@ -85,8 +86,11 @@ public:
               uint32_t maxServer = 12)
         : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
     {
+        ContTimer<config::kMonitorControlPath> timer("DSMKeeper::DSMKeeper(...)");
+
         DLOG(INFO) << "DSMKeeper::initLocalMeta()";
         initLocalMeta();
+        timer.pin("initLocalMeta()");
 
         DLOG(INFO) << "DSMKeeper::connectMemcached";
         if (!connectMemcached())
@@ -94,12 +98,17 @@ public:
             LOG(FATAL) << "DSMKeeper:: unable to connect to memcached";
             return;
         }
+        timer.pin("connectMemcached");
         serverEnter();
+        timer.pin("serverEnter");
 
         serverConnect();
         connectMySelf();
+        timer.pin("connect");
 
         initRouteRule();
+        timer.pin("initRouteRule");
+        timer.report();
     }
 
     virtual ~DSMKeeper();
