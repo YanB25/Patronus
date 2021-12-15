@@ -94,7 +94,7 @@ bool createContext(RdmaContext *context,
     memset(&attr, 0, sizeof(attr));
     if (ibv_query_device(context->ctx, &attr))
     {
-        perror("failed to query device.");
+        PLOG(ERROR) << "failed to query device.";
     }
     else
     {
@@ -148,7 +148,7 @@ bool destroyContext(RdmaContext *context)
     {
         if (ibv_dealloc_pd(context->pd))
         {
-            perror("Failed to deallocate PD");
+            PLOG(ERROR) << "Failed to deallocate PD";
             rc = false;
         }
     }
@@ -156,7 +156,7 @@ bool destroyContext(RdmaContext *context)
     {
         if (ibv_close_device(context->ctx))
         {
-            perror("failed to close device context");
+            PLOG(ERROR) << "failed to close device context";
             rc = false;
         }
     }
@@ -188,7 +188,7 @@ bool destroyMemoryRegion(ibv_mr *mr)
     {
         if (ibv_dereg_mr(mr))
         {
-            perror("failed to destroy mr");
+            PLOG(ERROR) << "failed to destroy mr";
             return false;
         }
     }
@@ -254,7 +254,7 @@ bool destroyMemoryRegionOnChip(ibv_mr *mr, ibv_exp_dm *dm)
               "If dm is nullptr, please use regular destroyMemoryRegion.";
         if (ibv_exp_free_dm(dm))
         {
-            perror("failed to free dm");
+            PLOG(ERROR) << "failed to free dm";
             return false;
         }
     }
@@ -324,7 +324,7 @@ bool destroyQueuePair(ibv_qp *qp)
     {
         if (ibv_destroy_qp(qp))
         {
-            perror("failed to destroy QP");
+            PLOG(ERROR) << "failed to destroy QP";
             return false;
         }
     }
@@ -402,7 +402,7 @@ bool destroyCompleteQueue(ibv_cq *cq)
     {
         if (ibv_destroy_cq(cq))
         {
-            perror("failed to destroy cq");
+            PLOG(ERROR) << "failed to destroy cq";
             return false;
         }
     }

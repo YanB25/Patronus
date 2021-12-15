@@ -29,6 +29,8 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)
 find_package(
     glog REQUIRED
 )
+
+find_package(gflags REQUIRED)
 # find_package(benchmark REQUIRED)
 # link_libraries(benchmark::benchmark)
 
@@ -53,6 +55,7 @@ file(GLOB_RECURSE COMMON_FILE ${COMMON_SRC}/*.cpp)
 add_library(sherman STATIC ${COMMON_FILE})
 link_libraries(sherman)
 link_libraries(${GLOG_LIBRARIES})
+link_libraries(${GFLAGS_LIBRARIES})
 
 # bench
 if (${BUILD_BENCH})

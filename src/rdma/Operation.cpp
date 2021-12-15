@@ -694,7 +694,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 bool rdmaWriteBatch(
     ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled, uint64_t wrID)
 {
-    DCHECK(k < kOroMax) <<  "overflow detected at k = " <<  k;
+    DCHECK(k < kOroMax) << "overflow detected at k = " << k;
 
     struct ibv_sge sg[kOroMax];
     struct ibv_send_wr wr[kOroMax];
@@ -899,7 +899,7 @@ void rdmaQueryDevice()
     memset(&attr, 0, sizeof(struct ibv_device_attr));
     if (ibv_query_device(ctx, &attr))
     {
-        perror("failed to query device attr");
+        PLOG(ERROR) << "failed to query device attr";
     }
     printf("======= device attr ========\n");
     printf("max_mr_size: %" PRIu64 "\n", attr.max_mr_size);
@@ -936,10 +936,9 @@ void rdmaQueryDevice()
                          IBV_EXP_DEVICE_ATTR_INLINE_RECV_SZ |
                          IBV_EXP_DEVICE_ATTR_TUNNELED_ATOMIC |
                          IBV_EXP_DEVICE_ATTR_TUNNEL_OFFLOADS_CAPS;
-    if (ibv_exp_query_device(ctx, &exp_attr))
-    {
-        perror("failed to query device attr");
-    }
+    PLOG_IF(ERROR, ibv_exp_query_device(ctx, &exp_attr))
+        << "failed to query device attr";
+
     printf("IBV_EXP_DEVICE_ODP: %d\n",
            exp_attr.exp_device_cap_flags & IBV_EXP_DEVICE_ODP ? 1 : 0);
     printf("inline_recv_sz: %d\n", exp_attr.inline_recv_sz);
@@ -947,9 +946,7 @@ void rdmaQueryDevice()
            exp_attr.tunneled_atomic_caps & IBV_EXP_TUNNELED_ATOMIC_SUPPORTED);
     printf("======= device attr end ====\n");
 
-    if (ibv_close_device(ctx))
-    {
-        perror("failed to close device");
-    }
+    PLOG_IF(ERROR, ibv_close_device(ctx)) << "failed to close device";
+
     ibv_free_device_list(deviceList);
 }

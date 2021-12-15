@@ -5,6 +5,7 @@
 #include "DirectoryConnection.h"
 #include "RawMessageConnection.h"
 #include "ThreadConnection.h"
+#include <glog/logging.h>
 
 /**
  * @brief RemoteConnection is a combination of @see ThreadConnection
@@ -38,11 +39,11 @@ struct RemoteConnection
             {
                 if (ibv_destroy_ah(dirToAppAh[i][j]))
                 {
-                    perror("failed to destroy ah");
+                    PLOG(ERROR) << "failed to destroy ah";
                 }
                 if (ibv_destroy_ah(appToDirAh[j][i]))
                 {
-                    perror("failed to destroy ah");
+                    PLOG(ERROR) << "failed to destroy ah";
                 }
             }
         }

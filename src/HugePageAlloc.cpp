@@ -32,7 +32,7 @@ bool hugePageFree(void* ptr, size_t size)
     CHECK(size % align == 0);
     if (munmap(ptr, size))
     {
-        perror("failed to free huge page");
+        PLOG(ERROR) << "failed to free huge page";
         return false;
     }
     return true;

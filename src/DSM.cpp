@@ -921,7 +921,7 @@ ibv_mw *DSM::alloc_mw()
     struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
     if (!mw)
     {
-        perror("failed to create memory window.");
+        PLOG(ERROR) << "failed to create memory window.";
     }
     // dinfo("allocating mw at pd: %p, type: %d", ctx->pd, ctx->mw_type);
     return mw;
@@ -929,11 +929,7 @@ ibv_mw *DSM::alloc_mw()
 
 void DSM::free_mw(struct ibv_mw *mw)
 {
-    if (ibv_dealloc_mw(mw))
-    {
-        perror("failed to destroy memory window");
-        CHECK(false);
-    }
+    PCHECK(ibv_dealloc_mw(mw) == 0) << "failed to destroy mw";
 }
 
 bool DSM::bind_memory_region(struct ibv_mw *mw,
