@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include "Keeper.h"
+#include <glog/logging.h>
 
 struct ThreadConnection;
 struct DirectoryConnection;
@@ -84,13 +85,13 @@ public:
               uint32_t maxServer = 12)
         : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
     {
-        dinfo("DSMKeeper::initLocalMeta()");
+        DLOG(INFO) << "DSMKeeper::initLocalMeta()";
         initLocalMeta();
 
-        dinfo("DSMKeeper::connectMemcached");
+        DLOG(INFO) << "DSMKeeper::connectMemcached";
         if (!connectMemcached())
         {
-            panic("DSMKeeper:: unable to connect to memcached");
+            LOG(FATAL) << "DSMKeeper:: unable to connect to memcached";
             return;
         }
         serverEnter();

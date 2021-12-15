@@ -4,8 +4,9 @@
 #include <sys/mman.h>
 
 #include <cstdint>
-#include "Debug.h"
+
 #include "Common.h"
+#include <glog/logging.h>
 void *hugePageAlloc(size_t size)
 {
     void *res = mmap(NULL,
@@ -16,8 +17,7 @@ void *hugePageAlloc(size_t size)
                      0);
     if (res == MAP_FAILED)
     {
-        error("%s mmap failed for size %lu\n", getIP(), size);
-        throw std::runtime_error("mmap failed to alloc");
+        LOG(FATAL) << getIP() << " mmap failed for size " << size;
         exit(-1);
     }
 

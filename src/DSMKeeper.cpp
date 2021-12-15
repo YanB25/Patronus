@@ -83,8 +83,8 @@ const ExchangeMeta &DSMKeeper::getExchangeMeta(uint16_t remoteID) const
     auto it = snapshot_exchange_meta_.find(remoteID);
     if (it == snapshot_exchange_meta_.end())
     {
-        error("failed to fetch exchange meta data for server %u", remoteID);
-        throw std::runtime_error("Exchange metadata not found.");
+        LOG(FATAL) << "failed to fetch exchange meta data for server "
+                   << remoteID;
     }
     return it->second;
 }
@@ -160,7 +160,8 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
     // init remote connections
     auto &remote = remoteCon[remoteID];
     remote.dsmBase = exMeta.dsmBase;
-    dinfo("remote %p set dsmBase to %p", &remote, (char *) remote.dsmBase);
+    DLOG(INFO) << "remote " << (void *) &remote << " set dsmBase to "
+               << (void *) remote.dsmBase;
     // remote.cacheBase = exMeta.cacheBase;
     remote.dmBase = exMeta.dmBase;
 

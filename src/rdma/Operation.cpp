@@ -1,3 +1,4 @@
+#include <glog/logging.h>
 #include <inttypes.h>
 
 #include <atomic>
@@ -12,7 +13,7 @@ int pollWithCQ(ibv_cq *cq,
                const WcHandler &handler)
 {
     int count = 0;
-    DCHECK(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
+    DCHECK(pollNumber > 0) << "pollNumber should > 0, get " << pollNumber;
 
     do
     {
@@ -25,24 +26,23 @@ int pollWithCQ(ibv_cq *cq,
             }
             else
             {
-                error("Failed status `%s (%d)` for wr_id %d at QP: %u. vendor err: %u",
-                    ibv_wc_status_str(wc->status),
-                    wc->status,
-                    (int) wc->wr_id,
-                    wc->qp_num,
-                    wc->vendor_err);
+                LOG(ERROR) << "[qp] Failed status "
+                           << ibv_wc_status_str(wc->status) << " ("
+                           << wc->status << ") for wr_id " << wc->wr_id
+                           << " at QP: " << wc->qp_num
+                           << ". vendor err: " << wc->vendor_err;
                 err_handler(wc);
             }
         }
         else if (new_count < 0)
         {
-            error("Poll Completion failed.");
+            LOG(ERROR) << "Poll Completion failed.";
             // sleep(5);
             return -1;
         }
         else if (new_count > 1)
         {
-            CHECK(false, "impossible return value from ibv_poll_cq");
+            LOG(FATAL) << "impossible return value from ibv_poll_cq";
         }
         count += new_count;
 
@@ -60,10 +60,8 @@ int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
     }
     if (wc->status != IBV_WC_SUCCESS)
     {
-        error("Failed status %s (%d) for wr_id %d",
-              ibv_wc_status_str(wc->status),
-              wc->status,
-              (int) wc->wr_id);
+        LOG(ERROR) << "[qp] failed status " << ibv_wc_status_str(wc->status)
+                   << " (" << wc->status << ") for wr_id " << wc->wr_id;
         return -1;
     }
     else
@@ -148,7 +146,7 @@ bool rdmaSend(ibv_qp *qp,
     }
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with RDMA_SEND failed.");
+        LOG(ERROR) << "Send with RDMA_SEND failed.";
         return false;
     }
     return true;
@@ -177,7 +175,7 @@ bool rdmaSend(
     wr.send_flags = IBV_SEND_SIGNALED;
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with RDMA_SEND failed.");
+        LOG(ERROR) << "Send with RDMA_SEND failed.";
         return false;
     }
     return true;
@@ -196,7 +194,7 @@ bool rdmaReceive(
 
     if (ibv_post_recv(qp, &wr, &wrBad))
     {
-        error("Receive with RDMA_RECV failed.");
+        LOG(ERROR) << "Receive with RDMA_RECV failed.";
         return false;
     }
     return true;
@@ -212,7 +210,7 @@ bool rdmaReceive(ibv_srq *srq, uint64_t source, uint64_t size, uint32_t lkey)
 
     if (ibv_post_srq_recv(srq, &wr, &wrBad))
     {
-        error("Receive with RDMA_RECV failed.");
+        LOG(ERROR) << "Receive with RDMA_RECV failed.";
         return false;
     }
     return true;
@@ -255,7 +253,7 @@ bool rdmaRead(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with RDMA_READ failed.");
+        LOG(ERROR) << "Send with RDMA_READ failed.";
         return false;
     }
     return true;
@@ -289,7 +287,7 @@ bool rdmaRead(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with RDMA_READ failed.");
+        LOG(ERROR) << "Send with RDMA_READ failed.";
         return false;
     }
     return true;
@@ -333,7 +331,7 @@ bool rdmaWrite(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad) != 0)
     {
-        error("Send with RDMA_WRITE(WITH_IMM) failed.");
+        LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";
         // sleep(10);
         return false;
     }
@@ -377,7 +375,7 @@ bool rdmaWrite(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad) != 0)
     {
-        error("Send with RDMA_WRITE(WITH_IMM) failed.");
+        LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";
         // sleep(5);
         return false;
     }
@@ -407,7 +405,7 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with ATOMIC_FETCH_AND_ADD failed.");
+        LOG(ERROR) << "Send with ATOMIC_FETCH_AND_ADD failed.";
         return false;
     }
     return true;
@@ -448,7 +446,7 @@ bool rdmaFetchAndAddBoundary(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with MASK FETCH_AND_ADD failed.");
+        LOG(ERROR) << "Send with MASK FETCH_AND_ADD failed.";
         return false;
     }
     return true;
@@ -483,7 +481,7 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with ATOMIC_FETCH_AND_ADD failed.");
+        LOG(ERROR) << "Send with ATOMIC_FETCH_AND_ADD failed.";
         return false;
     }
     return true;
@@ -533,38 +531,30 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     if (ret == EINVAL)
     {
-        error(
-            "failed to bind mw: maybe library not support TYPE_2 memory "
-            "window: errno %d",
-            ret);
+        LOG(ERROR)
+            << "failed to bind mw: maybe library not support TYPE_2 memory "
+               "window: errno "
+            << ret;
         return 0;
     }
     if (ret == ENOMEM)
     {
-        CHECK(false,
-              "Failed to bind mw: Memory has been used up. errno: %d",
-              ret);
+        LOG(FATAL) << "Failed to bind mw: Memory has been used up. errno: "
+                   << ret;
     }
     if (ret == ENOTSUP)
     {
-        CHECK(false,
-              "Failed to bind mw: Operation not supported. Is it too large? "
-              "errno: %d",
-              ret);
+        LOG(FATAL)
+            << "Failed to bind mw: Operation not supported. Is it too large? "
+               "errno: "
+            << ret;
     }
     if (ret)
     {
-        error(
-            "failed to bind memory window. errno: %d.\nqp: %p, mw: %p, mr: %p, "
-            "mr.lkey: %u, mm: %p, "
-            "size: %lu",
-            ret,
-            qp,
-            mw,
-            mr,
-            mr->lkey,
-            (char *) mm,
-            mmSize);
+        LOG(ERROR) << "Failed to bind memory window. errno: " << ret
+                   << "< qp: " << qp << ", mw: " << mw << ", mr: " << mr
+                   << ", mr.lkey: " << mr->lkey << ", mm: " << (char *) mm
+                   << ", size: " << mmSize;
         return 0;
     }
     // dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p",
@@ -573,7 +563,8 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     size_t id = id_.fetch_add(1);
     if ((id & mask) == magic)
     {
-        dwarn("TODO: Strange bug: reallocate mw: %p, idx: %lu", mw, id);
+        DLOG(WARNING) << "TODO: Strange bug: reallocate mw: " << mw
+                      << ", idx: %" << id;
         return rdmaAsyncBindMemoryWindow(
             qp, mw, mr, mm, mmSize, signal, wrID, mw_access_flag);
     }
@@ -613,7 +604,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with ATOMIC_CMP_AND_SWP failed.");
+        LOG(ERROR) << "Send with ATOMIC_CMP_AND_SWP failed.";
         // sleep(5);
         return false;
     }
@@ -657,7 +648,7 @@ bool rdmaCompareAndSwapMask(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with MASK ATOMIC_CMP_AND_SWP failed.");
+        LOG(ERROR) << "Send with MASK ATOMIC_CMP_AND_SWP failed.";
         return false;
     }
     return true;
@@ -694,7 +685,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with ATOMIC_CMP_AND_SWP failed.");
+        LOG(ERROR) << "Send with ATOMIC_CMP_AND_SWP failed.";
         return false;
     }
     return true;
@@ -703,7 +694,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 bool rdmaWriteBatch(
     ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled, uint64_t wrID)
 {
-    DCHECK(k < kOroMax, "overflow detected at k = %d", k);
+    DCHECK(k < kOroMax) <<  "overflow detected at k = " <<  k;
 
     struct ibv_sge sg[kOroMax];
     struct ibv_send_wr wr[kOroMax];
@@ -729,7 +720,7 @@ bool rdmaWriteBatch(
 
     if (ibv_post_send(qp, &wr[0], &wrBad) != 0)
     {
-        error("Send with RDMA_WRITE(WITH_IMM) failed.");
+        LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";
         // sleep(10);
         return false;
     }
@@ -769,7 +760,7 @@ bool rdmaCasRead(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        error("Send with CAS_READs failed.");
+        LOG(ERROR) << "Send with CAS_READs failed.";
         // sleep(10);
         return false;
     }
@@ -810,7 +801,7 @@ bool rdmaWriteFaa(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        error("Send with Write Faa failed.");
+        LOG(ERROR) << "Send with Write Faa failed.";
         // sleep(10);
         return false;
     }
@@ -850,7 +841,7 @@ bool rdmaWriteCas(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        error("Send with Write Cas failed.");
+        LOG(ERROR) << "Send with Write Cas failed.";
         // sleep(10);
         return false;
     }
@@ -868,14 +859,14 @@ void rdmaQueryDevice()
     struct ibv_device **deviceList = ibv_get_device_list(&devicesNum);
     if (!deviceList)
     {
-        error("failed to get IB devices list");
+        LOG(ERROR) << "failed to get IB devices list";
         return;
     }
 
     // if there isn't any IB device in host
     if (!devicesNum)
     {
-        info("found %d device(s)", devicesNum);
+        LOG(INFO) << "found " << devicesNum << " device(s)";
         return;
     }
     // dinfo("Open IB Device");
@@ -892,7 +883,7 @@ void rdmaQueryDevice()
 
     if (devIndex >= devicesNum)
     {
-        error("ib device wasn't found");
+        LOG(ERROR) << "ib device wasn't found";
         return;
     }
 
@@ -900,7 +891,7 @@ void rdmaQueryDevice()
     ctx = ibv_open_device(dev);
     if (!ctx)
     {
-        error("failed to open device");
+        LOG(ERROR) << "failed to open device";
         return;
     }
 

@@ -12,6 +12,8 @@
 #include "LocalAllocator.h"
 #include "RdmaBuffer.h"
 
+#include <glog/logging.h>
+
 class DSMKeeper;
 class Directory;
 
@@ -365,8 +367,8 @@ public:
     Buffer get_server_internal_buffer();
     RdmaBuffer &get_rbuf(int coro_id)
     {
-        DCHECK(coro_id < define::kMaxCoro,
-               "coro_id should be < define::kMaxCoro");
+        DCHECK(coro_id < define::kMaxCoro) << 
+               "coro_id should be < define::kMaxCoro";
         return rbuf[coro_id];
     }
 
@@ -399,7 +401,8 @@ public:
               bool sync = false)
     {
         // dwarn(
-        //     "TODO: now using dir_id = 0 by default. let rpc use distinct dir.");
+        //     "TODO: now using dir_id = 0 by default. let rpc use distinct
+        //     dir.");
         auto buffer = (RawMessage *) iCon->message->getSendPool();
         buffer->node_id = myNodeID;
         buffer->app_id = thread_id;
@@ -416,7 +419,7 @@ public:
         int ret = ibv_poll_cq(cq, 1, &wc);
         if (ret < 0)
         {
-            error("failed to poll cq. cq: %p. ret: %d", cq, ret);
+            LOG(ERROR) << "failed to poll cq. cq: " << cq << ". ret: " << ret;
             return nullptr;
         }
         if (ret == 1)

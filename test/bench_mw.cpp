@@ -14,7 +14,7 @@ constexpr uint32_t kMachineNr = 2;
 
 void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
 {
-    info("client: TODO");
+    LOG(INFO) << "client: TODO";
 }
 std::atomic<size_t> window_nr_;
 std::atomic<size_t> window_size_;
@@ -74,9 +74,8 @@ void server(std::shared_ptr<DSM> dsm,
         timer.print();
 
         printf("\n-------- bind mw ----------\n");
-        CHECK(window_size < max_size,
-              "mw_nr %lu too large, overflow an rdma buffer.",
-              mw_nr);
+        CHECK(window_size < max_size) << 
+              "mw_nr " << mw_nr << " too large, overflow an rdma buffer.";
         timer.begin();
         size_t remain_nr = mw_nr;
         size_t window_nr = max_size / window_size;
@@ -106,7 +105,7 @@ void server(std::shared_ptr<DSM> dsm,
                     // if i too large, we roll back i to 0.
                     buffer_start = buffer + (i % window_nr) * window_size;
                 }
-                warn("TODO: CHECK if thread_id == 0 is correct.");
+                LOG(WARNING) << "TODO: CHECK if thread_id == 0 is correct.";
                 dsm->bind_memory_region(
                     mws[i], kClientNodeId, 0, buffer_start, window_size);
             }
@@ -206,7 +205,7 @@ int main()
         m.to_csv("memory-window");
     }
 
-    info("finished. ctrl+C to quit.");
+    LOG(INFO) << "finished. ctrl+C to quit.";
     while (1)
     {
         sleep(1);

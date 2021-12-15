@@ -4,8 +4,9 @@
 #include <cstring>
 
 #include "Common.h"
-#include "Debug.h"
+
 #include "GlobalAddress.h"
+#include <glog/logging.h>
 
 // global allocator for coarse-grained (chunck level) alloc
 // used by home agent
@@ -41,7 +42,7 @@ public:
         if (bitmap_tail >= bitmap_len)
         {
             assert(false);
-            warn("shared memory space run out");
+            LOG(WARNING) << "shared memory space run out";
         }
 
         if (bitmap[bitmap_tail] == false)
@@ -54,7 +55,7 @@ public:
         else
         {
             assert(false);
-            warn("TODO");
+            LOG(WARNING) << "TODO";
         }
 
         return res;

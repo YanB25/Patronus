@@ -1,12 +1,14 @@
 #include "ClockManager.h"
 
+#include <glog/logging.h>
+
 #include "DSM.h"
 ClockManager::ClockManager(DSM *dsm) : dsm_(dsm)
 {
-    CHECK(false,
-          "I figure out that the design with rdtsc does not work, because CPU "
-          "has different frequency. Don't want to walk around. Maybe I just "
-          "can use std::chrono.");
+    LOG(FATAL)
+        << "I figure out that the design with rdtsc does not work, because CPU "
+           "has different frequency. Don't want to walk around. Maybe I just "
+           "can use std::chrono.";
 }
 void ClockManager::init_sync_clock()
 {
@@ -37,28 +39,28 @@ void ClockManager::sync_clock()
  */
 void ClockManager::primary_init_sync_clock()
 {
-    dinfo("[clock] primary init sync clock...");
+    DLOG(INFO) << "[clock] primary init sync clock...";
     auto dsm = dsm_;
 
     uint64_t max_clock = clock();
     for (size_t i = 1; i < dsm->getClusterSize(); ++i)
     {
-        dinfo("[clock] RECV that clock");
+        DLOG(INFO) << "[clock] RECV that clock";
         auto that_clock = *(uint64_t *) dsm->recv();
         max_clock = std::max(max_clock, that_clock);
     }
     set_clock(max_clock);
     for (size_t i = 1; i < dsm->getClusterSize(); ++i)
     {
-        dinfo("[clock] SEND max clock to %zu.", i);
+        DLOG(INFO) << "[clock] SEND max clock to " << i;
         dsm->send((char *) &max_clock, sizeof(max_clock), i);
     }
-    dinfo("[clock] primary init sync clock finished.");
+    DLOG(INFO) << "[clock] primary init sync clock finished.";
 }
 
 void ClockManager::backup_init_sync_clock()
 {
-    dinfo("[clock] backup init sync clock...");
+    DLOG(INFO) << "[clock] backup init sync clock...";
     auto dsm = dsm_;
 
     auto my_clock = clock();
@@ -73,7 +75,7 @@ void ClockManager::backup_init_sync_clock()
 
 void ClockManager::primary_sync_clock()
 {
-    dinfo("[clock] primary start to sync clock...");
+    DLOG(INFO) << "[clock] primary start to sync clock...";
     auto dsm = dsm_;
 
     std::unordered_map<int, uint64_t> node_rtt;
@@ -83,7 +85,7 @@ void ClockManager::primary_sync_clock()
     for (size_t i = 1; i < dsm->getClusterSize(); ++i)
     {
         auto begin_rdtsc = rdtsc();
-        dinfo("[clock] SEND measuring RTT with node %zu", i);
+        DLOG(INFO) << "[clock] SEND measuring RTT with node" << i;
         dsm->send(nullptr, 0, i, 0, true);
         auto end_rdtsc = rdtsc();
 
@@ -92,7 +94,7 @@ void ClockManager::primary_sync_clock()
 
     for (const auto &[node_id, rtt] : node_rtt)
     {
-        info("[clock] node: %d, rtt: %lu", node_id, rtt);
+        LOG(INFO) << "[clock] node: " << node_id << ", rtt: " << rtt;
     }
 
     // sync clock
@@ -119,21 +121,18 @@ void ClockManager::primary_sync_clock()
         sum += get_clock;
     }
     double avg = sum / node_clock.size();
-    dinfo("[clock] get avg clock: %lf", avg);
+    DLOG(INFO) << "[clock] get avg clock: " << avg;
 
     for (size_t i = 1; i < dsm->getClusterSize(); ++i)
     {
         double off = avg - node_clock[i];
-        dinfo("[clock] node: %zu, clock: %zu, avg: %lf, offset: %lf",
-              i,
-              node_clock[i],
-              avg,
-              off);
+        DLOG(INFO) << "[clock] node: " << i << " clock: " << node_clock[i]
+                   << ", avg: " << avg << ", offset: " << off;
         dsm->send((char *) &off, sizeof(off), i, 0, true);
     }
     double my_off = avg - node_clock[dsm->get_node_id()];
     set_offset(my_off);
-    dinfo("[clock] sync finished");
+    DLOG(INFO) << "[clock] sync finished";
 }
 
 void ClockManager::backup_sync_clock()
@@ -157,5 +156,5 @@ void ClockManager::backup_sync_clock()
     // dinfo("[clock] RECV getting off...");
     double off = *(double *) dsm->recv();
     set_offset(off);
-    dinfo("[clock] sync finished.");
+    DLOG(INFO) << "[clock] sync finished.";
 }

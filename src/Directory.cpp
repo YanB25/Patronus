@@ -49,9 +49,9 @@ Directory::~Directory()
 
 void Directory::dirThread()
 {
-    CHECK(false, "TODO:");
+    CHECK(false) <<  "TODO:";
     bindCore(23 - dirID);
-    info("dir %d launch!\n", dirID);
+    LOG(INFO) << "dir " << dirID << " launch!\n";
 
     while (true)
     {

@@ -196,14 +196,12 @@ void read_args(int argc, char **argv)
         kPacketSize = std::atoi(argv[5]);
     }
 
-    info(
-        "node_nr [%d], thread_nr [%d], zipfan [%.3f], cas sleep ns [%ld], "
-        "packsize [%d]",
-        node_nr,
-        thread_nr,
-        kZipfan,
-        cas_sleep_ns,
-        kPacketSize);
+    LOG(INFO) << "node_nr [" << node_nr << "], thread_nr [" << thread_nr
+              << "], zipfan [" << kZipfan << " << ], cas sleep ns ["
+              << cas_sleep_ns
+              << "] "
+                 "packsize ["
+              << kPacketSize << "]";
 }
 
 int main(int argc, char **argv)

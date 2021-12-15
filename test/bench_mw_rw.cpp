@@ -49,7 +49,7 @@ void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 {
     if (memcmp(lhs_buf, rhs_buf, size) != 0)
     {
-        error("buf %p != expect\n", lhs_buf);
+        LOG(ERROR) << "buf " << lhs_buf << " != expect\n";
     }
     printf("buf %p == expect!\n", lhs_buf);
 }
@@ -77,7 +77,7 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 
 std::vector<uint32_t> recv_rkeys(std::shared_ptr<DSM> dsm, size_t size)
 {
-    info("[master] Recving mws %lu from server.", size);
+    LOG(INFO) << "[master] Recving mws " << size << " from server.";
     std::vector<uint32_t> ret;
     ret.reserve(size);
     size_t remain_mw = size;
@@ -92,7 +92,7 @@ std::vector<uint32_t> recv_rkeys(std::shared_ptr<DSM> dsm, size_t size)
         dsm->send(nullptr, 0, kServerNodeId);
         remain_mw -= should_recv;
     }
-    info("Finish recving %lu mws", size);
+    LOG(INFO) << "Finish recving " << size << " mws";
     // for (size_t i = 0; i < ret.size(); ++i)
     // {
     //     fprintf(stderr, "##%u\n", ret[i]);
@@ -101,7 +101,7 @@ std::vector<uint32_t> recv_rkeys(std::shared_ptr<DSM> dsm, size_t size)
 }
 void send_rkeys(std::shared_ptr<DSM> dsm, std::vector<ibv_mw *> &mws)
 {
-    info("Sending mws with client.");
+    LOG(INFO) << "Sending mws with client.";
     size_t remain_sync_mw = mws.size();
     size_t index = 0;
     while (remain_sync_mw > 0)
@@ -128,14 +128,7 @@ void send_rkeys(std::shared_ptr<DSM> dsm, std::vector<ibv_mw *> &mws)
         dsm->recv();
         remain_sync_mw -= should_sync;
     }
-    info(
-        "one of regular rkey: %u, index %u, handle: "
-        "%u, pd: %p",
-        mws[0]->rkey,
-        0,
-        mws[0]->handle,
-        mws[0]->pd);
-    info("Finish sending mws.");
+    LOG(INFO) << "Finish sending mws.";
 }
 
 void bind_rkeys(std::shared_ptr<DSM> dsm,
@@ -181,9 +174,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
         Data data;
         CHECK(sizeof(Data) == sizeof(uint64_t));
         memcpy(&data, &wc->wr_id, sizeof(uint64_t));
-        error("Failed for rkey: %u, rkey_idx: %u. Remove from the rkey pool.",
-              data.lower,
-              data.upper);
+        LOG(ERROR) << "Failed for rkey: " << data.lower << ", rkey_idx: " << data.upper << ". Remove from the rkey pool.";
         rkeys[data.upper] = 0;
         if (sequantial || warmup)
         {
@@ -249,7 +240,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
         }
         else
         {
-            CHECK(false, "unknown Benchmark type: %d", bt);
+            CHECK(false) << "unknown Benchmark type: " << bt;
         }
     }
 
@@ -265,7 +256,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
 
 std::vector<uint32_t> prepare_client(std::shared_ptr<DSM> dsm, uint32_t mw_nr)
 {
-    info("requiring: mw_nr: %u", mw_nr);
+    LOG(INFO) << "requiring: mw_nr: " << mw_nr;
     dsm->send((char *) &mw_nr, sizeof(uint32_t), kServerNodeId);
     auto rkeys = recv_rkeys(dsm, mw_nr);
     CHECK(rkeys.size() == mw_nr);
@@ -289,20 +280,20 @@ void client(std::shared_ptr<DSM> dsm,
 
     client_bar.wait();
 
-    info_if(tid == 0, "detecting failed rkeys...");
+    LOG_IF(INFO, tid == 0) << "detecting failed rkeys...";
     if (tid == 0)
     {
         client_burn(dsm, size, io_size, bt, true, true);
     }
 
     client_bar.wait();
-    info_if(tid == 0, "warming up...");
+    LOG_IF(INFO, tid == 0) << "warming up...";
     if (tid < thread_nr)
     {
         client_burn(dsm, size, io_size, bt, false, true);
     }
     client_bar.wait();
-    info_if(tid == 0, "benchmarking...");
+    LOG_IF(INFO, tid == 0) << "benchmarking...";
     if (tid < thread_nr)
     {
         client_burn(dsm, size, io_size, bt, false, false);
@@ -311,7 +302,7 @@ void client(std::shared_ptr<DSM> dsm,
     if (tid == 0)
     {
         uint8_t ig = 0xfc;
-        dinfo("!!!! client 0 sending 0xfc");
+        DLOG(INFO) << "!!!! client 0 sending 0xfc";
         dsm->send((char *) &ig, sizeof(ig), kServerNodeId);
     }
 }
@@ -327,9 +318,9 @@ std::vector<ibv_mw *> prepare_server(std::shared_ptr<DSM> dsm, size_t size)
     Timer timer;
     timer.begin();
 
-    info("Server expecting new mw_nr");
+    LOG(INFO) << "Server expecting new mw_nr";
     uint32_t mw_nr = *(uint32_t *) dsm->recv();
-    info("Client request mw_nr: %u", mw_nr);
+    LOG(INFO) << "Client request mw_nr: " << mw_nr;
     std::vector<ibv_mw *> mws;
     mws.reserve(mw_nr);
     for (size_t i = 0; i < mw_nr; ++i)
@@ -340,7 +331,7 @@ std::vector<ibv_mw *> prepare_server(std::shared_ptr<DSM> dsm, size_t size)
     bind_rkeys(dsm, mws, size);
     send_rkeys(dsm, mws);
 
-    info("The latency of handshaking for %u mw", mw_nr);
+    LOG(INFO) << "The latency of handshaking for " << mw_nr << " mw";
     timer.end_print(1);
 
     return mws;
@@ -349,7 +340,7 @@ std::vector<ibv_mw *> prepare_server(std::shared_ptr<DSM> dsm, size_t size)
 void server(std::shared_ptr<DSM> dsm, size_t thread_nr)
 {
     char *recv_buf = dsm->try_recv();
-    dinfo("Entering loop");
+    DLOG(INFO) << "Entering loop";
     while (true)
     {
         if (recv_buf != nullptr)
@@ -361,7 +352,7 @@ void server(std::shared_ptr<DSM> dsm, size_t thread_nr)
             }
             else
             {
-                error("Expect 0xfc but get %x", ig);
+                LOG(ERROR) << "Expect 0xfc but get " << ig;
             }
         }
         for (size_t tid = 0; tid < 1 + thread_nr; ++tid)
@@ -370,7 +361,7 @@ void server(std::shared_ptr<DSM> dsm, size_t thread_nr)
                 IBV_QPS_ERR)
             {
                 Timer timer;
-                info("Benchmarking latency of QP recovery");
+                LOG(INFO) << ("Benchmarking latency of QP recovery");
                 timer.begin();
                 CHECK(dsm->recover_dir_qp(kClientNodeId, tid));
                 timer.end_print(1);
@@ -379,7 +370,7 @@ void server(std::shared_ptr<DSM> dsm, size_t thread_nr)
         }
         recv_buf = dsm->try_recv();
     }
-    dinfo("Leaving loop");
+    DLOG(INFO) << "Leaving loop";
 }
 
 constexpr static size_t kMaxThread = 24;
@@ -401,7 +392,7 @@ void thread_main(std::shared_ptr<DSM> dsm,
         {
             rkeys.clear();
             rkeys = prepare_client(dsm, mw_nr);
-            info("[%zu] rkeys.size(): %zu", tid, rkeys.size());
+            LOG(INFO) << "[" << tid << "] rkeys.size() " << rkeys.size();
         }
         client_bar.wait();
         client(dsm, size, io_size, thread_nr, tid, bt, client_bar);
@@ -494,14 +485,13 @@ int main()
                                         bench_type = bt;
                                         expr_id.fetch_add(1);
                                     }
-                                    info_if(
-                                        tid == 0 && nid == kClientNodeId,
-                                        "Benchmarking mw: %zu, thread: %zu, "
-                                        "io_size: "
-                                        "%zu",
-                                        window_nr,
-                                        thread_nr,
-                                        io_size);
+                                    LOG_IF(INFO,
+                                           tid == 0 && nid == kClientNodeId)
+                                        << "Benchmarking mw: " << window_nr
+                                        << ", thread: " << thread_nr
+                                        << ", "
+                                           "io_size: "
+                                        << io_size;
                                     thread_main(dsm,
                                                 window_nr,
                                                 thread_nr,
@@ -534,12 +524,13 @@ int main()
         bench::BenchManager::ins().to_csv("mw-rw-scalability");
     }
 
-    info("finished. ctrl+C to quit.");
-    warn(
-        "TODO: There is still bug: the server bind mw for only thread 0, but "
-        "24 threads at the client use the rkeys.");
-    warn(
-        "TODO: Because we are using TYPE_1 MW, and it binds to pd instead of "
-        "QP, so the bug does not take effect");
-    warn("TODO: If we start to use TYPE_2, the bug may cause failing");
+    LOG(INFO) << "finished. ctrl+C to quit.";
+    LOG(WARNING) << "TODO: There is still bug: the server bind mw for only "
+                    "thread 0, but "
+                    "24 threads at the client use the rkeys.";
+    LOG(WARNING) << "TODO: Because we are using TYPE_1 MW, and it binds to pd "
+                    "instead of "
+                    "QP, so the bug does not take effect";
+    LOG(WARNING)
+        << "TODO: If we start to use TYPE_2, the bug may cause failing";
 }

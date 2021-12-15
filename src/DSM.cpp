@@ -25,11 +25,9 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize);
 
-    info("shared memory size: %s, 0x%lx",
-         smart::smartSize(conf.dsmSize).c_str(),
-         baseAddr);
-    info("cache size: %s",
-         smart::smartSize(conf.cacheConfig.cacheSize).c_str());
+    LOG(INFO) << "shared memory size: " << smart::smartSize(conf.dsmSize)
+              << " at " << baseAddr;
+    LOG(INFO) << "cache size: " << smart::smartSize(conf.cacheConfig.cacheSize);
 
     // warmup
     // memset((char *)baseAddr, 0, conf.dsmSize * define::GB);
@@ -55,7 +53,8 @@ bool DSM::recover_th_qp(int node_id)
 {
     auto tid = get_thread_id();
     ibv_qp *qp = get_th_qp(node_id);
-    dinfo("Recovering th qp: %p. node_id: %d, thread_id: %d", qp, node_id, tid);
+    DLOG(INFO) << "Recovering th qp: " << qp << ". node_id: " << node_id
+               << ", thread_id: " << tid;
     const auto &ex = keeper->getExchangeMeta(node_id);
     if (!modifyErrQPtoNormal(qp,
                              ex.dirRcQpn2app[0][tid],
@@ -63,11 +62,8 @@ bool DSM::recover_th_qp(int node_id)
                              ex.dirTh[0].gid,
                              &iCon->ctx))
     {
-        error(
-            "failed to modify th QP to normal state. node_id: %d, thread_id: "
-            "%d",
-            node_id,
-            tid);
+        LOG(ERROR) << "failed to modify th QP to normal state. node_id: "
+                   << node_id << ", thread_id: " << tid;
         return false;
     }
     rdmaQueryQueuePair(qp);
@@ -79,10 +75,8 @@ bool DSM::recover_dir_qp(int node_id, int thread_id)
     size_t cur_dir = get_cur_dir();
 
     ibv_qp *qp = get_dir_qp(node_id, thread_id);
-    dinfo("Recovering dir qp %p. node_id: %d, thread_id: %d",
-          qp,
-          node_id,
-          thread_id);
+    LOG(INFO) << "Recovering dir qp " << qp << ". node_id: " << node_id
+              << ", thread_id: " << thread_id;
     const auto &ex = keeper->getExchangeMeta(node_id);
     if (!modifyErrQPtoNormal(qp,
                              ex.appRcQpn2dir[thread_id][0],
@@ -90,9 +84,8 @@ bool DSM::recover_dir_qp(int node_id, int thread_id)
                              ex.appTh[thread_id].gid,
                              &dirCon[cur_dir].ctx))
     {
-        error("failed to modify dir QP to normal state. node: %d, tid: %d",
-              node_id,
-              thread_id);
+        LOG(ERROR) << "failed to modify dir QP to normal state. node: "
+                   << node_id << ", tid: " << thread_id;
         return false;
     }
     rdmaQueryQueuePair(qp);
@@ -114,12 +107,12 @@ void DSM::registerThread()
 {
     if (thread_id != -1)
     {
-        error("Thread already registered.");
+        LOG(ERROR) << "Thread already registered.";
         return;
     }
 
     thread_id = appID.fetch_add(1);
-    CHECK(thread_id < (int) thCon.size(), "Can not allocate more threads");
+    CHECK(thread_id < (int) thCon.size()) << "Can not allocate more threads";
     thread_tag = thread_id + (((uint64_t) this->getMyNodeID()) << 32) + 1;
 
     iCon = &thCon[thread_id];
@@ -129,22 +122,22 @@ void DSM::registerThread()
     iCon->message->initRecv();
     iCon->message->initSend();
 
-    CHECK(thread_id * define::kRDMABufferSize < cache.size,
-          "Run out of cache size for offset = %" PRIu32,
-          thread_id * define::kRDMABufferSize);
+    CHECK(thread_id * define::kRDMABufferSize < cache.size)
+        << "Run out of cache size for offset = "
+        << thread_id * define::kRDMABufferSize;
     rdma_buffer = (char *) cache.data + thread_id * define::kRDMABufferSize;
 
     for (int i = 0; i < define::kMaxCoro; ++i)
     {
-        CHECK(i * define::kPerCoroRdmaBuf < define::kRDMABufferSize,
-              "Run out of RDMA buffer when allocating coroutine buffer.");
+        CHECK(i * define::kPerCoroRdmaBuf < define::kRDMABufferSize)
+            << "Run out of RDMA buffer when allocating coroutine buffer.";
         rbuf[i].set_buffer(rdma_buffer + i * define::kPerCoroRdmaBuf);
     }
 }
 
 void DSM::initRDMAConnection()
 {
-    info("Machine NR: %d", conf.machineNR);
+    LOG(INFO) << "Machine NR: " << conf.machineNR;
 
     remoteInfo.resize(conf.machineNR);
 

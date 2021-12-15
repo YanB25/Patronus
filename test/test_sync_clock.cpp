@@ -91,7 +91,7 @@ int main()
         server(dsm);
     }
 
-    info("finished. ctrl+C to quit.");
+    LOG(INFO) << "finished. ctrl+C to quit.";
     while (1)
     {
         sleep(1);

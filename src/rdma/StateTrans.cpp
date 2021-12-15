@@ -1,4 +1,5 @@
 #include "Rdma.h"
+#include <glog/logging.h>
 bool modifyErrQPtoNormal(struct ibv_qp *qp,
                          uint32_t remoteQPN,
                          uint16_t remoteLid,
@@ -21,7 +22,7 @@ bool modifyErrQPtoNormal(struct ibv_qp *qp,
     {
         return false;
     }
-    dinfo("Succeed in switch QP: %p to normal state.", qp);
+    DLOG(INFO) << "Succeed in switch QP: " << qp << " to normal state.";
     return true;
 }
 bool modifyQPtoReset(struct ibv_qp* qp)
@@ -43,11 +44,11 @@ bool modifyQPtoReset(struct ibv_qp* qp)
         break;
 
     case IBV_EXP_QPT_DC_INI:
-        error("implement me:)");
+        LOG(ERROR) << "implement me:)";
         break;
 
     default:
-        error("implement me:)");
+        LOG(ERROR) << "implement me:)";
     }
     int ret;
     if ((ret = ibv_modify_qp(qp, &attr, IBV_QP_STATE)))
@@ -80,11 +81,11 @@ bool modifyQPtoInit(struct ibv_qp *qp, RdmaContext *context)
         break;
 
     case IBV_EXP_QPT_DC_INI:
-        error("implement me:)");
+        LOG(ERROR) << "implement me:)";
         break;
 
     default:
-        error("implement me:)");
+        LOG(ERROR) << "implement me:)";
     }
 
     if (ibv_modify_qp(qp,

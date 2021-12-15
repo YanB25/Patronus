@@ -49,5 +49,5 @@ int main()
     {
     }
 
-    info("finished. ctrl+C to quit.");
+    LOG(INFO) << "finished. ctrl+C to quit.";
 }

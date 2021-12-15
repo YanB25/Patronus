@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <glog/logging.h>
 
 void bindCore(uint16_t core)
 {
@@ -16,7 +17,7 @@ void bindCore(uint16_t core)
     int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
     if (rc != 0)
     {
-        error("can't bind core %d!", core);
+        LOG(ERROR) << "can't bind core " << core;
     }
 }
 

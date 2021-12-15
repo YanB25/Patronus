@@ -1,4 +1,5 @@
 #include "AbstractMessageConnection.h"
+#include <glog/logging.h>
 
 AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
                                                      uint16_t sendPadding,
@@ -17,7 +18,7 @@ AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
 
     send_cq = ibv_create_cq(ctx.ctx, 128, NULL, NULL, 0);
 
-    CHECK(type == IBV_QPT_UD, "Only support UD here");
+    CHECK(type == IBV_QPT_UD) << "Only support UD here";
     CHECK(createQueuePair(&message, type, send_cq, cq, &ctx));
     modifyUDtoRTS(message, &ctx);
 
@@ -83,7 +84,7 @@ void AbstractMessageConnection::initRecv()
     {
         if (ibv_post_recv(message, &recvs[i][0], &bad))
         {
-            error("Receive failed.");
+            LOG(ERROR) << "Receive failed.";
         }
     }
 }
@@ -102,7 +103,7 @@ char *AbstractMessageConnection::getMessage()
                 &recvs[(curMessage / subNR - 1 + kBatchCount) % kBatchCount][0],
                 &bad))
         {
-            error("Receive failed.");
+            LOG(ERROR) << "Receive failed.";
         }
     }
 

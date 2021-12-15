@@ -4,7 +4,6 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "util/monitor.h"
-#include "Timer.h"
 
 // Two nodes
 // one node issues cas operations
@@ -32,7 +31,7 @@ void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 {
     if (memcmp(lhs_buf, rhs_buf, size) != 0)
     {
-        error("buf %p != expect\n", lhs_buf);
+        LOG(ERROR) << "buf " << lhs_buf << " != expect";
     }
     printf("buf %p == expect!\n", lhs_buf);
 }
@@ -48,7 +47,7 @@ void client(std::shared_ptr<DSM> dsm)
     *(uint64_t *) buffer = kMagic;
 
     dsm->write_sync(buffer, gaddr, sizeof(kMagic));
-    info("write finished at offset %lu: %lx.", kOffset, kMagic);
+    LOG(INFO) << "write finished at offset " << kOffset << ": " << kMagic;
 
     while (true)
     {
@@ -62,25 +61,25 @@ void client(std::shared_ptr<DSM> dsm)
         *(uint64_t *) read_buffer = 0;
         sleep(1);
     }
-    info("Finish basic RDMA write. Testing memory window. ");
-    info("Sending Identify to server");
+    LOG(INFO) << "Finish basic RDMA write. Testing memory window. ";
+    LOG(INFO) << "Sending Identify to server";
 
     auto id = dsm->get_identify();
     dsm->send((char *) &id, sizeof(id), kServerNodeId);
 
-    info("Waiting for rkey from server...");
+    LOG(INFO) << "Waiting for rkey from server...";
     char *msg = dsm->recv();
     uint32_t rkey = *(uint32_t *) msg;
-    info("Get rkey %u", rkey);
+    LOG(INFO) << "Get rkey " << rkey;
 
-    info("Trying to loop. Expect 8 success and 2 failure.");
+    LOG(INFO) << "Trying to loop. Expect 8 success and 2 failure.";
     for (size_t i = 0; i < 10; ++i)
     {
         *(uint64_t *) buffer = kMagic2;
         gaddr.offset = kOffset2 + i * sizeof(kMagic2);
         dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic2));
     }
-    info("We do it again. Expect the rkey still work: 8 success.");
+    LOG(INFO) << "We do it again. Expect the rkey still work: 8 success.";
     for (size_t i = 0; i < 8; ++i)
     {
         *(uint64_t *) buffer = kMagic2;
@@ -115,21 +114,21 @@ void server(std::shared_ptr<DSM> dsm)
 
     const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
-    info("get buffer addr: %p", buffer);
+    LOG(INFO) << "get buffer addr: " << buffer;
     // size_t max_size = buf_conf.size;
 
     loop_expect(buffer + kOffset, (char *) &kMagic, sizeof(kMagic));
 
     struct ibv_mw *mw = dsm->alloc_mw();
-    dinfo("the allocated mw with pd: %p", mw->pd);
+    LOG(INFO) << "the allocated mw with pd: " << mw->pd;
 
     Identify *client_id = (Identify *) dsm->recv();
     int node_id = client_id->node_id;
     int thread_id = client_id->thread_id;
-    info("Get client node_id: %d, thread_id: %d", node_id, thread_id);
+    LOG(INFO) << "Get client node_id: " << node_id << ", thread_id: " << thread_id;
 
     dsm->bind_memory_region_sync(mw, node_id, thread_id, buffer, 64);
-    info("bind memory window success. Rkey: %u", mw->rkey);
+    LOG(INFO) << "bind memory window success. Rkey: " << mw->rkey;
 
     dsm->send((char *) &mw->rkey, sizeof(mw->rkey), kClientNodeId);
 
@@ -140,7 +139,7 @@ void server(std::shared_ptr<DSM> dsm)
         if (rdmaQueryQueuePair(dsm->get_dir_qp(node_id, thread_id)) ==
             IBV_QPS_ERR)
         {
-            info("Benchmarking latency of QP recovery");
+            LOG(INFO) << "Benchmarking latency of QP recovery";
             timer.begin();
             CHECK(dsm->recover_dir_qp(node_id, thread_id));
             timer.end_print(1);
@@ -187,5 +186,5 @@ int main()
         server(dsm);
     }
 
-    info("finished. ctrl+C to quit.");
+    LOG(INFO) << "finished. ctrl+C to quit.";
 }

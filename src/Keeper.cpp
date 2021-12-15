@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <glog/logging.h>
 
 char *getIP();
 
@@ -42,7 +43,7 @@ bool Keeper::connectMemcached()
 
     if (!conf)
     {
-        error("can't open memchaced.conf at ../memcached.conf");
+        LOG(ERROR) << "can't open memchaced.conf at ../memcached.conf";
         return false;
     }
 
@@ -56,10 +57,10 @@ bool Keeper::connectMemcached()
     rc = memcached_server_push(memc, servers);
 
     free(servers);
-    
+
     if (rc != MEMCACHED_SUCCESS)
     {
-        error("Can't add server:%s", memcached_strerror(memc, rc));
+        LOG(ERROR) << "Can't add server:" << memcached_strerror(memc, rc);
         return false;
     }
 
@@ -91,12 +92,13 @@ void Keeper::serverEnter()
         {
             myNodeID = serverNum - 1;
 
-            dinfo("This server get NodeId %d [%s]\n", myNodeID, getIP());
+            DLOG(INFO) << "This server get NodeId " << myNodeID << "["
+                       << getIP() << "]";
             return;
         }
-        error("Server %d Counld't incr value and get ID: %s, retry...",
-              myNodeID,
-              memcached_strerror(memc, rc));
+        LOG(ERROR) << "Server " << myNodeID
+                   << " Counld't incr value and get ID: "
+                   << memcached_strerror(memc, rc) << ". retry. ";
         sleep(1);
     }
 }
@@ -114,9 +116,8 @@ void Keeper::serverConnect()
             memc, SERVER_NUM_KEY, strlen(SERVER_NUM_KEY), &l, &flags, &rc);
         if (rc != MEMCACHED_SUCCESS)
         {
-            error("Server %d Counld't get serverNum: %s, retry\n",
-                  myNodeID,
-                  memcached_strerror(memc, rc));
+            LOG(ERROR) << "Server " << myNodeID << " Counld't get serverNum:"
+                       << memcached_strerror(memc, rc) << ". retry. ";
             sleep(1);
             continue;
         }
@@ -129,7 +130,7 @@ void Keeper::serverConnect()
             if (k != myNodeID)
             {
                 connectNode(k);
-                dinfo("Connected to server %zu", k);
+                DLOG(INFO) << "Connected to server " << k;
             }
         }
         curServer = serverNum;

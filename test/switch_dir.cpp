@@ -39,14 +39,14 @@ void client(std::shared_ptr<DSM> dsm)
     *(uint64_t *) buffer = kMagic;
 
     dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
-    info("finished writing magic 1");
+    LOG(INFO) << "finished writing magic 1";
     // sync
     dsm->recv();
     dsm->roll_dir();
 
     *(uint64_t *) buffer = kMagic2;
     dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
-    info("finished writing magic 2");
+    LOG(INFO) << "finished writing magic 2";
 
     dsm->recv();
     // expect to roll back to 0 when NR_DIRECTORY == 2
@@ -54,7 +54,7 @@ void client(std::shared_ptr<DSM> dsm)
 
     *(uint64_t *) buffer = kMagic3;
     dsm->write_sync(buffer, gaddr, sizeof(uint64_t));
-    info("finished writing magic 3");
+    LOG(INFO) << "finished writing magic 3";
 }
 
 void server(std::shared_ptr<DSM> dsm)
@@ -113,5 +113,5 @@ int main()
         server(dsm);
     }
 
-    info("finished. ctrl+C to quit.");
+    LOG(INFO) << "finished. ctrl+C to quit.";
 }

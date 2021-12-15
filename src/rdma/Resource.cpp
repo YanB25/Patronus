@@ -1,4 +1,5 @@
 #include "Rdma.h"
+#include <glog/logging.h>
 
 bool createContext(RdmaContext *context,
                    uint8_t port,
@@ -15,14 +16,14 @@ bool createContext(RdmaContext *context,
     struct ibv_device **deviceList = ibv_get_device_list(&devicesNum);
     if (!deviceList)
     {
-        error("failed to get IB devices list");
+        LOG(ERROR) << "failed to get IB devices list";
         goto CreateResourcesExit;
     }
 
     // if there isn't any IB device in host
     if (!devicesNum)
     {
-        info("found %d device(s)", devicesNum);
+        LOG(INFO) << "found " << devicesNum << " device(s)";
         goto CreateResourcesExit;
     }
     // dinfo("Open IB Device");
@@ -39,7 +40,7 @@ bool createContext(RdmaContext *context,
 
     if (devIndex >= devicesNum)
     {
-        error("ib device wasn't found");
+        LOG(ERROR) << "ib device wasn't found";
         goto CreateResourcesExit;
     }
 
@@ -50,7 +51,7 @@ bool createContext(RdmaContext *context,
     ctx = ibv_open_device(dev);
     if (!ctx)
     {
-        error("failed to open device");
+        LOG(ERROR) << "failed to open device";
         goto CreateResourcesExit;
     }
     /* We are now done with device list, free it */
@@ -60,7 +61,7 @@ bool createContext(RdmaContext *context,
     // query port properties
     if (ibv_query_port(ctx, port, &portAttr))
     {
-        error("ibv_query_port failed");
+        LOG(ERROR) << "ibv_query_port failed";
         goto CreateResourcesExit;
     }
 
@@ -69,13 +70,14 @@ bool createContext(RdmaContext *context,
     pd = ibv_alloc_pd(ctx);
     if (!pd)
     {
-        error("ibv_alloc_pd failed");
+        LOG(ERROR) << "ibv_alloc_pd failed";
         goto CreateResourcesExit;
     }
 
     if (ibv_query_gid(ctx, port, gidIndex, &context->gid))
     {
-        error("could not get gid for port: %d, gidIndex: %d", port, gidIndex);
+        LOG(ERROR) << "could not get gid for port: " << port
+                   << " gidIndex: " << gidIndex;
         goto CreateResourcesExit;
     }
 
@@ -100,9 +102,9 @@ bool createContext(RdmaContext *context,
         if ((flag & IBV_DEVICE_MEM_WINDOW_TYPE_2A) ||
             (flag & IBV_DEVICE_MEM_WINDOW_TYPE_2B))
         {
-            dwarn(
+            LOG_FIRST_N(WARNING, 1) << 
                 "TODO: Although device seems to support memory window TYPE_2, "
-                "we fall back to TYPE_1");
+                "we fall back to TYPE_1";
             context->mw_type = IBV_MW_TYPE_1;
             // context->mw_type = IBV_MW_TYPE_2;
         }
@@ -118,7 +120,7 @@ bool createContext(RdmaContext *context,
 
 /* Error encountered, cleanup */
 CreateResourcesExit:
-    error("Error Encountered, Cleanup ...");
+    LOG(ERROR) << "Error Encountered, Cleanup ...";
 
     if (pd)
     {
@@ -174,7 +176,7 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
 
     if (!mr)
     {
-        error("Memory registration failed");
+        LOG(ERROR) << "Memory registration failed";
     }
 
     return mr;
@@ -202,7 +204,7 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     struct ibv_exp_dm *dm = ibv_exp_alloc_dm(ctx->ctx, &dm_attr);
     if (!dm)
     {
-        error("Allocate on-chip memory failed");
+        LOG(ERROR) << "Allocate on-chip memory failed";
         return nullptr;
     }
     ctx->dm = dm;
@@ -219,7 +221,7 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     struct ibv_mr *mr = ibv_exp_reg_mr(&mr_in);
     if (!mr)
     {
-        error("Memory registration failed");
+        LOG(ERROR) << "Memory registration failed";
         return nullptr;
     }
 
@@ -248,8 +250,8 @@ bool destroyMemoryRegionOnChip(ibv_mr *mr, ibv_exp_dm *dm)
         {
             return false;
         }
-        CHECK(dm != nullptr,
-              "If dm is nullptr, please use regular destroyMemoryRegion.");
+        CHECK(dm != nullptr) << 
+              "If dm is nullptr, please use regular destroyMemoryRegion.";
         if (ibv_exp_free_dm(dm))
         {
             perror("failed to free dm");
@@ -297,7 +299,7 @@ bool createQueuePair(ibv_qp **qp,
     *qp = ibv_exp_create_qp(context->ctx, &attr);
     if (!(*qp))
     {
-        error("Failed to create QP");
+        LOG(ERROR) << "Failed to create QP";
         return false;
     }
 
@@ -363,7 +365,7 @@ bool createDCTarget(ibv_exp_dct **dct,
     *dct = ibv_exp_create_dct(context->ctx, &dAttr);
     if (dct == NULL)
     {
-        error("failed to create dc target");
+        LOG(ERROR) << "failed to create dc target";
         return false;
     }
 

@@ -15,13 +15,19 @@ set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -W")
 # disable boost warning
 add_definitions(-DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
-set(Boost_USE_STATIC_LIBS ONss)
+set(Boost_USE_STATIC_LIBS ON)
 find_package(
     Boost
     1.59
     REQUIRED
     coroutine
     system
+)
+
+set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)
+# message(STATUS ${CMAKE_MODULE_PATH})
+find_package(
+    glog REQUIRED
 )
 # find_package(benchmark REQUIRED)
 # link_libraries(benchmark::benchmark)
@@ -37,6 +43,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-point
 
 set(INCLUDE_BASE ${PROJECT_SOURCE_DIR}/include)
 include_directories(${INCLUDE_BASE})
+include_directories(${GLOG_INCLUDE_DIRS})
 
 #Source file define
 set(COMMON_SRC ${PROJECT_SOURCE_DIR}/src)
@@ -45,12 +52,13 @@ set(COMMON_SRC ${PROJECT_SOURCE_DIR}/src)
 file(GLOB_RECURSE COMMON_FILE ${COMMON_SRC}/*.cpp)
 add_library(sherman STATIC ${COMMON_FILE})
 link_libraries(sherman)
+link_libraries(${GLOG_LIBRARIES})
 
 # bench
 if (${BUILD_BENCH})
     file(GLOB BENCHMARK_SRC ${PROJECT_SOURCE_DIR}/bench/*.cpp)
     foreach (BENCHMARK ${BENCHMARK_SRC})
-        get_filename_component(BENCHMARK_NAME ${BENCHMARK} NAME_WE)
+        get_filename_component(..BENCHMARK_NAME ${BENCHMARK} NAME_WE)
         add_executable(${BENCHMARK_NAME} ${BENCHMARK})
         target_link_libraries(${BENCHMARK_NAME} ${LINKS_FLAGS} sherman)
     endforeach()

@@ -1,6 +1,7 @@
 #include "RawMessageConnection.h"
 
 #include <cassert>
+#include <glog/logging.h>
 
 RawMessageConnection::RawMessageConnection(RdmaContext &ctx,
                                            ibv_cq *cq,
@@ -47,7 +48,7 @@ void RawMessageConnection::syncSendRawMessage(RawMessage *m,
         }
         else
         {
-            warn("polled unrevelant wc.");
+            LOG(WARNING) << "polled unrevelant wc.";
         }
     };
 

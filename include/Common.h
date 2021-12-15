@@ -9,7 +9,6 @@
 #include <cstring>
 #include <limits>
 
-#include "Debug.h"
 #include "HugePageAlloc.h"
 #include "Rdma.h"
 #include "Statistics.h"

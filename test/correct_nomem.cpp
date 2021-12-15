@@ -33,14 +33,14 @@ void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 {
     if (memcmp(lhs_buf, rhs_buf, size) != 0)
     {
-        error("buf %p != expect\n", lhs_buf);
+        LOG(ERROR) << "buf " << lhs_buf << " != expect";
     }
     printf("buf %p == expect!\n", lhs_buf);
 }
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    info("Because dsm->send/recv may lose packet. This does not work.");
+    LOG(INFO) << "Because dsm->send/recv may lose packet. This does not work.";
     // size_t remain_sync = kRpcNr;
     // size_t index = 0;
     // while (remain_sync > 0)
@@ -118,15 +118,15 @@ void client(std::shared_ptr<DSM> dsm)
             CHECK(succ);
             if (cnt % (1 * define::K) == 0)
             {
-                info("Finish alloc/free mw for 1k. Now: %zu", cnt);
+                LOG(INFO) << "Finish alloc/free mw for 1k. Now: " << cnt;
             }
         }
         dsm->free_mw(mw);
         dsm->roll_dir();
-        info("==== roll to the next dir %zu =====", dir);
+        LOG(INFO) << "==== roll to the next dir " << dir << " =====";
     }
 
-    info("finished bind_mw total %zu, dir %d", cnt, NR_DIRECTORY);
+    LOG(INFO) << "finished bind_mw total " << cnt << ", dir " << NR_DIRECTORY;
     dsm->send(nullptr, 0, kServerNodeId);
 }
 int main()
@@ -167,5 +167,5 @@ int main()
         server(dsm);
     }
 
-    info("finished. ctrl+C to quit.");
+    LOG(INFO) << "finished. ctrl+C to quit.";
 }

@@ -2,6 +2,7 @@
 
 #include "Connection.h"
 #include "Timer.h"
+#include <glog/logging.h>
 
 DirectoryConnection::DirectoryConnection(
     uint16_t dirID,

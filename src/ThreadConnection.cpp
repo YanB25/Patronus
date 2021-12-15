@@ -2,6 +2,7 @@
 
 #include "Connection.h"
 #include "Timer.h"
+#include <glog/logging.h>
 
 ThreadConnection::ThreadConnection(
     uint16_t threadID,
