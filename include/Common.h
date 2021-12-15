@@ -51,7 +51,7 @@
 // }
 
 // { dir thread
-#define NR_DIRECTORY 2
+#define NR_DIRECTORY 256
 
 #define DIR_MESSAGE_NR 128
 // }

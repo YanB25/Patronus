@@ -398,8 +398,8 @@ public:
               uint16_t dir_id = 0,
               bool sync = false)
     {
-        dwarn(
-            "TODO: now using dir_id = 0 by default. let rpc use distinct dir.");
+        // dwarn(
+        //     "TODO: now using dir_id = 0 by default. let rpc use distinct dir.");
         auto buffer = (RawMessage *) iCon->message->getSendPool();
         buffer->node_id = myNodeID;
         buffer->app_id = thread_id;
@@ -431,7 +431,7 @@ public:
     char *recv()
     {
         // size_t cur_dir = get_cur_dir();
-        dwarn("TODO: now always use the first as message dir.");
+        // dwarn("TODO: now always use the first as message dir.");
         size_t cur_dir = 0;
 
         struct ibv_wc wc;

@@ -924,6 +924,7 @@ ibv_mw *DSM::alloc_mw()
     size_t cur_dir = get_cur_dir();
 
     struct RdmaContext *ctx = &dirCon[cur_dir].ctx;
+    // dinfo("[dsm] dirCon ID: %d, pd: %p", dirCon[cur_dir].dirID, ctx->pd);
     struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
     if (!mw)
     {

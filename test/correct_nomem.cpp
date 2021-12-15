@@ -12,11 +12,11 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-constexpr static size_t kRpcNr = 2 * define::M;
-constexpr static size_t kMWNr = 200 * define::M;
+[[maybe_unused]] constexpr static size_t kRpcNr = 200;
+constexpr static size_t kMWNr = 150 * define::K;
 // constexpr static size_t kRpcNr = 200;
 // constexpr static size_t kMWNr = 1000;
-constexpr static size_t kSyncBatch = 64;
+[[maybe_unused]] constexpr static size_t kSyncBatch = 64;
 constexpr static size_t kBindSize = 64;
 
 void loop_expect(const char *lhs_buf, const char *rhs_buf, size_t size)
@@ -40,26 +40,24 @@ void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    size_t remain_sync = kRpcNr;
-    size_t index = 0;
-    while (remain_sync > 0)
-    {
-        size_t should_sync = std::min(remain_sync, kSyncBatch);
-        for (size_t i = 0; i < should_sync; ++i)
-        {
-            uint32_t rkey = 0xabcdef;
-            dsm->send((char *) &rkey, sizeof(uint32_t), kClientNodeId);
-            index++;
-        }
-        // wait and sync
-        dsm->recv();
-        remain_sync -= should_sync;
-    }
-    info("Server starts to idle");
-    while (true)
-    {
+    info("Because dsm->send/recv may lose packet. This does not work.");
+    // size_t remain_sync = kRpcNr;
+    // size_t index = 0;
+    // while (remain_sync > 0)
+    // {
+    //     size_t should_sync = std::min(remain_sync, kSyncBatch);
+    //     for (size_t i = 0; i < should_sync; ++i)
+    //     {
+    //         uint32_t rkey = 0xabcdef;
+    //         dsm->send((char *) &rkey, sizeof(uint32_t), kClientNodeId);
+    //         index++;
+    //     }
+    //     // wait and sync
+    //     dsm->recv();
+    //     remain_sync -= should_sync;
+    // }
 
-    }
+    dsm->recv();
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -84,48 +82,52 @@ uint64_t rand_int(uint64_t min, uint64_t max)
 
 void client(std::shared_ptr<DSM> dsm)
 {
-    size_t remain_mw = kRpcNr;
-    size_t done_work = 0;
-    while (remain_mw > 0)
-    {
-        size_t should_recv = std::min(remain_mw, kSyncBatch);
-        for (size_t i = 0; i < should_recv; ++i)
-        {
-            [[maybe_unused]] uint32_t rkey = *(uint32_t *) dsm->recv();
-        }
-        dsm->send(nullptr, 0, kServerNodeId);
-        remain_mw -= should_recv;
+    // size_t remain_mw = kRpcNr;
+    // size_t done_work = 0;
+    // while (remain_mw > 0)
+    // {
+    //     size_t should_recv = std::min(remain_mw, kSyncBatch);
+    //     for (size_t i = 0; i < should_recv; ++i)
+    //     {
+    //         [[maybe_unused]] uint32_t rkey = *(uint32_t *) dsm->recv();
+    //     }
+    //     dsm->send(nullptr, 0, kServerNodeId);
+    //     remain_mw -= should_recv;
 
-        done_work += should_recv;
-        if (done_work > 10 * define::M)
-        {
-            info("finish 10M. Remain %zu", remain_mw);
-            done_work = 0;
-        }
-    }
-    info("OK. RPC does not leak memory. perfect.");
+    //     done_work += should_recv;
+    //     if (done_work > 10 * define::M)
+    //     {
+    //         info("finish 10M. Remain %zu", remain_mw);
+    //         done_work = 0;
+    //     }
+    // }
+    // info("OK. RPC does not leak memory. perfect.");
 
     const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
 
-    auto *mw = dsm->alloc_mw();
-    for (size_t i = 0; i < kMWNr; ++i)
+    size_t cnt = 0;
+    for (size_t dir = 0; dir < NR_DIRECTORY; ++dir)
     {
-        bool succ = dsm->bind_memory_region_sync(
-            mw, kServerNodeId, 0, buffer, kBindSize);
-        CHECK(succ);
-        if (i % (1 * define::K) == 0)
+        auto *mw = dsm->alloc_mw();
+        for (size_t i = 0; i < kMWNr; ++i)
         {
-            info("Finish alloc/free mw for 1k. Now: %zu", i);
+            bool succ = dsm->bind_memory_region_sync(
+                mw, kServerNodeId, 0, buffer, kBindSize);
+            cnt++;
+            CHECK(succ);
+            if (cnt % (1 * define::K) == 0)
+            {
+                info("Finish alloc/free mw for 1k. Now: %zu", cnt);
+            }
         }
-        // if (i % (20 * define::K) == 0)
-        // {
-        //     info("Finish 20K. sleep 10s for NIC...");
-        //     sleep(10);
-        //     info("Wakeup");
-        // }
+        dsm->free_mw(mw);
+        dsm->roll_dir();
+        info("==== roll to the next dir %zu =====", dir);
     }
-    dsm->free_mw(mw);
+
+    info("finished bind_mw total %zu, dir %d", cnt, NR_DIRECTORY);
+    dsm->send(nullptr, 0, kServerNodeId);
 }
 int main()
 {

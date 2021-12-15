@@ -17,6 +17,7 @@ AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
 
     send_cq = ibv_create_cq(ctx.ctx, 128, NULL, NULL, 0);
 
+    CHECK(type == IBV_QPT_UD, "Only support UD here");
     CHECK(createQueuePair(&message, type, send_cq, cq, &ctx));
     modifyUDtoRTS(message, &ctx);
 
@@ -39,7 +40,7 @@ void AbstractMessageConnection::destroy()
     CHECK(hugePageFree(messagePool, 2 * messageNR * MESSAGE_SIZE));
     CHECK(destroyQueuePair(message));
     CHECK(destroyCompleteQueue(send_cq));
-     
+    
     for (int i = 0; i < kBatchCount; ++i)
     {
         delete[] recvs[i];
