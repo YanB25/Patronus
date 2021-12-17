@@ -14,6 +14,7 @@ constexpr uint32_t kMachineNr = 2;
 
 [[maybe_unused]] constexpr static size_t kRpcNr = 200;
 constexpr static size_t kMWNr = 150 * define::K;
+constexpr static size_t kDirectoryNr = 16 * NR_DIRECTORY;
 // constexpr static size_t kRpcNr = 200;
 // constexpr static size_t kMWNr = 1000;
 [[maybe_unused]] constexpr static size_t kSyncBatch = 64;
@@ -107,8 +108,9 @@ void client(std::shared_ptr<DSM> dsm)
     char *buffer = buf_conf.buffer;
 
     size_t cnt = 0;
-    for (size_t dir = 0; dir < NR_DIRECTORY; ++dir)
+    for (size_t times = 0; times < kDirectoryNr; ++times)
     {
+        size_t dir = times % NR_DIRECTORY;
         auto *mw = dsm->alloc_mw(dir);
         for (size_t i = 0; i < kMWNr; ++i)
         {
@@ -122,13 +124,15 @@ void client(std::shared_ptr<DSM> dsm)
             }
         }
         dsm->free_mw(mw);
-        LOG(INFO) << "==== roll to the next dir " << dir << " =====";
+        dsm->reinitializeDir(dir);
+        LOG(INFO) << "==== [" << int(times / NR_DIRECTORY)
+                  << "] roll to the next dir " << dir << " =====";
     }
 
     LOG(INFO) << "finished bind_mw total " << cnt << ", dir " << NR_DIRECTORY;
     dsm->send(nullptr, 0, kServerNodeId);
 }
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);

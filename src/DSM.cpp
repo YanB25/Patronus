@@ -109,6 +109,7 @@ ExchangeMeta &DSM::getExchangeMetaBootstrap(size_t node_id) const
 
 bool DSM::reinitializeDir(size_t dirID)
 {
+    ContTimer<config::kMonitorReconnection> timer("DSM::reinitialzeDir");
     LOG(INFO) << "[DSM] Reinitialize DirectoryConnetion[" << dirID << "]";
 
     if (dirID > dirCon.size())
@@ -119,9 +120,8 @@ bool DSM::reinitializeDir(size_t dirID)
     dirCon[dirID].reset();
     dirCon[dirID] = std::make_unique<DirectoryConnection>(
         dirID, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
-    LOG(WARNING) << "[debug] !!! rkey: " << std::hex
-                 << dirCon[dirID]->dsmMR->rkey
-                 << ", dsm: " << (void *) dirCon[dirID]->dsmMR->addr;
+    
+    timer.pin("Reinit DirConnection");
 
     // update the boostrapped exchangeMeta for all the peers
     for (size_t remoteID = 0; remoteID < getClusterSize(); ++remoteID)
@@ -139,11 +139,15 @@ bool DSM::reinitializeDir(size_t dirID)
             keeper->connectDir(*dirCon[dirID], remoteID, appID, connect_dir_ex);
         }
     }
+    timer.pin("Reconnect to ThreadConnections");
+    timer.report();
     return true;
 }
 
 bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
 {
+    ContTimer<config::kMonitorReconnection> timer("DSM::reconnectThreadToDir");
+
     LOG(INFO) << "[DSM] reconnect ThreadConnection for node " << node_id
               << ", dir " << dirID;
 
@@ -169,6 +173,8 @@ bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
         keeper->updateRemoteConnectionForDir(
             remoteInfo[node_id], cur_meta, dirID);
     }
+    timer.pin("end");
+    timer.report();
     return true;
 }
 

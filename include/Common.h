@@ -228,6 +228,7 @@ static inline uint64_t djb2_digest(const char *str, size_t size)
 namespace config
 {
 constexpr static bool kMonitorControlPath = false;
+constexpr static bool kMonitorReconnection = false;
 }
 
 #endif /* __COMMON_H__ */
