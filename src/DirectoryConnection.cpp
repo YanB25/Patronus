@@ -24,8 +24,8 @@ DirectoryConnection::DirectoryConnection(
     // dinfo("[dirCon] dirID: %d, ctx->pd: %p", dirID, ctx.pd);
     timer.pin("createContext");
 
-    cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
-    rpc_cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
+    cq = CHECK_NOTNULL(ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0));
+    rpc_cq = CHECK_NOTNULL(ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0));
     timer.pin("2x ibv_create_cq");
     message = RawMessageConnection::newInstance(ctx, rpc_cq, DIR_MESSAGE_NR);
 
@@ -36,7 +36,7 @@ DirectoryConnection::DirectoryConnection(
     // dsm memory
     this->dsmPool = dsmPool;
     this->dsmSize = dsmSize;
-    this->dsmMR = createMemoryRegion((uint64_t) dsmPool, dsmSize, &ctx);
+    this->dsmMR = CHECK_NOTNULL(createMemoryRegion((uint64_t) dsmPool, dsmSize, &ctx));
     timer.pin("createMR");
     // dinfo(
     //     "[DSM] CreateMemoryRegion at %p, size %ld. mr: %p, lkey: %u, rkey:

@@ -27,7 +27,7 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
     baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize);
 
     LOG(INFO) << "shared memory size: " << smart::smartSize(conf.dsmSize)
-              << " at " << baseAddr;
+              << " at " << (void *) baseAddr;
     LOG(INFO) << "cache size: " << smart::smartSize(conf.cacheConfig.cacheSize);
 
     // warmup
@@ -43,20 +43,142 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 
     initRDMAConnection();
 
+    // After the system boot, we do not rely on memcached anymore (and it is
+    // slow.) we use RDMA itself to maintain metadata (i.e., in the *bootstrap*
+    // way).
+    initExchangeMetadataBootstrap();
+
     keeper->barrier("DSM-init");
+
+    LOG(WARNING) << "[system] DSM ready. node_id: " << get_node_id();
+}
+
+void DSM::initExchangeMetadataBootstrap()
+{
+    if (get_thread_id() == -1)
+    {
+        registerThread();
+    }
+
+    for (size_t node_id = 0; node_id < getClusterSize(); ++node_id)
+    {
+        const auto &src_meta = keeper->getExchangeMeta(node_id);
+        auto &dst_meta = getExchangeMetaBootstrap(node_id);
+        memcpy(&dst_meta, &src_meta, sizeof(ExchangeMeta));
+    }
+}
+
+void DSM::syncMetadataBootstrap(const ExchangeMeta &self_meta, size_t remoteID)
+{
+    const auto &src_meta = self_meta;
+
+    if (remoteID == get_node_id())
+    {
+        auto &dst_meta = getExchangeMetaBootstrap(remoteID);
+        memcpy(&dst_meta, &src_meta, sizeof(dst_meta));
+    }
+    else
+    {
+        static auto wc_err_h = [](ibv_wc *wc)
+        {
+            LOG(ERROR)
+                << "[keeper] failed to broadcast metadata bootstrap. wr_id: "
+                << wc->wr_id;
+        };
+
+        GlobalAddress gaddr;
+        gaddr.nodeID = remoteID;
+        gaddr.offset = get_node_id() * sizeof(ExchangeMeta);
+        auto *buffer = get_rdma_buffer();
+        memcpy(buffer, &src_meta, sizeof(src_meta));
+        write_sync(buffer, gaddr, sizeof(ExchangeMeta), nullptr, 0, wc_err_h);
+    }
 }
 
 DSM::~DSM()
 {
 }
 
-bool DSM::recover_th_qp(int node_id, size_t dirID)
+ExchangeMeta &DSM::getExchangeMetaBootstrap(size_t node_id) const
+{
+    size_t my_node_id = get_node_id();
+    char *start_addr = (char *) remoteInfo[my_node_id].dsmBase;
+    char *meta_start_addr = start_addr + node_id * sizeof(ExchangeMeta);
+    return *(ExchangeMeta *) meta_start_addr;
+}
+
+bool DSM::reinitializeDir(size_t dirID)
+{
+    LOG(INFO) << "[DSM] Reinitialize DirectoryConnetion[" << dirID << "]";
+
+    if (dirID > dirCon.size())
+    {
+        return false;
+    }
+    // here destroy connection
+    dirCon[dirID].reset();
+    dirCon[dirID] = std::make_unique<DirectoryConnection>(
+        dirID, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
+    LOG(WARNING) << "[debug] !!! rkey: " << std::hex
+                 << dirCon[dirID]->dsmMR->rkey
+                 << ", dsm: " << (void *) dirCon[dirID]->dsmMR->addr;
+
+    // update the boostrapped exchangeMeta for all the peers
+    for (size_t remoteID = 0; remoteID < getClusterSize(); ++remoteID)
+    {
+        auto ex = keeper->updateDirMetadata(*dirCon[dirID], remoteID);
+        VLOG(1) << "[DSM] update dir meta for " << remoteID
+                << ", hash: " << std::hex
+                << djb2_digest((char *) &ex, sizeof(ex))
+                << ", rkey: " << ex.dirTh[dirID].rKey;
+        syncMetadataBootstrap(ex, remoteID);
+        auto connect_dir_ex = getExchangeMetaBootstrap(remoteID);
+
+        for (size_t appID = 0; appID < MAX_APP_THREAD; ++appID)
+        {
+            keeper->connectDir(*dirCon[dirID], remoteID, appID, connect_dir_ex);
+        }
+    }
+    return true;
+}
+
+bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
+{
+    LOG(INFO) << "[DSM] reconnect ThreadConnection for node " << node_id
+              << ", dir " << dirID;
+
+    for (size_t i = 0; i < MAX_APP_THREAD; ++i)
+    {
+        if (!thCon[i]->resetQP(node_id, dirID))
+        {
+            LOG(WARNING)
+                << "[DSM] failed to resetQP for ThreadConnection. thCon[" << i
+                << "]";
+            return false;
+        }
+        const auto &cur_meta = getExchangeMetaBootstrap(node_id);
+
+        VLOG(1) << "[DSM] reconnecting ThreadConnection[" << i
+                << "]. node_id: " << node_id << ", dirID: " << dirID
+                << ", meta digest: " << std::hex
+                << djb2_digest((char *) &cur_meta, sizeof(cur_meta))
+                << ", rkey: " << cur_meta.dirTh[dirID].rKey;
+
+        keeper->connectThread(*thCon[i], node_id, dirID, cur_meta);
+
+        keeper->updateRemoteConnectionForDir(
+            remoteInfo[node_id], cur_meta, dirID);
+    }
+    return true;
+}
+
+bool DSM::recoverThreadQP(int node_id, size_t dirID)
 {
     auto tid = get_thread_id();
     ibv_qp *qp = get_th_qp(node_id, dirID);
     DLOG(INFO) << "Recovering th qp: " << qp << ". node_id: " << node_id
                << ", thread_id: " << tid;
-    const auto &ex = keeper->getExchangeMeta(node_id);
+    const auto &ex = getExchangeMetaBootstrap(node_id);
     if (!modifyErrQPtoNormal(qp,
                              ex.dirRcQpn2app[dirID][tid],
                              ex.dirTh[dirID].lid,
@@ -67,16 +189,16 @@ bool DSM::recover_th_qp(int node_id, size_t dirID)
                    << node_id << ", thread_id: " << tid;
         return false;
     }
-    rdmaQueryQueuePair(qp);
+    // rdmaQueryQueuePair(qp);
     return true;
 }
 
-bool DSM::recover_dir_qp(int node_id, int thread_id, size_t dirID)
+bool DSM::recoverDirQP(int node_id, int thread_id, size_t dirID)
 {
     ibv_qp *qp = get_dir_qp(node_id, thread_id, dirID);
     LOG(INFO) << "Recovering dir qp " << qp << ". node_id: " << node_id
               << ", thread_id: " << thread_id;
-    const auto &ex = keeper->getExchangeMeta(node_id);
+    const auto &ex = getExchangeMetaBootstrap(node_id);
     if (!modifyErrQPtoNormal(qp,
                              ex.appRcQpn2dir[thread_id][dirID],
                              ex.appTh[thread_id].lid,
@@ -87,7 +209,7 @@ bool DSM::recover_dir_qp(int node_id, int thread_id, size_t dirID)
                    << node_id << ", tid: " << thread_id;
         return false;
     }
-    rdmaQueryQueuePair(qp);
+
     return true;
 }
 
@@ -104,7 +226,7 @@ void DSM::registerThread()
 {
     if (thread_id != -1)
     {
-        LOG(ERROR) << "Thread already registered.";
+        LOG(WARNING) << "[dsm] Thread " << thread_id << " already registered. ";
         return;
     }
 
@@ -220,7 +342,7 @@ bool DSM::rkey_read_sync(uint32_t rkey,
                          << gaddr.nodeID << "]";
             DCHECK(rdmaQueryQueuePair(iCon->QPs[dirID][gaddr.nodeID]) ==
                    IBV_QPS_ERR);
-            if (!recover_th_qp(gaddr.nodeID, dirID))
+            if (!recoverThreadQP(gaddr.nodeID, dirID))
             {
                 LOG(ERROR) << "[qp] failed to recovery. iCon->QPs[" << dirID
                            << "][" << gaddr.nodeID << "]";
@@ -278,6 +400,8 @@ bool DSM::write_sync(const char *buffer,
 {
     size_t dirID = get_cur_dir();
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    LOG(INFO) << "[debug] write_sync for rkey: " << std::hex << rkey
+              << ", dirID: " << dirID;
     return rkey_write_sync(
         rkey, buffer, gaddr, size, dirID, ctx, wc_id, handler);
 }
@@ -344,7 +468,7 @@ bool DSM::rkey_write_sync(uint32_t rkey,
                          << gaddr.nodeID << "]";
             DCHECK(rdmaQueryQueuePair(iCon->QPs[dirID][gaddr.nodeID]) ==
                    IBV_QPS_ERR);
-            if (!recover_th_qp(gaddr.nodeID, dirID))
+            if (!recoverThreadQP(gaddr.nodeID, dirID))
             {
                 LOG(ERROR) << "[qp] failed to recover iCon->QPs[" << dirID
                            << "][" << gaddr.nodeID << "]";
@@ -356,7 +480,10 @@ bool DSM::rkey_write_sync(uint32_t rkey,
     return true;
 }
 
-void DSM::fill_keys_dest(RdmaOpRegion &ror, GlobalAddress gaddr, bool is_chip, size_t dirID)
+void DSM::fill_keys_dest(RdmaOpRegion &ror,
+                         GlobalAddress gaddr,
+                         bool is_chip,
+                         size_t dirID)
 {
     ror.lkey = iCon->cacheLKey;
     if (is_chip)

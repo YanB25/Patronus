@@ -72,8 +72,10 @@ inline int bits_in(std::uint64_t u)
 
 #include <boost/coroutine/all.hpp>
 
-using CoroYield = typename boost::coroutines::symmetric_coroutine<void>::yield_type;
-using CoroCall = typename boost::coroutines::symmetric_coroutine<void>::call_type;
+using CoroYield =
+    typename boost::coroutines::symmetric_coroutine<void>::yield_type;
+using CoroCall =
+    typename boost::coroutines::symmetric_coroutine<void>::call_type;
 
 struct CoroContext
 {
@@ -162,12 +164,12 @@ inline void compiler_barrier()
 namespace future
 {
 template <typename T, typename... Args>
-std::unique_ptr<T> make_unique(Args &&... args)
+std::unique_ptr<T> make_unique(Args &&...args)
 {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
 template <typename T, typename... Args>
-std::shared_ptr<T> make_shared(Args &&... args)
+std::shared_ptr<T> make_shared(Args &&...args)
 {
     return std::shared_ptr<T>(new T(std::forward<Args>(args)...));
 }
@@ -187,7 +189,41 @@ struct Data
     };
 } __attribute__((packed));
 
+struct WRID
+{
+    union
+    {
+        struct
+        {
+            uint32_t prefix;
+            uint32_t id;
+        };
+        uint64_t val;
+    };
+} __attribute__((packed));
+
+inline std::ostream &operator<<(std::ostream &os, WRID wrid)
+{
+    os << "{WRID prefix: " << wrid.prefix << ", id: " << wrid.id << "}";
+    return os;
+}
+
 #define ROUND_UP(num, multiple) ceil(((double) (num)) / (multiple)) * (multiple)
+
+#define WRID_PREFIX_EXMETA 1
+
+static inline uint64_t djb2_digest(const char *str, size_t size)
+{
+    unsigned long hash = 5381;
+    int c;
+
+    for (size_t i = 0; i < size; ++i)
+    {
+        c = str[i];
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    }
+    return hash;
+}
 
 namespace config
 {

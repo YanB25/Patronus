@@ -68,20 +68,59 @@ bool DSMKeeper::connectNode(uint16_t remoteID)
     return true;
 }
 
-void DSMKeeper::snapshotExchangeMeta(uint16_t remoteID,
-                                     const ExchangeMeta &meta)
+ExchangeMeta DSMKeeper::updateDirMetadata(const DirectoryConnection &dir,
+                                          size_t remoteID)
 {
-    snapshot_exchange_meta_[remoteID] = meta;
+    ExchangeMeta meta = getExchangeMeta(remoteID);
+
+    auto dirID = dir.dirID;
+
+    meta.dsmBase = (uint64_t) dirCon[0]->dsmPool;
+    meta.dmBase = (uint64_t) dirCon[0]->dmPool;
+
+    meta.dirTh[dirID].lid = dir.ctx.lid;
+    meta.dirTh[dirID].rKey = dir.dsmMR->rkey;
+    if (dirID == 0)
+    {
+        meta.dirTh[dirID].dm_rkey = dir.lockMR->rkey;
+    }
+    else
+    {
+        meta.dirTh[dirID].dm_rkey = 0;
+    }
+    memcpy((char *) meta.dirTh[dirID].gid,
+           (char *) &(dir.ctx.gid),
+           16 * sizeof(uint8_t));
+    meta.dirUdQpn[dirID] = dir.message->getQPN();
+
+    for (int k = 0; k < MAX_APP_THREAD; ++k)
+    {
+        meta.dirRcQpn2app[dirID][k] = dir.QPs[k][remoteID]->qp_num;
+    }
+
+    return meta;
+}
+
+void DSMKeeper::snapshotConnectRemoteMeta(uint16_t remoteID,
+                                          const ExchangeMeta &meta)
+{
+    snapshot_remote_meta_[remoteID] = meta;
     // should be bit-wise equal.
-    DCHECK(memcmp(&snapshot_exchange_meta_[remoteID],
+    DCHECK(memcmp(&snapshot_remote_meta_[remoteID],
                   &meta,
                   sizeof(ExchangeMeta)) == 0);
 }
 
+/**
+ * @brief the exchange meta data used from connecting local to @remoteID
+ *
+ * @param remoteID
+ * @return const ExchangeMeta&
+ */
 const ExchangeMeta &DSMKeeper::getExchangeMeta(uint16_t remoteID) const
 {
-    auto it = snapshot_exchange_meta_.find(remoteID);
-    if (it == snapshot_exchange_meta_.end())
+    auto it = snapshot_remote_meta_.find(remoteID);
+    if (it == snapshot_remote_meta_.end())
     {
         LOG(FATAL) << "failed to fetch exchange meta data for server "
                    << remoteID;
@@ -112,81 +151,105 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
     }
 }
 
-void DSMKeeper::connectDir(DirectoryConnection& dir)
+void DSMKeeper::connectThread(ThreadConnection &th,
+                              int remoteID,
+                              int dirID,
+                              const ExchangeMeta &exMeta)
 {
-    for (int remoteID = 0; remoteID < getServerNR(); ++remoteID)
-    {
-        const auto& exMeta = getExchangeMeta(remoteID);
+    auto &qp = th.QPs[dirID][remoteID];
+    CHECK_EQ(qp->qp_type, IBV_QPT_RC);
+    CHECK(modifyQPtoInit(qp, &th.ctx));
+    CHECK(modifyQPtoRTR(qp,
+                        exMeta.dirRcQpn2app[dirID][th.threadID],
+                        exMeta.dirTh[dirID].lid,
+                        exMeta.dirTh[dirID].gid,
+                        &th.ctx));
+    CHECK(modifyQPtoRTS(qp));
+    VLOG(1) << "[keeper] (re)connection ThreadConnection[" << th.threadID
+            << "]. for remoteID " << remoteID << ", DIR " << dirID
+            << ". dirRcQpn2app: " << exMeta.dirRcQpn2app[dirID][th.threadID]
+            << ", lid: " << exMeta.dirTh[dirID].lid
+            << ", gid: " << exMeta.dirTh[dirID].gid;
+}
 
-        if (remoteID == getMyNodeID())
-        {
-            continue;
-        }
-        for (int k = 0; k < MAX_APP_THREAD; ++k)
-        {
-            auto& qp = dir.QPs[k][remoteID];
-            DCHECK(qp->qp_type == IBV_QPT_RC);
-            modifyQPtoInit(qp, &dir.ctx);
-            modifyQPtoRTR(qp,
-                          exMeta.appRcQpn2dir[k][dir.dirID],
-                          exMeta.appTh[k].lid,
-                          exMeta.appTh[k].gid,
-                          &dir.ctx);
-            modifyQPtoRTS(qp);
-        }
+void DSMKeeper::updateRemoteConnectionForDir(RemoteConnection &remote,
+                                             const ExchangeMeta &meta,
+                                             size_t dirID)
+{
+    remote.dsmBase = meta.dsmBase;
+    remote.dmBase = meta.dmBase;
+
+    remote.dsmRKey[dirID] = meta.dirTh[dirID].rKey;
+    remote.dmRKey[dirID] = meta.dirTh[dirID].dm_rkey;
+    remote.dirMessageQPN[dirID] = meta.dirUdQpn[dirID];
+
+    for (int k = 0; k < MAX_APP_THREAD; ++k)
+    {
+        struct ibv_ah_attr ahAttr;
+        fillAhAttr(&ahAttr,
+                   meta.dirTh[dirID].lid,
+                   meta.dirTh[dirID].gid,
+                   &thCon[k]->ctx);
+        PLOG_IF(ERROR, ibv_destroy_ah(remote.appToDirAh[k][dirID]))
+            << "failed to destroy ah.";
+        remote.appToDirAh[k][dirID] =
+            CHECK_NOTNULL(ibv_create_ah(thCon[k]->ctx.pd, &ahAttr));
     }
+}
+
+void DSMKeeper::connectDir(DirectoryConnection &dir,
+                           int remoteID,
+                           int appID,
+                           const ExchangeMeta &exMeta)
+{
+    auto &qp = dir.QPs[appID][remoteID];
+    CHECK(qp->qp_type == IBV_QPT_RC);
+    CHECK(modifyQPtoInit(qp, &dir.ctx));
+    CHECK(modifyQPtoRTR(qp,
+                        exMeta.appRcQpn2dir[appID][dir.dirID],
+                        exMeta.appTh[appID].lid,
+                        exMeta.appTh[appID].gid,
+                        &dir.ctx));
+    CHECK(modifyQPtoRTS(qp));
+    VLOG(1) << "[keeper] (re)connection DirectoryConnection[" << dir.dirID
+            << "]. for remoteID " << remoteID << ", Th " << appID
+            << ". dirRcQpn2app: " << exMeta.appRcQpn2dir[appID][dir.dirID]
+            << ", lid: " << exMeta.appTh[appID].lid
+            << ", gid: " << exMeta.appTh[appID].gid;
 }
 
 void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
 {
     // I believe the exMeta is correct here.
     // so do a snapshot for later retrieval
-    snapshotExchangeMeta(remoteID, exMeta);
+    snapshotConnectRemoteMeta(remoteID, exMeta);
 
     // init directory qp
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
-        auto &c = *dirCon[i].get();
-
-        for (int k = 0; k < MAX_APP_THREAD; ++k)
+        auto &dirC = *dirCon[i];
+        CHECK_EQ(dirC.dirID, i);
+        for (size_t appID = 0; appID < MAX_APP_THREAD; ++appID)
         {
-            auto &qp = c.QPs[k][remoteID];
-
-            assert(qp->qp_type == IBV_QPT_RC);
-            modifyQPtoInit(qp, &c.ctx);
-            modifyQPtoRTR(qp,
-                          exMeta.appRcQpn2dir[k][i],
-                          exMeta.appTh[k].lid,
-                          exMeta.appTh[k].gid,
-                          &c.ctx);
-            modifyQPtoRTS(qp);
+            connectDir(dirC, remoteID, appID, exMeta);
         }
     }
 
     // init application qp
     for (size_t i = 0; i < thCon.size(); ++i)
     {
-        auto &c = *thCon[i].get();
-        for (int k = 0; k < NR_DIRECTORY; ++k)
+        auto &thC = *thCon[i];
+        CHECK_EQ(thC.threadID, i);
+        for (size_t dirID = 0; dirID < NR_DIRECTORY; ++dirID)
         {
-            auto &qp = c.QPs[k][remoteID];
-
-            CHECK(qp->qp_type == IBV_QPT_RC);
-            modifyQPtoInit(qp, &c.ctx);
-            modifyQPtoRTR(qp,
-                          exMeta.dirRcQpn2app[k][i],
-                          exMeta.dirTh[k].lid,
-                          exMeta.dirTh[k].gid,
-                          &c.ctx);
-            modifyQPtoRTS(qp);
+            connectThread(thC, remoteID, dirID, exMeta);
         }
     }
 
     // init remote connections
     auto &remote = remoteCon[remoteID];
     remote.dsmBase = exMeta.dsmBase;
-    DLOG(INFO) << "remote " << (void *) &remote << " set dsmBase to "
-               << (void *) remote.dsmBase;
+    LOG_FIRST_N(INFO, 1) << "[system] set dsmBase to " << (void *) remote.dsmBase;
     // remote.cacheBase = exMeta.cacheBase;
     remote.dmBase = exMeta.dmBase;
 

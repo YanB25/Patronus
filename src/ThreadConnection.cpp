@@ -48,6 +48,26 @@ ThreadConnection::ThreadConnection(
     timer.report();
 }
 
+bool ThreadConnection::resetQP(size_t node_id, size_t dir_id)
+{
+    auto* qp = QPs[dir_id][node_id];
+    // if (!destroyQueuePair(qp))
+    // {
+    //     return false;
+    // }
+    // ibv_qp* qp_ptr = nullptr;
+    // if (!createQueuePair(&qp_ptr, IBV_QPT_RC, cq, &ctx))
+    // {
+    //     return false;
+    // }
+    // QPs[dir_id][node_id] = CHECK_NOTNULL(qp_ptr);
+    if (!modifyQPtoReset(qp))
+    {
+        return false;
+    }
+    return true;
+}
+
 ThreadConnection::~ThreadConnection()
 {
     DefOnceContTimer(timer, config::kMonitorControlPath, "~ThreadConnection");

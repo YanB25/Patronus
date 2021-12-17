@@ -16,6 +16,11 @@ constexpr static uint64_t kMagic = 0xaaaaaaaaaaaaaaaa;
 constexpr static uint64_t kMagic2 = 0xbbbbbbbbbbbbbbbb;
 constexpr static uint64_t kMagic3 = 0xcccccccccccccccc;
 
+struct SwitchNotifyMsg
+{
+
+} __attribute__((packed));
+
 void loop_expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 {
     while (memcmp(lhs_buf, rhs_buf, size) != 0)
@@ -31,6 +36,9 @@ void loop_expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 
 void client(std::shared_ptr<DSM> dsm)
 {
+    LOG(WARNING) << "I am client.";
+    dsm->debug_show_exchanges();
+
     GlobalAddress gaddr;
     gaddr.nodeID = kServerNodeId;
     gaddr.offset = 0;
@@ -49,16 +57,22 @@ void client(std::shared_ptr<DSM> dsm)
     LOG(INFO) << "finished writing magic 2";
 
     dsm->recv();
-    // test if the 0 QP ready
+    dsm->reconnectThreadToDir(kServerNodeId, 0 /* dirID */);
+    // // test if the 0 QP ready
     dsm->force_set_dir(0);
 
     *(uint64_t *) buffer = kMagic3;
     CHECK(dsm->write_sync(buffer, gaddr, sizeof(uint64_t), nullptr, 3));
     LOG(INFO) << "finished writing magic 3";
+
+    dsm->debug_show_exchanges();
 }
 
 void server(std::shared_ptr<DSM> dsm)
 {
+    LOG(WARNING) << "I am server.";
+    dsm->debug_show_exchanges();
+
     const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
 
@@ -66,13 +80,14 @@ void server(std::shared_ptr<DSM> dsm)
 
     dsm->send(nullptr, 0, kClientNodeId);
 
-    LOG(INFO) << "Server starts to reconnect dir 0";
-    dsm->reinit_dir(0);
+    LOG(INFO) << "Server starts to reinit dir 0";
+    dsm->reinitializeDir(0);
 
-    loop_expect(buffer, (char *) &kMagic2, sizeof(kMagic2));
+    // loop_expect(buffer, (char *) &kMagic2, sizeof(kMagic2));
 
     // info("start to send 2nd msg");
     dsm->send(nullptr, 0, kClientNodeId);
+    dsm->debug_show_exchanges();
     // info("send 2nd msg finished");
 
     loop_expect(buffer, (char *) &kMagic3, sizeof(kMagic3));

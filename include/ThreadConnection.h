@@ -67,6 +67,7 @@ struct ThreadConnection
     {
         (*this) = std::move(rhs);
     }
+    bool resetQP(size_t node_id, size_t dir_id);
     void sendMessage2Dir(RawMessage *m, uint16_t node_id, uint16_t dir_id = 0, bool eager_signal = false);
     ~ThreadConnection();
 };

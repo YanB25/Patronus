@@ -114,9 +114,12 @@ public:
     virtual ~DSMKeeper();
     void barrier(const std::string &barrierKey);
     uint64_t sum(const std::string &sum_key, uint64_t value);
-    void connectDir(DirectoryConnection&);
+    void connectDir(DirectoryConnection&, int remoteID, int appID, const ExchangeMeta& exMeta);
+    void connectThread(ThreadConnection&, int remoteID, int dirID, const ExchangeMeta& exMeta);
+    void updateRemoteConnectionForDir(RemoteConnection&, const ExchangeMeta& exMeta, size_t dirID);
 
     const ExchangeMeta& getExchangeMeta(uint16_t remoteID) const;
+    ExchangeMeta updateDirMetadata(const DirectoryConnection& dir, size_t remoteID);
 
 private:
     static const char *OK;
@@ -126,7 +129,8 @@ private:
     std::vector<std::unique_ptr<DirectoryConnection>> &dirCon;
     std::vector<RemoteConnection> &remoteCon;
 
-    std::unordered_map<uint16_t, ExchangeMeta> snapshot_exchange_meta_;
+    // remoteID => remoteMetaData
+    std::unordered_map<uint16_t, ExchangeMeta> snapshot_remote_meta_;
 
     ExchangeMeta exchangeMeta;
 
@@ -155,7 +159,7 @@ private:
      * @param remoteID the remote machine to set with
      */
     void setExchangeMeta(uint16_t remoteID);
-    void snapshotExchangeMeta(uint16_t remoteID, const ExchangeMeta& meta);
+    void snapshotConnectRemoteMeta(uint16_t remoteID, const ExchangeMeta& meta);
 
     /**
      * @brief This function does the real and dirty jobs to modify the QP state.

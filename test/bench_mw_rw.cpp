@@ -367,7 +367,7 @@ void server(std::shared_ptr<DSM> dsm, size_t thread_nr)
                     Timer timer;
                     LOG(INFO) << ("Benchmarking latency of QP recovery");
                     timer.begin();
-                    CHECK(dsm->recover_dir_qp(kClientNodeId, tid, dir));
+                    CHECK(dsm->recoverDirQP(kClientNodeId, tid, dir));
                     timer.end_print(1);
                 }
             }

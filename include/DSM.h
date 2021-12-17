@@ -48,21 +48,31 @@ public:
         return thread_tag;
     }
 
-    bool reinit_dir(size_t dirID)
+    void syncMetadataBootstrap(const ExchangeMeta &, size_t remoteID);
+
+    bool reconnectThreadToDir(size_t node_id, size_t dirID);
+
+    /**
+     * @brief Reinitialize the DirectoryConnection
+     * 
+     * This function is helpful to dealloc the whole PD and re-init the Dir from the ground.
+     * After called, all the peers should be notified to call threadReconnectDir.
+     * 
+     * @param dirID 
+     * @return true 
+     * @return false 
+     */
+    bool reinitializeDir(size_t dirID);
+
+    void debug_show_exchanges()
     {
-        LOG(WARNING) << "TODO: still have bug. not work";
-        if (dirID > dirCon.size())
+        for (size_t i = 0; i < getClusterSize(); ++i)
         {
-            return false;
+            auto ex = getExchangeMetaBootstrap(i);
+            uint64_t digest = djb2_digest((char *) &ex, sizeof(ex));
+            LOG(INFO) << "[debug] node: " << i << " digest: " << std::hex
+                      << digest;
         }
-        // here destroy connection
-        dirCon[dirID].reset();
-        dirCon[dirID] = std::make_unique<DirectoryConnection>(
-            dirID, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
-        keeper->connectDir(*dirCon[dirID]);
-        LOG(INFO) << "reinit_dir " << dirID << " at "
-                  << (void *) dirCon[dirID].get() << " finish";
-        return true;
     }
 
     // RDMA operations
@@ -284,6 +294,12 @@ public:
         return keeper->sum(std::string("sum-") + std::to_string(count++),
                            value);
     }
+    size_t server_internal_buffer_reserve_size()
+    {
+        size_t reserve = getClusterSize() * sizeof(ExchangeMeta);
+        return ROUND_UP(reserve, 4096);
+    }
+    ExchangeMeta &getExchangeMetaBootstrap(size_t node_id) const;
 
     // Memcached operations for sync
     size_t Put(uint64_t key, const void *value, size_t count)
@@ -326,8 +342,8 @@ public:
         id.thread_id = get_thread_id();
         return id;
     }
-    bool recover_dir_qp(int node_id, int thread_id, size_t dirID);
-    bool recover_th_qp(int node_id, size_t dirID);
+    bool recoverDirQP(int node_id, int thread_id, size_t dirID);
+    bool recoverThreadQP(int node_id, size_t dirID);
 
     void roll_dir()
     {
@@ -335,8 +351,8 @@ public:
     }
     /**
      * @brief only call this if you know what you are doing.
-     * 
-     * @param dir 
+     *
+     * @param dir
      */
     void force_set_dir(size_t dir)
     {
@@ -346,7 +362,11 @@ public:
 
 private:
     void initRDMAConnection();
-    void fill_keys_dest(RdmaOpRegion &ror, GlobalAddress addr, bool is_chip, size_t dirID = 0);
+    void initExchangeMetadataBootstrap();
+    void fill_keys_dest(RdmaOpRegion &ror,
+                        GlobalAddress addr,
+                        bool is_chip,
+                        size_t dirID = 0);
 
     size_t get_cur_dir() const
     {
@@ -390,6 +410,7 @@ public:
     }
     /**
      * @brief The per-thread temporary buffer for client.
+     * The thread must call DSM::registerThread() before calling this method.
      *
      * @return char*
      */
