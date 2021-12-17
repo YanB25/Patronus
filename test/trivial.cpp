@@ -50,9 +50,13 @@ int main(int argc, char* argv[])
     auto nid = dsm->getMyNodeID();
     if (nid == kClientNodeId)
     {
+        dsm->recv();
+        dsm->reconnectThreadToDir(kServerNodeId, 0);
     }
     else
     {
+        dsm->reinitializeDir(0);
+        dsm->send(nullptr, 0, kClientNodeId, 0);
     }
 
     LOG(INFO) << "finished. ctrl+C to quit.";
