@@ -278,7 +278,8 @@ public:
                             size_t target_thread_id,
                             const char *buffer,
                             size_t size,
-                            size_t dirID);
+                            size_t dirID,
+                            bool signal=false);
     bool bind_memory_region_sync(struct ibv_mw *mw,
                                  size_t target_node_id,
                                  size_t target_thread_id,
@@ -288,6 +289,7 @@ public:
 
     uint64_t poll_rdma_cq(int count = 1);
     bool poll_rdma_cq_once(uint64_t &wr_id);
+    int poll_dir_cq(size_t dirID, size_t count);
 
     uint64_t sum(uint64_t value)
     {

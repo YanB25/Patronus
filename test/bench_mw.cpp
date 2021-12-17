@@ -107,11 +107,10 @@ void server(std::shared_ptr<DSM> dsm,
                     // if i too large, we roll back i to 0.
                     buffer_start = buffer + (i % window_nr) * window_size;
                 }
-                LOG(WARNING) << "TODO: CHECK if thread_id == 0 is correct.";
                 dsm->bind_memory_region(
-                    mws[i], kClientNodeId, 0, buffer_start, window_size, dirID);
+                    mws[i], kClientNodeId, 0, buffer_start, window_size, dirID, true);
             }
-            dsm->poll_rdma_cq(work_nr);
+            dsm->poll_dir_cq(dirID, work_nr);
             remain_nr -= work_nr;
         }
         bind_mw_ns += timer.end(mw_nr);
@@ -178,16 +177,18 @@ int main(int argc, char* argv[])
         // 150 us to alloc one mw.
         // 10000000 mws need 16 min, so we don't bench it.
         std::vector<size_t> window_nr_arr{1000, 10000};
-        std::vector<size_t> window_size_arr{
-            1, 64, 1024, 4096, 2ull * define::MB, 512 * define::MB};
+        // std::vector<size_t> window_size_arr{
+        //     1, 2ull * define::MB, 512 * define::MB};
         std::vector<bool> random_addr_arr{true, false};
-        for (auto window_nr : window_nr_arr)
+        // for (auto window_nr : window_nr_arr)
+        for (auto window_nr : {10000})
         {
-            for (auto window_size : window_size_arr)
+            for (auto window_size : {2 * define::MB})
             {
                 for (int random_addr : {0, 1, 2})
                 {
-                    for (size_t batch_poll_size : {1, 10, 100})
+                    for (size_t batch_poll_size : {10})
+                    // for (size_t batch_poll_size : {1, 10, 100})
                     {
                         window_nr_ = window_nr;
                         window_size_ = window_size;

@@ -537,7 +537,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     if (ret == EINVAL)
     {
-        LOG(ERROR)
+        PLOG(ERROR)
             << "failed to bind mw: maybe library not support TYPE_2 memory "
                "window: errno "
             << ret;
@@ -545,19 +545,19 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     }
     if (ret == ENOMEM)
     {
-        LOG(FATAL) << "Failed to bind mw: Memory has been used up. errno: "
+        PLOG(FATAL) << "Failed to bind mw: Memory has been used up. errno: "
                    << ret;
     }
     if (ret == ENOTSUP)
     {
-        LOG(FATAL)
+        PLOG(FATAL)
             << "Failed to bind mw: Operation not supported. Is it too large? "
                "errno: "
             << ret;
     }
     if (ret)
     {
-        LOG(ERROR) << "Failed to bind memory window. errno: " << ret
+        PLOG(ERROR) << "Failed to bind memory window. errno: " << ret
                    << "< qp: " << qp << ", mw: " << mw << ", mr: " << mr
                    << ", mr.lkey: " << mr->lkey << ", mm: " << (char *) mm
                    << ", size: " << mmSize;

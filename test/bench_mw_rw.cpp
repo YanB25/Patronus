@@ -19,6 +19,8 @@ constexpr static size_t dirID = 0;
 uint32_t magic = 0b1010101010;
 uint16_t mask = 0b1111111111;
 
+std::atomic<uint64_t> master_tid{(uint64_t) -1};
+
 constexpr static size_t kSyncBatch = 100;
 
 enum RWType
@@ -145,7 +147,8 @@ void bind_rkeys(std::shared_ptr<DSM> dsm,
 
     for (size_t t = 0; t < mws.size(); ++t)
     {
-        dsm->bind_memory_region_sync(mws[t], kClientNodeId, 0, buffer, size, dirID);
+        dsm->bind_memory_region_sync(
+            mws[t], kClientNodeId, 0, buffer, size, dirID);
     }
 }
 
@@ -176,7 +179,9 @@ void client_burn(std::shared_ptr<DSM> dsm,
         Data data;
         CHECK(sizeof(Data) == sizeof(uint64_t));
         memcpy(&data, &wc->wr_id, sizeof(uint64_t));
-        LOG(ERROR) << "Failed for rkey: " << data.lower << ", rkey_idx: " << data.upper << ". Remove from the rkey pool.";
+        LOG(ERROR) << "Failed for rkey: " << data.lower
+                   << ", rkey_idx: " << data.upper
+                   << ". Remove from the rkey pool.";
         rkeys[data.upper] = 0;
         if (sequantial || warmup)
         {
@@ -218,26 +223,50 @@ void client_burn(std::shared_ptr<DSM> dsm,
         {
             if (sequantial || (i % kClientBatchWrite == 0))
             {
-                dsm->rkey_write_sync(
-                    rkey, buffer, gaddr, io_size, dirID, nullptr, data.val, handler);
+                dsm->rkey_write_sync(rkey,
+                                     buffer,
+                                     gaddr,
+                                     io_size,
+                                     dirID,
+                                     nullptr,
+                                     data.val,
+                                     handler);
             }
             else
             {
-                dsm->rkey_write(
-                    rkey, buffer, gaddr, io_size, dirID, false, nullptr, data.val);
+                dsm->rkey_write(rkey,
+                                buffer,
+                                gaddr,
+                                io_size,
+                                dirID,
+                                false,
+                                nullptr,
+                                data.val);
             }
         }
         else if (bt == kRO)
         {
             if (sequantial || (i % kClientBatchWrite == 0))
             {
-                dsm->rkey_read_sync(
-                    rkey, buffer, gaddr, io_size, dirID, nullptr, data.val, handler);
+                dsm->rkey_read_sync(rkey,
+                                    buffer,
+                                    gaddr,
+                                    io_size,
+                                    dirID,
+                                    nullptr,
+                                    data.val,
+                                    handler);
             }
             else
             {
-                dsm->rkey_read(
-                    rkey, buffer, gaddr, io_size, dirID, false, nullptr, data.val);
+                dsm->rkey_read(rkey,
+                               buffer,
+                               gaddr,
+                               io_size,
+                               dirID,
+                               false,
+                               nullptr,
+                               data.val);
             }
         }
         else
@@ -276,32 +305,32 @@ void client(std::shared_ptr<DSM> dsm,
     // dinfo("[%zu] get rkeys.size() %zu", tid, rkeys.size());
 
     size_t mw_per_thread = std::max(rkeys.size() / thread_nr, size_t(1));
-    CHECK(mw_per_thread <= rkeys.size());
+    CHECK_LE(mw_per_thread, rkeys.size());
     // size_t rkey_start_idx = mw_per_thread * tid;
     // size_t rkey_end_idx = mw_per_thread * (tid + 1);
 
     client_bar.wait();
 
-    LOG_IF(INFO, tid == 0) << "detecting failed rkeys...";
-    if (tid == 0)
+    LOG_IF(INFO, tid == master_tid) << "detecting failed rkeys...";
+    if (tid == master_tid)
     {
         client_burn(dsm, size, io_size, bt, true, true);
     }
 
     client_bar.wait();
-    LOG_IF(INFO, tid == 0) << "warming up...";
+    LOG_IF(INFO, tid == master_tid) << "warming up...";
     if (tid < thread_nr)
     {
         client_burn(dsm, size, io_size, bt, false, true);
     }
     client_bar.wait();
-    LOG_IF(INFO, tid == 0) << "benchmarking...";
+    LOG_IF(INFO, tid == master_tid) << "benchmarking...";
     if (tid < thread_nr)
     {
         client_burn(dsm, size, io_size, bt, false, false);
     }
     client_bar.wait();
-    if (tid == 0)
+    if (tid == master_tid)
     {
         uint8_t ig = 0xfc;
         DLOG(INFO) << "!!!! client 0 sending 0xfc";
@@ -361,8 +390,8 @@ void server(std::shared_ptr<DSM> dsm, size_t thread_nr)
         {
             for (size_t dir = 0; dir < NR_DIRECTORY; ++dir)
             {
-                if (rdmaQueryQueuePair(dsm->get_dir_qp(kClientNodeId, tid, dir)) ==
-                    IBV_QPS_ERR)
+                if (rdmaQueryQueuePair(dsm->get_dir_qp(
+                        kClientNodeId, tid, dir)) == IBV_QPS_ERR)
                 {
                     Timer timer;
                     LOG(INFO) << ("Benchmarking latency of QP recovery");
@@ -393,7 +422,7 @@ void thread_main(std::shared_ptr<DSM> dsm,
     if (nid == kClientNodeId)
     {
         // let client spining
-        if (tid == 0)
+        if (tid == master_tid)
         {
             rkeys.clear();
             rkeys = prepare_client(dsm, mw_nr);
@@ -405,7 +434,7 @@ void thread_main(std::shared_ptr<DSM> dsm,
     }
     else
     {
-        if (tid == 0)
+        if (tid == master_tid)
         {
             auto mws = prepare_server(dsm, size);
             server(dsm, thread_nr);
@@ -413,7 +442,7 @@ void thread_main(std::shared_ptr<DSM> dsm,
         }
     }
 }
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -468,7 +497,16 @@ int main(int argc, char* argv[])
                 bindCore(i + 1);
                 dsm->registerThread();
                 auto nid = dsm->getMyNodeID();
-                auto tid = dsm->get_thread_id();
+                uint64_t tid = dsm->get_thread_id();
+
+                // select a leader
+                uint64_t old = (uint64_t) -1;
+                if (master_tid.compare_exchange_strong(
+                        old, tid, std::memory_order_seq_cst))
+                {
+                    LOG(INFO) << "Leader is tid " << tid;
+                }
+
                 // for (Type bt : {kRO, kWO})
                 for (RWType bt : {kRO})
                 {
@@ -483,7 +521,7 @@ int main(int argc, char* argv[])
                                 for (size_t io_size : {8})
                                 // for (size_t io_size : {8, 64, 256, 1024})
                                 {
-                                    if (tid == 0)
+                                    if (tid == master_tid)
                                     {
                                         window_nr_x = window_nr;
                                         thread_nr_x = thread_nr;
@@ -493,7 +531,7 @@ int main(int argc, char* argv[])
                                         expr_id.fetch_add(1);
                                     }
                                     LOG_IF(INFO,
-                                           tid == 0 && nid == kClientNodeId)
+                                           tid == master_tid && nid == kClientNodeId)
                                         << "Benchmarking mw: " << window_nr
                                         << ", thread: " << thread_nr
                                         << ", "
@@ -508,7 +546,7 @@ int main(int argc, char* argv[])
                                                 io_size,
                                                 bt,
                                                 client_bar);
-                                    if (tid == 0)
+                                    if (tid == master_tid)
                                     {
                                         b.snapshot();
                                         b.clear();

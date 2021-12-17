@@ -1076,6 +1076,12 @@ uint64_t DSM::poll_rdma_cq(int count)
     return wc.wr_id;
 }
 
+int DSM::poll_dir_cq(size_t dirID, size_t count)
+{
+    ibv_wc wc;
+    return pollWithCQ(dirCon[dirID]->cq, count, &wc);
+}
+
 bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
 {
     ibv_wc wc;
@@ -1109,11 +1115,12 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
                              size_t target_thread_id,
                              const char *buffer,
                              size_t size,
-                             size_t dirID)
+                             size_t dirID,
+                             bool signal)
 {
     struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
-        qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, false);
+        qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, signal);
     return rkey != 0;
 }
 bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
