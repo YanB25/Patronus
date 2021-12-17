@@ -105,7 +105,8 @@ void client(std::shared_ptr<DSM> dsm)
         {
             *(uint64_t *) buffer = kMagic3;
             gaddr.offset = kOffset3 + i * sizeof(kMagic3);
-            dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic3), second_dir);
+            dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic3),
+            second_dir);
         }
         dsm->send(nullptr, 0, kServerNodeId);
     }
@@ -141,7 +142,7 @@ void server(std::shared_ptr<DSM> dsm)
 
     const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
-    LOG(INFO) << "get buffer addr: " << buffer;
+    LOG(INFO) << "get buffer addr: " << (void*) buffer;
     // size_t max_size = buf_conf.size;
 
     loop_expect(buffer + kOffset, (char *) &kMagic, sizeof(kMagic));
@@ -167,10 +168,10 @@ void server(std::shared_ptr<DSM> dsm)
         if (rdmaQueryQueuePair(dsm->get_dir_qp(node_id, thread_id, dirID)) ==
             IBV_QPS_ERR)
         {
-            LOG(INFO) << "Benchmarking latency of QP recovery";
-            timer.begin();
             CHECK(dsm->recoverDirQP(node_id, thread_id, dirID));
-            timer.end_print(1);
+            LOG(WARNING) << "[bench] Finished recover DIR QP for node "
+                         << node_id << ", thread_id " << thread_id
+                         << " at dirID " << dirID;
         }
         usleep(100);
     }
@@ -184,7 +185,6 @@ void server(std::shared_ptr<DSM> dsm)
             mw2, node_id, thread_id, buffer, 64, second_dir);
         LOG(INFO) << "bind memory window 2 success. Rkey: " << mw2->rkey;
         dsm->send((char *) &mw2->rkey, sizeof(mw2->rkey), kClientNodeId);
-
 
         while (dsm->try_recv() == nullptr)
         {

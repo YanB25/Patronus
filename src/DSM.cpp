@@ -120,7 +120,7 @@ bool DSM::reinitializeDir(size_t dirID)
     dirCon[dirID].reset();
     dirCon[dirID] = std::make_unique<DirectoryConnection>(
         dirID, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
-    
+
     timer.pin("Reinit DirConnection");
 
     // update the boostrapped exchangeMeta for all the peers
@@ -185,6 +185,7 @@ bool DSM::recoverThreadQP(int node_id, size_t dirID)
     DLOG(INFO) << "Recovering th qp: " << qp << ". node_id: " << node_id
                << ", thread_id: " << tid;
     const auto &ex = getExchangeMetaBootstrap(node_id);
+
     if (!modifyErrQPtoNormal(qp,
                              ex.dirRcQpn2app[dirID][tid],
                              ex.dirTh[dirID].lid,
@@ -195,7 +196,7 @@ bool DSM::recoverThreadQP(int node_id, size_t dirID)
                    << node_id << ", thread_id: " << tid;
         return false;
     }
-    // rdmaQueryQueuePair(qp);
+    rdmaQueryQueuePair(qp);
     return true;
 }
 
@@ -306,7 +307,7 @@ void DSM::rkey_read(uint32_t rkey,
     {
         rdmaRead(iCon->QPs[dirID][gaddr.nodeID],
                  (uint64_t) buffer,
-                 remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                 dsm_pool_addr(gaddr),
                  size,
                  iCon->cacheLKey,
                  rkey,
@@ -317,7 +318,7 @@ void DSM::rkey_read(uint32_t rkey,
     {
         rdmaRead(iCon->QPs[dirID][gaddr.nodeID],
                  (uint64_t) buffer,
-                 remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                 dsm_pool_addr(gaddr),
                  size,
                  iCon->cacheLKey,
                  rkey,
@@ -430,7 +431,7 @@ void DSM::rkey_write(uint32_t rkey,
     {
         rdmaWrite(iCon->QPs[dirID][gaddr.nodeID],
                   (uint64_t) buffer,
-                  remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                  dsm_pool_addr(gaddr),
                   size,
                   iCon->cacheLKey,
                   rkey,
@@ -442,7 +443,7 @@ void DSM::rkey_write(uint32_t rkey,
     {
         rdmaWrite(iCon->QPs[dirID][gaddr.nodeID],
                   (uint64_t) buffer,
-                  remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                  dsm_pool_addr(gaddr),
                   size,
                   iCon->cacheLKey,
                   rkey,
@@ -494,12 +495,12 @@ void DSM::fill_keys_dest(RdmaOpRegion &ror,
     ror.lkey = iCon->cacheLKey;
     if (is_chip)
     {
-        ror.dest = remoteInfo[gaddr.nodeID].dmBase + gaddr.offset;
+        ror.dest = dsm_pool_addr(gaddr);
         ror.remoteRKey = remoteInfo[gaddr.nodeID].dmRKey[dirID];
     }
     else
     {
-        ror.dest = remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset;
+        ror.dest = dsm_pool_addr(gaddr);
         ror.remoteRKey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
     }
 }
@@ -715,7 +716,7 @@ void DSM::cas(GlobalAddress gaddr,
     {
         rdmaCompareAndSwap(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
-                           remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                           dsm_pool_addr(gaddr),
                            equal,
                            val,
                            iCon->cacheLKey,
@@ -726,7 +727,7 @@ void DSM::cas(GlobalAddress gaddr,
     {
         rdmaCompareAndSwap(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
-                           remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                           dsm_pool_addr(gaddr),
                            equal,
                            val,
                            iCon->cacheLKey,
@@ -764,7 +765,7 @@ void DSM::cas_mask(GlobalAddress gaddr,
     size_t cur_dir = get_cur_dir();
     rdmaCompareAndSwapMask(iCon->QPs[cur_dir][gaddr.nodeID],
                            (uint64_t) rdma_buffer,
-                           remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                           dsm_pool_addr(gaddr),
                            equal,
                            val,
                            iCon->cacheLKey,
@@ -798,7 +799,7 @@ void DSM::faa_boundary(GlobalAddress gaddr,
     {
         rdmaFetchAndAddBoundary(iCon->QPs[cur_dir][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
-                                remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                                dsm_pool_addr(gaddr),
                                 add_val,
                                 iCon->cacheLKey,
                                 remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
@@ -809,7 +810,7 @@ void DSM::faa_boundary(GlobalAddress gaddr,
     {
         rdmaFetchAndAddBoundary(iCon->QPs[cur_dir][gaddr.nodeID],
                                 (uint64_t) rdma_buffer,
-                                remoteInfo[gaddr.nodeID].dsmBase + gaddr.offset,
+                                dsm_pool_addr(gaddr),
                                 add_val,
                                 iCon->cacheLKey,
                                 remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
@@ -822,7 +823,8 @@ void DSM::faa_boundary(GlobalAddress gaddr,
 Buffer DSM::get_server_internal_buffer()
 {
     size_t node_id = get_node_id();
-    Buffer ret((char *) remoteInfo[node_id].dsmBase, 16 * define::GB);
+    size_t rv = server_internal_buffer_reserve_size();
+    Buffer ret((char *) remoteInfo[node_id].dsmBase + rv, 16 * define::GB - rv);
     return ret;
 }
 

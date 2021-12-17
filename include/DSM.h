@@ -54,13 +54,14 @@ public:
 
     /**
      * @brief Reinitialize the DirectoryConnection
-     * 
-     * This function is helpful to dealloc the whole PD and re-init the Dir from the ground.
-     * After called, all the peers should be notified to call threadReconnectDir.
-     * 
-     * @param dirID 
-     * @return true 
-     * @return false 
+     *
+     * This function is helpful to dealloc the whole PD and re-init the Dir from
+     * the ground. After called, all the peers should be notified to call
+     * threadReconnectDir.
+     *
+     * @param dirID
+     * @return true
+     * @return false
      */
     bool reinitializeDir(size_t dirID);
 
@@ -299,6 +300,14 @@ public:
         size_t reserve = getClusterSize() * sizeof(ExchangeMeta);
         return ROUND_UP(reserve, 4096);
     }
+
+    uint64_t dsm_pool_addr(const GlobalAddress &gaddr)
+    {
+        auto base = remoteInfo[gaddr.nodeID].dsmBase +
+                    server_internal_buffer_reserve_size();
+        return base + gaddr.offset;
+    }
+
     ExchangeMeta &getExchangeMetaBootstrap(size_t node_id) const;
 
     // Memcached operations for sync
