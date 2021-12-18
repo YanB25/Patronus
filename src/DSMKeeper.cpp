@@ -307,7 +307,7 @@ void DSMKeeper::connectDir(DirectoryConnection &dir,
             << "]. for remoteID " << remoteID << ", Th " << appID
             << ". dirRcQpn2app: " << exMeta.appRcQpn2dir[appID][dir.dirID]
             << ", lid: " << exMeta.appTh[appID].lid
-            << ", gid: " << exMeta.appTh[appID].gid;
+            << ", gid: " << (void*) exMeta.appTh[appID].gid;
 }
 
 void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)

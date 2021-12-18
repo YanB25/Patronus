@@ -37,6 +37,40 @@ ReliableRecvMessageConnection::~ReliableRecvMessageConnection()
     destroyContext(&ctx_);
 }
 
+void ReliableRecvMessageConnection::fills(ibv_sge &sge,
+                                          ibv_recv_wr &wr,
+                                          size_t node_id,
+                                          size_t batch_id)
+{
+    memset(&sge, 0, sizeof(ibv_sge));
+
+    sge.addr = (uint64_t) msg_pool_ + get_msg_pool_idx(node_id, batch_id) * kMessageSize;
+    sge.length = kMessageSize;
+    sge.lkey = lkey_;
+
+    memset(&wr, 0, sizeof(ibv_recv_wr));
+
+    wr.sg_list = &sge;
+    wr.num_sge = 1;
+    if ((batch_id + 1) % kPostRecvBufferBatch == 0)
+    {
+        VLOG(3) << "[rmsg-recv] recvs[" << node_id << "][" << batch_id << "] set next to "
+                << "nullptr. Current k " << batch_id << " @" << (void *) sge.addr;
+        wr.next = nullptr;
+    }
+    else
+    {
+        VLOG(3) << "[rmesg-recv] recvs[" << node_id << "][" << batch_id << "] set next to "
+                << "recvs[" << node_id << "][" << batch_id + 1 << "]. Current k " << batch_id
+                << " @" << (void *) sge.addr;
+        wr.next = &recvs[node_id][batch_id + 1];
+        CHECK_LT(node_id, MAX_MACHINE);
+        CHECK_LT(batch_id + 1, kRecvBuffer) << "Current m " << node_id << ", k " << batch_id;
+    }
+
+    wr.wr_id = WRID(WRID_PREFIX_RELIABLE_RECV, node_id).val;
+}
+
 /**
  * @brief should be inited after the qp is valid.
  *
@@ -48,38 +82,9 @@ void ReliableRecvMessageConnection::init()
     {
         for (int k = 0; k < kRecvBuffer; ++k)
         {
-            auto &s = recv_sgl[m][k];
-            memset(&s, 0, sizeof(s));
-
-            s.addr =
-                (uint64_t) msg_pool_ + get_msg_pool_idx(m, k) * kMessageSize;
-            s.length = kMessageSize;
-            s.lkey = lkey_;
-
-            auto &r = recvs[m][k];
-            memset(&r, 0, sizeof(r));
-
-            r.sg_list = &s;
-            r.num_sge = 1;
-            if ((k + 1) % kPostRecvBufferBatch == 0)
-            {
-                // LOG(INFO) << "recvs[" << m << "][" << k << "] set next to "
-                //           << "nullptr. Current k " << k;
-                r.next = nullptr;
-            }
-            else
-            {
-                // LOG(INFO) << "recvs[" << m << "][" << k << "] set next to "
-                //           << "recvs[" << m << "][" << k + 1 << "]. Current k
-                //           "
-                //           << k;
-                r.next = &recvs[m][k + 1];
-                CHECK_LT(m, MAX_MACHINE);
-                CHECK_LT(k + 1, kRecvBuffer)
-                    << "Current m " << m << ", k " << k;
-            }
-
-            r.wr_id = WRID(WRID_PREFIX_RELIABLE_RECV, m * 100).val;
+            auto& sge = recv_sgl[m][k];
+            auto& wr = recvs[m][k];
+            fills(sge, wr, m, k);
         }
     }
 
@@ -94,6 +99,8 @@ void ReliableRecvMessageConnection::init()
             {
                 PLOG(ERROR) << "Receive failed.";
             }
+            VLOG(3) << "[rmsg] posting recvs[" << remoteID << "]["
+                         << i * kPostRecvBufferBatch << "]" << "to remoteID " << remoteID;
         }
     }
 }
@@ -128,19 +135,23 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf)
     size_t cur_idx =
         msg_recv_index_[node_id].fetch_add(1, std::memory_order_relaxed);
 
-    VLOG(3) << "[Rmsg] Recved msg from node " << node_id << ", cur_idx "
-            << cur_idx;
-
     if ((cur_idx + 1) % kPostRecvBufferBatch == 0)
     {
         size_t post_buf_idx =
             (cur_idx + 1 % kRecvBuffer) +
-            kPostRecvBufferAdvanceBatch * kPostRecvBufferBatch;
+            (kPostRecvBufferAdvanceBatch - 1) * kPostRecvBufferBatch;
         struct ibv_recv_wr *bad;
+        for (size_t i = 0; i < kPostRecvBufferBatch; ++i)
+        {
+            size_t second_id = (post_buf_idx + i) % kRecvBuffer;
+            auto& sgl = recv_sgl[node_id][second_id];
+            auto& wr = recvs[node_id][second_id];
+            fills(sgl, wr, node_id, second_id);
+        }
         VLOG(3) << "[rmsg] Posting another " << kPostRecvBufferBatch
-                  << " recvs to node " << node_id << " for cur_idx " << cur_idx
-                  << " i.e. recvs[" << node_id << "]["
-                  << (post_buf_idx % kRecvBuffer) << "]";
+                     << " recvs to node " << node_id << " for cur_idx "
+                     << cur_idx << " i.e. recvs[" << node_id << "]["
+                     << (post_buf_idx % kRecvBuffer) << "]";
         PLOG_IF(ERROR,
                 ibv_post_recv(QPs_[node_id],
                               &recvs[node_id][post_buf_idx % kRecvBuffer],
@@ -151,8 +162,13 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf)
     if (ibuf)
     {
         char *buf = (char *) msg_pool_ +
-                    get_msg_pool_idx(node_id, cur_idx) * kMessageSize;
+                    get_msg_pool_idx(node_id, cur_idx % kRecvBuffer) * kMessageSize;
         memcpy(ibuf, buf, kMessageSize);
+
+        auto get = *(uint64_t *) buf;
+        VLOG(3) << "[Rmsg] Recved msg from node " << node_id << ", cur_idx "
+                << cur_idx << ", it is " << std::hex << get << " @"
+                << (void *) buf;
     }
     return kMessageSize;
 }

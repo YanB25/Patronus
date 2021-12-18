@@ -16,37 +16,53 @@ constexpr static uint64_t kMagic = 0xaabbccddeeff0011;
 
 constexpr static size_t kRpcNr = 100;
 
+constexpr static size_t kPingpoingCnt = 100;
+void client_pingpong_correct(std::shared_ptr<DSM> dsm)
+{
+    auto *buf = dsm->get_rdma_buffer();
+    char recv_buf[1024];
+    for (size_t i = 0; i < kPingpoingCnt; ++i)
+    {
+        uint64_t magic = rand();
+        *(uint64_t *) buf = magic;
+        dsm->reliable_send(buf, sizeof(uint64_t), kServerNodeId);
+
+        dsm->reliable_recv(recv_buf);
+        uint64_t get = *(uint64_t *) recv_buf;
+        CHECK_EQ(get, magic)
+            << "Pingpoing content mismatch for " << i << "-th test";
+        LOG_EVERY_N(INFO, 100) << "Finish round " << i << " magic: " << std::hex << magic;
+    }
+}
+void server_pingpong_correct(std::shared_ptr<DSM> dsm)
+{
+    char recv_buf[1024];
+    auto *buf = dsm->get_rdma_buffer();
+    for (size_t i = 0; i < kPingpoingCnt; ++i)
+    {
+        dsm->reliable_recv(recv_buf);
+        uint64_t get = *(uint64_t *) recv_buf;
+
+        *(uint64_t *) buf = get;
+        dsm->reliable_send(buf, sizeof(uint64_t), kClientNodeId);
+    }
+}
+
 void client(std::shared_ptr<DSM> dsm)
 {
-    size_t cnt = 0;
+    client_pingpong_correct(dsm);
 
-    char *buf = dsm->get_rdma_buffer();
-    LOG(INFO) << "Sending " << std::hex << kMagic;
-    *(uint64_t *) buf = kMagic;
-    dsm->reliable_send(buf, sizeof(uint64_t), kServerNodeId);
-    cnt++;
-
-    for (size_t i = 0; i < kRpcNr; ++i)
-    {
-        dsm->reliable_send(buf, sizeof(uint64_t), kServerNodeId);
-        cnt++;
-    }
+    // sync
     dsm->reliable_recv(nullptr);
+    dsm->reliable_send(nullptr, 0, kServerNodeId);
 }
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    [[maybe_unused]] char buf[1024];
-    dsm->reliable_recv(buf);
-    uint64_t get = *(uint64_t *) buf;
-    LOG(INFO) << "Got: " << std::hex << get;
-    CHECK_EQ(get, kMagic) << "Failed the test";
+    server_pingpong_correct(dsm);
 
-    for (size_t i = 0; i < kRpcNr; ++i)
-    {
-        dsm->reliable_recv(buf);
-    }
-    dsm->reliable_send(nullptr, 0, kClientNodeId);
+    dsm->reliable_send(nullptr, 0, kServerNodeId);
+    dsm->reliable_recv(nullptr);
 }
 
 int main(int argc, char *argv[])
