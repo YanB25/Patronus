@@ -5,7 +5,7 @@
 #include "Connection.h"
 #include "Timer.h"
 
-/** 
+/**
  * every DirectoryConnection has its own protection domain
  */
 DirectoryConnection::DirectoryConnection(
@@ -24,8 +24,11 @@ DirectoryConnection::DirectoryConnection(
     // dinfo("[dirCon] dirID: %d, ctx->pd: %p", dirID, ctx.pd);
     timer.pin("createContext");
 
-    cq = CHECK_NOTNULL(ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0));
-    rpc_cq = CHECK_NOTNULL(ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0));
+    cq =
+        CHECK_NOTNULL(ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0));
+    rpc_cq =
+        CHECK_NOTNULL(ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0));
+
     timer.pin("2x ibv_create_cq");
     message = RawMessageConnection::newInstance(ctx, rpc_cq, DIR_MESSAGE_NR);
 
@@ -36,12 +39,9 @@ DirectoryConnection::DirectoryConnection(
     // dsm memory
     this->dsmPool = dsmPool;
     this->dsmSize = dsmSize;
-    this->dsmMR = CHECK_NOTNULL(createMemoryRegion((uint64_t) dsmPool, dsmSize, &ctx));
+    this->dsmMR =
+        CHECK_NOTNULL(createMemoryRegion((uint64_t) dsmPool, dsmSize, &ctx));
     timer.pin("createMR");
-    // dinfo(
-    //     "[DSM] CreateMemoryRegion at %p, size %ld. mr: %p, lkey: %u, rkey:
-    //     %u. pd: %p", dsmPool, dsmSize, dsmMR, dsmMR->lkey, dsmMR->rkey,
-    //     ctx.pd);
     this->dsmLKey = dsmMR->lkey;
 
     // on-chip lock memory
@@ -62,20 +62,10 @@ DirectoryConnection::DirectoryConnection(
         for (size_t k = 0; k < machineNR; ++k)
         {
             createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
-            // dinfo(
-            //     "Directory: bingding QP: QPs[%lu][%lu]: qp: %p, cq: %p, lkey:
-            //     "
-            //     "%u. mr: %p. pd: %p",
-            //     QPs.size() - 1,
-            //     k,
-            //     QPs.back()[k],
-            //     (char *) cq,
-            //     dsmLKey,
-            //     dsmMR,
-            //     ctx.pd);
         }
     }
     timer.pin("create QPs");
+    timer.pin("reliable recv");
     timer.report();
 }
 

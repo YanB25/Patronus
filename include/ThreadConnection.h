@@ -4,6 +4,7 @@
 #include "Common.h"
 #include "RawMessageConnection.h"
 #include <vector>
+#include "ReliableMessageConnection.h"
 
 struct RemoteConnection;
 

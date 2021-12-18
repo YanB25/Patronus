@@ -281,8 +281,11 @@ void DSM::initRDMAConnection()
     }
     timer.pin("dirCons " + std::to_string(NR_DIRECTORY));
 
+    reliable_msg_ = std::make_unique<ReliableConnection>(cache.data, cache.size, conf.machineNR);
+    timer.pin("keeper init");
+
     // thCon, dirCon, remoteInfo set up here.
-    keeper = DSMKeeper::newInstance(thCon, dirCon, remoteInfo, conf.machineNR);
+    keeper = DSMKeeper::newInstance(thCon, dirCon, remoteInfo, *reliable_msg_, conf.machineNR);
     timer.pin("keeper init");
 
     myNodeID = keeper->getMyNodeID();
@@ -298,11 +301,6 @@ void DSM::rkey_read(uint32_t rkey,
                     CoroContext *ctx,
                     uint64_t wr_id)
 {
-    // dinfo("RDMA reading rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
-    //       rkey,
-    //       buffer,
-    //       gaddr.val,
-    //       size);
     if (ctx == nullptr)
     {
         rdmaRead(iCon->QPs[dirID][gaddr.nodeID],

@@ -1,5 +1,6 @@
 #include "AbstractMessageConnection.h"
 #include <glog/logging.h>
+#include "Common.h"
 
 AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
                                                      uint16_t sendPadding,

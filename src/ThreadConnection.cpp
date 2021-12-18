@@ -1,8 +1,10 @@
 #include "ThreadConnection.h"
 
-#include "Connection.h"
-#include "Timer.h"
 #include <glog/logging.h>
+
+#include "Connection.h"
+#include "ReliableMessageConnection.h"
+#include "Timer.h"
 
 ThreadConnection::ThreadConnection(
     uint16_t threadID,
@@ -12,7 +14,9 @@ ThreadConnection::ThreadConnection(
     const std::vector<RemoteConnection> &remoteInfo)
     : threadID(threadID), remoteInfo(&remoteInfo)
 {
-    DefOnceContTimer(timer, config::kMonitorControlPath, "ThreadConnection::ThreadConnection()");
+    DefOnceContTimer(timer,
+                     config::kMonitorControlPath,
+                     "ThreadConnection::ThreadConnection()");
 
     CHECK(createContext(&ctx));
     timer.pin("createContext");
@@ -20,7 +24,8 @@ ThreadConnection::ThreadConnection(
     cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
     // rpc_cq = cq;
     rpc_cq = ibv_create_cq(ctx.ctx, RAW_RECV_CQ_COUNT, NULL, NULL, 0);
-    timer.pin("2x ibv_create_cq");
+
+    timer.pin("3x ibv_create_cq");
 
     message = new RawMessageConnection(ctx, rpc_cq, APP_MESSAGE_NR);
     timer.pin("RawMessageConnection");
@@ -40,27 +45,17 @@ ThreadConnection::ThreadConnection(
         for (size_t k = 0; k < machineNR; ++k)
         {
             createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
-            // dinfo("QPs[%lu][%lu]: qp: %p, cq: %p, lkey: %u. mr: %p",
-            // QPs.size() - 1, k, QPs.back()[k], (char*)cq, cacheLKey, cacheMR);
         }
     }
     timer.pin("CreateQPs");
+    timer.pin("InitReliableSend");
+
     timer.report();
 }
 
 bool ThreadConnection::resetQP(size_t node_id, size_t dir_id)
 {
-    auto* qp = QPs[dir_id][node_id];
-    // if (!destroyQueuePair(qp))
-    // {
-    //     return false;
-    // }
-    // ibv_qp* qp_ptr = nullptr;
-    // if (!createQueuePair(&qp_ptr, IBV_QPT_RC, cq, &ctx))
-    // {
-    //     return false;
-    // }
-    // QPs[dir_id][node_id] = CHECK_NOTNULL(qp_ptr);
+    auto *qp = QPs[dir_id][node_id];
     if (!modifyQPtoReset(qp))
     {
         return false;
@@ -72,9 +67,9 @@ ThreadConnection::~ThreadConnection()
 {
     DefOnceContTimer(timer, config::kMonitorControlPath, "~ThreadConnection");
 
-    for (const auto& qps: QPs)
+    for (const auto &qps : QPs)
     {
-        for (ibv_qp* qp: qps)
+        for (ibv_qp *qp : qps)
         {
             CHECK(destroyQueuePair(qp));
         }
@@ -86,6 +81,7 @@ ThreadConnection::~ThreadConnection()
     {
         message->destroy();
         delete message;
+        message = nullptr;
     }
     timer.pin("destroy messages");
     CHECK(destroyCompleteQueue(rpc_cq));
@@ -101,7 +97,7 @@ void ThreadConnection::sendMessage2Dir(RawMessage *m,
                                        uint16_t dir_id,
                                        bool sync)
 {
-    const auto& remoteInfoObj = *remoteInfo;
+    const auto &remoteInfoObj = *remoteInfo;
     if (!sync)
     {
         message->sendRawMessage(

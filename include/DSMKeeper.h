@@ -1,11 +1,13 @@
 #ifndef __LINEAR_KEEPER__H__
 #define __LINEAR_KEEPER__H__
 
-#include <vector>
+#include <glog/logging.h>
+
 #include <unordered_map>
+#include <vector>
 
 #include "Keeper.h"
-#include <glog/logging.h>
+#include "ReliableMessageConnection.h"
 #include "Timer.h"
 
 struct ThreadConnection;
@@ -23,6 +25,13 @@ struct ExPerThread
     uint32_t dm_rkey;  // for directory on-chip memory
 } __attribute__((packed));
 
+struct ExReliable
+{
+    uint16_t lid;
+    uint32_t rkey;
+    uint8_t gid[16];
+    uint32_t qpn;
+} __attribute__((packed));
 /**
  * @brief an exchange data used in building connection for each `pair` of
  * machines in the system. Keep the struct POD to be memcpy-able
@@ -65,6 +74,9 @@ struct ExchangeMeta
      */
     uint32_t dirRcQpn2app[NR_DIRECTORY][MAX_APP_THREAD];
 
+    ExReliable rsend;
+    ExReliable rrecv;
+
 } __attribute__((packed));
 
 class DSMKeeper : public Keeper
@@ -74,52 +86,43 @@ public:
         std::vector<std::unique_ptr<ThreadConnection>> &thCon,
         std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
         std::vector<RemoteConnection> &remoteCon,
+        ReliableConnection &reliableCon,
         uint32_t maxServer = 12)
     {
         return future::make_unique<DSMKeeper>(
-            thCon, dirCon, remoteCon, maxServer);
+            thCon, dirCon, remoteCon, reliableCon, maxServer);
     }
 
     DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
               std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
               std::vector<RemoteConnection> &remoteCon,
-              uint32_t maxServer = 12)
-        : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
-    {
-        ContTimer<config::kMonitorControlPath> timer("DSMKeeper::DSMKeeper(...)");
-
-        DLOG(INFO) << "DSMKeeper::initLocalMeta()";
-        initLocalMeta();
-        timer.pin("initLocalMeta()");
-
-        DLOG(INFO) << "DSMKeeper::connectMemcached";
-        if (!connectMemcached())
-        {
-            LOG(FATAL) << "DSMKeeper:: unable to connect to memcached";
-            return;
-        }
-        timer.pin("connectMemcached");
-        serverEnter();
-        timer.pin("serverEnter");
-
-        serverConnect();
-        connectMySelf();
-        timer.pin("connect");
-
-        initRouteRule();
-        timer.pin("initRouteRule");
-        timer.report();
-    }
+              ReliableConnection &reliableCon,
+              uint32_t maxServer = MAX_MACHINE);
 
     virtual ~DSMKeeper();
     void barrier(const std::string &barrierKey);
     uint64_t sum(const std::string &sum_key, uint64_t value);
-    void connectDir(DirectoryConnection&, int remoteID, int appID, const ExchangeMeta& exMeta);
-    void connectThread(ThreadConnection&, int remoteID, int dirID, const ExchangeMeta& exMeta);
-    void updateRemoteConnectionForDir(RemoteConnection&, const ExchangeMeta& exMeta, size_t dirID);
+    void connectDir(DirectoryConnection &,
+                    int remoteID,
+                    int appID,
+                    const ExchangeMeta &exMeta);
+    void connectRecv(ReliableRecvMessageConnection &recv,
+                     int remoteID,
+                     const ExchangeMeta &);
+    void connectThread(ThreadConnection &,
+                       int remoteID,
+                       int dirID,
+                       const ExchangeMeta &exMeta);
+    void connectSend(ReliableSendMessageConnection &,
+                     int remoteID,
+                     const ExchangeMeta &exMeta);
+    void updateRemoteConnectionForDir(RemoteConnection &,
+                                      const ExchangeMeta &exMeta,
+                                      size_t dirID);
 
-    const ExchangeMeta& getExchangeMeta(uint16_t remoteID) const;
-    ExchangeMeta updateDirMetadata(const DirectoryConnection& dir, size_t remoteID);
+    const ExchangeMeta &getExchangeMeta(uint16_t remoteID) const;
+    ExchangeMeta updateDirMetadata(const DirectoryConnection &dir,
+                                   size_t remoteID);
 
 private:
     static const char *OK;
@@ -127,6 +130,7 @@ private:
 
     std::vector<std::unique_ptr<ThreadConnection>> &thCon;
     std::vector<std::unique_ptr<DirectoryConnection>> &dirCon;
+    ReliableConnection &reliableCon;
     std::vector<RemoteConnection> &remoteCon;
 
     // remoteID => remoteMetaData
@@ -159,7 +163,7 @@ private:
      * @param remoteID the remote machine to set with
      */
     void setExchangeMeta(uint16_t remoteID);
-    void snapshotConnectRemoteMeta(uint16_t remoteID, const ExchangeMeta& meta);
+    void snapshotConnectRemoteMeta(uint16_t remoteID, const ExchangeMeta &meta);
 
     /**
      * @brief This function does the real and dirty jobs to modify the QP state.

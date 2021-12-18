@@ -13,9 +13,9 @@
 #include <unistd.h>
 
 #include <cstring>
+#include <functional>
 #include <list>
 #include <string>
-#include <functional>
 
 #define MAX_POST_LIST 32
 #define DCT_ACCESS_KEY 3185
@@ -52,16 +52,16 @@ struct RdmaContext
     union ibv_gid gid;
     ibv_mw_type mw_type;
 
-    ibv_exp_dm* dm{nullptr};
+    ibv_exp_dm *dm{nullptr};
 
     // default to use type 1, because it is always supported
     // will query and change to TYPE_2 if supported.
     RdmaContext() : ctx(NULL), pd(NULL), mw_type(IBV_MW_TYPE_1)
     {
     }
-    RdmaContext& operator=(const RdmaContext&) = delete;
-    RdmaContext(const RdmaContext&) = delete;
-    RdmaContext& operator=(RdmaContext&& rhs)
+    RdmaContext &operator=(const RdmaContext &) = delete;
+    RdmaContext(const RdmaContext &) = delete;
+    RdmaContext &operator=(RdmaContext &&rhs)
     {
         devIndex = std::move(rhs.devIndex);
         port = std::move(rhs.port);
@@ -77,7 +77,7 @@ struct RdmaContext
         rhs.dm = nullptr;
         return *this;
     }
-    RdmaContext(RdmaContext&& rhs)
+    RdmaContext(RdmaContext &&rhs)
     {
         *this = std::move(rhs);
     }
@@ -98,12 +98,12 @@ bool createContext(RdmaContext *context,
                    uint8_t devIndex = 0);
 bool destroyContext(RdmaContext *context);
 
-ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx);
-bool destroyMemoryRegion(ibv_mr* mr);
+ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, const RdmaContext *ctx);
+bool destroyMemoryRegion(ibv_mr *mr);
 ibv_mr *createMemoryRegionOnChip(uint64_t mm,
                                  uint64_t mmSize,
                                  RdmaContext *ctx);
-bool destroyMemoryRegionOnChip(struct ibv_mr* mr, struct ibv_exp_dm *dm);
+bool destroyMemoryRegionOnChip(struct ibv_mr *mr, struct ibv_exp_dm *dm);
 
 bool createQueuePair(ibv_qp **qp,
                      ibv_qp_type mode,
@@ -154,10 +154,10 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                    uint16_t remoteLid,
                    uint8_t *remoteGid,
                    RdmaContext *context);
-bool destroyCompleteQueue(ibv_cq* cq);
+bool destroyCompleteQueue(ibv_cq *cq);
 
 //// Operation.cpp
-using WcHandler = std::function<void(ibv_wc*)>;
+using WcHandler = std::function<void(ibv_wc *)>;
 using WcErrHandler = WcHandler;
 static WcErrHandler empty_wc_err_handler = [](ibv_wc *) {};
 static WcHandler empty_wc_handler = [](ibv_wc *) {};
@@ -168,12 +168,11 @@ static WcHandler empty_wc_handler = [](ibv_wc *) {};
  * @param wc the polling results
  * @return the number of wc actually polled.
  */
-int pollWithCQ(
-    ibv_cq *cq,
-    int pollNumber,
-    struct ibv_wc *wc,
-    const WcErrHandler& hander = empty_wc_err_handler,
-    const WcHandler& handler = empty_wc_handler);
+int pollWithCQ(ibv_cq *cq,
+               int pollNumber,
+               struct ibv_wc *wc,
+               const WcErrHandler &hander = empty_wc_err_handler,
+               const WcHandler &handler = empty_wc_handler);
 /**
  * @brief non-blocking and try to poll the CQ and return immediately if get
  * nothing.
@@ -213,6 +212,8 @@ bool rdmaSend(ibv_qp *qp,
               uint64_t source,
               uint64_t size,
               uint32_t lkey,
+              bool signal,
+              uint64_t wr_id,
               int32_t imm = -1);
 /**
  * @brief rdma receive

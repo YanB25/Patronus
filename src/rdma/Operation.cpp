@@ -159,8 +159,13 @@ bool rdmaSend(ibv_qp *qp,
 }
 
 // for RC & UC
-bool rdmaSend(
-    ibv_qp *qp, uint64_t source, uint64_t size, uint32_t lkey, int32_t imm)
+bool rdmaSend(ibv_qp *qp,
+              uint64_t source,
+              uint64_t size,
+              uint32_t lkey,
+              bool signal,
+              uint64_t wr_id,
+              int32_t imm)
 {
     struct ibv_sge sg;
     struct ibv_send_wr wr;
@@ -177,8 +182,15 @@ bool rdmaSend(
     {
         wr.opcode = IBV_WR_SEND;
     }
-
-    wr.send_flags = IBV_SEND_SIGNALED;
+    if (signal)
+    {
+        wr.send_flags = IBV_SEND_SIGNALED;
+    }
+    else
+    {
+        wr.send_flags = 0;
+    }
+    wr.wr_id = wr_id;
     if (ibv_post_send(qp, &wr, &wrBad))
     {
         LOG(ERROR) << "Send with RDMA_SEND failed.";
@@ -546,7 +558,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     if (ret == ENOMEM)
     {
         PLOG(FATAL) << "Failed to bind mw: Memory has been used up. errno: "
-                   << ret;
+                    << ret;
     }
     if (ret == ENOTSUP)
     {
@@ -558,9 +570,9 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     if (ret)
     {
         PLOG(ERROR) << "Failed to bind memory window. errno: " << ret
-                   << "< qp: " << qp << ", mw: " << mw << ", mr: " << mr
-                   << ", mr.lkey: " << mr->lkey << ", mm: " << (char *) mm
-                   << ", size: " << mmSize;
+                    << "< qp: " << qp << ", mw: " << mw << ", mr: " << mr
+                    << ", mr.lkey: " << mr->lkey << ", mm: " << (char *) mm
+                    << ", size: " << mmSize;
         return 0;
     }
     // dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p",
@@ -569,8 +581,8 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     size_t id = id_.fetch_add(1);
     if ((id & mask) == magic)
     {
-        LOG_FIRST_N(WARNING, 1) << "TODO: Strange bug: reallocate mw: " << mw
-                      << ", idx: %" << id;
+        LOG_FIRST_N(WARNING, 1)
+            << "TODO: Strange bug: reallocate mw: " << mw << ", idx: %" << id;
         return rdmaAsyncBindMemoryWindow(
             qp, mw, mr, mm, mmSize, signal, wrID, mw_access_flag);
     }

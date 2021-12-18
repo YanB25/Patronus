@@ -3,6 +3,7 @@
 
 #include "Common.h"
 #include "RawMessageConnection.h"
+#include "ReliableMessageConnection.h"
 #include <vector>
 
 struct RemoteConnection;

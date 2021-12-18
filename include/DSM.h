@@ -12,6 +12,7 @@
 #include "DSMKeeper.h"
 #include "GlobalAddress.h"
 #include "LocalAllocator.h"
+#include "Pool.h"
 #include "RdmaBuffer.h"
 
 class DSMKeeper;
@@ -279,7 +280,7 @@ public:
                             const char *buffer,
                             size_t size,
                             size_t dirID,
-                            bool signal=false);
+                            bool signal = false);
     bool bind_memory_region_sync(struct ibv_mw *mw,
                                  size_t target_node_id,
                                  size_t target_thread_id,
@@ -371,6 +372,19 @@ public:
         cur_dir_ = dir;
     }
 
+    void reliable_send(const char *buf, size_t size, uint16_t node_id)
+    {
+        reliable_msg_->send(buf, size, node_id);
+    }
+    size_t reliable_recv(char* ibuf)
+    {
+        return reliable_msg_->recv(ibuf);
+    }
+    size_t reliable_try_recv(char* ibuf)
+    {
+        return reliable_msg_->try_recv(ibuf);
+    }
+
 private:
     void initRDMAConnection();
     void initExchangeMetadataBootstrap();
@@ -398,7 +412,6 @@ private:
     uint64_t baseAddr;
     uint32_t myNodeID;
 
-    // RemoteConnection *remoteInfo;
     std::vector<RemoteConnection> remoteInfo;
     std::vector<std::unique_ptr<ThreadConnection>> thCon;
     std::vector<std::unique_ptr<DirectoryConnection>> dirCon;
@@ -409,6 +422,7 @@ private:
     std::atomic<size_t> cur_dir_{0};
 
     // ClockManager clock_manager_;
+    std::unique_ptr<ReliableConnection> reliable_msg_;
 
 public:
     bool is_register()
@@ -468,7 +482,7 @@ public:
         auto buffer = (RawMessage *) iCon->message->getSendPool();
         buffer->node_id = myNodeID;
         buffer->app_id = thread_id;
-        CHECK(size < sizeof(RawMessage::inlined_buffer));
+        CHECK_LT(size, sizeof(RawMessage::inlined_buffer));
         memcpy(buffer->inlined_buffer, buf, size);
         iCon->sendMessage2Dir(buffer, node_id, dir_id, sync);
     }

@@ -191,6 +191,12 @@ struct Data
 
 struct WRID
 {
+    WRID(uint32_t p, uint32_t i) : prefix(p), id(i)
+    {
+    }
+    WRID(uint64_t v) : val(v)
+    {
+    }
     union
     {
         struct
@@ -211,6 +217,8 @@ inline std::ostream &operator<<(std::ostream &os, WRID wrid)
 #define ROUND_UP(num, multiple) ceil(((double) (num)) / (multiple)) * (multiple)
 
 #define WRID_PREFIX_EXMETA 1
+#define WRID_PREFIX_RELIABLE_SEND 2
+#define WRID_PREFIX_RELIABLE_RECV 3
 
 static inline uint64_t djb2_digest(const char *str, size_t size)
 {
@@ -229,6 +237,6 @@ namespace config
 {
 constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
-}
+}  // namespace config
 
 #endif /* __COMMON_H__ */

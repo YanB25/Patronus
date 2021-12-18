@@ -173,7 +173,7 @@ bool destroyContext(RdmaContext *context)
     return rc;
 }
 
-ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
+ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, const RdmaContext *ctx)
 {
     ibv_mr *mr = NULL;
     mr = ibv_reg_mr(ctx->pd,
