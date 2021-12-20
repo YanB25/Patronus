@@ -201,6 +201,7 @@ bool rdmaSend(ibv_qp *qp,
               ibv_ah *ah,
               uint32_t remoteQPN,
               bool isSignaled = false,
+              bool isInlined = false,
               uint64_t wr_id = 0);
 
 /**
@@ -213,6 +214,7 @@ bool rdmaSend(ibv_qp *qp,
               uint64_t size,
               uint32_t lkey,
               bool signal,
+              bool inlined,
               uint64_t wr_id,
               int32_t imm = -1);
 /**

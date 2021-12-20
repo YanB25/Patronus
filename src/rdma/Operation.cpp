@@ -81,29 +81,46 @@ int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
 static inline void fillSgeWr(
     ibv_sge &sg, ibv_send_wr &wr, uint64_t source, uint64_t size, uint32_t lkey)
 {
-    memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t) source;
-    sg.length = size;
-    sg.lkey = lkey;
-
     memset(&wr, 0, sizeof(wr));
-    wr.wr_id = 0;
-    wr.sg_list = &sg;
-    wr.num_sge = 1;
+
+    // optimized for zero-size op, e.g., zero-size SEND
+    if (size == 0)
+    {
+        wr.num_sge = 0;
+    }
+    else
+    {
+        memset(&sg, 0, sizeof(sg));
+        sg.addr = (uintptr_t) source;
+        sg.length = size;
+        sg.lkey = lkey;
+
+        wr.wr_id = 0;
+        wr.sg_list = &sg;
+        wr.num_sge = 1;
+    }
 }
 
 static inline void fillSgeWr(
     ibv_sge &sg, ibv_recv_wr &wr, uint64_t source, uint64_t size, uint32_t lkey)
 {
-    memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t) source;
-    sg.length = size;
-    sg.lkey = lkey;
-
     memset(&wr, 0, sizeof(wr));
-    wr.wr_id = 0;
-    wr.sg_list = &sg;
-    wr.num_sge = 1;
+
+    if (size == 0)
+    {
+        wr.num_sge = 0;
+    }
+    else
+    {
+        memset(&sg, 0, sizeof(sg));
+        sg.addr = (uintptr_t) source;
+        sg.length = size;
+        sg.lkey = lkey;
+
+        wr.wr_id = 0;
+        wr.sg_list = &sg;
+        wr.num_sge = 1;
+    }
 }
 
 static inline void fillSgeWr(ibv_sge &sg,
@@ -112,15 +129,22 @@ static inline void fillSgeWr(ibv_sge &sg,
                              uint64_t size,
                              uint32_t lkey)
 {
-    memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t) source;
-    sg.length = size;
-    sg.lkey = lkey;
-
     memset(&wr, 0, sizeof(wr));
-    wr.wr_id = 0;
-    wr.sg_list = &sg;
-    wr.num_sge = 1;
+    if (size == 0)
+    {
+        wr.num_sge = 0;
+    }
+    else
+    {
+        memset(&sg, 0, sizeof(sg));
+        sg.addr = (uintptr_t) source;
+        sg.length = size;
+        sg.lkey = lkey;
+
+        wr.wr_id = 0;
+        wr.sg_list = &sg;
+        wr.num_sge = 1;
+    }
 }
 
 // for UD and DC
@@ -131,6 +155,7 @@ bool rdmaSend(ibv_qp *qp,
               ibv_ah *ah,
               uint32_t remoteQPN /* remote dct_number */,
               bool isSignaled,
+              bool isInlined,
               uint64_t wr_id)
 {
     struct ibv_sge sg;
@@ -145,10 +170,15 @@ bool rdmaSend(ibv_qp *qp,
     wr.wr.ud.remote_qpn = remoteQPN;
     wr.wr.ud.remote_qkey = UD_PKEY;
     wr.wr_id = wr_id;
+    wr.send_flags = 0;
 
     if (isSignaled)
     {
-        wr.send_flags = IBV_SEND_SIGNALED;
+        wr.send_flags |= IBV_SEND_SIGNALED;
+    }
+    if (isInlined)
+    {
+        wr.send_flags |= IBV_SEND_INLINE;
     }
     if (ibv_post_send(qp, &wr, &wrBad))
     {
@@ -164,6 +194,7 @@ bool rdmaSend(ibv_qp *qp,
               uint64_t size,
               uint32_t lkey,
               bool signal,
+              bool inlined,
               uint64_t wr_id,
               int32_t imm)
 {
@@ -172,6 +203,7 @@ bool rdmaSend(ibv_qp *qp,
     struct ibv_send_wr *wrBad;
 
     fillSgeWr(sg, wr, source, size, lkey);
+    wr.send_flags = 0;
 
     if (imm != -1)
     {
@@ -184,12 +216,13 @@ bool rdmaSend(ibv_qp *qp,
     }
     if (signal)
     {
-        wr.send_flags = IBV_SEND_SIGNALED;
+        wr.send_flags |= IBV_SEND_SIGNALED;
     }
-    else
+    if (inlined)
     {
-        wr.send_flags = 0;
+        wr.send_flags |= IBV_SEND_INLINE;
     }
+
     wr.wr_id = wr_id;
     if (ibv_post_send(qp, &wr, &wrBad))
     {

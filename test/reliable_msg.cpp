@@ -12,11 +12,12 @@ constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-constexpr static uint64_t kMagic = 0xaabbccddeeff0011;
+// constexpr static uint64_t kMagic = 0xaabbccddeeff0011;
 
-constexpr static size_t kRpcNr = 100;
+// constexpr static size_t kRpcNr = 100;
 
-constexpr static size_t kPingpoingCnt = 100;
+constexpr static size_t kPingpoingCnt = 100 * define::K;
+constexpr static size_t kBurnCnt = 100 * define::K;
 void client_pingpong_correct(std::shared_ptr<DSM> dsm)
 {
     auto *buf = dsm->get_rdma_buffer();
@@ -31,7 +32,52 @@ void client_pingpong_correct(std::shared_ptr<DSM> dsm)
         uint64_t get = *(uint64_t *) recv_buf;
         CHECK_EQ(get, magic)
             << "Pingpoing content mismatch for " << i << "-th test";
-        LOG_EVERY_N(INFO, 100) << "Finish round " << i << " magic: " << std::hex << magic;
+        // LOG_EVERY_N(INFO, 1000) << "round " << i << " magic: " << std::hex << magic;
+    }
+}
+void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
+{
+    std::vector<std::thread> threads;
+    Timer t;
+    t.begin();
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        threads.emplace_back([dsm, i]() {
+            bindCore(i + 1);
+            dsm->registerThread();
+            for (size_t t = 0; t < kBurnCnt; ++t)
+            {
+                dsm->reliable_send(nullptr, 0, kServerNodeId);
+            }
+        });
+    }
+    for (auto& t: threads)
+    {
+        t.join();
+    }
+
+    auto ns = t.end();
+    auto op = thread_nr * kBurnCnt;
+    LOG(INFO) << "count: " << op << ", ns: " << ns << ", ops: " << 1e9 * op / ns;
+}
+void server_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
+{
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        threads.emplace_back([dsm, i]() {
+            bindCore(i + 1);
+            dsm->registerThread();
+            char buf[1024];
+            for (size_t t = 0; t < kBurnCnt; ++t)
+            {
+                dsm->reliable_recv(buf);
+            }
+        });
+    }
+    for (auto& t: threads)
+    {
+        t.join();
     }
 }
 void server_pingpong_correct(std::shared_ptr<DSM> dsm)
@@ -50,19 +96,26 @@ void server_pingpong_correct(std::shared_ptr<DSM> dsm)
 
 void client(std::shared_ptr<DSM> dsm)
 {
-    client_pingpong_correct(dsm);
+    // client_pingpong_correct(dsm);
+    LOG(INFO) << "Begin burn";
+    client_burn(dsm, 1);
 
     // sync
     dsm->reliable_recv(nullptr);
     dsm->reliable_send(nullptr, 0, kServerNodeId);
+    LOG(INFO) << "Exiting!!!";
 }
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    server_pingpong_correct(dsm);
+    // server_pingpong_correct(dsm);
+
+    LOG(INFO) << "Begin burn";
+    server_burn(dsm, 1);
 
     dsm->reliable_send(nullptr, 0, kServerNodeId);
     dsm->reliable_recv(nullptr);
+    LOG(INFO) << "Exiting!!!";
 }
 
 int main(int argc, char *argv[])

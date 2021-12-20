@@ -36,10 +36,11 @@ void RawMessageConnection::syncSendRawMessage(RawMessage *m,
              ah,
              remoteQPN,
              true,
+             false, 
              magic_wr_id);
     ibv_wc wc;
 
-    std::atomic<bool> found = false;
+    std::atomic<bool> found{false};
     auto handler = [&found, magic_wr_id](ibv_wc *wc)
     {
         if (wc->wr_id == magic_wr_id)
