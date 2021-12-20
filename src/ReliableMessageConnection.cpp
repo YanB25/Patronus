@@ -22,7 +22,7 @@ ReliableRecvMessageConnection::ReliableRecvMessageConnection(size_t machine_nr)
     QPs_.resize(machine_nr);
     for (size_t i = 0; i < machine_nr; ++i)
     {
-        CHECK(createQueuePair(&QPs_[i], IBV_QPT_RC, recv_cq_, &ctx_));
+        CHECK(createQueuePair(&QPs_[i], IBV_QPT_RC, recv_cq_, &ctx_, 1024, 64));
     }
 }
 ReliableRecvMessageConnection::~ReliableRecvMessageConnection()
@@ -204,7 +204,7 @@ ReliableSendMessageConnection::ReliableSendMessageConnection(uint64_t mm,
     QPs_.resize(machine_nr);
     for (size_t i = 0; i < machine_nr; ++i)
     {
-        CHECK(createQueuePair(&QPs_[i], IBV_QPT_RC, send_cq_, &ctx_));
+        CHECK(createQueuePair(&QPs_[i], IBV_QPT_RC, send_cq_, &ctx_, 1024, 64));
     }
 }
 
