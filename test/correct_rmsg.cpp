@@ -16,7 +16,7 @@ constexpr uint32_t kMachineNr = 2;
 // constexpr static uint64_t kMagic = 0xaabbccddeeff0011;
 
 // constexpr static size_t kRpcNr = 100;
-constexpr static size_t kMsgSize = 16;
+// constexpr static size_t kMsgSize = 16;
 
 constexpr static size_t kPingpoingCnt = 100 * define::K;
 // constexpr static size_t kBurnCnt = 100 * define::M;
