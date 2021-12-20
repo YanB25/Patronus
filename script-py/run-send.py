@@ -63,12 +63,14 @@ if __name__ == '__main__':
     DURATION = 10
     DEFAULT_PORT = 18515
     # thread_nrs = [1, 2, 4, 6, 8, 10, 12, 14, 16, 32] # max at 10
-    thread_nrs = [8, 10, 12]
+    # thread_nrs = [8, 10, 12]
+    thread_nrs = [1]
     tx_lengths = [128]
     qpns = [1]
     inlines = [True, False]
     # sizes = [1]
-    sizes = [1, 8, 28, 32, 36, 40, 48, 64]
+    # sizes = [1, 8, 28, 32, 36, 40, 48, 64]
+    sizes = [16, 32]
     for (thread_nr, tx_length, qpn, size, inline) in itertools.product(thread_nrs, tx_lengths, qpns, sizes, inlines):
         conf = exec.Config()
         init_conf(conf, inets, thread_nr)

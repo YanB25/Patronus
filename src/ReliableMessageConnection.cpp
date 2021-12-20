@@ -47,7 +47,7 @@ void ReliableRecvMessageConnection::fills(ibv_sge &sge,
     sge.addr = (uint64_t) msg_pool_ +
                get_msg_pool_idx(node_id, batch_id) * kMessageSize;
     DCHECK_EQ(sge.addr % 64, 0) << "Should be cacheline aligned.";
-    
+
     sge.length = kMessageSize;
     sge.lkey = lkey_;
 
@@ -113,7 +113,7 @@ void ReliableRecvMessageConnection::init()
     }
 }
 
-size_t ReliableRecvMessageConnection::try_recv(char *ibuf)
+bool ReliableRecvMessageConnection::try_recv(char *ibuf)
 {
     DCHECK(inited_);
     ibv_wc wc;
@@ -121,16 +121,16 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf)
     if (ret < 0)
     {
         PLOG(ERROR) << "failed to pollWithCQ";
-        return 0;
+        return false;
     }
     if (ret == 0)
     {
-        return 0;
+        return false;
     }
     if (wc.status != IBV_WC_SUCCESS)
     {
         PLOG(ERROR) << "Failed to process recv. wc " << WRID(wc.wr_id);
-        return 0;
+        return false;
     }
     else
     {
@@ -142,6 +142,7 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf)
     uint32_t node_id = WRID(wc.wr_id).id;
     size_t cur_idx =
         msg_recv_index_[node_id].fetch_add(1, std::memory_order_relaxed);
+    auto actual_size = wc.imm_data;
 
     if ((cur_idx + 1) % kPostRecvBufferBatch == 0)
     {
@@ -149,13 +150,6 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf)
             (cur_idx + 1 % kRecvBuffer) +
             (kPostRecvBufferAdvanceBatch - 1) * kPostRecvBufferBatch;
         struct ibv_recv_wr *bad;
-        for (size_t i = 0; i < kPostRecvBufferBatch; ++i)
-        {
-            size_t second_id = (post_buf_idx + i) % kRecvBuffer;
-            auto &sgl = recv_sgl[node_id][second_id];
-            auto &wr = recvs[node_id][second_id];
-            fills(sgl, wr, node_id, second_id);
-        }
         VLOG(3) << "[rmsg] Posting another " << kPostRecvBufferBatch
                 << " recvs to node " << node_id << " for cur_idx " << cur_idx
                 << " i.e. recvs[" << node_id << "]["
@@ -172,7 +166,7 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf)
         char *buf =
             (char *) msg_pool_ +
             get_msg_pool_idx(node_id, cur_idx % kRecvBuffer) * kMessageSize;
-        memcpy(ibuf, buf, kMessageSize);
+        memcpy(ibuf, buf, actual_size);
 
         auto get = *(uint64_t *) buf;
         VLOG(3) << "[Rmsg] Recved msg from node " << node_id << ", cur_idx "
@@ -184,18 +178,15 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf)
         VLOG(3) << "[Rmsg] Recved msg from node " << node_id << ", cur_idx "
                 << cur_idx;
     }
-    return kMessageSize;
+    return true;
 }
 
-size_t ReliableRecvMessageConnection::recv(char *ibuf)
+void ReliableRecvMessageConnection::recv(char *ibuf)
 {
     DCHECK(inited_);
-    size_t ret;
-    do
+    while (!try_recv(ibuf))
     {
-        ret = try_recv(ibuf);
-    } while (ret == 0);
-    return ret;
+    }
 }
 
 ReliableSendMessageConnection::ReliableSendMessageConnection(uint64_t mm,
@@ -232,7 +223,7 @@ void ReliableSendMessageConnection::send(size_t node_id,
                                          const char *buf,
                                          size_t size)
 {
-    CHECK_LT(size, kMessageSize) << "[rmsg] message size exceed limits";
+    CHECK_LE(size, kMessageSize) << "[rmsg] message size exceed limits";
 
     auto nr = msg_sent_nr_.fetch_add(1, std::memory_order_relaxed) + 1;
     bool signal = false;
@@ -248,10 +239,8 @@ void ReliableSendMessageConnection::send(size_t node_id,
         second_ = true;
     }
 
-    if (signal)
-    {
-        VLOG(3) << "[rmsg] One signal";
-    }
+    VLOG_IF(3, signal) << "[rmsg] one signal";
+
     CHECK(rdmaSend(QPs_[node_id],
                    (uint64_t) buf,
                    size,
@@ -259,7 +248,7 @@ void ReliableSendMessageConnection::send(size_t node_id,
                    signal,
                    true /* inlined */,
                    WRID(WRID_PREFIX_RELIABLE_SEND, 0).val,
-                   0));
+                   size));
 }
 
 void ReliableSendMessageConnection::poll_cq()

@@ -4,6 +4,7 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "util/monitor.h"
+#include <glog/logging.h>
 
 // Two nodes
 // one node issues cas operations
@@ -15,9 +16,10 @@ constexpr uint32_t kMachineNr = 2;
 // constexpr static uint64_t kMagic = 0xaabbccddeeff0011;
 
 // constexpr static size_t kRpcNr = 100;
+constexpr static size_t kMsgSize = 16;
 
 constexpr static size_t kPingpoingCnt = 100 * define::K;
-constexpr static size_t kBurnCnt = 100 * define::K;
+constexpr static size_t kBurnCnt = 100 * define::M;
 void client_pingpong_correct(std::shared_ptr<DSM> dsm)
 {
     auto *buf = dsm->get_rdma_buffer();
@@ -45,9 +47,11 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
         threads.emplace_back([dsm, i]() {
             bindCore(i + 1);
             dsm->registerThread();
+            auto* buf = dsm->get_rdma_buffer(); 
             for (size_t t = 0; t < kBurnCnt; ++t)
             {
-                dsm->reliable_send(nullptr, 0, kServerNodeId);
+                // dsm->reliable_send(buf, 32, kServerNodeId);
+                dsm->reliable_send(buf, kMsgSize, kServerNodeId);
             }
         });
     }
@@ -68,10 +72,10 @@ void server_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
         threads.emplace_back([dsm, i]() {
             bindCore(i + 1);
             dsm->registerThread();
-            char buf[1024];
+            // char buf[1024];
             for (size_t t = 0; t < kBurnCnt; ++t)
             {
-                dsm->reliable_recv(buf);
+                dsm->reliable_recv(nullptr);
             }
         });
     }
@@ -94,16 +98,30 @@ void server_pingpong_correct(std::shared_ptr<DSM> dsm)
     }
 }
 
+void client_wait(std::shared_ptr<DSM> dsm)
+{
+    // sync
+    auto* buf = dsm->get_rdma_buffer();
+    dsm->reliable_recv(nullptr);
+    dsm->reliable_send(buf, 0, kServerNodeId);
+
+}
+
 void client(std::shared_ptr<DSM> dsm)
 {
     // client_pingpong_correct(dsm);
     LOG(INFO) << "Begin burn";
     client_burn(dsm, 1);
 
-    // sync
-    dsm->reliable_recv(nullptr);
-    dsm->reliable_send(nullptr, 0, kServerNodeId);
+    client_wait(dsm);
     LOG(INFO) << "Exiting!!!";
+}
+
+void server_wait(std::shared_ptr<DSM> dsm)
+{
+    auto* buffer = dsm->get_rdma_buffer();
+    dsm->reliable_send(buffer, 0, kClientNodeId);
+    dsm->reliable_recv(nullptr);
 }
 
 void server(std::shared_ptr<DSM> dsm)
@@ -113,8 +131,7 @@ void server(std::shared_ptr<DSM> dsm)
     LOG(INFO) << "Begin burn";
     server_burn(dsm, 1);
 
-    dsm->reliable_send(nullptr, 0, kServerNodeId);
-    dsm->reliable_recv(nullptr);
+    server_wait(dsm);
     LOG(INFO) << "Exiting!!!";
 }
 

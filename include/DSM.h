@@ -376,11 +376,11 @@ public:
     {
         reliable_msg_->send(buf, size, node_id);
     }
-    size_t reliable_recv(char* ibuf)
+    void reliable_recv(char* ibuf)
     {
-        return reliable_msg_->recv(ibuf);
+        reliable_msg_->recv(ibuf);
     }
-    size_t reliable_try_recv(char* ibuf)
+    bool reliable_try_recv(char* ibuf)
     {
         return reliable_msg_->try_recv(ibuf);
     }

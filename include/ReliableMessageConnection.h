@@ -14,18 +14,18 @@
 
 class ReliableRecvMessageConnection
 {
-    constexpr static size_t kMessageSize = 128;
+    constexpr static size_t kMessageSize = 32;
 
-    const static int kRecvBuffer = 64;
+    const static int kRecvBuffer = 128;
     // post 2 batch in advance.
     const static int kPostRecvBufferAdvanceBatch = 2;
-    const static int kPostRecvBufferBatch = 16;
+    const static int kPostRecvBufferBatch = 64;
 
 public:
     ReliableRecvMessageConnection(size_t machine_nr);
     ~ReliableRecvMessageConnection();
-    size_t recv(char *ibuf);
-    size_t try_recv(char *ibuf);
+    void recv(char *ibuf);
+    bool try_recv(char *ibuf);
     void init();
     void fills(ibv_sge &sge, ibv_recv_wr &wr, size_t node_id, size_t batch_id);
     const std::vector<ibv_qp *> &QPs() const
@@ -69,7 +69,7 @@ private:
 
 class ReliableSendMessageConnection
 {
-    constexpr static size_t kMessageSize = 64;
+    constexpr static size_t kMessageSize = 32;
     const static int kSendBatch = 16;
 
 public:
@@ -129,11 +129,11 @@ public:
     {
         return send_.send(node_id, buf, size);
     }
-    size_t recv(char *ibuf)
+    void recv(char *ibuf)
     {
         return recv_.recv(ibuf);
     }
-    size_t try_recv(char *ibuf)
+    bool try_recv(char *ibuf)
     {
         return recv_.try_recv(ibuf);
     }
