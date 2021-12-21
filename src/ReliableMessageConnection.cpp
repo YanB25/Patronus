@@ -7,6 +7,10 @@
 
 ReliableConnection::ReliableConnection(uint64_t mm, size_t mm_size, size_t machine_nr)
 {
+    if constexpr (!config::kEnableReliableMessage)
+    {
+        return;
+    }
     CHECK(createContext(&ctx_));
     constexpr static size_t kMsgNr =
         MAX_MACHINE * kRecvBuffer * RMSG_MULTIPLEXING;
@@ -46,6 +50,11 @@ ReliableConnection::ReliableConnection(uint64_t mm, size_t mm_size, size_t machi
 }
 ReliableConnection::~ReliableConnection()
 {
+    if constexpr (!config::kEnableReliableMessage)
+    {
+        return;
+    }
+
     for (size_t i = 0; i < QPs_.size(); ++i)
     {
         for (size_t m = 0; m < QPs_[0].size(); ++m)
@@ -67,13 +76,16 @@ void ReliableConnection::send(const char *buf,
                               uint16_t node_id,
                               size_t mid)
 {
+    DCHECK(config::kEnableReliableMessage);
     return send_->send(node_id, buf, size, mid);
 }
 void ReliableConnection::recv(char *ibuf)
 {
+    DCHECK(config::kEnableReliableMessage);
     return recv_->recv(ibuf);
 }
 bool ReliableConnection::try_recv(char *ibuf)
 {
+    DCHECK(config::kEnableReliableMessage);
     return recv_->try_recv(ibuf);
 }

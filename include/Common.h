@@ -254,6 +254,8 @@ namespace config
 {
 constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
+
+constexpr static bool kEnableReliableMessage = true;
 }  // namespace config
 
 #endif /* __COMMON_H__ */

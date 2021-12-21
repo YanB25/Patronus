@@ -40,7 +40,10 @@ DSMKeeper::DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
     initRouteRule();
     timer.pin("initRouteRule");
 
-    reliableCon.recv_->init();
+    if constexpr (config::kEnableReliableMessage)
+    {
+        reliableCon.recv_->init();
+    }
     timer.pin("init reliable recv");
     timer.report();
 }
@@ -63,12 +66,15 @@ void DSMKeeper::initLocalMeta()
     }
 
     // reliable
-    auto &reliable_ctx = reliableCon.context();
-    exchangeMeta.ex_reliable.lid = reliable_ctx.lid;
-    exchangeMeta.ex_reliable.rkey = reliableCon.rkey();
-    memcpy((char *) exchangeMeta.ex_reliable.gid,
-           (char *) (&reliable_ctx.gid),
-           sizeof(uint8_t) * 16);
+    if constexpr (config::kEnableReliableMessage)
+    {
+        auto &reliable_ctx = reliableCon.context();
+        exchangeMeta.ex_reliable.lid = reliable_ctx.lid;
+        exchangeMeta.ex_reliable.rkey = reliableCon.rkey();
+        memcpy((char *) exchangeMeta.ex_reliable.gid,
+               (char *) (&reliable_ctx.gid),
+               sizeof(uint8_t) * 16);
+    }
 
     // per thread DIR
     for (size_t i = 0; i < dirCon.size(); ++i)
@@ -189,10 +195,13 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
     }
 
     // for reliable message
-    for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
+    if constexpr (config::kEnableReliableMessage)
     {
-        exchangeMeta.ex_reliable.qpn[i] =
-            reliableCon.QPs()[i][remoteID]->qp_num;
+        for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
+        {
+            exchangeMeta.ex_reliable.qpn[i] =
+                reliableCon.QPs()[i][remoteID]->qp_num;
+        }
     }
 
     for (int i = 0; i < MAX_APP_THREAD; ++i)
@@ -210,6 +219,10 @@ void DSMKeeper::connectReliableMsg(ReliableConnection &cond,
                                    int remoteID,
                                    const ExchangeMeta &exMeta)
 {
+    if constexpr (!config::kEnableReliableMessage)
+    {
+        return;
+    }
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
         auto &qp = cond.QPs()[i][remoteID];
@@ -224,28 +237,11 @@ void DSMKeeper::connectReliableMsg(ReliableConnection &cond,
         CHECK(modifyQPtoRTS(qp));
 
         DVLOG(3) << "[debug] Send connect to remote " << remoteID
-                  << ", mid: " << i << ", hash(rrecv): " << std::hex
-                  << djb2_digest((char *) &exMeta.ex_reliable,
-                                 sizeof(exMeta.ex_reliable));
+                 << ", mid: " << i << ", hash(rrecv): " << std::hex
+                 << djb2_digest((char *) &exMeta.ex_reliable,
+                                sizeof(exMeta.ex_reliable));
     }
 }
-
-// void DSMKeeper::connectSend(ReliableSendMessageConnection &send,
-//                             int remoteID,
-//                             const ExchangeMeta &exMeta)
-// {
-//     auto &qp = send.QPs()[remoteID];
-//     auto &ctx = send.context();
-//     CHECK_EQ(qp->qp_type, IBV_QPT_RC);
-//     CHECK(modifyQPtoInit(qp, &ctx));
-//     CHECK(modifyQPtoRTR(
-//         qp, exMeta.rrecv.qpn, exMeta.rrecv.lid, exMeta.rrecv.gid, &ctx));
-//     CHECK(modifyQPtoRTS(qp));
-
-//     LOG(INFO) << "[debug] Send connect to remote " << remoteID
-//               << ", hash(rrecv): " << std::hex
-//               << djb2_digest((char *) &exMeta.rrecv, sizeof(exMeta.rrecv));
-// }
 
 void DSMKeeper::connectThread(ThreadConnection &th,
                               int remoteID,
@@ -262,10 +258,10 @@ void DSMKeeper::connectThread(ThreadConnection &th,
                         &th.ctx));
     CHECK(modifyQPtoRTS(qp));
     DVLOG(1) << "[keeper] (re)connection ThreadConnection[" << th.threadID
-            << "]. for remoteID " << remoteID << ", DIR " << dirID
-            << ". dirRcQpn2app: " << exMeta.dirRcQpn2app[dirID][th.threadID]
-            << ", lid: " << exMeta.dirTh[dirID].lid
-            << ", gid: " << exMeta.dirTh[dirID].gid;
+             << "]. for remoteID " << remoteID << ", DIR " << dirID
+             << ". dirRcQpn2app: " << exMeta.dirRcQpn2app[dirID][th.threadID]
+             << ", lid: " << exMeta.dirTh[dirID].lid
+             << ", gid: " << exMeta.dirTh[dirID].gid;
 }
 
 void DSMKeeper::updateRemoteConnectionForDir(RemoteConnection &remote,
@@ -293,7 +289,6 @@ void DSMKeeper::updateRemoteConnectionForDir(RemoteConnection &remote,
     }
 }
 
-
 void DSMKeeper::connectDir(DirectoryConnection &dir,
                            int remoteID,
                            int appID,
@@ -309,10 +304,10 @@ void DSMKeeper::connectDir(DirectoryConnection &dir,
                         &dir.ctx));
     CHECK(modifyQPtoRTS(qp));
     DVLOG(1) << "[keeper] (re)connection DirectoryConnection[" << dir.dirID
-            << "]. for remoteID " << remoteID << ", Th " << appID
-            << ". dirRcQpn2app: " << exMeta.appRcQpn2dir[appID][dir.dirID]
-            << ", lid: " << exMeta.appTh[appID].lid
-            << ", gid: " << (void *) exMeta.appTh[appID].gid;
+             << "]. for remoteID " << remoteID << ", Th " << appID
+             << ". dirRcQpn2app: " << exMeta.appRcQpn2dir[appID][dir.dirID]
+             << ", lid: " << exMeta.appTh[appID].lid
+             << ", gid: " << (void *) exMeta.appTh[appID].gid;
 }
 
 void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
@@ -344,7 +339,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
     }
 
     // for reliable msg
-    connectReliableMsg(reliableCon, remoteID, exMeta) ;
+    connectReliableMsg(reliableCon, remoteID, exMeta);
 
     // init remote connections
     auto &remote = remoteCon[remoteID];
