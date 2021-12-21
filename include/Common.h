@@ -53,6 +53,8 @@
 #define NR_DIRECTORY 2
 
 #define DIR_MESSAGE_NR 128
+
+#define RMSG_MULTIPLEXING 12
 // }
 
 /**
@@ -191,26 +193,41 @@ struct Data
 
 struct WRID
 {
-    WRID(uint32_t p, uint32_t i) : prefix(p), id(i)
+    WRID(uint16_t p, uint16_t a16, uint16_t b16, uint16_t c16)
+        : prefix(p), u16_a(a16), u16_b(b16), u16_c(c16)
     {
     }
     WRID(uint64_t v) : val(v)
+    {
+    }
+    WRID(uint16_t p, uint32_t id) : prefix(p), u16_a(0), id(id)
     {
     }
     union
     {
         struct
         {
-            uint32_t prefix;
-            uint32_t id;
-        };
+            uint16_t prefix;
+            uint16_t u16_a;
+            union
+            {
+                struct
+                {
+                    uint16_t u16_b;
+                    uint16_t u16_c;
+                } __attribute__((packed));
+                uint32_t id;
+            };
+        } __attribute__((packed));
         uint64_t val;
     };
 } __attribute__((packed));
 
 inline std::ostream &operator<<(std::ostream &os, WRID wrid)
 {
-    os << "{WRID prefix: " << wrid.prefix << ", id: " << wrid.id << "}";
+    os << "{WRID prefix: " << wrid.prefix << ", a: " << wrid.u16_a
+       << ", b: " << wrid.u16_b << ", c: " << wrid.u16_c << "/ id: " << wrid.id
+       << "/ val: " << wrid.val << "}";
     return os;
 }
 

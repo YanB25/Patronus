@@ -28,7 +28,7 @@ void client_pingpong_correct(std::shared_ptr<DSM> dsm)
     {
         uint64_t magic = rand();
         *(uint64_t *) buf = magic;
-        dsm->reliable_send(buf, sizeof(uint64_t), kServerNodeId);
+        dsm->reliable_send(buf, sizeof(uint64_t), kServerNodeId, 0);
 
         dsm->reliable_recv(recv_buf);
         uint64_t get = *(uint64_t *) recv_buf;
@@ -51,7 +51,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
             for (size_t t = 0; t < kBurnCnt; ++t)
             {
                 // dsm->reliable_send(buf, 32, kServerNodeId);
-                dsm->reliable_send(buf, kMsgSize, kServerNodeId);
+                dsm->reliable_send(buf, kMsgSize, kServerNodeId, 0);
             }
         });
     }
@@ -94,7 +94,7 @@ void server_pingpong_correct(std::shared_ptr<DSM> dsm)
         uint64_t get = *(uint64_t *) recv_buf;
 
         *(uint64_t *) buf = get;
-        dsm->reliable_send(buf, sizeof(uint64_t), kClientNodeId);
+        dsm->reliable_send(buf, sizeof(uint64_t), kClientNodeId, 0);
     }
 }
 
@@ -103,7 +103,7 @@ void client_wait(std::shared_ptr<DSM> dsm)
     // sync
     auto* buf = dsm->get_rdma_buffer();
     dsm->reliable_recv(nullptr);
-    dsm->reliable_send(buf, 0, kServerNodeId);
+    dsm->reliable_send(buf, 0, kServerNodeId, 0);
 
 }
 
@@ -120,7 +120,7 @@ void client(std::shared_ptr<DSM> dsm)
 void server_wait(std::shared_ptr<DSM> dsm)
 {
     auto* buffer = dsm->get_rdma_buffer();
-    dsm->reliable_send(buffer, 0, kClientNodeId);
+    dsm->reliable_send(buffer, 0, kClientNodeId, 0);
     dsm->reliable_recv(nullptr);
 }
 

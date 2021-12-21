@@ -372,9 +372,9 @@ public:
         cur_dir_ = dir;
     }
 
-    void reliable_send(const char *buf, size_t size, uint16_t node_id)
+    void reliable_send(const char *buf, size_t size, uint16_t node_id, size_t targetID)
     {
-        reliable_msg_->send(buf, size, node_id);
+        reliable_msg_->send(buf, size, node_id, targetID);
     }
     void reliable_recv(char* ibuf)
     {

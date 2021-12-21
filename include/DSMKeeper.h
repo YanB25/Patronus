@@ -30,7 +30,7 @@ struct ExReliable
     uint16_t lid;
     uint32_t rkey;
     uint8_t gid[16];
-    uint32_t qpn;
+    uint32_t qpn[RMSG_MULTIPLEXING];
 } __attribute__((packed));
 /**
  * @brief an exchange data used in building connection for each `pair` of
@@ -74,8 +74,7 @@ struct ExchangeMeta
      */
     uint32_t dirRcQpn2app[NR_DIRECTORY][MAX_APP_THREAD];
 
-    ExReliable rsend;
-    ExReliable rrecv;
+    ExReliable ex_reliable;
 
 } __attribute__((packed));
 
@@ -106,16 +105,13 @@ public:
                     int remoteID,
                     int appID,
                     const ExchangeMeta &exMeta);
-    void connectRecv(ReliableRecvMessageConnection &recv,
-                     int remoteID,
-                     const ExchangeMeta &);
     void connectThread(ThreadConnection &,
                        int remoteID,
                        int dirID,
                        const ExchangeMeta &exMeta);
-    void connectSend(ReliableSendMessageConnection &,
+    void connectReliableMsg(ReliableConnection &cond,
                      int remoteID,
-                     const ExchangeMeta &exMeta);
+                     const ExchangeMeta &);
     void updateRemoteConnectionForDir(RemoteConnection &,
                                       const ExchangeMeta &exMeta,
                                       size_t dirID);

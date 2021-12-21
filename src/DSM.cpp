@@ -127,7 +127,7 @@ bool DSM::reinitializeDir(size_t dirID)
     for (size_t remoteID = 0; remoteID < getClusterSize(); ++remoteID)
     {
         auto ex = keeper->updateDirMetadata(*dirCon[dirID], remoteID);
-        VLOG(1) << "[DSM] update dir meta for " << remoteID
+        DVLOG(1) << "[DSM] update dir meta for " << remoteID
                 << ", hash: " << std::hex
                 << djb2_digest((char *) &ex, sizeof(ex))
                 << ", rkey: " << ex.dirTh[dirID].rKey;
@@ -162,7 +162,7 @@ bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
         }
         const auto &cur_meta = getExchangeMetaBootstrap(node_id);
 
-        VLOG(1) << "[DSM] reconnecting ThreadConnection[" << i
+        DVLOG(1) << "[DSM] reconnecting ThreadConnection[" << i
                 << "]. node_id: " << node_id << ", dirID: " << dirID
                 << ", meta digest: " << std::hex
                 << djb2_digest((char *) &cur_meta, sizeof(cur_meta))
