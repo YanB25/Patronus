@@ -25,14 +25,21 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     send_mr_ = CHECK_NOTNULL(createMemoryRegion((uint64_t) mm, mm_size, &ctx_));
     send_lkey_ = send_mr_->lkey;
 
+    size_t max_cqe_for_receiver = machine_nr * RMSG_MULTIPLEXING *
+                                  kPostRecvBufferBatch *
+                                  kPostRecvBufferAdvanceBatch;
     recv_cq_ = CHECK_NOTNULL(
-        ibv_create_cq(ctx_.ctx, RAW_RECV_CQ_COUNT, nullptr, nullptr, 0));
+        ibv_create_cq(ctx_.ctx, max_cqe_for_receiver, nullptr, nullptr, 0));
     // at maximum, the sender will have (RMSG_MULTIPLEXING) * kSenderBatchSize
     // pending cqes
-    size_t max_cqe_for_sender = RMSG_MULTIPLEXING * kSenderBatchSize * 2;
+    size_t max_cqe_for_sender = machine_nr * MAX_APP_THREAD;
     send_cq_ = CHECK_NOTNULL(
         ibv_create_cq(ctx_.ctx, max_cqe_for_sender, nullptr, nullptr, 0));
 
+    // sender size requirement
+    size_t qp_max_depth_send = kSenderBatchSize * MAX_APP_THREAD;
+    // receiver size requirement
+    size_t qp_max_depth_recv = kPostRecvBufferAdvanceBatch * kPostRecvBufferBatch;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
         QPs_.emplace_back(machine_nr);
@@ -43,7 +50,8 @@ ReliableConnection::ReliableConnection(uint64_t mm,
                                   send_cq_,
                                   recv_cq_,
                                   &ctx_,
-                                  128,
+                                  qp_max_depth_send,
+                                  qp_max_depth_recv,
                                   32));
         }
     }

@@ -6,12 +6,13 @@
 
 class ReliableRecvMessageConnection
 {
-    // post 2 batch in advance.
-    const static int kPostRecvBufferAdvanceBatch = 2;
-    const static int kPostRecvBufferBatch = 64;
-
     constexpr static int kMessageSize = ReliableConnection::kMessageSize;
     constexpr static size_t kRecvBuffer = ReliableConnection::kRecvBuffer;
+
+    const static size_t kPostRecvBufferAdvanceBatch =
+        ReliableConnection::kPostRecvBufferAdvanceBatch;
+    const static size_t kPostRecvBufferBatch =
+        ReliableConnection::kPostRecvBufferBatch;
 
 public:
     ReliableRecvMessageConnection(std::vector<std::vector<ibv_qp *>> &QPs,
@@ -19,19 +20,19 @@ public:
                                   void *msg_pool,
                                   uint32_t lkey);
     ~ReliableRecvMessageConnection();
-    void recv(char *ibuf, size_t msg_limit=1);
+    void recv(char *ibuf, size_t msg_limit = 1);
     /**
      * @brief try to recv any buffered messages
-     * 
+     *
      * @param ibuf The buffered to store received messages
      * @param msg_limit The number of messages at most the ibuf can store
      * @return size_t The number of messages actually received.
      */
-    size_t try_recv(char* ibuf, size_t msg_limit=1);
+    size_t try_recv(char *ibuf, size_t msg_limit = 1);
     void init();
 
 private:
-    void handle_wc(char* ibuf, const ibv_wc& wc);
+    void handle_wc(char *ibuf, const ibv_wc &wc);
     void fills(ibv_sge &sge,
                ibv_recv_wr &wr,
                size_t threadID,
@@ -58,7 +59,8 @@ private:
     ibv_recv_wr recvs[RMSG_MULTIPLEXING][MAX_MACHINE][kRecvBuffer];
     ibv_sge recv_sgl[RMSG_MULTIPLEXING][MAX_MACHINE][kRecvBuffer];
 
-    using Aligned = std::aligned_storage<sizeof(std::atomic<size_t>), 128>::type;
+    using Aligned =
+        std::aligned_storage<sizeof(std::atomic<size_t>), 128>::type;
     Aligned msg_recv_index_layout_[RMSG_MULTIPLEXING][MAX_MACHINE] = {};
     /**
      * @brief Array[RMSG_MULTIPLEXING][MAX_MACHINE]

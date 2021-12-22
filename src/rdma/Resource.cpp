@@ -87,7 +87,6 @@ bool createContext(RdmaContext *context,
         }
     }
 
-
     // allocate Protection Domain
     // info("Allocate Protection Domain");
     pd = ibv_alloc_pd(ctx);
@@ -106,7 +105,7 @@ bool createContext(RdmaContext *context,
     if (ibv_query_gid(ctx, port, gidIndex, &context->gid))
     {
         PLOG(ERROR) << "could not get gid for port: " << (int) port
-                   << " gidIndex: " << gidIndex;
+                    << " gidIndex: " << gidIndex;
         goto CreateResourcesExit;
     }
 
@@ -275,7 +274,8 @@ bool createQueuePair(ibv_qp **qp,
                      ibv_cq *send_cq,
                      ibv_cq *recv_cq,
                      RdmaContext *context,
-                     uint32_t qpsMaxDepth,
+                     size_t max_send_wr,
+                     size_t max_recv_wr,
                      uint32_t maxInlineData)
 {
     struct ibv_exp_qp_init_attr attr;
@@ -299,8 +299,8 @@ bool createQueuePair(ibv_qp **qp,
         attr.comp_mask = IBV_EXP_QP_INIT_ATTR_PD;
     }
 
-    attr.cap.max_send_wr = qpsMaxDepth;
-    attr.cap.max_recv_wr = qpsMaxDepth;
+    attr.cap.max_send_wr = max_send_wr;
+    attr.cap.max_recv_wr = max_recv_wr;
     attr.cap.max_send_sge = 1;
     attr.cap.max_recv_sge = 1;
     attr.cap.max_inline_data = maxInlineData;
@@ -315,6 +315,24 @@ bool createQueuePair(ibv_qp **qp,
     // info("Create Queue Pair with Num = %d", (*qp)->qp_num);
 
     return true;
+}
+
+bool createQueuePair(ibv_qp **qp,
+                     ibv_qp_type mode,
+                     ibv_cq *send_cq,
+                     ibv_cq *recv_cq,
+                     RdmaContext *context,
+                     uint32_t qpsMaxDepth,
+                     uint32_t maxInlineData)
+{
+    return createQueuePair(qp,
+                           mode,
+                           send_cq,
+                           recv_cq,
+                           context,
+                           qpsMaxDepth,
+                           qpsMaxDepth,
+                           maxInlineData);
 }
 
 bool createQueuePair(ibv_qp **qp,

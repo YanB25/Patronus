@@ -44,7 +44,7 @@ ThreadConnection::ThreadConnection(
         QPs.emplace_back(machineNR);
         for (size_t k = 0; k < machineNR; ++k)
         {
-            createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx);
+            createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx, 128, 0);
         }
     }
     timer.pin("CreateQPs");

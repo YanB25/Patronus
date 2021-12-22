@@ -17,8 +17,16 @@ class ReliableConnection
 {
 public:
     const static size_t kRecvBuffer = 128;
+    // post 2 batch in advance. must be 2.
+    constexpr static size_t kPostRecvBufferAdvanceBatch = 2;
+    constexpr static size_t kPostRecvBufferBatch =
+        kRecvBuffer / kPostRecvBufferAdvanceBatch;
+    // better be cahceline alinged. e.g. multiple of 64
     constexpr static size_t kMessageSize = 64;
-    constexpr static size_t kSenderBatchSize = 8;
+    /**
+     * @brief how much send # before a signal
+     */
+    constexpr static size_t kSenderBatchSize = 16;
 
     /**
      * @brief Construct a new Reliable Connection object
@@ -28,12 +36,16 @@ public:
      */
     ReliableConnection(uint64_t mm, size_t mmSize, size_t machine_nr);
     ~ReliableConnection();
-    void send(size_t threadID, const char *buf, size_t size, uint16_t node_id, size_t mid);
-    void recv(char *ibuf, size_t limit=1);
-    size_t try_recv(char *ibuf, size_t limit=1);
+    void send(size_t threadID,
+              const char *buf,
+              size_t size,
+              uint16_t node_id,
+              size_t mid);
+    void recv(char *ibuf, size_t limit = 1);
+    size_t try_recv(char *ibuf, size_t limit = 1);
 
 private:
-    RdmaContext& context()
+    RdmaContext &context()
     {
         return ctx_;
     }
@@ -41,7 +53,7 @@ private:
     {
         return recv_mr_->rkey;
     }
-    std::vector<std::vector<ibv_qp*>>& QPs()
+    std::vector<std::vector<ibv_qp *>> &QPs()
     {
         return QPs_;
     }
