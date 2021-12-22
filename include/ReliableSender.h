@@ -5,14 +5,14 @@
 
 class ReliableSendMessageConnection
 {
-    constexpr static size_t kMessageSize = 32;
-    const static int kSendBatch = 16;
+    constexpr static size_t kMessageSize = ReliableConnection::kMessageSize;
+    const static int kSendBatch = ReliableConnection::kSenderBatchSize;
 
 public:
     ReliableSendMessageConnection(std::vector<std::vector<ibv_qp *>> &QPs,
                                   ibv_cq *cq, uint32_t lkey);
     ~ReliableSendMessageConnection();
-    void send(size_t node_id, const char *buf, size_t size, size_t targetID);
+    void send(size_t threadID, size_t node_id, const char *buf, size_t size, size_t targetID);
 
 private:
     void poll_cq();
@@ -24,10 +24,6 @@ private:
     ibv_cq *send_cq_{nullptr};
 
     using Aligned = std::aligned_storage<sizeof(std::atomic<size_t>), 128>::type;
-    Aligned msg_send_indexes_inner_[RMSG_MULTIPLEXING];
-    std::atomic<size_t>* msg_send_indexes_{nullptr};
-
-    std::atomic<bool> second_{false};
 
     uint32_t lkey_{0};
 };

@@ -374,15 +374,15 @@ public:
 
     void reliable_send(const char *buf, size_t size, uint16_t node_id, size_t targetID)
     {
-        reliable_msg_->send(buf, size, node_id, targetID);
+        reliable_msg_->send(thread_id, buf, size, node_id, targetID);
     }
-    void reliable_recv(char* ibuf)
+    void reliable_recv(char* ibuf, size_t limit=1)
     {
-        reliable_msg_->recv(ibuf);
+        reliable_msg_->recv(ibuf, limit);
     }
-    bool reliable_try_recv(char* ibuf)
+    size_t reliable_try_recv(char* ibuf, size_t limit=1)
     {
-        return reliable_msg_->try_recv(ibuf);
+        return reliable_msg_->try_recv(ibuf, limit);
     }
 
 private:

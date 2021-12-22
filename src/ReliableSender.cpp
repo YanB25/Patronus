@@ -4,48 +4,54 @@ ReliableSendMessageConnection::ReliableSendMessageConnection(
     std::vector<std::vector<ibv_qp *>> &QPs, ibv_cq *cq, uint32_t lkey)
     : QPs_(QPs), send_cq_(cq), lkey_(lkey)
 {
-    msg_send_indexes_ = (std::atomic<size_t> *) &msg_send_indexes_inner_;
 }
 
 ReliableSendMessageConnection::~ReliableSendMessageConnection()
 {
 }
 
-void ReliableSendMessageConnection::send(size_t node_id,
+void ReliableSendMessageConnection::send(size_t threadID,
+                                         size_t node_id,
                                          const char *buf,
                                          size_t size,
                                          size_t targetID)
 {
     DCHECK_LT(targetID, RMSG_MULTIPLEXING);
+    DCHECK_LT(threadID, MAX_APP_THREAD);
     CHECK_LE(size, kMessageSize) << "[rmsg] message size exceed limits";
 
-    auto nr =
-        msg_send_indexes_[targetID].fetch_add(1, std::memory_order_relaxed) + 1;
+    static thread_local bool thread_second_{false};
+    static thread_local size_t msg_send_index_{0};
+
+    msg_send_index_++;
     bool signal = false;
 
-    if (nr % kSendBatch == 0)
+    if (msg_send_index_ % kSendBatch == 0)
     {
-        if (second_)
+        if (thread_second_)
         {
-            DVLOG(3) << "[rmsg] One poll";
+            DVLOG(3) << "[rmsg] Thread " << threadID << " triggers one poll"
+                     << ", current targetID " << targetID;
             poll_cq();
         }
         signal = true;
-        second_ = true;
+        thread_second_ = true;
     }
     bool inlined = (size <= 32);
 
-    DVLOG(3) << "[rmsg] sending to QP[" << targetID << "][" << node_id
-            << "] with size " << size << ", inlined: " << inlined << ", signal: " << signal;
+    DVLOG(3) << "[rmsg] Thread " << threadID << " sending to QP[" << targetID
+             << "][" << node_id << "] with size " << size
+             << ", inlined: " << inlined << ", signal: " << signal;
 
-    CHECK(rdmaSend(QPs_[targetID][node_id],
-                   (uint64_t) buf,
-                   size,
-                   lkey_,
-                   signal,
-                   inlined,
-                   WRID(WRID_PREFIX_RELIABLE_SEND, 0).val,
-                   size));
+    CHECK(
+        rdmaSend(QPs_[targetID][node_id],
+                 (uint64_t) buf,
+                 size,
+                 lkey_,
+                 signal,
+                 inlined,
+                 WRID(WRID_PREFIX_RELIABLE_SEND, threadID, targetID, size).val,
+                 size));
 }
 
 void ReliableSendMessageConnection::poll_cq()

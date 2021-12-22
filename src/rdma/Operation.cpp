@@ -28,7 +28,7 @@ int pollWithCQ(ibv_cq *cq,
             {
                 LOG(ERROR) << "[wc] Failed status "
                            << ibv_wc_status_str(wc->status) << " ("
-                           << wc->status << ") for wr_id " << wc->wr_id
+                           << wc->status << ") for wr_id " << WRID(wc->wr_id)
                            << " at QP: " << wc->qp_num
                            << ". vendor err: " << wc->vendor_err;
                 err_handler(wc);
@@ -226,7 +226,8 @@ bool rdmaSend(ibv_qp *qp,
     wr.wr_id = wr_id;
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        LOG(ERROR) << "Send with RDMA_SEND failed.";
+        PLOG(ERROR) << "Send with RDMA_SEND failed. wrid: " << WRID(wr.wr_id)
+                    << ", QP: " << (void *) qp;
         return false;
     }
     return true;

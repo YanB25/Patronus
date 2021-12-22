@@ -20,6 +20,8 @@ constexpr static size_t kMsgSize = 16;
 
 constexpr static size_t kPingpoingCnt = 100 * define::K;
 constexpr static size_t kBurnCnt = 100 * define::M;
+constexpr static size_t kThreadNr = RMSG_MULTIPLEXING;
+// constexpr static size_t kThreadNr = 1;
 void client_pingpong_correct(std::shared_ptr<DSM> dsm)
 {
     auto *buf = dsm->get_rdma_buffer();
@@ -47,11 +49,14 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
         threads.emplace_back([dsm, i]() {
             bindCore(i + 1);
             dsm->registerThread();
-            auto* buf = dsm->get_rdma_buffer(); 
+            auto tid = dsm->get_thread_id();
+            auto mid = tid % RMSG_MULTIPLEXING;
+
+            auto* buf = dsm->get_rdma_buffer();
+            
             for (size_t t = 0; t < kBurnCnt; ++t)
             {
-                // dsm->reliable_send(buf, 32, kServerNodeId);
-                dsm->reliable_send(buf, kMsgSize, kServerNodeId, 0);
+                dsm->reliable_send(buf, 8, kServerNodeId, mid);
             }
         });
     }
@@ -67,15 +72,22 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
 void server_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
 {
     std::vector<std::thread> threads;
+    std::atomic<size_t> got{0};
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back([dsm, i]() {
+        threads.emplace_back([dsm, i, &got, thread_nr]() {
             bindCore(i + 1);
             dsm->registerThread();
-            // char buf[1024];
-            for (size_t t = 0; t < kBurnCnt; ++t)
+            auto tid = dsm->get_thread_id();
+            // auto mid = tid % RMSG_PUBLIC_MULTIPLEXING;
+
+            size_t expect_nr = kBurnCnt * thread_nr;
+            char buffer[64 * 128];
+            while (got.load() < expect_nr)
             {
-                dsm->reliable_recv(nullptr);
+                auto get = dsm->reliable_try_recv(buffer, 64);
+                got.fetch_add(get);
+                VLOG(3) << "[bench] get " << get << " for tid " << tid;
             }
         });
     }
@@ -111,7 +123,7 @@ void client(std::shared_ptr<DSM> dsm)
 {
     // client_pingpong_correct(dsm);
     LOG(INFO) << "Begin burn";
-    client_burn(dsm, 1);
+    client_burn(dsm, kThreadNr);
 
     client_wait(dsm);
     LOG(INFO) << "Exiting!!!";
@@ -129,7 +141,7 @@ void server(std::shared_ptr<DSM> dsm)
     // server_pingpong_correct(dsm);
 
     LOG(INFO) << "Begin burn";
-    server_burn(dsm, 1);
+    server_burn(dsm, kThreadNr);
 
     server_wait(dsm);
     LOG(INFO) << "Exiting!!!";

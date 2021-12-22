@@ -18,6 +18,7 @@ class ReliableConnection
 public:
     const static size_t kRecvBuffer = 128;
     constexpr static size_t kMessageSize = 64;
+    constexpr static size_t kSenderBatchSize = 8;
 
     /**
      * @brief Construct a new Reliable Connection object
@@ -27,9 +28,9 @@ public:
      */
     ReliableConnection(uint64_t mm, size_t mmSize, size_t machine_nr);
     ~ReliableConnection();
-    void send(const char *buf, size_t size, uint16_t node_id, size_t mid);
-    void recv(char *ibuf);
-    bool try_recv(char *ibuf);
+    void send(size_t threadID, const char *buf, size_t size, uint16_t node_id, size_t mid);
+    void recv(char *ibuf, size_t limit=1);
+    size_t try_recv(char *ibuf, size_t limit=1);
 
 private:
     RdmaContext& context()

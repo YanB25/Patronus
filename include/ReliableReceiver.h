@@ -19,11 +19,19 @@ public:
                                   void *msg_pool,
                                   uint32_t lkey);
     ~ReliableRecvMessageConnection();
-    void recv(char *ibuf);
-    bool try_recv(char *ibuf);
+    void recv(char *ibuf, size_t msg_limit=1);
+    /**
+     * @brief try to recv any buffered messages
+     * 
+     * @param ibuf The buffered to store received messages
+     * @param msg_limit The number of messages at most the ibuf can store
+     * @return size_t The number of messages actually received.
+     */
+    size_t try_recv(char* ibuf, size_t msg_limit=1);
     void init();
 
 private:
+    void handle_wc(char* ibuf, const ibv_wc& wc);
     void fills(ibv_sge &sge,
                ibv_recv_wr &wr,
                size_t threadID,

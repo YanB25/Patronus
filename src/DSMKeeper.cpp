@@ -197,7 +197,7 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
     // for reliable message
     if constexpr (config::kEnableReliableMessage)
     {
-        for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
+        for (size_t i = 0; i < reliableCon.QPs().size(); ++i)
         {
             exchangeMeta.ex_reliable.qpn[i] =
                 reliableCon.QPs()[i][remoteID]->qp_num;
@@ -223,7 +223,7 @@ void DSMKeeper::connectReliableMsg(ReliableConnection &cond,
     {
         return;
     }
-    for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
+    for (size_t i = 0; i < cond.QPs().size(); ++i)
     {
         auto &qp = cond.QPs()[i][remoteID];
         auto &ctx = cond.context();

@@ -20,7 +20,7 @@ constexpr uint32_t kMachineNr = 2;
 // constexpr static size_t kMsgSize = 16;
 
 constexpr static size_t kPingpoingCnt = 100 * define::K;
-// constexpr static size_t kBurnCnt = 100 * define::M;
+constexpr static size_t kBurnCnt = 4 * define::M;
 
 constexpr static size_t kBenchMessageBufSize = 16;
 struct BenchMessage
@@ -45,7 +45,6 @@ void check_valid(const BenchMessage &msg)
         << "Digest mismatch! Expect " << std::hex << calculated_dg << ", got "
         << msg.digest;
 }
-
 
 template <class T, class... Args>
 inline T &TLS(Args &&...args)
@@ -146,32 +145,53 @@ void server_pingpong_correct(std::shared_ptr<DSM> dsm, size_t mid)
     }
 }
 
-
-void server_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
+void server_multithread(std::shared_ptr<DSM> dsm,
+                        size_t total_nr,
+                        size_t thread_nr)
 {
     std::vector<std::thread> threads;
+    std::atomic<size_t> finished_nr{0};
+
+    std::array<std::atomic<int64_t>, RMSG_MULTIPLEXING> recv_mid_msgs{};
+
     for (size_t i = 0; i < thread_nr; ++i)
     {
         threads.emplace_back(
-            [i, dsm]()
+            [i, dsm, &finished_nr, total_nr, &recv_mid_msgs]()
             {
                 bindCore(1 + i);
                 dsm->registerThread();
+                auto tid = dsm->get_thread_id();
 
-                char buffer[1024];
+                char buffer[102400];
                 auto *rdma_buf = dsm->get_rdma_buffer();
-                for (size_t time = 0; time < kPingpoingCnt; ++time)
+                while (finished_nr < total_nr)
                 {
-                    dsm->reliable_recv(buffer);
-                    auto *msg = (BenchMessage *) buffer;
+                    size_t get = dsm->reliable_try_recv(buffer, 64);
+                    finished_nr.fetch_add(get);
+                    for (size_t i = 0; i < get; ++i)
+                    {
+                        auto *recv_msg =
+                            (BenchMessage *) ((char *) buffer +
+                                              ReliableConnection::kMessageSize *
+                                                  i);
+                        check_valid(*recv_msg);
 
-                    check_valid(*msg);
-
-                    memcpy(rdma_buf, buffer, sizeof(BenchMessage));
-                    dsm->reliable_send(rdma_buf,
-                                       sizeof(BenchMessage),
-                                       msg->from_node,
-                                       msg->from_mid);
+                        auto now =
+                            recv_mid_msgs[recv_msg->from_mid].fetch_add(1) + 1;
+                        BenchMessage *send_msg = (BenchMessage *) rdma_buf;
+                        memcpy(send_msg, recv_msg, sizeof(BenchMessage));
+                        if (now % 64 == 0)
+                        {
+                            recv_mid_msgs[recv_msg->from_mid].fetch_sub(64);
+                            VLOG(3) << "[wait] server tid " << tid
+                                    << " let go mid " << recv_msg->from_mid;
+                            dsm->reliable_send((char *) send_msg,
+                                               sizeof(BenchMessage),
+                                               kClientNodeId,
+                                               0);
+                        }
+                    }
                 }
             });
     }
@@ -181,26 +201,32 @@ void server_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
     }
 }
 
+constexpr static size_t kMidOffset = 0;
+
 void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
 {
     LOG(WARNING) << "[bench] testing multithread for thread = " << thread_nr;
     std::vector<std::thread> threads;
+
+    std::array<std::atomic<bool>, RMSG_MULTIPLEXING> can_continue_{};
     for (size_t i = 0; i < thread_nr; ++i)
     {
         threads.emplace_back(
-            [i, dsm]()
+            [i, dsm, &can_continue_]()
             {
                 bindCore(1 + i);
                 dsm->registerThread();
 
                 auto tid = dsm->get_thread_id();
-                auto from_mid = tid % RMSG_MULTIPLEXING;
+                auto from_mid = (tid + kMidOffset) % RMSG_MULTIPLEXING;
+
+                size_t sent = 0;
 
                 char buffer[1024];
 
                 auto *rdma_buf = dsm->get_rdma_buffer();
                 BenchMessage *msg = (BenchMessage *) rdma_buf;
-                for (size_t time = 0; time < kPingpoingCnt; ++time)
+                for (size_t time = 0; time < kBurnCnt; ++time)
                 {
                     msg->size = rand_int(0, kBenchMessageBufSize);
                     for (size_t s = 0; s < msg->size; ++s)
@@ -216,10 +242,31 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
                                        sizeof(BenchMessage),
                                        kServerNodeId,
                                        from_mid);
+                    sent++;
+                    if (sent % 64 == 0)
+                    {
+                        DVLOG(3) << "[wait] tid " << tid
+                                << " sent 64. wait for ack. ";
+                        dsm->reliable_recv(buffer);
+                        auto *recv_msg = (BenchMessage *) buffer;
+                        DVLOG(3) << "[wait] tid " << tid
+                                << " recv continue msg for mid "
+                                << recv_msg->from_mid;
+                        can_continue_[recv_msg->from_mid] = true;
 
-                    dsm->reliable_recv(buffer);
-                    auto *recv_msg = (BenchMessage *) buffer;
-                    check_valid(*recv_msg);
+                        while (!can_continue_[from_mid].load())
+                        {
+                        }
+                        DVLOG(3) << "[wait] tid " << tid << " from mid "
+                                << from_mid << " can continue.";
+                        can_continue_[from_mid] = false;
+                    }
+
+                    if (time % (100 * define::K) == 0)
+                    {
+                        LOG(WARNING) << "[bench] client tid " << tid
+                                     << " finish 100K. time: " << time;
+                    }
                 }
             });
     }
@@ -237,8 +284,11 @@ void client_wait(std::shared_ptr<DSM> dsm)
     dsm->reliable_send(buf, 0, kServerNodeId, 0);
 }
 
-constexpr static size_t kMultiThreadNr = 16;
-static_assert(kMultiThreadNr < MAX_APP_THREAD);
+// constexpr static size_t kMultiThreadNr = 16;
+constexpr static size_t kClientThreadNr = RMSG_MULTIPLEXING;
+constexpr static size_t kServerThreadNr = RMSG_MULTIPLEXING;
+static_assert(kClientThreadNr < MAX_APP_THREAD);
+static_assert(kServerThreadNr < MAX_APP_THREAD);
 
 void client(std::shared_ptr<DSM> dsm)
 {
@@ -251,7 +301,7 @@ void client(std::shared_ptr<DSM> dsm)
         client_varsize_correct(dsm, i);
     }
 
-    client_multithread(dsm, kMultiThreadNr);
+    client_multithread(dsm, kClientThreadNr);
 
     client_wait(dsm);
     LOG(INFO) << "ALL TEST PASSED";
@@ -276,7 +326,8 @@ void server(std::shared_ptr<DSM> dsm)
         server_varsize_correct(dsm, i);
     }
 
-    server_multithread(dsm, kMultiThreadNr);
+    size_t expect_work = kClientThreadNr * kBurnCnt;
+    server_multithread(dsm, expect_work, kServerThreadNr);
 
     server_wait(dsm);
     LOG(INFO) << "ALL TEST PASSED";
