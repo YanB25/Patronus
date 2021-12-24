@@ -6,6 +6,7 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "util/monitor.h"
+#include "PerThread.h"
 
 // Two nodes
 // one node issues cas operations
@@ -21,7 +22,7 @@ constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kPingpoingCnt = 100 * define::K;
 constexpr static size_t kBurnCnt = 20 * define::M;
-constexpr static size_t kThreadNr = RMSG_MULTIPLEXING;
+constexpr static size_t kThreadNr = RMSG_MULTIPLEXING - 1;
 // constexpr static size_t kThreadNr = 1;
 // constexpr static size_t kBenchMsgSize = 16;
 
@@ -54,7 +55,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
     std::vector<std::thread> threads;
 
     // @kTokenNr token, each of which get ReliableConnection::kRecvBuffer / @kTokenNr.
-    std::array<std::atomic<int64_t>, RMSG_MULTIPLEXING> continue_token;
+    Perthread<std::atomic<int64_t>> continue_token;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
         continue_token[i] = kTokenNr;
@@ -73,6 +74,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
                 auto mid = tid % RMSG_MULTIPLEXING;
+                CHECK_NE(mid, 0);
 
                 auto *buf = dsm->get_rdma_buffer();
                 auto *send_msg = (BenchMsg *) buf;
@@ -132,29 +134,35 @@ void server_burn(std::shared_ptr<DSM> dsm,
                  size_t thread_nr)
 {
     std::vector<std::thread> threads;
-    std::atomic<size_t> got{0};
-    // std::array<std::atomic<int64_t>, RMSG_MULTIPLEXING> recv_mid_msgs{};
+    Perthread<std::atomic<size_t>> gots;
 
-    std::array<std::atomic<int64_t>, RMSG_MULTIPLEXING> recv_mid_msgs;
+    Perthread<std::atomic<int64_t>> recv_mid_msgs;
+
+    std::atomic<bool> finished{false};
+
+    for (size_t i = 0; i < gots.size(); ++i)
+    {
+        CHECK_EQ(gots[i], 0);
+    }
 
     for (size_t i = 0; i < thread_nr; ++i)
     {
         threads.emplace_back(
-            [dsm, i, &got, total_msg_nr, &recv_mid_msgs]()
+            [dsm, i, &gots, &recv_mid_msgs, &finished]()
             {
                 bindCore(i + 1);
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
                 auto mid = tid % RMSG_MULTIPLEXING;
+                CHECK_NE(mid, 0);
 
                 char buffer[ReliableConnection::kMessageSize * 64];
                 auto *rdma_buf = dsm->get_rdma_buffer();
                 memset(rdma_buf, 0, sizeof(BenchMsg));
-                while (got.load() < total_msg_nr)
-                // while (true)
+                while (!finished.load(std::memory_order_relaxed))
                 {
                     auto get = dsm->reliable_try_recv(mid, buffer, 64);
-                    got.fetch_add(get);
+                    gots[mid].fetch_add(get, std::memory_order_relaxed);
                     for (size_t i = 0; i < get; ++i)
                     {
                         auto *recv_msg =
@@ -176,9 +184,23 @@ void server_burn(std::shared_ptr<DSM> dsm,
                                                mid);
                         }
                     }
-                    // VLOG(3) << "[bench] get " << get << " for tid " << tid;
                 }
             });
+    }
+    while (true)
+    {
+        sleep(1);
+        size_t sum = 0;
+        for (size_t i = 0; i < gots.size(); ++i)
+        {
+            sum += gots[i].load(std::memory_order_relaxed);
+        }
+        if (sum >= total_msg_nr)
+        {
+            LOG(WARNING) << "[bench] Okay, server receives all the messages. Exit...";
+            finished = true;
+            break;
+        }
     }
     for (auto &t : threads)
     {
@@ -210,6 +232,7 @@ void client_wait(std::shared_ptr<DSM> dsm)
 void client(std::shared_ptr<DSM> dsm)
 {
     // client_pingpong_correct(dsm);
+    sleep(2);
     LOG(INFO) << "Begin burn";
     client_burn(dsm, kThreadNr);
 
