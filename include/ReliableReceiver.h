@@ -16,11 +16,11 @@ class ReliableRecvMessageConnection
 
 public:
     ReliableRecvMessageConnection(std::vector<std::vector<ibv_qp *>> &QPs,
-                                  ibv_cq *cq,
+                                  std::array<ibv_cq *, RMSG_MULTIPLEXING>& cqs,
                                   void *msg_pool,
                                   uint32_t lkey);
     ~ReliableRecvMessageConnection();
-    void recv(char *ibuf, size_t msg_limit = 1);
+    void recv(size_t mid, char *ibuf, size_t msg_limit = 1);
     /**
      * @brief try to recv any buffered messages
      *
@@ -28,7 +28,7 @@ public:
      * @param msg_limit The number of messages at most the ibuf can store
      * @return size_t The number of messages actually received.
      */
-    size_t try_recv(char *ibuf, size_t msg_limit = 1);
+    size_t try_recv(size_t mid, char *ibuf, size_t msg_limit = 1);
     void init();
 
 private:
@@ -46,7 +46,7 @@ private:
      * @brief maintain QPs[RMSG_MULTIPLEXING][machineNR]
      */
     std::vector<std::vector<ibv_qp *>> &QPs_;
-    ibv_cq *recv_cq_{nullptr};
+    std::array<ibv_cq *, RMSG_MULTIPLEXING> recv_cqs_;
     void *msg_pool_{nullptr};
     uint32_t lkey_{0};
 

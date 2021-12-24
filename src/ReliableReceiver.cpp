@@ -2,10 +2,10 @@
 
 ReliableRecvMessageConnection::ReliableRecvMessageConnection(
     std::vector<std::vector<ibv_qp *>> &QPs,
-    ibv_cq *cq,
+    std::array<ibv_cq *, RMSG_MULTIPLEXING>& cqs,
     void *msg_pool,
     uint32_t lkey)
-    : QPs_(QPs), recv_cq_(cq), msg_pool_(msg_pool), lkey_(lkey)
+    : QPs_(QPs), recv_cqs_(cqs), msg_pool_(msg_pool), lkey_(lkey)
 {
     memset(recvs, 0, sizeof(recvs));
     memset(recv_sgl, 0, sizeof(recv_sgl));
@@ -110,7 +110,7 @@ void ReliableRecvMessageConnection::init()
     inited_ = true;
 }
 
-size_t ReliableRecvMessageConnection::try_recv(char *ibuf, size_t msg_limit)
+size_t ReliableRecvMessageConnection::try_recv(size_t mid, char *ibuf, size_t msg_limit)
 {
     DCHECK(inited_);
     constexpr static size_t kMaxPollNr = 64;
@@ -118,7 +118,7 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf, size_t msg_limit)
 
     static thread_local ibv_wc wc[kMaxPollNr];
 
-    size_t actually_polled = ibv_poll_cq(recv_cq_, msg_limit, wc);
+    size_t actually_polled = ibv_poll_cq(recv_cqs_[mid], msg_limit, wc);
     if (actually_polled < 0)
     {
         PLOG(ERROR) << "failed to ibv_poll_cq";
@@ -176,7 +176,7 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
         size_t post_buf_idx =
             (cur_idx + 1 % kRecvBuffer) +
             (kPostRecvBufferAdvanceBatch - 1) * kPostRecvBufferBatch;
-        struct ibv_recv_wr *bad;
+        ibv_recv_wr *bad;
         DVLOG(3) << "[rmsg] Posting another " << kPostRecvBufferBatch
                  << " recvs to node " << node_id << ", mid " << mid
                  << ". cur_idx " << cur_idx << " i.e. recvs[" << mid << "]["
@@ -190,12 +190,12 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
     }
 }
 
-void ReliableRecvMessageConnection::recv(char *ibuf, size_t msg_limit)
+void ReliableRecvMessageConnection::recv(size_t mid, char *ibuf, size_t msg_limit)
 {
     size_t remain = msg_limit;
     while (remain > 0)
     {
-        auto actual = try_recv(ibuf, remain);
+        auto actual = try_recv(mid, ibuf, remain);
         DCHECK_LE(actual, remain);
         remain -= actual;
     }

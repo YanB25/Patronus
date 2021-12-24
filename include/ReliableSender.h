@@ -10,20 +10,23 @@ class ReliableSendMessageConnection
 
 public:
     ReliableSendMessageConnection(std::vector<std::vector<ibv_qp *>> &QPs,
-                                  ibv_cq *cq, uint32_t lkey);
+                                  std::array<ibv_cq *, RMSG_MULTIPLEXING>& cqs,
+                                  uint32_t lkey);
     ~ReliableSendMessageConnection();
-    void send(size_t threadID, size_t node_id, const char *buf, size_t size, size_t targetID);
+    void send(size_t threadID,
+              size_t node_id,
+              const char *buf,
+              size_t size,
+              size_t targetID);
 
 private:
-    void poll_cq();
+    void poll_cq(size_t mid);
 
-    /**
-     * @brief QPs[RMSG_MULTIPLEXING][machineNR]
-     */
     std::vector<std::vector<ibv_qp *>> &QPs_;
-    ibv_cq *send_cq_{nullptr};
+    std::array<ibv_cq *, RMSG_MULTIPLEXING> send_cqs_;
 
-    using Aligned = std::aligned_storage<sizeof(std::atomic<size_t>), 128>::type;
+    using Aligned =
+        std::aligned_storage<sizeof(std::atomic<size_t>), 128>::type;
 
     uint32_t lkey_{0};
 };

@@ -1,8 +1,10 @@
 #include "ReliableSender.h"
 
 ReliableSendMessageConnection::ReliableSendMessageConnection(
-    std::vector<std::vector<ibv_qp *>> &QPs, ibv_cq *cq, uint32_t lkey)
-    : QPs_(QPs), send_cq_(cq), lkey_(lkey)
+    std::vector<std::vector<ibv_qp *>> &QPs,
+    std::array<ibv_cq *, RMSG_MULTIPLEXING> &cqs,
+    uint32_t lkey)
+    : QPs_(QPs), send_cqs_(cqs), lkey_(lkey)
 {
 }
 
@@ -32,7 +34,7 @@ void ReliableSendMessageConnection::send(size_t threadID,
         {
             DVLOG(3) << "[rmsg] Thread " << threadID << " triggers one poll"
                      << ", current targetID " << targetID;
-            poll_cq();
+            poll_cq(targetID);
         }
         signal = true;
         thread_second_ = true;
@@ -55,15 +57,20 @@ void ReliableSendMessageConnection::send(size_t threadID,
                  size));
 }
 
-void ReliableSendMessageConnection::poll_cq()
+void ReliableSendMessageConnection::poll_cq(size_t mid)
 {
-    ibv_wc wc;
-    static auto err_h = [](ibv_wc *wc)
+    thread_local static ibv_wc wc[64];
+    
+    size_t polled = ibv_poll_cq(send_cqs_[mid], 64, wc);
+    if (polled < 0)
     {
-        LOG(ERROR) << "Failed to process send. ";
-        DCHECK_EQ(WRID(wc->wr_id).prefix, WRID_PREFIX_RELIABLE_SEND);
-    };
-
-    auto ret = pollWithCQ(send_cq_, 1, &wc, err_h);
-    PLOG_IF(ERROR, ret < 0) << "failed to pollWithCQ";
+        PLOG(ERROR) << "Failed to poll cq.";
+    }
+    for (size_t i = 0; i < polled; ++i)
+    {
+        if (wc[i].status != IBV_WC_SUCCESS)
+        {
+            LOG(ERROR) << "[rmsg] sender wc failed. " << WRID(wc[i].wr_id);
+        }
+    }
 }

@@ -28,13 +28,19 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     size_t max_cqe_for_receiver = machine_nr * RMSG_MULTIPLEXING *
                                   kPostRecvBufferBatch *
                                   kPostRecvBufferAdvanceBatch;
-    recv_cq_ = CHECK_NOTNULL(
-        ibv_create_cq(ctx_.ctx, max_cqe_for_receiver, nullptr, nullptr, 0));
+    for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
+    {
+        recv_cqs_[i] = CHECK_NOTNULL(
+            ibv_create_cq(ctx_.ctx, max_cqe_for_receiver, nullptr, nullptr, 0));
+    }
     // at maximum, the sender will have (RMSG_MULTIPLEXING) * kSenderBatchSize
     // pending cqes
     size_t max_cqe_for_sender = machine_nr * MAX_APP_THREAD;
-    send_cq_ = CHECK_NOTNULL(
-        ibv_create_cq(ctx_.ctx, max_cqe_for_sender, nullptr, nullptr, 0));
+    for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
+    {
+        send_cqs_[i] = CHECK_NOTNULL(
+            ibv_create_cq(ctx_.ctx, max_cqe_for_sender, nullptr, nullptr, 0));
+    }
 
     // sender size requirement
     size_t qp_max_depth_send = kSenderBatchSize * MAX_APP_THREAD;
@@ -47,8 +53,8 @@ ReliableConnection::ReliableConnection(uint64_t mm,
         {
             CHECK(createQueuePair(&QPs_.back()[m],
                                   IBV_QPT_RC,
-                                  send_cq_,
-                                  recv_cq_,
+                                  send_cqs_[i],
+                                  recv_cqs_[i],
                                   &ctx_,
                                   qp_max_depth_send,
                                   qp_max_depth_recv,
@@ -57,9 +63,9 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     }
 
     send_ = std::make_unique<ReliableSendMessageConnection>(
-        QPs_, send_cq_, send_lkey_);
+        QPs_, send_cqs_, send_lkey_);
     recv_ = std::make_unique<ReliableRecvMessageConnection>(
-        QPs_, recv_cq_, recv_msg_pool_, recv_lkey_);
+        QPs_, recv_cqs_, recv_msg_pool_, recv_lkey_);
 }
 ReliableConnection::~ReliableConnection()
 {
@@ -75,8 +81,14 @@ ReliableConnection::~ReliableConnection()
             CHECK(destroyQueuePair(QPs_[i][m]));
         }
     }
-    CHECK(destroyCompleteQueue(send_cq_));
-    CHECK(destroyCompleteQueue(recv_cq_));
+    for (size_t i = 0; i < send_cqs_.size(); ++i)
+    {
+        CHECK(destroyCompleteQueue(send_cqs_[i]));
+    }
+    for (size_t i = 0; i < recv_cqs_.size(); ++i)
+    {
+        CHECK(destroyCompleteQueue(recv_cqs_[i]));
+    }
     CHECK(destroyMemoryRegion(recv_mr_));
     CHECK(destroyMemoryRegion(send_mr_));
     CHECK(hugePageFree(
@@ -91,13 +103,13 @@ void ReliableConnection::send(
     DCHECK(config::kEnableReliableMessage);
     send_->send(threadID, node_id, buf, size, mid);
 }
-void ReliableConnection::recv(char *ibuf, size_t limit)
+void ReliableConnection::recv(size_t mid, char *ibuf, size_t limit)
 {
     DCHECK(config::kEnableReliableMessage);
-    return recv_->recv(ibuf, limit);
+    return recv_->recv(mid, ibuf, limit);
 }
-size_t ReliableConnection::try_recv(char *ibuf, size_t limit)
+size_t ReliableConnection::try_recv(size_t mid, char *ibuf, size_t limit)
 {
     DCHECK(config::kEnableReliableMessage);
-    return recv_->try_recv(ibuf, limit);
+    return recv_->try_recv(mid, ibuf, limit);
 }

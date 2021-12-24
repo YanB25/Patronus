@@ -376,13 +376,13 @@ public:
     {
         reliable_msg_->send(thread_id, buf, size, node_id, targetID);
     }
-    void reliable_recv(char* ibuf, size_t limit=1)
+    void reliable_recv(size_t from_mid, char* ibuf, size_t limit=1)
     {
-        reliable_msg_->recv(ibuf, limit);
+        reliable_msg_->recv(from_mid, ibuf, limit);
     }
-    size_t reliable_try_recv(char* ibuf, size_t limit=1)
+    size_t reliable_try_recv(size_t from_mid, char* ibuf, size_t limit=1)
     {
-        return reliable_msg_->try_recv(ibuf, limit);
+        return reliable_msg_->try_recv(from_mid, ibuf, limit);
     }
 
 private:

@@ -41,8 +41,8 @@ public:
               size_t size,
               uint16_t node_id,
               size_t mid);
-    void recv(char *ibuf, size_t limit = 1);
-    size_t try_recv(char *ibuf, size_t limit = 1);
+    void recv(size_t mid, char *ibuf, size_t limit = 1);
+    size_t try_recv(size_t mid, char *ibuf, size_t limit = 1);
 
 private:
     RdmaContext &context()
@@ -68,11 +68,11 @@ private:
     void *recv_msg_pool_{nullptr};
     ibv_mr *recv_mr_{nullptr};
     uint32_t recv_lkey_{0};
-    ibv_cq *recv_cq_{nullptr};
+    std::array<ibv_cq *, RMSG_MULTIPLEXING> recv_cqs_;
     // for sender
     ibv_mr *send_mr_{nullptr};
     uint32_t send_lkey_{0};
-    ibv_cq *send_cq_{nullptr};
+    std::array<ibv_cq *, RMSG_MULTIPLEXING> send_cqs_;
 
     std::unique_ptr<ReliableRecvMessageConnection> recv_;
     std::unique_ptr<ReliableSendMessageConnection> send_;

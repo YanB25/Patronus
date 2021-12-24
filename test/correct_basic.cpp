@@ -50,7 +50,7 @@ int main(int argc, char* argv[])
     auto nid = dsm->getMyNodeID();
     if (nid == kClientNodeId)
     {
-        dsm->reliable_recv(nullptr);
+        dsm->reliable_recv(0, nullptr);
         dsm->reconnectThreadToDir(kServerNodeId, 0);
     }
     else

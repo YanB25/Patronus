@@ -80,7 +80,7 @@ void client_varsize_correct(std::shared_ptr<DSM> dsm, size_t mid)
         }
         dsm->reliable_send(buf, size, kServerNodeId, mid);
 
-        dsm->reliable_recv(recv_buf);
+        dsm->reliable_recv(0, recv_buf);
         if (memcmp(recv_buf, buf, size) != 0)
         {
             LOG(ERROR) << "Mismatch result at " << i << "-th test. size "
@@ -104,7 +104,7 @@ void server_varsize_correct(std::shared_ptr<DSM> dsm, size_t mid)
     auto *buf = dsm->get_rdma_buffer();
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
-        dsm->reliable_recv(recv_buf);
+        dsm->reliable_recv(0, recv_buf);
         memcpy(buf, recv_buf, 32);
         dsm->reliable_send(buf, 32, kClientNodeId, mid);
     }
@@ -122,7 +122,7 @@ void client_pingpong_correct(std::shared_ptr<DSM> dsm, size_t mid)
         *(uint64_t *) buf = magic;
         dsm->reliable_send(buf, sizeof(uint64_t), kServerNodeId, mid);
 
-        dsm->reliable_recv(recv_buf);
+        dsm->reliable_recv(0, recv_buf);
         uint64_t get = *(uint64_t *) recv_buf;
         CHECK_EQ(get, magic)
             << "Pingpoing content mismatch for " << i << "-th test. expect "
@@ -135,7 +135,7 @@ void server_pingpong_correct(std::shared_ptr<DSM> dsm, size_t mid)
     auto *buf = dsm->get_rdma_buffer();
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
-        dsm->reliable_recv(recv_buf);
+        dsm->reliable_recv(0, recv_buf);
         uint64_t get = *(uint64_t *) recv_buf;
         DVLOG(3) << "[bench] server got " << std::hex << get << " for " << i
                  << "-th test";
@@ -162,12 +162,13 @@ void server_multithread(std::shared_ptr<DSM> dsm,
                 bindCore(1 + i);
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
+                auto mid = tid % RMSG_MULTIPLEXING;
 
                 char buffer[102400];
                 auto *rdma_buf = dsm->get_rdma_buffer();
                 while (finished_nr < total_nr)
                 {
-                    size_t get = dsm->reliable_try_recv(buffer, 64);
+                    size_t get = dsm->reliable_try_recv(mid, buffer, 64);
                     finished_nr.fetch_add(get);
                     for (size_t i = 0; i < get; ++i)
                     {
@@ -247,7 +248,7 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
                     {
                         DVLOG(3) << "[wait] tid " << tid
                                 << " sent 64. wait for ack. ";
-                        dsm->reliable_recv(buffer);
+                        dsm->reliable_recv(from_mid, buffer);
                         auto *recv_msg = (BenchMessage *) buffer;
                         DVLOG(3) << "[wait] tid " << tid
                                 << " recv continue msg for mid "
@@ -280,7 +281,7 @@ void client_wait(std::shared_ptr<DSM> dsm)
 {
     // sync
     auto *buf = dsm->get_rdma_buffer();
-    dsm->reliable_recv(nullptr);
+    dsm->reliable_recv(0, nullptr);
     dsm->reliable_send(buf, 0, kServerNodeId, 0);
 }
 
@@ -311,7 +312,7 @@ void server_wait(std::shared_ptr<DSM> dsm)
 {
     auto *buffer = dsm->get_rdma_buffer();
     dsm->reliable_send(buffer, 0, kClientNodeId, 0);
-    dsm->reliable_recv(nullptr);
+    dsm->reliable_recv(0, nullptr);
 }
 
 void server(std::shared_ptr<DSM> dsm)

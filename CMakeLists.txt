@@ -12,6 +12,10 @@ option(SANITIZE "Turn on sanitization" OFF)
 set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wno-unused-private-field -Wsign-compare -Wno-address-of-packed-member")
 set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -W")
 
+# enable profiling
+# set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg ")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg ")
+
 # disable boost warning
 add_definitions(-DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
