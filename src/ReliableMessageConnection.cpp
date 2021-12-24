@@ -17,6 +17,7 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     constexpr static size_t kMsgNr =
         MAX_MACHINE * kRecvBuffer * RMSG_MULTIPLEXING;
     recv_msg_pool_ = CHECK_NOTNULL(hugePageAlloc(kMsgNr * kMessageSize));
+    CHECK_EQ((uint64_t) recv_msg_pool_ % 64, 0) << "must be cacheline aligned.";
 
     recv_mr_ = CHECK_NOTNULL(createMemoryRegion(
         (uint64_t) recv_msg_pool_, kMsgNr * kMessageSize, &ctx_));
@@ -45,7 +46,8 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     // sender size requirement
     size_t qp_max_depth_send = kSenderBatchSize * MAX_APP_THREAD;
     // receiver size requirement
-    size_t qp_max_depth_recv = kPostRecvBufferAdvanceBatch * kPostRecvBufferBatch;
+    size_t qp_max_depth_recv =
+        kPostRecvBufferAdvanceBatch * kPostRecvBufferBatch;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
         QPs_.emplace_back(machine_nr);

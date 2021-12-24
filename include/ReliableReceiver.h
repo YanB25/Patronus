@@ -3,6 +3,7 @@
 #define RELIABLE_RECEIVER_H_
 
 #include "ReliableMessageConnection.h"
+#include "PerThread.h"
 
 class ReliableRecvMessageConnection
 {
@@ -16,7 +17,7 @@ class ReliableRecvMessageConnection
 
 public:
     ReliableRecvMessageConnection(std::vector<std::vector<ibv_qp *>> &QPs,
-                                  std::array<ibv_cq *, RMSG_MULTIPLEXING>& cqs,
+                                  std::array<ibv_cq *, RMSG_MULTIPLEXING> &cqs,
                                   void *msg_pool,
                                   uint32_t lkey);
     ~ReliableRecvMessageConnection();
@@ -59,9 +60,8 @@ private:
     ibv_recv_wr recvs[RMSG_MULTIPLEXING][MAX_MACHINE][kRecvBuffer];
     ibv_sge recv_sgl[RMSG_MULTIPLEXING][MAX_MACHINE][kRecvBuffer];
 
-    using Aligned =
-        std::aligned_storage<sizeof(std::atomic<size_t>), 128>::type;
-    Aligned msg_recv_index_layout_[RMSG_MULTIPLEXING][MAX_MACHINE] = {};
+    Aligned<std::atomic<size_t>, 64> msg_recv_index_[RMSG_MULTIPLEXING]
+                                                           [MAX_MACHINE] = {};
 };
 
 #endif

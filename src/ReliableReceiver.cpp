@@ -2,7 +2,7 @@
 
 ReliableRecvMessageConnection::ReliableRecvMessageConnection(
     std::vector<std::vector<ibv_qp *>> &QPs,
-    std::array<ibv_cq *, RMSG_MULTIPLEXING>& cqs,
+    std::array<ibv_cq *, RMSG_MULTIPLEXING> &cqs,
     void *msg_pool,
     uint32_t lkey)
     : QPs_(QPs), recv_cqs_(cqs), msg_pool_(msg_pool), lkey_(lkey)
@@ -110,7 +110,9 @@ void ReliableRecvMessageConnection::init()
     inited_ = true;
 }
 
-size_t ReliableRecvMessageConnection::try_recv(size_t mid, char *ibuf, size_t msg_limit)
+size_t ReliableRecvMessageConnection::try_recv(size_t mid,
+                                               char *ibuf,
+                                               size_t msg_limit)
 {
     DCHECK(inited_);
     constexpr static size_t kMaxPollNr = 64;
@@ -147,10 +149,8 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
     DCHECK_LT(node_id, MAX_MACHINE);
     DCHECK_LT(mid, RMSG_MULTIPLEXING);
 
-    void *msg_recv_index_layout = &msg_recv_index_layout_[mid][node_id];
-    std::atomic<size_t> &msg_recv_index =
-        *(std::atomic<size_t> *) msg_recv_index_layout;
-    size_t cur_idx = msg_recv_index.fetch_add(1, std::memory_order_relaxed);
+    size_t cur_idx = msg_recv_index_[mid][node_id].get().fetch_add(
+        1, std::memory_order_relaxed);
     auto actual_size = wc.imm_data;
 
     if (ibuf)
@@ -190,7 +190,9 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
     }
 }
 
-void ReliableRecvMessageConnection::recv(size_t mid, char *ibuf, size_t msg_limit)
+void ReliableRecvMessageConnection::recv(size_t mid,
+                                         char *ibuf,
+                                         size_t msg_limit)
 {
     size_t remain = msg_limit;
     while (remain > 0)

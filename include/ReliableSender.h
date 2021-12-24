@@ -25,9 +25,6 @@ private:
     std::vector<std::vector<ibv_qp *>> &QPs_;
     std::array<ibv_cq *, RMSG_MULTIPLEXING> send_cqs_;
 
-    using Aligned =
-        std::aligned_storage<sizeof(std::atomic<size_t>), 128>::type;
-
     uint32_t lkey_{0};
 };
 

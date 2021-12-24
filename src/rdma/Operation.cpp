@@ -612,7 +612,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     // dinfo("Succeed in bind_mw. poll? send_cq: %p, recv_cq: %p, srq: %p",
     // qp->send_cq, qp->recv_cq, qp->srq);
 
-    size_t id = id_.fetch_add(1);
+    size_t id = id_.fetch_add(1, std::memory_order_relaxed);
     if ((id & mask) == magic)
     {
         LOG_FIRST_N(WARNING, 1)

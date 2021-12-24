@@ -89,7 +89,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                     sent++;
                     if (sent % msg_each_token == 0)
                     {
-                        continue_token[mid].fetch_sub(1);
+                        continue_token[mid].fetch_sub(1, std::memory_order_relaxed);
                         // auto now = std::chrono::steady_clock::now();
                         VLOG(3)
                             << "[wait] tid " << tid << " sent " << sent
@@ -107,12 +107,12 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                                 VLOG(3) << "[wait] tid " << tid
                                          << " recv continue msg for mid "
                                          << recv_msg->mid << ". add one token";
-                                continue_token[recv_msg->mid].fetch_add(1);
+                                continue_token[recv_msg->mid].fetch_add(1, std::memory_order_relaxed);
                             }
-                        } while (continue_token[mid] <= 0);
+                        } while (continue_token[mid].load(std::memory_order_relaxed) <= 0);
                         VLOG(3) << "[wait] tid " << tid << " from mid " << mid
                                  << " has enough token. current: "
-                                 << continue_token[mid];
+                                 << continue_token[mid].load(std::memory_order_relaxed);
                     }
                 }
             });
@@ -168,14 +168,14 @@ void server_burn(std::shared_ptr<DSM> dsm,
                         auto *recv_msg =
                             (BenchMsg *) ((char *) buffer +
                                           ReliableConnection::kMessageSize * i);
-                        auto now = recv_mid_msgs[recv_msg->mid].fetch_add(1) + 1;
+                        auto now = recv_mid_msgs[recv_msg->mid].fetch_add(1, std::memory_order_relaxed) + 1;
                         BenchMsg *send_msg = (BenchMsg *) rdma_buf;
                         memcpy(send_msg, recv_msg, sizeof(BenchMsg));
                         constexpr size_t credit_for_token =
                             ReliableConnection::kPostRecvBufferBatch / kTokenNr;
                         if (now % credit_for_token == 0)
                         {
-                            recv_mid_msgs[recv_msg->mid].fetch_sub(credit_for_token);
+                            recv_mid_msgs[recv_msg->mid].fetch_sub(credit_for_token, std::memory_order_relaxed);
                             VLOG(3) << "[wait] server tid " << tid
                                     << " let go mid " << recv_msg->mid;
                             dsm->reliable_send((char *) send_msg,
