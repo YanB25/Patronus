@@ -7,8 +7,6 @@ ReliableRecvMessageConnection::ReliableRecvMessageConnection(
     uint32_t lkey)
     : QPs_(QPs), recv_cq_(cq), msg_pool_(msg_pool), lkey_(lkey)
 {
-    msg_recv_index_ = (std::atomic<size_t> *) msg_recv_index_layout_;
-
     memset(recvs, 0, sizeof(recvs));
     memset(recv_sgl, 0, sizeof(recv_sgl));
 }
@@ -126,6 +124,8 @@ size_t ReliableRecvMessageConnection::try_recv(char *ibuf, size_t msg_limit)
         PLOG(ERROR) << "failed to ibv_poll_cq";
         return 0;
     }
+    // TODO: for now, we always + kMessageSize. Could we just + message actual
+    // size?
     for (size_t i = 0; i < actually_polled; ++i)
     {
         handle_wc(ibuf + i * kMessageSize, wc[i]);
@@ -147,8 +147,10 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
     DCHECK_LT(node_id, MAX_MACHINE);
     DCHECK_LT(mid, RMSG_MULTIPLEXING);
 
-    size_t cur_idx = msg_recv_index_[mid * MAX_MACHINE + node_id].fetch_add(
-        1, std::memory_order_relaxed);
+    void *msg_recv_index_layout = &msg_recv_index_layout_[mid][node_id];
+    std::atomic<size_t> &msg_recv_index =
+        *(std::atomic<size_t> *) msg_recv_index_layout;
+    size_t cur_idx = msg_recv_index.fetch_add(1, std::memory_order_relaxed);
     auto actual_size = wc.imm_data;
 
     if (ibuf)
@@ -179,14 +181,13 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
                  << " recvs to node " << node_id << ", mid " << mid
                  << ". cur_idx " << cur_idx << " i.e. recvs[" << mid << "]["
                  << node_id << "][" << (post_buf_idx % kRecvBuffer) << "]";
-                 
+
         PLOG_IF(ERROR,
                 ibv_post_recv(QPs_[mid][node_id],
                               &recvs[mid][node_id][post_buf_idx % kRecvBuffer],
                               &bad))
             << "failed to post recv";
     }
-
 }
 
 void ReliableRecvMessageConnection::recv(char *ibuf, size_t msg_limit)

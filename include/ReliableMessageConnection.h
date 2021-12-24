@@ -16,7 +16,7 @@ class ReliableSendMessageConnection;
 class ReliableConnection
 {
 public:
-    const static size_t kRecvBuffer = 128;
+    const static size_t kRecvBuffer = 512;
     // post 2 batch in advance. must be 2.
     constexpr static size_t kPostRecvBufferAdvanceBatch = 2;
     constexpr static size_t kPostRecvBufferBatch =
@@ -26,7 +26,7 @@ public:
     /**
      * @brief how much send # before a signal
      */
-    constexpr static size_t kSenderBatchSize = 16;
+    constexpr static size_t kSenderBatchSize = 32;
 
     /**
      * @brief Construct a new Reliable Connection object

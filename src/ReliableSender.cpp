@@ -18,7 +18,7 @@ void ReliableSendMessageConnection::send(size_t threadID,
 {
     DCHECK_LT(targetID, RMSG_MULTIPLEXING);
     DCHECK_LT(threadID, MAX_APP_THREAD);
-    CHECK_LE(size, kMessageSize) << "[rmsg] message size exceed limits";
+    DCHECK_LE(size, kMessageSize) << "[rmsg] message size exceed limits";
 
     static thread_local bool thread_second_{false};
     static thread_local size_t msg_send_index_{0};
@@ -43,6 +43,7 @@ void ReliableSendMessageConnection::send(size_t threadID,
              << "][" << node_id << "] with size " << size
              << ", inlined: " << inlined << ", signal: " << signal;
 
+    // TODO: the fillSeg by rdmaSend is overkilled. try to optimize.
     CHECK(
         rdmaSend(QPs_[targetID][node_id],
                  (uint64_t) buf,

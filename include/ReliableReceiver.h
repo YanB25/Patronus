@@ -62,11 +62,6 @@ private:
     using Aligned =
         std::aligned_storage<sizeof(std::atomic<size_t>), 128>::type;
     Aligned msg_recv_index_layout_[RMSG_MULTIPLEXING][MAX_MACHINE] = {};
-    /**
-     * @brief Array[RMSG_MULTIPLEXING][MAX_MACHINE]
-     */
-    std::atomic<size_t> *msg_recv_index_;
-    // std::array<std::atomic<size_t>, MAX_MACHINE> msg_recv_index_{};
 };
 
 #endif
