@@ -23,6 +23,7 @@ constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kPingpoingCnt = 100 * define::K;
 constexpr static size_t kBurnCnt = 20 * define::M;
 constexpr static size_t kThreadNr = RMSG_MULTIPLEXING - 1;
+// constexpr static size_t kThreadNr = RMSG_MULTIPLEXING;
 // constexpr static size_t kThreadNr = 1;
 // constexpr static size_t kBenchMsgSize = 16;
 
@@ -70,8 +71,9 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
                 auto mid = tid % RMSG_MULTIPLEXING;
-                CHECK_NE(mid, 0);
                 LOG(WARNING) << "[bench] threadID " << tid << ", mid " << mid;
+
+                CHECK_NE(mid, 0);
 
                 auto *buf = dsm->get_rdma_buffer();
                 auto *send_msg = (BenchMsg *) buf;
@@ -149,6 +151,7 @@ void server_burn(std::shared_ptr<DSM> dsm,
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
                 auto mid = tid % RMSG_MULTIPLEXING;
+
                 CHECK_NE(mid, 0);
 
                 char buffer[ReliableConnection::kMessageSize * 64];

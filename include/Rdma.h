@@ -18,6 +18,8 @@
 #include <string>
 #include <optional>
 
+#include "Common.h"
+
 #define MAX_POST_LIST 32
 #define DCT_ACCESS_KEY 3185
 #define UD_PKEY 0x11111111
@@ -55,7 +57,7 @@ struct RdmaContext
 
     ibv_exp_dm *dm{nullptr};
 
-    ibv_exp_res_domain* res_dom{nullptr};
+    ibv_exp_res_domain* res_doms[MAX_APP_THREAD] = {};
 
     // default to use type 1, because it is always supported
     // will query and change to TYPE_2 if supported.
@@ -78,8 +80,8 @@ struct RdmaContext
         mw_type = std::move(rhs.mw_type);
         dm = std::move(rhs.dm);
         rhs.dm = nullptr;
-        res_dom = std::move(rhs.res_dom);
-        rhs.res_dom = nullptr;
+        memcpy(res_doms, rhs.res_doms, sizeof(res_doms));
+        memset(rhs.res_doms, 0, sizeof(rhs.res_doms));
         return *this;
     }
     RdmaContext(RdmaContext &&rhs)
@@ -117,7 +119,8 @@ bool createQueuePair(ibv_qp **qp,
                      ibv_cq *cq,
                      RdmaContext *context,
                      uint32_t qpsMaxDepth,
-                     uint32_t maxInlineData);
+                     uint32_t maxInlineData,
+                     ibv_exp_res_domain* res_dom);
 
 bool createQueuePair(ibv_qp **qp,
                      ibv_qp_type mode,
@@ -125,7 +128,8 @@ bool createQueuePair(ibv_qp **qp,
                      ibv_cq *recv_cq,
                      RdmaContext *context,
                      uint32_t qpsMaxDepth,
-                     uint32_t maxInlineData);
+                     uint32_t maxInlineData,
+                     ibv_exp_res_domain* res_dom);
 bool createQueuePair(ibv_qp **qp,
                      ibv_qp_type mode,
                      ibv_cq *send_cq,
@@ -133,7 +137,8 @@ bool createQueuePair(ibv_qp **qp,
                      RdmaContext *context,
                      size_t max_send_wr,
                      size_t max_recv_wr,
-                     uint32_t maxInlineData);
+                     uint32_t maxInlineData,
+                     ibv_exp_res_domain* res_dom);
 bool destroyQueuePair(ibv_qp *qp);
 
 bool createDCTarget(ibv_exp_dct **dct,
@@ -170,7 +175,7 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                    uint8_t *remoteGid,
                    RdmaContext *context);
 
-ibv_cq* createCompleteQueue(RdmaContext *context, int cqe);
+ibv_cq* createCompleteQueue(RdmaContext *context, int cqe, ibv_exp_res_domain*);
 bool destroyCompleteQueue(ibv_cq *cq);
 
 //// Operation.cpp

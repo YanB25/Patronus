@@ -6,10 +6,12 @@
 #include <infiniband/verbs.h>
 
 #include <memory>
-#include <vector>
 #include <mutex>
+#include <vector>
 
 #include "Common.h"
+#include "Rdma.h"
+#include "ValidityMutex.h"
 
 class ReliableRecvMessageConnection;
 class ReliableSendMessageConnection;
@@ -28,6 +30,8 @@ public:
      * @brief how much send # before a signal
      */
     constexpr static size_t kSenderBatchSize = 32;
+
+    using DebugMutex = ValidityMutex<config::kEnableValidityMutex>;
 
     /**
      * @brief Construct a new Reliable Connection object
@@ -77,6 +81,9 @@ private:
 
     std::unique_ptr<ReliableRecvMessageConnection> recv_;
     std::unique_ptr<ReliableSendMessageConnection> send_;
+
+    std::array<DebugMutex, RMSG_MULTIPLEXING>
+        debug_locks_;
 };
 
 #endif

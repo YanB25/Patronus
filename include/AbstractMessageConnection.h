@@ -2,6 +2,7 @@
 #define __ABSTRACTMESSAGECONNECTION_H__
 
 #include "Common.h"
+#include "Rdma.h"
 
 #define SIGNAL_BATCH 31
 

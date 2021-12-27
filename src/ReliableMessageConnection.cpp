@@ -13,17 +13,16 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     {
         return;
     }
-    // NOTE: has to be THREAD_UNSAFE instead of THREAD_SINGLE
-    // - THEAD_UNSAFE: Access to the associated objects are not thread safe.
-    // - THREAD_SINGLE: different objects associated with the same resource
-    // domain must be called by the same thread.
-    // TODO: don't know why:
-    // If resource domain is attached, it assert false, because of multi-thread problem
-    // if I set thread model to THREAD_SINGLE or THREAD_UNSAFE, it will not throw.
-    // However, the performance drops significantly.
-    // Soo strange.
-    CHECK(createContext(
-        &ctx_, 1, 1, 0, std::nullopt, std::nullopt));
+
+    if constexpr (config::kEnableReliableMessageSingleThread)
+    {
+        CHECK(createContext(
+            &ctx_, 1, 1, 0, IBV_EXP_THREAD_SINGLE, IBV_EXP_MSG_HIGH_BW));
+    }
+    else
+    {
+        CHECK(createContext(&ctx_, 1, 1, 0, std::nullopt, std::nullopt));
+    }
     constexpr static size_t kMsgNr =
         MAX_MACHINE * kRecvBuffer * RMSG_MULTIPLEXING;
     recv_msg_pool_ = CHECK_NOTNULL(hugePageAlloc(kMsgNr * kMessageSize));
@@ -41,16 +40,20 @@ ReliableConnection::ReliableConnection(uint64_t mm,
                                   kPostRecvBufferAdvanceBatch;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
-        recv_cqs_[i] =
-            CHECK_NOTNULL(createCompleteQueue(&ctx_, max_cqe_for_receiver));
+        recv_cqs_[i] = CHECK_NOTNULL(
+            createCompleteQueue(&ctx_,
+                                max_cqe_for_receiver,
+                                ctx_.res_doms[i] ? ctx_.res_doms[i] : nullptr));
     }
     // at maximum, the sender will have (RMSG_MULTIPLEXING) * kSenderBatchSize
     // pending cqes
     size_t max_cqe_for_sender = machine_nr * MAX_APP_THREAD;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
-        send_cqs_[i] =
-            CHECK_NOTNULL(createCompleteQueue(&ctx_, max_cqe_for_sender));
+        send_cqs_[i] = CHECK_NOTNULL(
+            createCompleteQueue(&ctx_,
+                                max_cqe_for_sender,
+                                ctx_.res_doms[i] ? ctx_.res_doms[i] : nullptr));
     }
 
     // sender size requirement
@@ -63,14 +66,16 @@ ReliableConnection::ReliableConnection(uint64_t mm,
         QPs_.emplace_back(machine_nr);
         for (size_t m = 0; m < machine_nr; ++m)
         {
-            CHECK(createQueuePair(&QPs_.back()[m],
-                                  IBV_QPT_RC,
-                                  send_cqs_[i],
-                                  recv_cqs_[i],
-                                  &ctx_,
-                                  qp_max_depth_send,
-                                  qp_max_depth_recv,
-                                  32));
+            CHECK(
+                createQueuePair(&QPs_.back()[m],
+                                IBV_QPT_RC,
+                                send_cqs_[i],
+                                recv_cqs_[i],
+                                &ctx_,
+                                qp_max_depth_send,
+                                qp_max_depth_recv,
+                                32,
+                                ctx_.res_doms[i] ? ctx_.res_doms[i] : nullptr));
         }
     }
 
@@ -113,15 +118,25 @@ void ReliableConnection::send(
     size_t threadID, const char *buf, size_t size, uint16_t node_id, size_t mid)
 {
     DCHECK(config::kEnableReliableMessage);
+    DCHECK_LT(mid, RMSG_MULTIPLEXING);
+
+    std::lock_guard<DebugMutex> lk(debug_locks_[mid]);
+
     send_->send(threadID, node_id, buf, size, mid);
 }
 void ReliableConnection::recv(size_t mid, char *ibuf, size_t limit)
 {
     DCHECK(config::kEnableReliableMessage);
+    DCHECK_LT(mid, RMSG_MULTIPLEXING);
+
+    std::lock_guard<DebugMutex> lk(debug_locks_[mid]);
     return recv_->recv(mid, ibuf, limit);
 }
 size_t ReliableConnection::try_recv(size_t mid, char *ibuf, size_t limit)
 {
     DCHECK(config::kEnableReliableMessage);
+    DCHECK_LT(mid, RMSG_MULTIPLEXING);
+
+    std::lock_guard<DebugMutex> lk(debug_locks_[mid]);
     return recv_->try_recv(mid, ibuf, limit);
 }

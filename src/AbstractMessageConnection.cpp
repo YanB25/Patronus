@@ -20,7 +20,7 @@ AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
     send_cq = ibv_create_cq(ctx.ctx, 128, NULL, NULL, 0);
 
     CHECK(type == IBV_QPT_UD) << "Only support UD here";
-    CHECK(createQueuePair(&message, type, send_cq, cq, &ctx, 128, 0));
+    CHECK(createQueuePair(&message, type, send_cq, cq, &ctx, 128, 0, nullptr));
     modifyUDtoRTS(message, &ctx);
 
     messagePool = hugePageAlloc(2 * messageNR * MESSAGE_SIZE);

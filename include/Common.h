@@ -10,7 +10,6 @@
 #include <limits>
 
 #include "HugePageAlloc.h"
-#include "Rdma.h"
 #include "Statistics.h"
 #include "WRLock.h"
 
@@ -252,10 +251,17 @@ static inline uint64_t djb2_digest(const char *str, size_t size)
 
 namespace config
 {
+// about enabling monitors, sacrifying performance
 constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
 
+constexpr static bool kEnableReliableMessageSingleThread = true;
+
+// about opening a feature
 constexpr static bool kEnableReliableMessage = true;
+
+// about higher level of debugging, sacrifying performance.
+constexpr static bool kEnableValidityMutex = false;
 }  // namespace config
 
 #endif /* __COMMON_H__ */
