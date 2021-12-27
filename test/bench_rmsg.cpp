@@ -21,7 +21,7 @@ constexpr uint32_t kMachineNr = 2;
 // constexpr static size_t kMsgSize = 16;
 
 constexpr static size_t kPingpoingCnt = 100 * define::K;
-constexpr static size_t kBurnCnt = 20 * define::M;
+constexpr static size_t kBurnCnt = 100 * define::M;
 constexpr static size_t kThreadNr = RMSG_MULTIPLEXING - 1;
 // constexpr static size_t kThreadNr = RMSG_MULTIPLEXING;
 // constexpr static size_t kThreadNr = 1;
@@ -62,10 +62,12 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
 
     Timer t;
     t.begin();
+
+    Perthread<std::atomic<size_t>> counts;
     for (size_t i = 0; i < thread_nr; ++i)
     {
         threads.emplace_back(
-            [dsm, i]()
+            [dsm, i, &count = counts[i]]()
             {
                 bindCore(i + 1);
                 dsm->registerThread();
@@ -80,7 +82,8 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                 send_msg->mid = mid;
 
                 size_t sent = 0;
-                char buffer[ReliableConnection::kMessageSize * ReliableConnection::kRecvLimit];
+                char buffer[ReliableConnection::kMessageSize *
+                            ReliableConnection::kRecvLimit];
                 int64_t token = kTokenNr;
                 for (size_t t = 0; t < kBurnCnt; ++t)
                 {
@@ -89,14 +92,17 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                     sent++;
                     if (sent % msg_each_token == 0)
                     {
+                        count.fetch_add(msg_each_token,
+                                        std::memory_order_relaxed);
+
                         token--;
                         VLOG(3)
                             << "[wait] tid " << tid << " sent " << sent
                             << " at " << msg_each_token << ", wait for ack.";
                         do
                         {
-                            size_t recv_nr =
-                                dsm->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
+                            size_t recv_nr = dsm->reliable_try_recv(
+                                mid, buffer, ReliableConnection::kRecvLimit);
                             // handle possbile recv token
                             for (size_t r = 0; r < recv_nr; ++r)
                             {
@@ -111,7 +117,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                             }
                             if (token <= 0)
                             {
-                                LOG(WARNING) << "[wait] tid " << tid << " mid "
+                                VLOG(1) << "[wait] tid " << tid << " mid "
                                              << mid << " blocked.";
                             }
                         } while (token <= 0);
@@ -121,6 +127,35 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                 }
             });
     }
+
+    size_t expect_nr = thread_nr * kBurnCnt;
+
+    auto start = std::chrono::steady_clock::now();
+    size_t last_sum = 0;
+    while (true)
+    {
+        size_t sum = 0;
+        for (size_t i = 0; i < thread_nr; ++i)
+        {
+            sum += counts[i].load(std::memory_order_relaxed);
+        }
+        auto end = std::chrono::steady_clock::now();
+        auto ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+                .count();
+        LOG(INFO) << "[bench] OPS: " << 1.0 * 1e9 * (sum - last_sum) / ns
+                  << ", for sum: " << (sum - last_sum) << ", ns " << ns;
+
+        start = end;
+        last_sum = sum;
+
+        sleep(1);
+        if (sum == expect_nr)
+        {
+            break;
+        }
+    }
+
     for (auto &t : threads)
     {
         t.join();
@@ -154,13 +189,15 @@ void server_burn(std::shared_ptr<DSM> dsm,
 
                 CHECK_NE(mid, 0);
 
-                char buffer[ReliableConnection::kMessageSize * ReliableConnection::kRecvLimit];
+                char buffer[ReliableConnection::kMessageSize *
+                            ReliableConnection::kRecvLimit];
                 auto *rdma_buf = dsm->get_rdma_buffer();
                 memset(rdma_buf, 0, sizeof(BenchMsg));
                 size_t recv_msg_nr = 0;
                 while (!finished.load(std::memory_order_relaxed))
                 {
-                    auto get = dsm->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
+                    auto get = dsm->reliable_try_recv(
+                        mid, buffer, ReliableConnection::kRecvLimit);
                     gots[mid].fetch_add(get, std::memory_order_relaxed);
                     recv_msg_nr += get;
                     constexpr size_t credit_for_token =
