@@ -13,7 +13,17 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     {
         return;
     }
-    CHECK(createContext(&ctx_));
+    // NOTE: has to be THREAD_UNSAFE instead of THREAD_SINGLE
+    // - THEAD_UNSAFE: Access to the associated objects are not thread safe.
+    // - THREAD_SINGLE: different objects associated with the same resource
+    // domain must be called by the same thread.
+    // TODO: don't know why:
+    // If resource domain is attached, it assert false, because of multi-thread problem
+    // if I set thread model to THREAD_SINGLE or THREAD_UNSAFE, it will not throw.
+    // However, the performance drops significantly.
+    // Soo strange.
+    CHECK(createContext(
+        &ctx_, 1, 1, 0, std::nullopt, std::nullopt));
     constexpr static size_t kMsgNr =
         MAX_MACHINE * kRecvBuffer * RMSG_MULTIPLEXING;
     recv_msg_pool_ = CHECK_NOTNULL(hugePageAlloc(kMsgNr * kMessageSize));
@@ -31,16 +41,16 @@ ReliableConnection::ReliableConnection(uint64_t mm,
                                   kPostRecvBufferAdvanceBatch;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
-        recv_cqs_[i] = CHECK_NOTNULL(
-            ibv_create_cq(ctx_.ctx, max_cqe_for_receiver, nullptr, nullptr, 0));
+        recv_cqs_[i] =
+            CHECK_NOTNULL(createCompleteQueue(&ctx_, max_cqe_for_receiver));
     }
     // at maximum, the sender will have (RMSG_MULTIPLEXING) * kSenderBatchSize
     // pending cqes
     size_t max_cqe_for_sender = machine_nr * MAX_APP_THREAD;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
-        send_cqs_[i] = CHECK_NOTNULL(
-            ibv_create_cq(ctx_.ctx, max_cqe_for_sender, nullptr, nullptr, 0));
+        send_cqs_[i] =
+            CHECK_NOTNULL(createCompleteQueue(&ctx_, max_cqe_for_sender));
     }
 
     // sender size requirement

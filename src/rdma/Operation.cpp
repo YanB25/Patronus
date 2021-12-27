@@ -987,7 +987,13 @@ void rdmaQueryDevice()
                          IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS |
                          IBV_EXP_DEVICE_ATTR_INLINE_RECV_SZ |
                          IBV_EXP_DEVICE_ATTR_TUNNELED_ATOMIC |
-                         IBV_EXP_DEVICE_ATTR_TUNNEL_OFFLOADS_CAPS;
+                         IBV_EXP_DEVICE_ATTR_TUNNEL_OFFLOADS_CAPS |
+                         // TODO: I can query, but I can not find where's the bit.
+                         IBV_EXP_DEVICE_ATTR_WITH_TIMESTAMP_MASK |
+                         IBV_EXP_DEVICE_ATTR_WITH_HCA_CORE_CLOCK;
+    // size_t unknow_flag_1 = IBV_EXP_START_FLAG << 8;
+    // size_t unknow_flag_2 = IBV_EXP_START_FLAG << 9;
+    // size_t unknow_flag_3 = IBV_EXP_START_FLAG << 27;
     PLOG_IF(ERROR, ibv_exp_query_device(ctx, &exp_attr))
         << "failed to query device attr";
 
@@ -996,6 +1002,10 @@ void rdmaQueryDevice()
     printf("inline_recv_sz: %d\n", exp_attr.inline_recv_sz);
     printf("IBV_EXP_TUNNELED_ATOMIC_SUPPORTED: %d\n",
            exp_attr.tunneled_atomic_caps & IBV_EXP_TUNNELED_ATOMIC_SUPPORTED);
+    printf("timestamp_mask: %" PRIu64 "\n", exp_attr.timestamp_mask);
+    printf("hca_core_clock: %" PRIu64 "\n", exp_attr.hca_core_clock);
+    // printf("IBV_EXP_FLAGS unknown 1: %d, 2: %d, 3: %d\n", 
+    //     exp_attr.exp_device_cap_flags & )
     printf("======= device attr end ====\n");
 
     PLOG_IF(ERROR, ibv_close_device(ctx)) << "failed to close device";

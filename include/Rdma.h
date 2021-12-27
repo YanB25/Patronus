@@ -16,6 +16,7 @@
 #include <functional>
 #include <list>
 #include <string>
+#include <optional>
 
 #define MAX_POST_LIST 32
 #define DCT_ACCESS_KEY 3185
@@ -54,6 +55,8 @@ struct RdmaContext
 
     ibv_exp_dm *dm{nullptr};
 
+    ibv_exp_res_domain* res_dom{nullptr};
+
     // default to use type 1, because it is always supported
     // will query and change to TYPE_2 if supported.
     RdmaContext() : ctx(NULL), pd(NULL), mw_type(IBV_MW_TYPE_1)
@@ -75,6 +78,8 @@ struct RdmaContext
         mw_type = std::move(rhs.mw_type);
         dm = std::move(rhs.dm);
         rhs.dm = nullptr;
+        res_dom = std::move(rhs.res_dom);
+        rhs.res_dom = nullptr;
         return *this;
     }
     RdmaContext(RdmaContext &&rhs)
@@ -95,7 +100,9 @@ struct Region
 bool createContext(RdmaContext *context,
                    uint8_t port = 1,
                    int gidIndex = 1,
-                   uint8_t devIndex = 0);
+                   uint8_t devIndex = 0,
+                   std::optional<ibv_exp_thread_model> thread_model = std::nullopt,
+                   std::optional<ibv_exp_msg_model> msg_model = std::nullopt);
 bool destroyContext(RdmaContext *context);
 
 ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, const RdmaContext *ctx);
@@ -162,6 +169,8 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                    uint16_t remoteLid,
                    uint8_t *remoteGid,
                    RdmaContext *context);
+
+ibv_cq* createCompleteQueue(RdmaContext *context, int cqe);
 bool destroyCompleteQueue(ibv_cq *cq);
 
 //// Operation.cpp

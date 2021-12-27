@@ -60,7 +60,7 @@ void ReliableSendMessageConnection::send(size_t threadID,
 void ReliableSendMessageConnection::poll_cq(size_t mid)
 {
     thread_local static ibv_wc wc[64];
-    
+
     size_t polled = ibv_poll_cq(send_cqs_[mid], 64, wc);
     if (polled < 0)
     {

@@ -64,5 +64,8 @@
         "set": "cpp",
         "string_view": "cpp",
         "shared_mutex": "cpp"
-    }
+    },
+    "C_Cpp.default.compilerArgs": [
+        "--std=c++17"
+    ]
 }

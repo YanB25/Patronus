@@ -5,12 +5,15 @@
 bool createContext(RdmaContext *context,
                    uint8_t port,
                    int gidIndex,
-                   uint8_t devIndex)
+                   uint8_t devIndex,
+                   std::optional<ibv_exp_thread_model> thread_model,
+                   std::optional<ibv_exp_msg_model> msg_model)
 {
-    ibv_device *dev = NULL;
-    ibv_context *ctx = NULL;
-    ibv_pd *pd = NULL;
+    ibv_device *dev = nullptr;
+    ibv_context *ctx = nullptr;
+    ibv_pd *pd = nullptr;
     ibv_port_attr portAttr;
+    ibv_exp_res_domain *res_dom = nullptr;
 
     // get device names in the system
     int devicesNum;
@@ -96,6 +99,29 @@ bool createContext(RdmaContext *context,
         goto CreateResourcesExit;
     }
 
+    // setup resource domain for thread-safe optimizations.
+    // used in creating QP, CQ and WQ.
+    if (thread_model.has_value() || msg_model.has_value())
+    {
+        ibv_exp_res_domain_init_attr res_dom_attr;
+        memset(&res_dom_attr, 0, sizeof(res_dom_attr));
+        if (thread_model.has_value())
+        {
+            res_dom_attr.comp_mask |= IBV_EXP_RES_DOMAIN_THREAD_MODEL;
+            res_dom_attr.thread_model = thread_model.value();
+        }
+        if (msg_model.has_value())
+        {
+            res_dom_attr.comp_mask |= IBV_EXP_RES_DOMAIN_MSG_MODEL;
+            res_dom_attr.msg_model = msg_model.value();
+        }
+        res_dom = ibv_exp_create_res_domain(ctx, &res_dom_attr);
+        if (!res_dom)
+        {
+            PLOG(WARNING) << "failed to create resource domain. ";
+        }
+    }
+
     CHECK(portAttr.state == IBV_PORT_ARMED ||
           portAttr.state == IBV_PORT_ACTIVE);
     CHECK_LT(gidIndex, portAttr.gid_tbl_len) << "required from doc";
@@ -117,6 +143,7 @@ bool createContext(RdmaContext *context,
     context->ctx = ctx;
     context->pd = pd;
     context->lid = portAttr.lid;
+    context->res_dom = res_dom;
 
     // CHECK device memory support
     if (kMaxDeviceMemorySize == 0)
@@ -128,16 +155,24 @@ bool createContext(RdmaContext *context,
 
 /* Error encountered, cleanup */
 CreateResourcesExit:
-    LOG(ERROR) << "Error Encountered, Cleanup ...";
+    LOG(ERROR) << "Error Encountered at createContext. Cleanup ...";
+    if (res_dom)
+    {
+        ibv_exp_destroy_res_domain_attr destroy_res_dom_attr;
+        memset(&destroy_res_dom_attr, 0, sizeof(destroy_res_dom_attr));
+        PLOG_IF(ERROR,
+                ibv_exp_destroy_res_domain(ctx, res_dom, &destroy_res_dom_attr))
+            << "Failed to destroy resource domain";
+    }
 
     if (pd)
     {
-        ibv_dealloc_pd(pd);
+        PLOG_IF(ERROR, ibv_dealloc_pd(pd)) << "Failed to dealloc pd";
         pd = NULL;
     }
     if (ctx)
     {
-        ibv_close_device(ctx);
+        PLOG_IF(ERROR, ibv_close_device(ctx)) << "Failed to close device";
         ctx = NULL;
     }
     if (deviceList)
@@ -152,6 +187,17 @@ CreateResourcesExit:
 bool destroyContext(RdmaContext *context)
 {
     bool rc = true;
+    if (context->res_dom)
+    {
+        ibv_exp_destroy_res_domain_attr destroy_res_dom_attr;
+        memset(&destroy_res_dom_attr, 0, sizeof(destroy_res_dom_attr));
+        if (ibv_exp_destroy_res_domain(
+                context->ctx, context->res_dom, &destroy_res_dom_attr))
+        {
+            PLOG(ERROR) << "Failed to destroy resource domain";
+            rc = false;
+        }
+    }
     if (context->pd)
     {
         if (ibv_dealloc_pd(context->pd))
@@ -299,6 +345,12 @@ bool createQueuePair(ibv_qp **qp,
         attr.comp_mask = IBV_EXP_QP_INIT_ATTR_PD;
     }
 
+    if (context->res_dom)
+    {
+        attr.comp_mask |= IBV_EXP_QP_INIT_ATTR_RES_DOMAIN;
+        attr.res_domain = context->res_dom;
+    }
+
     attr.cap.max_send_wr = max_send_wr;
     attr.cap.max_recv_wr = max_recv_wr;
     attr.cap.max_send_sge = 1;
@@ -434,4 +486,22 @@ bool destroyCompleteQueue(ibv_cq *cq)
         }
     }
     return true;
+}
+
+ibv_cq *createCompleteQueue(RdmaContext *context, int cqe)
+{
+    if (context->res_dom)
+    {
+        ibv_exp_cq_init_attr cq_init_attr;
+        memset(&cq_init_attr, 0, sizeof(cq_init_attr));
+        cq_init_attr.comp_mask |= IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN;
+        cq_init_attr.res_domain = context->res_dom;
+        // TODO: flag can enable CQ_TIMESTAMP and CQ_TIMESTAMP_TO_SYS_TIME for
+        // attaching timestamp on msg send/recv
+        // TODO: flag can enable CQ_AS_NOTIFY for fast interrupt thread wakeup
+        // TODO: flag can enable CQ_COMPRESSED_CQE
+        return ibv_exp_create_cq(
+            context->ctx, cqe, nullptr, nullptr, 0, &cq_init_attr);
+    }
+    return ibv_create_cq(context->ctx, cqe, nullptr, nullptr, 0);
 }

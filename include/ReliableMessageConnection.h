@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <vector>
+#include <mutex>
 
 #include "Common.h"
 
@@ -16,7 +17,7 @@ class ReliableSendMessageConnection;
 class ReliableConnection
 {
 public:
-    const static size_t kRecvBuffer = 512;
+    const static size_t kRecvBuffer = 1024;
     // post 2 batch in advance. must be 2.
     constexpr static size_t kPostRecvBufferAdvanceBatch = 2;
     constexpr static size_t kPostRecvBufferBatch =
