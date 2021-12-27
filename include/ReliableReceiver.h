@@ -10,10 +10,11 @@ class ReliableRecvMessageConnection
     constexpr static int kMessageSize = ReliableConnection::kMessageSize;
     constexpr static size_t kRecvBuffer = ReliableConnection::kRecvBuffer;
 
-    const static size_t kPostRecvBufferAdvanceBatch =
+    constexpr static size_t kPostRecvBufferAdvanceBatch =
         ReliableConnection::kPostRecvBufferAdvanceBatch;
-    const static size_t kPostRecvBufferBatch =
+    constexpr static size_t kPostRecvBufferBatch =
         ReliableConnection::kPostRecvBufferBatch;
+    constexpr static size_t kRecvLimit = ReliableConnection::kRecvLimit;
 
 public:
     ReliableRecvMessageConnection(std::vector<std::vector<ibv_qp *>> &QPs,

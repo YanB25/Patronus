@@ -115,29 +115,29 @@ size_t ReliableRecvMessageConnection::try_recv(size_t mid,
                                                size_t msg_limit)
 {
     DCHECK(inited_);
-    constexpr static size_t kMaxPollNr = 64;
-    msg_limit = std::min(msg_limit, kMaxPollNr);
+    msg_limit = std::min(msg_limit, kRecvLimit);
 
-    static thread_local ibv_wc wc[kMaxPollNr];
+    static thread_local ibv_wc wc[kRecvLimit];
 
     size_t actually_polled = ibv_poll_cq(recv_cqs_[mid], msg_limit, wc);
-    if (actually_polled < 0)
+    if (unlikely(actually_polled < 0))
     {
         PLOG(ERROR) << "failed to ibv_poll_cq";
         return 0;
     }
-    // TODO: for now, we always + kMessageSize. Could we just + message actual
-    // size?
+
     for (size_t i = 0; i < actually_polled; ++i)
     {
         handle_wc(ibuf + i * kMessageSize, wc[i]);
     }
+    // LOG_IF(WARNING, actually_polled == kRecvLimit)
+    //     << "[rmsg] server seems to be heavy working. mid " << mid;
     return actually_polled;
 }
 
 void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
 {
-    if (wc.status != IBV_WC_SUCCESS)
+    if (unlikely(wc.status != IBV_WC_SUCCESS))
     {
         LOG(ERROR) << "[rmsg] Failed to handle wc: " << WRID(wc.wr_id)
                    << ", status: " << wc.status;
@@ -153,7 +153,7 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
         1, std::memory_order_relaxed);
     auto actual_size = wc.imm_data;
 
-    if (ibuf)
+    if (likely(ibuf != nullptr))
     {
         char *buf = (char *) msg_pool_ +
                     get_msg_pool_idx(mid, node_id, cur_idx % kRecvBuffer) *
@@ -171,7 +171,7 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
                  << cur_idx;
     }
 
-    if ((cur_idx + 1) % kPostRecvBufferBatch == 0)
+    if (unlikely((cur_idx + 1) % kPostRecvBufferBatch == 0))
     {
         size_t post_buf_idx =
             (cur_idx + 1 % kRecvBuffer) +

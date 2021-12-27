@@ -80,7 +80,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                 send_msg->mid = mid;
 
                 size_t sent = 0;
-                char buffer[ReliableConnection::kMessageSize * 64];
+                char buffer[ReliableConnection::kMessageSize * ReliableConnection::kRecvLimit];
                 int64_t token = kTokenNr;
                 for (size_t t = 0; t < kBurnCnt; ++t)
                 {
@@ -96,7 +96,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                         do
                         {
                             size_t recv_nr =
-                                dsm->reliable_try_recv(mid, buffer, 64);
+                                dsm->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
                             // handle possbile recv token
                             for (size_t r = 0; r < recv_nr; ++r)
                             {
@@ -154,13 +154,13 @@ void server_burn(std::shared_ptr<DSM> dsm,
 
                 CHECK_NE(mid, 0);
 
-                char buffer[ReliableConnection::kMessageSize * 64];
+                char buffer[ReliableConnection::kMessageSize * ReliableConnection::kRecvLimit];
                 auto *rdma_buf = dsm->get_rdma_buffer();
                 memset(rdma_buf, 0, sizeof(BenchMsg));
                 size_t recv_msg_nr = 0;
                 while (!finished.load(std::memory_order_relaxed))
                 {
-                    auto get = dsm->reliable_try_recv(mid, buffer, 64);
+                    auto get = dsm->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
                     gots[mid].fetch_add(get, std::memory_order_relaxed);
                     recv_msg_nr += get;
                     constexpr size_t credit_for_token =

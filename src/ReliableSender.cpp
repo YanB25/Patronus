@@ -28,9 +28,9 @@ void ReliableSendMessageConnection::send(size_t threadID,
     msg_send_index_++;
     bool signal = false;
 
-    if (msg_send_index_ % kSendBatch == 0)
+    if (unlikely(msg_send_index_ % kSendBatch == 0))
     {
-        if (thread_second_)
+        if (likely(thread_second_))
         {
             DVLOG(3) << "[rmsg] Thread " << threadID << " triggers one poll"
                      << ", current targetID " << targetID;
@@ -62,13 +62,13 @@ void ReliableSendMessageConnection::poll_cq(size_t mid)
     thread_local static ibv_wc wc[64];
 
     size_t polled = ibv_poll_cq(send_cqs_[mid], 64, wc);
-    if (polled < 0)
+    if (unlikely(polled < 0))
     {
         PLOG(ERROR) << "Failed to poll cq.";
     }
     for (size_t i = 0; i < polled; ++i)
     {
-        if (wc[i].status != IBV_WC_SUCCESS)
+        if (unlikely(wc[i].status != IBV_WC_SUCCESS))
         {
             LOG(ERROR) << "[rmsg] sender wc failed. " << WRID(wc[i].wr_id);
         }
