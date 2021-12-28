@@ -4,17 +4,16 @@
 
 #include "DSM.h"
 #include "Result.h"
-#include "patronus/Type.h"
 #include "patronus/Lease.h"
+#include "patronus/Type.h"
 
 namespace patronus
 {
 class Patronus;
 
-
 struct RpcContext
 {
-    Lease* lease;
+    Lease *lease;
     std::atomic<bool> ready{false};
 };
 
@@ -54,15 +53,15 @@ public:
     Lease extend(const Lease &rlease, CoroContext *ctx = nullptr);
     Lease relinquish(const Lease &rlease, CoroContext *ctx = nullptr);
     void read(const Lease &,
-                char *obuf,
-                size_t size,
-                size_t offset,
-                CoroContext *ctx = nullptr);
+              char *obuf,
+              size_t size,
+              size_t offset,
+              CoroContext *ctx = nullptr);
     void write(const Lease &,
-                 const char *ibuf,
-                 size_t size,
-                 size_t offset,
-                 CoroContext *ctx = nullptr);
+               const char *ibuf,
+               size_t size,
+               size_t offset,
+               CoroContext *ctx = nullptr);
 
     void registerThread()
     {
@@ -80,6 +79,8 @@ public:
         return dsm_->get_thread_id();
     }
 
+    void handle_messages(const char *msg_buf, size_t msg_nr, size_t dirID);
+
 private:
     char *get_rdma_buffer()
     {
@@ -89,18 +90,20 @@ private:
     {
         rdma_buffers_->put(buf);
     }
-    RpcContext* get_rpc_context()
+    RpcContext *get_rpc_context()
     {
         return rpc_context_.get();
     }
-    void put_rpc_context(RpcContext* ctx)
+    void put_rpc_context(RpcContext *ctx)
     {
         rpc_context_.put(ctx);
     }
-    uint16_t get_context_id(RpcContext* ctx)
+    uint16_t get_context_id(RpcContext *ctx)
     {
         return rpc_context_.obj_to_id(ctx);
     }
+
+    void handle_acquire(AcquireRequest *, size_t dirID);
 
     DSM::pointer dsm_;
 

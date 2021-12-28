@@ -2,8 +2,7 @@
 
 namespace patronus
 {
-thread_local std::unique_ptr<
-    ThreadUnsafeBufferPool<Patronus::kMessageSize>>
+thread_local std::unique_ptr<ThreadUnsafeBufferPool<Patronus::kMessageSize>>
     Patronus::rdma_buffers_;
 thread_local ThreadUnsafePool<RpcContext, Patronus::kMaxCoroNr>
     Patronus::rpc_context_;
@@ -79,6 +78,68 @@ void Patronus::read(const Lease &lease,
                     true,
                     ctx,
                     ctx ? ctx->coro_id : 0);
+}
+
+void Patronus::handle_messages(const char *msg_buf, size_t msg_nr, size_t dirID)
+{
+    for (size_t i = 0; i < msg_nr; ++i)
+    {
+        auto *base = (BaseRequest *) (msg_buf + i * kMessageSize);
+        auto request_type = base->type;
+        switch (request_type)
+        {
+        case RequestType::kAcquire:
+        {
+            VLOG(2) << "[patronus] handling kAcquire";
+            auto *msg = (AcquireRequest *) base;
+            handle_acquire(msg, dirID);
+            break;
+        }
+        case RequestType::kUpgrade:
+        {
+            VLOG(2) << "[patronus] handling kUpgrade";
+            break;
+        }
+        case RequestType::kExtend:
+        {
+            VLOG(2) << "[patronus] handling kExtend";
+            break;
+        }
+        case RequestType::kRelinquish:
+        {
+            VLOG(2) << "[patronus] handling kRelinquish";
+            break;
+        }
+        default:
+        {
+            LOG(FATAL) << "Unknown request type " << (int) request_type
+                       << ". Possible corrupted message";
+        }
+        }
+    }
+}
+
+void Patronus::handle_acquire(AcquireRequest *req, size_t dirID)
+{
+    auto *mw = dsm_->alloc_mw(dirID);
+    auto internal = dsm_->get_server_internal_buffer();
+    // TODO(patronus): use coroutine here.
+    // TODO(patronus): use pre-allocated mw here.
+    dsm_->bind_memory_region_sync(mw,
+                                  req->cid.node_id,
+                                  req->cid.thread_id,
+                                  internal.buffer,
+                                  4 * 1024,
+                                  dirID);
+
+    auto *resp_buf = get_rdma_buffer();
+    auto *resp_msg = (AcquireResponse *) resp_buf;
+    resp_msg->type = req->type;
+    resp_msg->rkey_0 = mw->rkey;
+    dsm_->reliable_send(
+        (char*) resp_msg, sizeof(AcquireResponse), req->cid.node_id, dirID);
+
+    put_rdma_buffer(resp_buf);
 }
 
 }  // namespace patronus
