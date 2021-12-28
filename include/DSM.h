@@ -27,6 +27,7 @@ struct Identify
 class DSM : public std::enable_shared_from_this<DSM>
 {
 public:
+    using pointer = std::shared_ptr<DSM>;
     using WcErrHandler = WcErrHandler;
 
     void registerThread();
@@ -80,7 +81,6 @@ public:
     // RDMA operations
     // buffer is registered memory
 
-    // TODO(Bin Yan): finish the rkey_* API for memory windows.
     void rkey_read(uint32_t rkey,
                    char *buffer,
                    GlobalAddress gaddr,
@@ -384,6 +384,8 @@ public:
     {
         return reliable_msg_->try_recv(from_mid, ibuf, limit);
     }
+
+    // below used as lease
 
 private:
     void initRDMAConnection();

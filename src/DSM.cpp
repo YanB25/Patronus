@@ -320,8 +320,8 @@ void DSM::rkey_read(uint32_t rkey,
                  size,
                  iCon->cacheLKey,
                  rkey,
-                 true,
-                 ctx->coro_id);
+                 true /* has to signal for coroutine */ ,
+                 wr_id);
         (*ctx->yield)(*ctx->master);
     }
 }
