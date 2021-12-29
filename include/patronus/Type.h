@@ -34,8 +34,6 @@ struct ClientID
             uint8_t coro_id;
             uint16_t rpc_ctx_id;
             // below two idx is used for internal management
-            // uint8_t lease_idx;
-            // uint8_t buffer_idx;
         } __attribute__((packed));
         uint64_t cid;
     };

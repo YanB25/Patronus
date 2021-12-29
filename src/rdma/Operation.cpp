@@ -568,18 +568,8 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     mw_bind.bind_info.length = mmSize;
     mw_bind.bind_info.mw_access_flags = mw_access_flag;
 
-    // dinfo(
-    //     "[MW] Binding memory window. qp: %p, mm: %p, size: %lu, mr: %p, "
-    //     "mr.lkey: %u, mr.rkey: %u, mr.pd: %p, mr.addr: %p, mr.length: %lu",
-    //     qp,
-    //     (char *) mm,
-    //     mmSize,
-    //     mr,
-    //     mr->lkey,
-    //     mr->rkey,
-    //     mr->pd,
-    //     mr->addr,
-    //     mr->length);
+    // NOTE: can not use ibv_exp_bind_mw. 
+    // libibverbs: Fatal: device doesn't support function.
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     if (ret == EINVAL)
     {
