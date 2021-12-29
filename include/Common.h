@@ -78,11 +78,12 @@ using CoroYield =
 using CoroCall =
     typename boost::coroutines::symmetric_coroutine<void>::call_type;
 
+using coro_t = uint8_t;
 struct CoroContext
 {
     CoroYield *yield;
     CoroCall *master;
-    int coro_id;
+    coro_t coro_id;
 };
 
 namespace define
@@ -235,9 +236,11 @@ inline std::ostream &operator<<(std::ostream &os, WRID wrid)
 #define WRID_PREFIX_EXMETA 1
 #define WRID_PREFIX_RELIABLE_SEND 2
 #define WRID_PREFIX_RELIABLE_RECV 3
+#define WRID_PREFIX_PATRONUS_RW 4
 
-static inline uint64_t djb2_digest(const char *str, size_t size)
+static inline uint64_t djb2_digest(const void *void_str, size_t size)
 {
+    const char *str = (const char *) void_str;
     unsigned long hash = 5381;
     int c;
 
@@ -248,6 +251,18 @@ static inline uint64_t djb2_digest(const char *str, size_t size)
     }
     return hash;
 }
+
+#ifdef NDEBUG
+constexpr bool debug()
+{
+    return false;
+}
+#else
+constexpr bool debug()
+{
+    return true;
+}
+#endif
 
 namespace config
 {
@@ -264,7 +279,7 @@ constexpr static bool kEnableReliableMessage = true;
 constexpr static bool kEnableValidityMutex = false;
 }  // namespace config
 
-#define likely(x)       __builtin_expect((x),1)
-#define unlikely(x)     __builtin_expect((x),0)
+#define likely(x) __builtin_expect((x), 1)
+#define unlikely(x) __builtin_expect((x), 0)
 
 #endif /* __COMMON_H__ */

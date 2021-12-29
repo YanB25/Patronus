@@ -128,9 +128,9 @@ bool DSM::reinitializeDir(size_t dirID)
     {
         auto ex = keeper->updateDirMetadata(*dirCon[dirID], remoteID);
         DVLOG(1) << "[DSM] update dir meta for " << remoteID
-                << ", hash: " << std::hex
-                << djb2_digest((char *) &ex, sizeof(ex))
-                << ", rkey: " << ex.dirTh[dirID].rKey;
+                 << ", hash: " << std::hex
+                 << djb2_digest((char *) &ex, sizeof(ex))
+                 << ", rkey: " << ex.dirTh[dirID].rKey;
         syncMetadataBootstrap(ex, remoteID);
         auto connect_dir_ex = getExchangeMetaBootstrap(remoteID);
 
@@ -163,10 +163,10 @@ bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
         const auto &cur_meta = getExchangeMetaBootstrap(node_id);
 
         DVLOG(1) << "[DSM] reconnecting ThreadConnection[" << i
-                << "]. node_id: " << node_id << ", dirID: " << dirID
-                << ", meta digest: " << std::hex
-                << djb2_digest((char *) &cur_meta, sizeof(cur_meta))
-                << ", rkey: " << cur_meta.dirTh[dirID].rKey;
+                 << "]. node_id: " << node_id << ", dirID: " << dirID
+                 << ", meta digest: " << std::hex
+                 << djb2_digest((char *) &cur_meta, sizeof(cur_meta))
+                 << ", rkey: " << cur_meta.dirTh[dirID].rKey;
 
         keeper->connectThread(*thCon[i], node_id, dirID, cur_meta);
 
@@ -281,11 +281,13 @@ void DSM::initRDMAConnection()
     }
     timer.pin("dirCons " + std::to_string(NR_DIRECTORY));
 
-    reliable_msg_ = std::make_unique<ReliableConnection>(cache.data, cache.size, conf.machineNR);
+    reliable_msg_ = std::make_unique<ReliableConnection>(
+        cache.data, cache.size, conf.machineNR);
     timer.pin("keeper init");
 
     // thCon, dirCon, remoteInfo set up here.
-    keeper = DSMKeeper::newInstance(thCon, dirCon, remoteInfo, *reliable_msg_, conf.machineNR);
+    keeper = DSMKeeper::newInstance(
+        thCon, dirCon, remoteInfo, *reliable_msg_, conf.machineNR);
     timer.pin("keeper init");
 
     myNodeID = keeper->getMyNodeID();
@@ -320,7 +322,7 @@ void DSM::rkey_read(uint32_t rkey,
                  size,
                  iCon->cacheLKey,
                  rkey,
-                 true /* has to signal for coroutine */ ,
+                 true /* has to signal for coroutine */,
                  wr_id);
         (*ctx->yield)(*ctx->master);
     }
@@ -1063,6 +1065,11 @@ void DSM::faa_dm_boundary_sync(GlobalAddress gaddr,
         ibv_wc wc;
         pollWithCQ(iCon->cq, 1, &wc);
     }
+}
+
+size_t DSM::try_poll_rdma_cq(ibv_wc *buf, size_t limit)
+{
+    return ibv_poll_cq(iCon->cq, limit, buf);
 }
 
 uint64_t DSM::poll_rdma_cq(int count)

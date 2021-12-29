@@ -303,6 +303,10 @@ bool rdmaRead(ibv_qp *qp,
     wr.wr.rdma.rkey = remoteRKey;
     wr.wr_id = wrID;
 
+    DVLOG(3) << "[READ] remote_addr: " << (void *) dest << ", size " << size
+             << ", rkey: " << remoteRKey << ", QPN: " << qp->qp_num
+             << ", signal: " << signal << ", wr_id: " << WRID(wrID);
+
     if (ibv_post_send(qp, &wr, &wrBad))
     {
         LOG(ERROR) << "Send with RDMA_READ failed.";
@@ -568,7 +572,7 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     mw_bind.bind_info.length = mmSize;
     mw_bind.bind_info.mw_access_flags = mw_access_flag;
 
-    // NOTE: can not use ibv_exp_bind_mw. 
+    // NOTE: can not use ibv_exp_bind_mw.
     // libibverbs: Fatal: device doesn't support function.
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     if (ret == EINVAL)
@@ -610,6 +614,10 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
         return rdmaAsyncBindMemoryWindow(
             qp, mw, mr, mm, mmSize, signal, wrID, mw_access_flag);
     }
+
+    DVLOG(4) << "[BIND_MW] Binding addr " << (void *) mm << " size " << mmSize
+             << " to rkey " << mw->rkey << ", with QPN: " << qp->qp_num
+             << ", signal: " << signal << ", wr_id: " << WRID(wrID);
 
     return mw->rkey;
 }
@@ -973,14 +981,14 @@ void rdmaQueryDevice()
 
     struct ibv_exp_device_attr exp_attr;
     memset(&exp_attr, 0, sizeof(exp_attr));
-    exp_attr.comp_mask = IBV_EXP_DEVICE_ATTR_ODP |
-                         IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS |
-                         IBV_EXP_DEVICE_ATTR_INLINE_RECV_SZ |
-                         IBV_EXP_DEVICE_ATTR_TUNNELED_ATOMIC |
-                         IBV_EXP_DEVICE_ATTR_TUNNEL_OFFLOADS_CAPS |
-                         // TODO: I can query, but I can not find where's the bit.
-                         IBV_EXP_DEVICE_ATTR_WITH_TIMESTAMP_MASK |
-                         IBV_EXP_DEVICE_ATTR_WITH_HCA_CORE_CLOCK;
+    exp_attr.comp_mask =
+        IBV_EXP_DEVICE_ATTR_ODP | IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS |
+        IBV_EXP_DEVICE_ATTR_INLINE_RECV_SZ |
+        IBV_EXP_DEVICE_ATTR_TUNNELED_ATOMIC |
+        IBV_EXP_DEVICE_ATTR_TUNNEL_OFFLOADS_CAPS |
+        // TODO: I can query, but I can not find where's the bit.
+        IBV_EXP_DEVICE_ATTR_WITH_TIMESTAMP_MASK |
+        IBV_EXP_DEVICE_ATTR_WITH_HCA_CORE_CLOCK;
     // size_t unknow_flag_1 = IBV_EXP_START_FLAG << 8;
     // size_t unknow_flag_2 = IBV_EXP_START_FLAG << 9;
     // size_t unknow_flag_3 = IBV_EXP_START_FLAG << 27;
@@ -994,7 +1002,7 @@ void rdmaQueryDevice()
            exp_attr.tunneled_atomic_caps & IBV_EXP_TUNNELED_ATOMIC_SUPPORTED);
     printf("timestamp_mask: %" PRIu64 "\n", exp_attr.timestamp_mask);
     printf("hca_core_clock: %" PRIu64 "\n", exp_attr.hca_core_clock);
-    // printf("IBV_EXP_FLAGS unknown 1: %d, 2: %d, 3: %d\n", 
+    // printf("IBV_EXP_FLAGS unknown 1: %d, 2: %d, 3: %d\n",
     //     exp_attr.exp_device_cap_flags & )
     printf("======= device attr end ====\n");
 

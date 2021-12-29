@@ -288,6 +288,14 @@ public:
                                  size_t size,
                                  size_t dirID);
 
+    /**
+     * @brief poll rdma cq
+     *
+     * @param buf buffer of at least sizeof(ibv_wc) * @limit length
+     * @param limit
+     * @return size_t the number of wc actually polled
+     */
+    size_t try_poll_rdma_cq(ibv_wc *buf, size_t limit);
     uint64_t poll_rdma_cq(int count = 1);
     bool poll_rdma_cq_once(uint64_t &wr_id);
     int poll_dir_cq(size_t dirID, size_t count);
@@ -372,15 +380,18 @@ public:
         cur_dir_ = dir;
     }
 
-    void reliable_send(const char *buf, size_t size, uint16_t node_id, size_t targetID)
+    void reliable_send(const char *buf,
+                       size_t size,
+                       uint16_t node_id,
+                       size_t targetID)
     {
         reliable_msg_->send(thread_id, buf, size, node_id, targetID);
     }
-    void reliable_recv(size_t from_mid, char* ibuf, size_t limit=1)
+    void reliable_recv(size_t from_mid, char *ibuf, size_t limit = 1)
     {
         reliable_msg_->recv(from_mid, ibuf, limit);
     }
-    size_t reliable_try_recv(size_t from_mid, char* ibuf, size_t limit=1)
+    size_t reliable_try_recv(size_t from_mid, char *ibuf, size_t limit = 1)
     {
         return reliable_msg_->try_recv(from_mid, ibuf, limit);
     }
@@ -446,7 +457,7 @@ public:
         return rdma_buffer;
     }
     Buffer get_server_internal_buffer();
-    RdmaBuffer &get_rbuf(int coro_id)
+    RdmaBuffer &get_rbuf(coro_t coro_id)
     {
         DCHECK(coro_id < define::kMaxCoro)
             << "coro_id should be < define::kMaxCoro";

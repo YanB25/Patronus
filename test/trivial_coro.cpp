@@ -16,11 +16,11 @@ constexpr static size_t kCoroCnt = 8;
 thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
 
-void do_worker(std::shared_ptr<DSM> dsm, CoroYield &yield, size_t coro_id)
+void do_worker(std::shared_ptr<DSM> dsm, CoroYield &yield, coro_t coro_id)
 {
     auto tid = dsm->get_thread_id();
     LOG(INFO) << "Enter do_worker. My work finished. I am tid " << tid
-              << ", coro_id " << coro_id;
+              << ", coro_id " << (int) coro_id;
     yield(master);
 }
 

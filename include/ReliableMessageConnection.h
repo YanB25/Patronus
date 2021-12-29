@@ -32,6 +32,7 @@ public:
     constexpr static size_t kSenderBatchSize = 32;
     // so that, server can get maximum messages by ONE poll.
     constexpr static size_t kRecvLimit = kPostRecvBufferBatch;
+    constexpr static size_t kMaxRecvBuffer = kMessageSize * kRecvLimit;
 
     using DebugMutex = ValidityMutex<config::kEnableValidityMutex>;
 

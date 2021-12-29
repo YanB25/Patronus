@@ -15,14 +15,14 @@ constexpr uint32_t kMachineNr = 2;
 
 using namespace patronus;
 
-void client(std::unique_ptr<Patronus> p)
+void client(Patronus::pointer p)
 {
-    auto tid = p->thread_id();
+    auto tid = p->get_thread_id();
     LOG(INFO) << "I am client. tid " << tid;
 }
-void server(std::unique_ptr<Patronus> p)
+void server(Patronus::pointer p)
 {
-    auto tid = p->thread_id();
+    auto tid = p->get_thread_id();
     LOG(INFO) << "I am server. tid " << tid;
 }
 
@@ -46,14 +46,14 @@ int main(int argc, char* argv[])
     patronus->registerThread();
 
     // let client spining
-    auto nid = patronus->node_id();
+    auto nid = patronus->get_node_id();
     if (nid == kClientNodeId)
     {
-        client(std::move(patronus));
+        client(patronus);
     }
     else
     {
-        server(std::move(patronus));
+        server(patronus);
     }
 
     LOG(INFO) << "finished. ctrl+C to quit.";

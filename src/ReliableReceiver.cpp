@@ -37,7 +37,7 @@ void ReliableRecvMessageConnection::fills(ibv_sge &sge,
     wr.num_sge = 1;
     if ((batch_id + 1) % kPostRecvBufferBatch == 0)
     {
-        DVLOG(3) << "[rmsg-recv] recvs[" << multiplexing_id << "][" << node_id
+        DVLOG(5) << "[rmsg-recv] recvs[" << multiplexing_id << "][" << node_id
                  << "][" << batch_id << "] set next to "
                  << "nullptr. Current k " << batch_id << " @"
                  << (void *) sge.addr;
@@ -45,7 +45,7 @@ void ReliableRecvMessageConnection::fills(ibv_sge &sge,
     }
     else
     {
-        DVLOG(3) << "[rmesg-recv] recvs[" << multiplexing_id << "][" << node_id
+        DVLOG(5) << "[rmesg-recv] recvs[" << multiplexing_id << "][" << node_id
                  << "][" << batch_id << "] set next to "
                  << "recvs[" << multiplexing_id << "][" << node_id << "]["
                  << batch_id + 1 << "]. Current k " << batch_id << " @"

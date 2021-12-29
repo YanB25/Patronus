@@ -17,7 +17,7 @@ public:
         for (size_t i = 0; i < buffer_nr_; ++i)
         {
             void *addr = (char *) pool_addr_ + i * kBufferSize;
-            validity_check(addr);
+            debug_validity_check(addr);
             pool_.push(addr);
         }
     }
@@ -27,46 +27,52 @@ public:
         {
             return nullptr;
         }
-        void *ret = pool_.back();
-        validity_check(ret);
+        void *ret = pool_.front();
+        debug_validity_check(ret);
         pool_.pop();
         return ret;
     }
     void put(void *buf)
     {
-        validity_check(buf);
+        debug_validity_check(buf);
         pool_.push(buf);
     }
 
     uint64_t buf_to_id(void *buf)
     {
-        validity_check(buf);
-        auto idx = (buf - pool_addr_) / kBufferSize;
+        debug_validity_check(buf);
+        auto idx = ((uint64_t) buf - (uint64_t) pool_addr_) / kBufferSize;
         return idx;
     }
     void *id_to_buf(uint64_t id)
     {
         void *ret = (char *) pool_addr_ + kBufferSize * id;
-        validity_check(ret);
+        debug_validity_check(ret);
         return ret;
     }
 
-private:
-    void validity_check(void *buf)
+    void debug_validity_check(const void *buf)
     {
-        DCHECK_NOTNULL(buf);
-        DCHECK_GE(buf, pool_addr_)
-            << "The buf at " << (void *) buf
-            << " does not start from pool start addr " << (void *) pool_addr_;
-        DCHECK_EQ(((char *) buf - (char *) pool_addr_) % kBufferSize, 0)
-            << "The buf at " << (void *) buf
-            << " does not aligned with buffer size " << kBufferSize;
-        [[maybe_unused]] size_t idx =
-            ((char *) buf - (char *) pool_addr_) / kBufferSize;
-        DCHECK_LT(idx, buffer_nr_)
-            << "The buf at " << (void *) buf << " overflow buffer length "
-            << buffer_nr_ << ". idx: " << idx;
+        if constexpr (debug())
+        {
+            DCHECK_NOTNULL(buf);
+            [[maybe_unused]] ssize_t diff =
+                (uint64_t) buf - (uint64_t) pool_addr_;
+            [[maybe_unused]] size_t idx = diff / kBufferSize;
+            DCHECK_GE(buf, pool_addr_)
+                << "The buf at " << (void *) buf
+                << " does not start from pool start addr "
+                << (void *) pool_addr_;
+            DCHECK_EQ(diff % kBufferSize, 0)
+                << "The buf at " << (void *) buf
+                << " does not aligned with buffer size " << kBufferSize;
+            DCHECK_LT(idx, buffer_nr_)
+                << "The buf at " << (void *) buf << " overflow buffer length "
+                << buffer_nr_ << ". idx: " << idx;
+        }
     }
+
+private:
     void *pool_addr_{nullptr};
     size_t pool_length_{0};
     size_t buffer_nr_{0};
@@ -81,7 +87,7 @@ public:
     {
         for (size_t i = 0; i < kSize; ++i)
         {
-            validity_check(&buffer_[i]);
+            debug_validity_check(&buffer_[i]);
             pool_.push(&buffer_[i]);
         }
     }
@@ -94,43 +100,47 @@ public:
         }
         T *ret = pool_.front();
         pool_.pop();
-        validity_check(ret);
+        debug_validity_check(ret);
         return ret;
     }
     void put(T *obj)
     {
-        validity_check(obj);
+        debug_validity_check(obj);
         pool_.push(obj);
     }
     uint64_t obj_to_id(T *obj)
     {
-        validity_check(obj);
-        auto idx = (obj - buffer_) / sizeof(T);
+        debug_validity_check(obj);
+        auto idx = obj - buffer_;
         return idx;
     }
     T *id_to_obj(uint64_t id)
     {
-        T *ret = buffer_ + sizeof(T) * id;
-        validity_check(ret);
+        T *ret = buffer_ + id;
+        debug_validity_check(ret);
         return ret;
     }
 
-private:
-    void validity_check(T *obj)
+    void debug_validity_check(const T *obj)
     {
-        DCHECK_NOTNULL(obj);
-        [[maybe_unused]] size_t idx = (obj - buffer_) / sizeof(T);
-        DCHECK_EQ((obj - buffer_) % sizeof(T), 0)
-            << "The obj at " << (void *) obj
-            << " does not align to pool start addr " << (void *) buffer_;
-        DCHECK_GE(obj, buffer_)
-            << "The obj at " << (void *) obj
-            << " does not start from pool start addr " << (void *) buffer_;
-        DCHECK_LT(idx, kSize)
-            << "The obj at " << (void *) obj << " overflow from buffer. idx "
-            << idx << " greater than " << kSize;
+        if constexpr (debug())
+        {
+            DCHECK_NOTNULL(obj);
+            [[maybe_unused]] ssize_t diff = (uint64_t) obj - (uint64_t) buffer_;
+            [[maybe_unused]] size_t idx = diff / sizeof(T);
+            DCHECK_EQ(diff % sizeof(T), 0)
+                << "The obj at " << (void *) obj
+                << " does not align to pool start addr " << (void *) buffer_;
+            DCHECK_GE(obj, buffer_)
+                << "The obj at " << (void *) obj
+                << " does not start from pool start addr " << (void *) buffer_;
+            DCHECK_LT(idx, kSize) << "The obj at " << (void *) obj
+                                  << " overflow from buffer. idx " << idx
+                                  << " greater than " << kSize;
+        }
     }
 
+private:
     std::queue<T *> pool_;
     T buffer_[kSize];
 };

@@ -18,11 +18,11 @@ thread_local CoroCall master;
 
 constexpr static size_t kMsgNr = 1 * define::K;
 
-void do_worker(std::shared_ptr<DSM> dsm, CoroYield &yield, size_t coro_id)
+void do_worker(std::shared_ptr<DSM> dsm, CoroYield &yield, coro_t coro_id)
 {
     auto tid = dsm->get_thread_id();
     LOG(INFO) << "Enter do_worker. My work finished. I am tid " << tid
-              << ", coro_id " << coro_id;
+              << ", coro_id " << (int) coro_id;
     yield(master);
 }
 
@@ -48,7 +48,7 @@ struct CID
             uint16_t node_id;
             uint16_t thread_id;
             uint8_t mid;
-            uint8_t coro_id;
+            coro_t coro_id;
         } __attribute__((packed));
         uint64_t cid;
     };
@@ -64,7 +64,7 @@ size_t send_nr = 0;
 bool client_finish = false;
 
 void client_worker(std::shared_ptr<DSM> dsm,
-                   size_t coro_id,
+                   coro_t coro_id,
                    CoroYield &yield,
                    std::queue<void *> &messages)
 {
@@ -88,7 +88,7 @@ void client_worker(std::shared_ptr<DSM> dsm,
     for (size_t i = 0; i < kMsgNr; ++i)
     {
         VLOG(2) << "[bench] client tid " << tid << " mid " << mid << " coro "
-                << coro_id << " sending val " << send_msg->val;
+                << (int) coro_id << " sending val " << send_msg->val;
 
         dsm->reliable_send(
             (char *) send_msg, sizeof(EchoMessage), kServerNodeId, tid);
