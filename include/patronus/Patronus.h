@@ -8,6 +8,8 @@
 #include "patronus/Type.h"
 #include "util/Debug.h"
 
+#include <unordered_set>
+
 namespace patronus
 {
 class Patronus;
@@ -107,6 +109,10 @@ public:
             {
                 auto *mw = CHECK_NOTNULL(dsm_->alloc_mw(dirID));
                 mw_pool_[dirID].push(mw);
+                {
+                    std::lock_guard<std::mutex> lk(allocated_mws_mu_);
+                    allocated_mws_.insert(mw);
+                }
             }
         }
     }
@@ -226,6 +232,7 @@ public:
     {
         return should_exit_.load(std::memory_order_relaxed);
     }
+    ~Patronus();
 
 private:
     ibv_mw *get_mw(size_t dirID)
@@ -281,6 +288,8 @@ private:
     // owned by server threads
     // [NR_DIRECTORY]
     static thread_local std::queue<ibv_mw *> mw_pool_[NR_DIRECTORY];
+    std::unordered_set<ibv_mw *> allocated_mws_;
+    std::mutex allocated_mws_mu_;
 
     // for admin management
     std::array<std::atomic<bool>, MAX_MACHINE> exits_;

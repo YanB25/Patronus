@@ -25,6 +25,13 @@ Patronus::Patronus(const DSMConfig &conf)
 {
     dsm_ = DSM::getInstance(conf);
 }
+Patronus::~Patronus()
+{
+    for (ibv_mw* mw: allocated_mws_)
+    {
+        dsm_->free_mw(mw);
+    }
+}
 
 Lease Patronus::get_rlease(uint16_t node_id,
                            uint16_t dir_id,
@@ -212,7 +219,7 @@ void Patronus::handle_request_messages(const char *msg_buf,
         case RequestType::kAdmin:
         {
             auto *msg = (AdminRequest *) base;
-            DVLOG(4) << "[patronus] handling admin request " << *msg << *ctx;
+            DVLOG(4) << "[patronus] handling admin request " << *msg << " " << *ctx;
             handle_admin(msg, ctx);
             break;
         }
