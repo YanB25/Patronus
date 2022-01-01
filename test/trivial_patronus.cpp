@@ -43,16 +43,17 @@ int main(int argc, char* argv[])
 
     sleep(1);
 
-    patronus->registerThread();
 
     // let client spining
     auto nid = patronus->get_node_id();
     if (nid == kClientNodeId)
     {
+        patronus->registerClientThread();
         client(patronus);
     }
     else
     {
+        patronus->registerServerThread();
         server(patronus);
     }
 

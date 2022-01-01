@@ -79,12 +79,31 @@ using CoroCall =
     typename boost::coroutines::symmetric_coroutine<void>::call_type;
 
 using coro_t = uint8_t;
+static constexpr coro_t kMasterCoro = coro_t(-1);
+
 struct CoroContext
 {
     CoroYield *yield;
     CoroCall *master;
     coro_t coro_id;
+    void yield_to_master() const
+    {
+        (*yield)(*master);
+    }
 };
+
+inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
+{
+    if (ctx.coro_id == kMasterCoro)
+    {
+        os << "{Coro Master}";
+    }
+    else
+    {
+        os << "{Coro " << (int) ctx.coro_id << "}";
+    }
+    return os;
+}
 
 namespace define
 {
@@ -237,6 +256,7 @@ inline std::ostream &operator<<(std::ostream &os, WRID wrid)
 #define WRID_PREFIX_RELIABLE_SEND 2
 #define WRID_PREFIX_RELIABLE_RECV 3
 #define WRID_PREFIX_PATRONUS_RW 4
+#define WRID_PREFIX_PATRONUS_BIND_MW 5
 
 static inline uint64_t djb2_digest(const void *void_str, size_t size)
 {

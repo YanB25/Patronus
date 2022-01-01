@@ -1081,6 +1081,11 @@ uint64_t DSM::poll_rdma_cq(int count)
     return wc.wr_id;
 }
 
+size_t DSM::try_poll_dir_cq(ibv_wc *wcs, size_t dirID, size_t limit)
+{
+    return ibv_poll_cq(dirCon[dirID]->cq, limit, wcs);
+}
+
 int DSM::poll_dir_cq(size_t dirID, size_t count)
 {
     ibv_wc wc;
@@ -1133,21 +1138,38 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   size_t target_thread_id,
                                   const char *buffer,
                                   size_t size,
-                                  size_t dirID)
+                                  size_t dirID,
+                                  CoroContext *ctx)
 {
+    coro_t coro_id = ctx ? ctx->coro_id : 0;
+
     struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
-    uint32_t rkey = rdmaAsyncBindMemoryWindow(
-        qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, true);
+    uint32_t rkey =
+        rdmaAsyncBindMemoryWindow(qp,
+                                  mw,
+                                  dirCon[dirID]->dsmMR,
+                                  (uint64_t) buffer,
+                                  size,
+                                  true,
+                                  WRID(WRID_PREFIX_PATRONUS_BIND_MW, coro_id).val);
     if (rkey == 0)
     {
         return false;
     }
-    struct ibv_wc wc;
-    int ret = pollWithCQ(dirCon[dirID]->cq, 1, &wc) == 1;
-    if (ret < 0)
+    if (unlikely(ctx == nullptr))
     {
-        rdmaQueryQueuePair(qp);
-        return false;
+        struct ibv_wc wc;
+        int ret = pollWithCQ(dirCon[dirID]->cq, 1, &wc) == 1;
+        if (ret < 0)
+        {
+            rdmaQueryQueuePair(qp);
+            return false;
+        }
+        return true;
+    }
+    else
+    {
+        ctx->yield_to_master();
     }
     return true;
 }

@@ -15,10 +15,11 @@
 #include <cstring>
 #include <functional>
 #include <list>
-#include <string>
 #include <optional>
+#include <string>
 
 #include "Common.h"
+#include <glog/logging.h>
 
 #define MAX_POST_LIST 32
 #define DCT_ACCESS_KEY 3185
@@ -57,7 +58,7 @@ struct RdmaContext
 
     ibv_exp_dm *dm{nullptr};
 
-    ibv_exp_res_domain* res_doms[MAX_APP_THREAD] = {};
+    ibv_exp_res_domain *res_doms[MAX_APP_THREAD] = {};
 
     // default to use type 1, because it is always supported
     // will query and change to TYPE_2 if supported.
@@ -99,15 +100,18 @@ struct Region
 };
 
 //// Resource.cpp
-bool createContext(RdmaContext *context,
-                   uint8_t port = 1,
-                   int gidIndex = 1,
-                   uint8_t devIndex = 0,
-                   std::optional<ibv_exp_thread_model> thread_model = std::nullopt,
-                   std::optional<ibv_exp_msg_model> msg_model = std::nullopt);
+bool createContext(
+    RdmaContext *context,
+    uint8_t port = 1,
+    int gidIndex = 1,
+    uint8_t devIndex = 0,
+    std::optional<ibv_exp_thread_model> thread_model = std::nullopt,
+    std::optional<ibv_exp_msg_model> msg_model = std::nullopt);
 bool destroyContext(RdmaContext *context);
 
-ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, const RdmaContext *ctx);
+ibv_mr *createMemoryRegion(uint64_t mm,
+                           uint64_t mmSize,
+                           const RdmaContext *ctx);
 bool destroyMemoryRegion(ibv_mr *mr);
 ibv_mr *createMemoryRegionOnChip(uint64_t mm,
                                  uint64_t mmSize,
@@ -120,7 +124,7 @@ bool createQueuePair(ibv_qp **qp,
                      RdmaContext *context,
                      uint32_t qpsMaxDepth,
                      uint32_t maxInlineData,
-                     ibv_exp_res_domain* res_dom);
+                     ibv_exp_res_domain *res_dom);
 
 bool createQueuePair(ibv_qp **qp,
                      ibv_qp_type mode,
@@ -129,7 +133,7 @@ bool createQueuePair(ibv_qp **qp,
                      RdmaContext *context,
                      uint32_t qpsMaxDepth,
                      uint32_t maxInlineData,
-                     ibv_exp_res_domain* res_dom);
+                     ibv_exp_res_domain *res_dom);
 bool createQueuePair(ibv_qp **qp,
                      ibv_qp_type mode,
                      ibv_cq *send_cq,
@@ -138,7 +142,7 @@ bool createQueuePair(ibv_qp **qp,
                      size_t max_send_wr,
                      size_t max_recv_wr,
                      uint32_t maxInlineData,
-                     ibv_exp_res_domain* res_dom);
+                     ibv_exp_res_domain *res_dom);
 bool destroyQueuePair(ibv_qp *qp);
 
 bool createDCTarget(ibv_exp_dct **dct,
@@ -175,7 +179,9 @@ bool modifyDCtoRTS(struct ibv_qp *qp,
                    uint8_t *remoteGid,
                    RdmaContext *context);
 
-ibv_cq* createCompleteQueue(RdmaContext *context, int cqe, ibv_exp_res_domain*);
+ibv_cq *createCompleteQueue(RdmaContext *context,
+                            int cqe,
+                            ibv_exp_res_domain *);
 bool destroyCompleteQueue(ibv_cq *cq);
 
 //// Operation.cpp
@@ -183,6 +189,16 @@ using WcHandler = std::function<void(ibv_wc *)>;
 using WcErrHandler = WcHandler;
 static WcErrHandler empty_wc_err_handler = [](ibv_wc *) {};
 static WcHandler empty_wc_handler = [](ibv_wc *) {};
+static WcHandler log_wc_handler = [](ibv_wc *wc)
+{
+    if (unlikely(wc->status != IBV_WC_SUCCESS))
+    {
+        LOG(ERROR) << "[wc] Failed status " << ibv_wc_status_str(wc->status)
+                   << " (" << wc->status << ") for wr_id " << WRID(wc->wr_id)
+                   << " at QP: " << wc->qp_num
+                   << ". vendor err: " << wc->vendor_err;
+    }
+};
 /**
  * @brief block and poll the CQ until the specified number
  * @param cq the CQ to polled with

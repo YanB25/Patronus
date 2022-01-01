@@ -6,10 +6,12 @@ namespace patronus
 {
 thread_local std::unique_ptr<ThreadUnsafeBufferPool<Patronus::kMessageSize>>
     Patronus::rdma_message_buffer_pool_;
-thread_local std::unique_ptr<ThreadUnsafeBufferPool<Patronus::kClientRdmaBufferSize>>
+thread_local std::unique_ptr<
+    ThreadUnsafeBufferPool<Patronus::kClientRdmaBufferSize>>
     Patronus::rdma_client_buffer_;
 thread_local ThreadUnsafePool<RpcContext, Patronus::kMaxCoroNr>
     Patronus::rpc_context_;
+thread_local std::queue<ibv_mw *> Patronus::mw_pool_[NR_DIRECTORY];
 
 template <typename T>
 using PResult = Patronus::PResult<T>;
@@ -33,7 +35,7 @@ Lease Patronus::get_rlease(uint16_t node_id,
     auto *rpc_context = get_rpc_context();
     uint16_t rpc_ctx_id = get_context_id(rpc_context);
     DVLOG(3) << "[debug] allocating rpc_context " << (void *) rpc_context
-            << " at id " << rpc_ctx_id;
+             << " at id " << rpc_ctx_id;
 
     Lease ret_lease;
     ret_lease.node_id_ = node_id;
@@ -158,7 +160,9 @@ void Patronus::handle_response_messages(const char *msg_buf, size_t msg_nr)
     }
 }
 
-void Patronus::handle_request_messages(const char *msg_buf, size_t msg_nr)
+void Patronus::handle_request_messages(const char *msg_buf,
+                                       size_t msg_nr,
+                                       CoroContext *ctx)
 {
     for (size_t i = 0; i < msg_nr; ++i)
     {
@@ -171,7 +175,7 @@ void Patronus::handle_request_messages(const char *msg_buf, size_t msg_nr)
         {
             auto *msg = (AcquireRequest *) base;
             DVLOG(4) << "[patronus] handling acquire request " << *msg;
-            handle_request_acquire(msg);
+            handle_request_acquire(msg, ctx);
             break;
         }
         case RequestType::kUpgrade:
@@ -244,10 +248,11 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     rpc_context->ready.store(true, std::memory_order_release);
 }
 
-void Patronus::handle_request_acquire(AcquireRequest *req)
+void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 {
     auto dirID = req->dir_id;
-    auto *mw = dsm_->alloc_mw(dirID);
+    // TODO(patronus): when to put_mw ?
+    auto *mw = get_mw(dirID);
     auto internal = dsm_->get_server_internal_buffer();
     if constexpr (debug())
     {
@@ -255,8 +260,6 @@ void Patronus::handle_request_acquire(AcquireRequest *req)
         req->digest = 0;
         DCHECK_EQ(digest, djb2_digest(req, sizeof(AcquireRequest)));
     }
-    // TODO(patronus): use coroutine here.
-    // TODO(patronus): use pre-allocated mw here.
     CHECK_LT(req->size, internal.size);
     DVLOG(4) << "Trying to bind with dirID " << dirID
              << ", internal_buf: " << (void *) internal.buffer << ", size "
@@ -268,7 +271,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req)
                                   req->cid.thread_id,
                                   internal.buffer + req->key,
                                   req->size,
-                                  dirID);
+                                  dirID,
+                                  ctx);
 
     auto *resp_buf = get_rdma_message_buffer();
     auto *resp_msg = (AcquireResponse *) resp_buf;

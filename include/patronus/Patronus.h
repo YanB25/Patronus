@@ -23,18 +23,16 @@ class Patronus
 {
 public:
     constexpr static size_t kMaxCoroNr = 8;
-    constexpr static size_t kMaxLeasePerCoro = 8;
     using pointer = std::shared_ptr<Patronus>;
     template <typename T>
     using PResult = Result<T, Void>;
 
-    constexpr static size_t kReserveMessageNr =
-        ReliableConnection::kPostRecvBufferBatch;
-    constexpr static size_t kReserveBufferSize =
-        kReserveMessageNr * ReliableConnection::kMessageSize;
-
     constexpr static size_t kMessageSize = ReliableConnection::kMessageSize;
     constexpr static size_t kClientRdmaBufferSize = 1 * define::MB;
+
+    // TODO(patronus): try to tune this parameter up.
+    constexpr static size_t kTotalMwPoolSize = 1 * define::M;
+
     static pointer ins(const DSMConfig &conf)
     {
         return std::make_shared<Patronus>(conf);
@@ -83,7 +81,28 @@ public:
                size_t offset,
                CoroContext *ctx = nullptr);
 
-    void registerThread()
+    void registerServerThread()
+    {
+        // for server, all the buffers are given to rdma_message_buffer_pool_
+        dsm_->registerThread();
+
+        auto *dsm_rdma_buffer = dsm_->get_rdma_buffer();
+        size_t message_pool_size = define::kRDMABufferSize;
+        rdma_message_buffer_pool_ =
+            std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
+                dsm_rdma_buffer, message_pool_size);
+
+        size_t alloc_mw_nr = kTotalMwPoolSize / MAX_APP_THREAD / NR_DIRECTORY;
+        for (size_t dirID = 0; dirID < NR_DIRECTORY; ++dirID)
+        {
+            for (size_t i = 0; i < alloc_mw_nr; ++i)
+            {
+                auto *mw = CHECK_NOTNULL(dsm_->alloc_mw(dirID));
+                mw_pool_[dirID].push(mw);
+            }
+        }
+    }
+    void registerClientThread()
     {
         dsm_->registerThread();
         // - reserve 4MB for message pool. total 65536 messages, far then enough
@@ -118,7 +137,9 @@ public:
         return dsm_->get_thread_id();
     }
 
-    void handle_request_messages(const char *msg_buf, size_t msg_nr);
+    void handle_request_messages(const char *msg_buf,
+                                 size_t msg_nr,
+                                 CoroContext *ctx = nullptr);
     void handle_response_messages(const char *msg_buf, size_t msg_nr);
 
     size_t reliable_try_recv(size_t from_mid, char *ibuf, size_t limit = 1)
@@ -141,22 +162,41 @@ public:
         for (size_t i = 0; i < nr; ++i)
         {
             auto &wc = wc_buffer[i];
-            if (unlikely(wc.status != IBV_WC_SUCCESS))
+            log_wc_handler(&wc);
+            if (unlikely(wc.status == IBV_WC_WR_FLUSH_ERR))
             {
-                LOG(ERROR) << "[wc] Failed status "
-                           << ibv_wc_status_str(wc.status) << " (" << wc.status
-                           << ") for wr_id " << WRID(wc.wr_id)
-                           << " at QP: " << wc.qp_num
-                           << ". vendor err: " << wc.vendor_err;
-                if (wc_buffer[i].status == IBV_WC_WR_FLUSH_ERR)
-                {
-                    LOG(WARNING)
-                        << "[patronus] QP error. skip all the following wrs.";
-                    break;
-                }
+                LOG(WARNING)
+                    << "[patronus] QP error. skip all the following wrs.";
+                break;
             }
+            auto wrid = WRID(wc.wr_id);
+            DCHECK_EQ(wrid.prefix, WRID_PREFIX_PATRONUS_RW);
             // this will be coro_id by design
-            buf[i] = WRID(wc_buffer[i].wr_id).id;
+            buf[i] = wrid.id;
+        }
+        return nr;
+    }
+    size_t try_get_server_finished_coros(coro_t *buf,
+                                         size_t dirID,
+                                         size_t limit)
+    {
+        constexpr static size_t kBufferSize = 16;
+        static thread_local ibv_wc wc_buffer[kBufferSize];
+        auto nr = dsm_->try_poll_dir_cq(wc_buffer, dirID, limit);
+        for (size_t i = 0; i < nr; ++i)
+        {
+            auto &wc = wc_buffer[i];
+            log_wc_handler(&wc);
+            if (unlikely(wc.status == IBV_WC_WR_FLUSH_ERR))
+            {
+                LOG(WARNING)
+                    << "[patronus] QP error. skip all the following wrs.";
+                break;
+            }
+            auto wrid = WRID(wc.wr_id);
+            DCHECK_EQ(wrid.prefix, WRID_PREFIX_PATRONUS_BIND_MW);
+            // this will be coro_id by design
+            buf[i] = wrid.id;
         }
         return nr;
     }
@@ -175,6 +215,16 @@ public:
     }
 
 private:
+    ibv_mw *get_mw(size_t dirID)
+    {
+        auto *ret = mw_pool_[dirID].front();
+        mw_pool_[dirID].pop();
+        return ret;
+    }
+    void put_mw(size_t dirID, ibv_mw *mw)
+    {
+        mw_pool_[dirID].push(mw);
+    }
     char *get_rdma_message_buffer()
     {
         return (char *) rdma_message_buffer_pool_->get();
@@ -200,17 +250,23 @@ private:
         return rpc_context_.obj_to_id(ctx);
     }
 
-    void handle_request_acquire(AcquireRequest *);
+    void handle_request_acquire(AcquireRequest *, CoroContext *ctx);
     void handle_response_acquire(AcquireResponse *);
 
+    // owned by both
     DSM::pointer dsm_;
-
     static thread_local std::unique_ptr<ThreadUnsafeBufferPool<kMessageSize>>
         rdma_message_buffer_pool_;
+
+    // owned by client threads
     static thread_local ThreadUnsafePool<RpcContext, kMaxCoroNr> rpc_context_;
     static thread_local std::unique_ptr<
         ThreadUnsafeBufferPool<kClientRdmaBufferSize>>
         rdma_client_buffer_;
+
+    // owned by server threads
+    // [NR_DIRECTORY]
+    static thread_local std::queue<ibv_mw *> mw_pool_[NR_DIRECTORY];
 };
 }  // namespace patronus
 

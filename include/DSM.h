@@ -286,7 +286,8 @@ public:
                                  size_t target_thread_id,
                                  const char *buffer,
                                  size_t size,
-                                 size_t dirID);
+                                 size_t dirID,
+                                 CoroContext* ctx = nullptr);
 
     /**
      * @brief poll rdma cq
@@ -299,6 +300,7 @@ public:
     uint64_t poll_rdma_cq(int count = 1);
     bool poll_rdma_cq_once(uint64_t &wr_id);
     int poll_dir_cq(size_t dirID, size_t count);
+    size_t try_poll_dir_cq(ibv_wc *buf, size_t dirID, size_t limit);
 
     uint64_t sum(uint64_t value)
     {

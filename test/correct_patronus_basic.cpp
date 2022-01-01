@@ -113,10 +113,128 @@ void client(Patronus::pointer p)
     master = CoroCall([p](CoroYield &yield) { client_master(p, yield); });
     master();
 }
-void server(Patronus::pointer p)
+
+thread_local CoroCall server_workers[kCoroCnt];
+thread_local CoroCall server_master_coro;
+// thread_local bool server_first[kCoroCnt];
+
+struct Task
+{
+    const char *buf{nullptr};
+    size_t msg_nr{0};
+    size_t fetched_nr{0};
+    size_t finished_nr{0};
+    // because we need to call p->put_rdma_buffer(buf) when all the things get done.
+    std::function<void()> call_back_on_finish;
+};
+struct ServerCoroutineCommunicationContext
+{
+    bool finished[kCoroCnt];
+    std::queue<std::shared_ptr<Task>> task_queue;
+} server_comm;
+
+void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
+{
+    CoroContext ctx;
+    ctx.yield = &yield;
+    ctx.master = &server_master_coro;
+    ctx.coro_id = coro_id;
+
+    while (!server_comm.task_queue.empty())
+    {
+        auto task = server_comm.task_queue.front();
+        CHECK_NE(task->msg_nr, 0);
+        CHECK_LT(task->fetched_nr, task->msg_nr);
+        auto cur_nr = task->fetched_nr;
+        const char *cur_msg =
+            task->buf + ReliableConnection::kMessageSize * cur_nr;
+        task->fetched_nr++;
+        if (task->fetched_nr == task->msg_nr)
+        {
+            server_comm.task_queue.pop();
+        }
+        VLOG(1) << "[bench] server handling task @" << (void *) task.get()
+                << ", message_nr " << task->msg_nr << ", cur_fetched " << cur_nr
+                << ", cur_finished: " << task->finished_nr;
+        p->handle_request_messages(cur_msg, 1, &ctx);
+        task->finished_nr++;
+        if (task->finished_nr == task->msg_nr)
+        {
+            VLOG(1) << "[bench] server handling callback of task @"
+                    << (void *) task.get();
+            task->call_back_on_finish();
+        }
+    }
+
+    LOG(WARNING) << "[bench] server coro: " << ctx << " exit.";
+    ctx.yield_to_master();
+}
+
+void server_master(Patronus::pointer p, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
     auto mid = tid;
+
+    for (size_t i = 0; i < kCoroCnt; ++i)
+    {
+        server_comm.finished[i] = true;
+    }
+
+    char *__buffer = (char *) malloc(ReliableConnection::kMaxRecvBuffer * 32);
+    ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer> buffer_pool(
+        __buffer, ReliableConnection::kMaxRecvBuffer * 32);
+    coro_t coro_buf[kCoroCnt * 2];
+    while (true)
+    {
+        char *buffer = (char *) buffer_pool.get();
+        size_t nr =
+            p->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
+        if (likely(nr > 0))
+        {
+            LOG(WARNING) << "[bench] server recv messages " << nr
+                         << ". Dispatch to workers, avg get "
+                         << (nr / kCoroCnt);
+            std::shared_ptr<Task> task = std::make_shared<Task>();
+            task->buf = buffer;
+            task->msg_nr = nr;
+            task->fetched_nr = 0;
+            task->finished_nr = 0;
+            task->call_back_on_finish = [&buffer_pool, buffer]()
+            { buffer_pool.put(buffer); };
+            server_comm.task_queue.push(task);
+        }
+
+        if (!server_comm.task_queue.empty())
+        {
+            for (size_t i = 0; i < kCoroCnt; ++i)
+            {
+                // it finished its last reqeust.
+                if (server_comm.finished[i])
+                {
+                    server_comm.finished[i] = false;
+                    yield(server_workers[i]);
+                }
+            }
+        }
+
+        nr = p->try_get_server_finished_coros(coro_buf, kDirID, 2 * kCoroCnt);
+        if (likely(nr > 0))
+        {
+            for (size_t i = 0; i < nr; ++i)
+            {
+                coro_t coro_id = coro_buf[i];
+                yield(server_workers[coro_id]);
+            }
+        }
+    }
+
+    free(__buffer);
+}
+
+void server(Patronus::pointer p)
+{
+    auto tid = p->get_thread_id();
+    // auto mid = tid;
 
     LOG(INFO) << "I am server. tid " << tid;
 
@@ -136,13 +254,15 @@ void server(Patronus::pointer p)
                 << " for coro " << i;
     }
 
-    while (true)
+    for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        char buf[ReliableConnection::kMaxRecvBuffer];
-        size_t nr =
-            p->reliable_try_recv(mid, buf, ReliableConnection::kRecvLimit);
-        p->handle_request_messages(buf, nr);
+        server_workers[i] =
+            CoroCall([p, i](CoroYield &yield) { server_worker(p, i, yield); });
     }
+    server_master_coro =
+        CoroCall([p](CoroYield &yield) { server_master(p, yield); });
+
+    server_master_coro();
 }
 
 int main(int argc, char *argv[])
@@ -162,17 +282,17 @@ int main(int argc, char *argv[])
 
     sleep(1);
 
-    patronus->registerThread();
-
     // let client spining
     auto nid = patronus->get_node_id();
     if (nid == kClientNodeId)
     {
+        patronus->registerClientThread();
         sleep(2);
         client(patronus);
     }
     else
     {
+        patronus->registerServerThread();
         server(patronus);
     }
 
