@@ -33,6 +33,9 @@ public:
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kTotalMwPoolSize = 1 * define::M;
 
+    using KeyLocator = std::function<uint64_t(key_t)>;
+    static KeyLocator identity_locator;
+
     static pointer ins(const DSMConfig &conf)
     {
         return std::make_shared<Patronus>(conf);
@@ -41,6 +44,10 @@ public:
     Patronus(const Patronus &) = delete;
     Patronus(const DSMConfig &conf);
 
+    void reg_locator(const KeyLocator& locator = identity_locator)
+    {
+        locator_ = locator;
+    }
     /**
      * @brief Get the rlease object
      *
@@ -278,6 +285,9 @@ private:
     // for admin management
     std::array<std::atomic<bool>, MAX_MACHINE> exits_;
     std::atomic<bool> should_exit_{false};
+
+    // for user interfaces
+    KeyLocator locator_;
 };
 }  // namespace patronus
 

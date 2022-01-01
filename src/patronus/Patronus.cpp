@@ -13,6 +13,11 @@ thread_local ThreadUnsafePool<RpcContext, Patronus::kMaxCoroNr>
     Patronus::rpc_context_;
 thread_local std::queue<ibv_mw *> Patronus::mw_pool_[NR_DIRECTORY];
 
+Patronus::KeyLocator Patronus::identity_locator = [](key_t key) -> uint64_t
+{
+    return (uint64_t) key;
+};
+
 template <typename T>
 using PResult = Patronus::PResult<T>;
 
@@ -276,15 +281,14 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         DCHECK_EQ(digest, djb2_digest(req, sizeof(AcquireRequest)));
     }
     CHECK_LT(req->size, internal.size);
-    DVLOG(4) << "Trying to bind with dirID " << dirID
+    DVLOG(4) << "[patronus] Trying to bind with dirID " << dirID
              << ", internal_buf: " << (void *) internal.buffer << ", size "
              << internal.size;
-    // TODO(patronus), CRITICAL(patronus): use offset = key. should be change
-    // later.
+    uint64_t actual_position = locator_(req->key);
     dsm_->bind_memory_region_sync(mw,
                                   req->cid.node_id,
                                   req->cid.thread_id,
-                                  internal.buffer + req->key,
+                                  internal.buffer + actual_position,
                                   req->size,
                                   dirID,
                                   ctx);
@@ -293,9 +297,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     auto *resp_msg = (AcquireResponse *) resp_buf;
     resp_msg->type = req->type;
     resp_msg->rkey_0 = mw->rkey;
-    // CRITICAL(patronus), TODO(patronus):
-    // should use custom logic to get the address.
-    resp_msg->base = req->key;
+    resp_msg->base = actual_position;
     resp_msg->term = req->require_term;
     resp_msg->cid = req->cid;
     resp_msg->cid.node_id = get_node_id();

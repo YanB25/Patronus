@@ -16,6 +16,10 @@ class Lease
 {
 public:
     Lease() = default;
+    uint64_t base_addr() const
+    {
+        return base_addr_;
+    }
 
 private:
     friend class Patronus;

@@ -19,8 +19,21 @@ thread_local bool workers_finished[kCoroCnt];
 thread_local CoroCall master;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
-constexpr static size_t kOffset = 1024;
+constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kDirID = 0;
+
+struct Object
+{
+    uint64_t target;
+    uint64_t unused_1;
+    uint64_t unused_2;
+    uint64_t unused_3;
+};
+
+uint64_t bench_locator(key_t key)
+{
+    return key * sizeof(Object);
+}
 
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
@@ -29,27 +42,24 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     ctx.coro_id = coro_id;
     ctx.master = &master;
 
-    size_t coro_offset = kOffset + coro_id * sizeof(kMagic);
+    size_t coro_key = kCoroStartKey + coro_id;
     size_t coro_magic = kMagic + coro_id;
 
-    Lease lease = p->get_rlease(kServerNodeId,
-                                kDirID,
-                                coro_offset /* key */,
-                                sizeof(kMagic),
-                                100,
-                                &ctx);
+    Lease lease = p->get_rlease(
+        kServerNodeId, kDirID, coro_key /* key */, sizeof(Object), 100, &ctx);
     LOG(WARNING) << "[bench] client coro " << (int) coro_id << " got lease "
                  << lease;
 
     auto rdma_buf = p->get_rdma_buffer();
     LOG(WARNING) << "[bench] client coro " << (int) coro_id << " start to read";
-    CHECK_LT(sizeof(kMagic), rdma_buf.size);
+    CHECK_LT(sizeof(Object), rdma_buf.size);
     p->read(
-        lease, rdma_buf.buffer, sizeof(kMagic), 0 /* offset */, kDirID, &ctx);
+        lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, kDirID, &ctx);
     LOG(WARNING) << "[bench] client coro " << (int) coro_id << " read finished";
-    uint64_t magic = *(uint64_t *) rdma_buf.buffer;
-    CHECK_EQ(magic, coro_magic) << "coro_id " << (int) coro_id
-                                << ", Read at offset " << (void *) coro_offset;
+    Object magic_object = *(Object *) rdma_buf.buffer;
+    CHECK_EQ(magic_object.target, coro_magic)
+        << "coro_id " << (int) coro_id << ", Read at key " << coro_key
+        << ", lease.base: " << (void *) lease.base_addr();
 
     p->put_rdma_buffer(rdma_buf.buffer);
     LOG(WARNING) << "worker coro " << (int) coro_id
@@ -273,14 +283,14 @@ void server(Patronus::pointer p)
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
         auto coro_magic = kMagic + i;
-        auto coro_offset = kOffset + sizeof(kMagic) * i;
+        auto coro_offset = bench_locator(kCoroStartKey + i);
 
         auto *server_internal_buf = internal_buf.buffer;
-        uint64_t *where = (uint64_t *) &server_internal_buf[coro_offset];
-        *where = coro_magic;
+        Object *where = (Object *) &server_internal_buf[coro_offset];
+        where->target = coro_magic;
 
-        VLOG(1) << "[bench] server setting " << coro_magic << " to "
-                << coro_offset << ". actual addr: " << (void *) where
+        VLOG(1) << "[bench] server setting " << coro_magic << " to offset "
+                << coro_offset << ". actual addr: " << (void *) &(where->target)
                 << " for coro " << i;
     }
 
@@ -323,6 +333,7 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
+        patronus->reg_locator(bench_locator);
         patronus->finished();
         server(patronus);
     }
