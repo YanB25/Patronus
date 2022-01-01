@@ -1,5 +1,5 @@
 TODO:
-
-看看最高可以到多少 NR_DIRECTORY
-最好把最后一个dir留出来，作为生命线dir。roll的时候不要roll最后一个。
-看看能不能用最后一个dir来做rpc，做reliable的。
+- Add API p->should_exit()
+- Add key_to_dsm_addr API for addressing.
+- Implemente all the APIs in Patronus
+- Bench the performance / coroutine.

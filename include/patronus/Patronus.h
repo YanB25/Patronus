@@ -80,6 +80,7 @@ public:
                size_t size,
                size_t offset,
                CoroContext *ctx = nullptr);
+    void finished([[maybe_unused]] CoroContext *ctx = nullptr);
 
     void registerServerThread()
     {
@@ -214,6 +215,11 @@ public:
         rdma_client_buffer_->put(buf);
     }
 
+    bool should_exit() const
+    {
+        return should_exit_.load(std::memory_order_relaxed);
+    }
+
 private:
     ibv_mw *get_mw(size_t dirID)
     {
@@ -252,6 +258,7 @@ private:
 
     void handle_request_acquire(AcquireRequest *, CoroContext *ctx);
     void handle_response_acquire(AcquireResponse *);
+    void handle_admin(AdminRequest *req, CoroContext *ctx);
 
     // owned by both
     DSM::pointer dsm_;
@@ -267,6 +274,10 @@ private:
     // owned by server threads
     // [NR_DIRECTORY]
     static thread_local std::queue<ibv_mw *> mw_pool_[NR_DIRECTORY];
+
+    // for admin management
+    std::array<std::atomic<bool>, MAX_MACHINE> exits_;
+    std::atomic<bool> should_exit_{false};
 };
 }  // namespace patronus
 

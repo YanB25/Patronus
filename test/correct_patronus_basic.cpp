@@ -84,10 +84,19 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         for (size_t i = 0; i < nr; ++i)
         {
             auto *msg_start = buf + ReliableConnection::kMessageSize * i;
-            auto *recv_msg = (BaseMessage *) msg_start;
+            const auto *recv_msg = (BaseMessage *) msg_start;
             auto coro_id = recv_msg->cid.coro_id;
-            VLOG(1) << "[bench] yielding to coro " << (int) coro_id;
-            yield(workers[coro_id]);
+            if (unlikely(coro_id == kMasterCoro))
+            {
+                // this should be already handled by the above
+                // p->handle_rsponse_messages
+                VLOG(1) << "[bench] coro master handling admin.";
+            }
+            else
+            {
+                VLOG(1) << "[bench] yielding to coro " << (int) coro_id;
+                yield(workers[coro_id]);
+            }
         }
         // try to see if read/write finished
 
@@ -98,6 +107,8 @@ void client_master(Patronus::pointer p, CoroYield &yield)
             yield(workers[coro_id]);
         }
     }
+
+    p->finished();
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -124,7 +135,8 @@ struct Task
     size_t msg_nr{0};
     size_t fetched_nr{0};
     size_t finished_nr{0};
-    // because we need to call p->put_rdma_buffer(buf) when all the things get done.
+    // because we need to call p->put_rdma_buffer(buf) when all the things get
+    // done.
     std::function<void()> call_back_on_finish;
 };
 struct ServerCoroutineCommunicationContext
@@ -140,7 +152,7 @@ void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     ctx.master = &server_master_coro;
     ctx.coro_id = coro_id;
 
-    while (!server_comm.task_queue.empty())
+    while (!p->should_exit())
     {
         auto task = server_comm.task_queue.front();
         CHECK_NE(task->msg_nr, 0);
@@ -155,7 +167,7 @@ void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         }
         VLOG(1) << "[bench] server handling task @" << (void *) task.get()
                 << ", message_nr " << task->msg_nr << ", cur_fetched " << cur_nr
-                << ", cur_finished: " << task->finished_nr;
+                << ", cur_finished: " << task->finished_nr << " " << ctx;
         p->handle_request_messages(cur_msg, 1, &ctx);
         task->finished_nr++;
         if (task->finished_nr == task->msg_nr)
@@ -164,6 +176,11 @@ void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                     << (void *) task.get();
             task->call_back_on_finish();
         }
+
+        // VLOG(1) << "[bench] server " << ctx
+        //         << " finished current task. yield to master.";
+        server_comm.finished[coro_id] = true;
+        ctx.yield_to_master();
     }
 
     LOG(WARNING) << "[bench] server coro: " << ctx << " exit.";
@@ -184,9 +201,10 @@ void server_master(Patronus::pointer p, CoroYield &yield)
     ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer> buffer_pool(
         __buffer, ReliableConnection::kMaxRecvBuffer * 32);
     coro_t coro_buf[kCoroCnt * 2];
-    while (true)
+    while (!p->should_exit())
     {
-        char *buffer = (char *) buffer_pool.get();
+        char *buffer = (char *) CHECK_NOTNULL(buffer_pool.get());
+        VLOG(3) << "[bench] buffer get. remain size: " << buffer_pool.size();
         size_t nr =
             p->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
         if (likely(nr > 0))
@@ -195,12 +213,16 @@ void server_master(Patronus::pointer p, CoroYield &yield)
                          << ". Dispatch to workers, avg get "
                          << (nr / kCoroCnt);
             std::shared_ptr<Task> task = std::make_shared<Task>();
-            task->buf = buffer;
+            task->buf = CHECK_NOTNULL(buffer);
             task->msg_nr = nr;
             task->fetched_nr = 0;
             task->finished_nr = 0;
             task->call_back_on_finish = [&buffer_pool, buffer]()
-            { buffer_pool.put(buffer); };
+            {
+                buffer_pool.put(buffer);
+                VLOG(3) << "[bench] buffer put. remain size: "
+                        << buffer_pool.size();
+            };
             server_comm.task_queue.push(task);
         }
 
@@ -208,11 +230,16 @@ void server_master(Patronus::pointer p, CoroYield &yield)
         {
             for (size_t i = 0; i < kCoroCnt; ++i)
             {
-                // it finished its last reqeust.
-                if (server_comm.finished[i])
+                if (!server_comm.task_queue.empty())
                 {
-                    server_comm.finished[i] = false;
-                    yield(server_workers[i]);
+                    // it finished its last reqeust.
+                    if (server_comm.finished[i])
+                    {
+                        server_comm.finished[i] = false;
+                        VLOG(3) << "[bench] yield to " << (int) i
+                                << " because has task";
+                        yield(server_workers[i]);
+                    }
                 }
             }
         }
@@ -223,6 +250,9 @@ void server_master(Patronus::pointer p, CoroYield &yield)
             for (size_t i = 0; i < nr; ++i)
             {
                 coro_t coro_id = coro_buf[i];
+                VLOG(3) << "[bench] yield to " << (int) coro_id
+                        << " because CQE arrvied.";
+                DCHECK(!server_comm.finished[coro_id]);
                 yield(server_workers[coro_id]);
             }
         }
@@ -293,6 +323,7 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
+        patronus->finished();
         server(patronus);
     }
 

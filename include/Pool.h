@@ -32,6 +32,10 @@ public:
         pool_.pop();
         return ret;
     }
+    size_t size() const
+    {
+        return pool_.size();
+    }
     void put(void *buf)
     {
         debug_validity_check(buf);

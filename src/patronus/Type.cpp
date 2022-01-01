@@ -33,6 +33,11 @@ std::ostream &operator<<(std::ostream &os, const RequestType &t)
         os << "Ex";
         break;
     }
+    case RequestType::kAdmin:
+    {
+        os << "Adm";
+        break;
+    }
     default:
     {
         os << "Unknown(" << (int) t << ")";
@@ -64,6 +69,14 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
     os << "{AcquireResponse type: " << resp.type << ", cid: " << resp.cid
        << ", rkey_0: " << resp.rkey_0 << ", base " << resp.base
        << ", term: " << resp.term << "}";
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const AdminRequest &req)
+{
+    bool exit = req.flag & (uint8_t) AdminFlag::kAdminReqExit;
+    os << "{AdminRequest type: " << req.type << ", cid: " << req.cid
+       << "flags: exit(" << exit << "}";
     return os;
 }
 

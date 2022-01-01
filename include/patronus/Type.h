@@ -24,6 +24,7 @@ enum class RequestType : uint8_t
     kUpgrade,
     kRelinquish,
     kExtend,
+    kAdmin,
 };
 std::ostream &operator<<(std::ostream &os, const RequestType &t);
 
@@ -77,6 +78,21 @@ struct AcquireResponse
 } __attribute__((packed));
 static_assert(sizeof(AcquireResponse) < ReliableConnection::kMessageSize);
 std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp);
+
+enum class AdminFlag : uint8_t
+{
+    kAdminReqExit = 1 << 0,
+};
+
+struct AdminRequest
+{
+    enum RequestType type;
+    ClientID cid;
+    uint8_t flag; // enum AdminFlag
+    Debug<uint64_t> digest;
+} __attribute__((packed));
+static_assert(sizeof(AdminRequest) < ReliableConnection::kMessageSize);
+std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);
 
 }  // namespace patronus
 

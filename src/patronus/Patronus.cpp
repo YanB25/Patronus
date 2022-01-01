@@ -41,6 +41,7 @@ Lease Patronus::get_rlease(uint16_t node_id,
     ret_lease.node_id_ = node_id;
 
     auto *msg = (AcquireRequest *) rdma_buf;
+    msg->type = RequestType::kAcquireRLease;
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = tid;
     msg->cid.mid = mid;
@@ -151,9 +152,16 @@ void Patronus::handle_response_messages(const char *msg_buf, size_t msg_nr)
             LOG(FATAL) << "TODO";
             break;
         }
+        case RequestType::kAdmin:
+        {
+            auto *msg = (AdminRequest *) base;
+            DVLOG(4) << "[patronus] handling admin request " << *msg;
+            handle_admin(msg, nullptr);
+            break;
+        }
         default:
         {
-            LOG(FATAL) << "Unknown request type " << (int) request_type
+            LOG(FATAL) << "Unknown response type " << (int) request_type
                        << ". Possible corrupted message";
         }
         }
@@ -174,7 +182,7 @@ void Patronus::handle_request_messages(const char *msg_buf,
         case RequestType::kAcquireWLease:
         {
             auto *msg = (AcquireRequest *) base;
-            DVLOG(4) << "[patronus] handling acquire request " << *msg;
+            DVLOG(4) << "[patronus] handling acquire request " << *msg << " coro " << *ctx;
             handle_request_acquire(msg, ctx);
             break;
         }
@@ -194,6 +202,13 @@ void Patronus::handle_request_messages(const char *msg_buf,
         {
             DVLOG(4) << "[patronus] handling relinquish request";
             LOG(FATAL) << "TODO";
+            break;
+        }
+        case RequestType::kAdmin:
+        {
+            auto *msg = (AdminRequest *) base;
+            DVLOG(4) << "[patronus] handling admin request " << *msg << *ctx;
+            handle_admin(msg, ctx);
             break;
         }
         default:
@@ -296,4 +311,64 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     put_rdma_message_buffer(resp_buf);
 }
 
+void Patronus::finished(CoroContext *ctx)
+{
+    DLOG_IF(WARNING, ctx && (ctx->coro_id != kMasterCoro))
+        << "[Patronus] Admin request better be sent by master coroutine.";
+    exits_[dsm_->get_node_id()] = true;
+
+    auto mid = dsm_->get_thread_id() % RMSG_MULTIPLEXING;
+    auto tid = mid;
+
+    char *rdma_buf = get_rdma_message_buffer();
+    auto *msg = (AdminRequest *) rdma_buf;
+    msg->type = RequestType::kAdmin;
+    msg->flag = (uint8_t) AdminFlag::kAdminReqExit;
+    msg->cid.node_id = get_node_id();
+    msg->cid.thread_id = tid;
+    msg->cid.mid = mid;
+    msg->cid.coro_id = ctx ? ctx->coro_id : kMasterCoro;
+
+    if constexpr (debug())
+    {
+        msg->digest = 0;
+        msg->digest = djb2_digest(msg, sizeof(AdminRequest));
+    }
+
+    for (size_t i = 0; i < dsm_->getClusterSize(); ++i)
+    {
+        if (i == dsm_->get_node_id())
+        {
+            continue;
+        }
+        dsm_->reliable_send(rdma_buf, sizeof(AdminRequest), i, 0);
+    }
+}
+
+void Patronus::handle_admin(AdminRequest *req,
+                            [[maybe_unused]] CoroContext *ctx)
+{
+    if constexpr (debug())
+    {
+        uint64_t digest = req->digest.get();
+        req->digest = 0;
+        DCHECK_EQ(digest, djb2_digest(req, sizeof(AdminRequest)));
+    }
+
+    auto from_node = req->cid.node_id;
+    exits_[from_node].store(true);
+
+    for (size_t i = 0; i < dsm_->getClusterSize(); ++i)
+    {
+        if (!exits_[i])
+        {
+            DVLOG(4) << "[patronus] Not exit becasue node " << i
+                    << " not finished yet.";
+            return;
+        }
+    }
+
+    DVLOG(4) << "[patronux] set should_exit to true.";
+    should_exit_.store(true, std::memory_order_release);
+}
 }  // namespace patronus
