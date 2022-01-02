@@ -8,3 +8,7 @@ TODO:
 [-] then, we should return all the onging coro ids. so that, the client_master will yield to these coroutines
 [-] then, all the worker will realize that they fail. so they all retries.
 [-] refactor: the API for client should combine into one.
+
+- implement relinquish, and let the server gc the memory window. so that I can bench for a looong time instead of several ms.
+- try to optimize the performance of single-thread patronus-basic (takes 2-3 days if lucky).
+- remember to measure the latency of each op, and the penalty of coroutine switching.
