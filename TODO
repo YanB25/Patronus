@@ -3,3 +3,8 @@ TODO:
 [-] Add key_to_dsm_addr API for addressing.
 - Implemente all the APIs in Patronus
 - Bench the performance / coroutine.
+
+[-] when QP fails, before recovery, we should wait for all the on-going contexts, and set result to false.
+[-] then, we should return all the onging coro ids. so that, the client_master will yield to these coroutines
+[-] then, all the worker will realize that they fail. so they all retries.
+[-] refactor: the API for client should combine into one.

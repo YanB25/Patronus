@@ -81,7 +81,8 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp);
 
 enum class AdminFlag : uint8_t
 {
-    kAdminReqExit = 1 << 0,
+    kAdminReqExit = 0,
+    kAdminReqRecovery = 1,
 };
 
 struct AdminRequest
@@ -90,6 +91,7 @@ struct AdminRequest
     ClientID cid;
     uint8_t flag; // enum AdminFlag
     Debug<uint64_t> digest;
+    uint16_t dir_id;
 } __attribute__((packed));
 static_assert(sizeof(AdminRequest) < ReliableConnection::kMessageSize);
 std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);

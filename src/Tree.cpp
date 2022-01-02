@@ -1569,10 +1569,7 @@ void Tree::run_coroutine(CoroFunc func, int id, int coro_cnt)
 
 void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id)
 {
-    CoroContext ctx;
-    ctx.coro_id = coro_id;
-    ctx.master = &master;
-    ctx.yield = &yield;
+    CoroContext ctx(&yield, &master, coro_id);
 
     Timer coro_timer;
     auto thread_id = dsm->getMyThreadID();
@@ -1657,7 +1654,7 @@ inline bool Tree::acquire_local_lock(GlobalAddress lock_addr,
         if (cxt != nullptr)
         {
             hot_wait_queue.push(coro_id);
-            (*cxt->yield)(*cxt->master);
+            cxt->yield_to_master();
         }
 
         current = node.ticket_lock.load(std::memory_order_relaxed) >> 32;

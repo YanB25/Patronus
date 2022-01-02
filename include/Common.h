@@ -1,6 +1,8 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#include <glog/logging.h>
+
 #include <atomic>
 #include <bitset>
 #include <cassert>
@@ -80,27 +82,81 @@ using CoroCall =
 
 using coro_t = uint8_t;
 static constexpr coro_t kMasterCoro = coro_t(-1);
+static constexpr coro_t kNotACoro = coro_t(-2);
 
 struct CoroContext
 {
-    CoroYield *yield;
-    CoroCall *master;
-    coro_t coro_id;
+public:
+    CoroContext(CoroYield *yield, CoroCall *master, coro_t coro_id)
+        : yield_(yield), master_(master), coro_id_(coro_id)
+    {
+        CHECK_NE(coro_id, kMasterCoro) << "** This coro should not be a master";
+        CHECK_NE(coro_id, kNotACoro) << "** This coro should not be nullctx";
+    }
+    CoroContext(CoroYield *yield, CoroCall *workers)
+        : yield_(yield), workers_(workers)
+    {
+        coro_id_ = kMasterCoro;
+    }
+    CoroContext(const CoroContext&) = delete;
+    CoroContext& operator=(const CoroContext&) = delete;
+    
+    CoroContext() : coro_id_(kNotACoro)
+    {
+    }
+    bool is_master() const
+    {
+        return coro_id_ == kMasterCoro;
+    }
+    bool is_worker() const
+    {
+        return coro_id_ != kMasterCoro && coro_id_ != kNotACoro;
+    }
+    bool is_nullctx() const
+    {
+        return coro_id_ == kNotACoro;
+    }
+    coro_t coro_id() const
+    {
+        return coro_id_;
+    }
+
     void yield_to_master() const
     {
-        (*yield)(*master);
+        DVLOG(4) << "[Coro] " << *this << " yielding to master.";
+        DCHECK(is_worker()) << *this;
+        (*yield_)(*master_);
     }
+    void yield_to_worker(coro_t wid)
+    {
+        DVLOG(4) << "[Coro] " << *this << " yielding to worker " << (int) wid;
+        DCHECK(is_master()) << *this;
+        (*yield_)(workers_[wid]);
+    }
+    friend std::ostream &operator<<(std::ostream &os, const CoroContext &ctx);
+
+private:
+    CoroYield *yield_{nullptr};
+    CoroCall *master_{nullptr};
+    CoroCall *workers_{nullptr};
+    coro_t coro_id_{kNotACoro};
 };
+
+static CoroContext nullctx;
 
 inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
 {
-    if (ctx.coro_id == kMasterCoro)
+    if (ctx.coro_id_ == kMasterCoro)
     {
         os << "{Coro Master}";
     }
+    else if (ctx.coro_id_ == kNotACoro)
+    {
+        os << "{Coro Not a coro}";
+    }
     else
     {
-        os << "{Coro " << (int) ctx.coro_id << "}";
+        os << "{Coro " << (int) ctx.coro_id_ << "}";
     }
     return os;
 }
@@ -220,6 +276,9 @@ struct WRID
     {
     }
     WRID(uint16_t p, uint32_t id) : prefix(p), u16_a(0), id(id)
+    {
+    }
+    WRID(uint16_t p, uint16_t a16, uint32_t id) : prefix(p), u16_a(a16), id(id)
     {
     }
     union

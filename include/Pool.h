@@ -28,18 +28,24 @@ public:
             return nullptr;
         }
         void *ret = pool_.front();
-        debug_validity_check(ret);
         pool_.pop();
+        on_going_++;
+        debug_validity_check(ret);
         return ret;
     }
     size_t size() const
     {
         return pool_.size();
     }
+    size_t onging_size() const
+    {
+        return on_going_;
+    }
     void put(void *buf)
     {
-        debug_validity_check(buf);
         pool_.push(buf);
+        on_going_--;
+        debug_validity_check(buf);
     }
 
     uint64_t buf_to_id(void *buf)
@@ -73,6 +79,8 @@ public:
             DCHECK_LT(idx, buffer_nr_)
                 << "The buf at " << (void *) buf << " overflow buffer length "
                 << buffer_nr_ << ". idx: " << idx;
+            DCHECK_GE(on_going_, 0);
+            DCHECK_LE(on_going_, buffer_nr_);
         }
     }
 
@@ -82,6 +90,8 @@ private:
     size_t buffer_nr_{0};
 
     std::queue<void *> pool_;
+
+    int64_t on_going_{0};
 };
 template <typename T, size_t kSize>
 class ThreadUnsafePool
@@ -104,13 +114,15 @@ public:
         }
         T *ret = pool_.front();
         pool_.pop();
+        on_going_++;
         debug_validity_check(ret);
         return ret;
     }
     void put(T *obj)
     {
-        debug_validity_check(obj);
         pool_.push(obj);
+        on_going_--;
+        debug_validity_check(obj);
     }
     uint64_t obj_to_id(T *obj)
     {
@@ -123,6 +135,11 @@ public:
         T *ret = buffer_ + id;
         debug_validity_check(ret);
         return ret;
+    }
+
+    size_t ongoing_size() const
+    {
+        return on_going_;
     }
 
     void debug_validity_check(const T *obj)
@@ -141,12 +158,16 @@ public:
             DCHECK_LT(idx, kSize) << "The obj at " << (void *) obj
                                   << " overflow from buffer. idx " << idx
                                   << " greater than " << kSize;
+            DCHECK_GE(on_going_, 0);
+            DCHECK_LE(on_going_, kSize);
         }
     }
 
 private:
     std::queue<T *> pool_;
     T buffer_[kSize];
+
+    size_t on_going_{0};
 };
 
 template <size_t kObjSize>

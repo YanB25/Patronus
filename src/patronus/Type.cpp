@@ -47,6 +47,29 @@ std::ostream &operator<<(std::ostream &os, const RequestType &t)
     return os;
 }
 
+std::ostream &operator<<(std::ostream &os, const AdminFlag &f)
+{
+    switch (f)
+    {
+    case AdminFlag::kAdminReqExit:
+    {
+        os << "Exit";
+        break;
+    }
+    case AdminFlag::kAdminReqRecovery:
+    {
+        os << "Recov";
+        break;
+    }
+    default:
+    {
+        os << "Unknown(" << (int) f << ")";
+        break;
+    }
+    }
+    return os;
+}
+
 std::ostream &operator<<(std::ostream &os, const ClientID &cid)
 {
     os << "{CID node: " << cid.node_id << ", tid: " << cid.thread_id
@@ -74,9 +97,8 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
 
 std::ostream &operator<<(std::ostream &os, const AdminRequest &req)
 {
-    bool exit = req.flag & (uint8_t) AdminFlag::kAdminReqExit;
     os << "{AdminRequest type: " << req.type << ", cid: " << req.cid
-       << "flags: exit(" << exit << "}";
+       << "flags: " << (int) req.flag << " }";
     return os;
 }
 

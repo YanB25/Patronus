@@ -324,7 +324,7 @@ void DSM::rkey_read(uint32_t rkey,
                  rkey,
                  true /* has to signal for coroutine */,
                  wr_id);
-        (*ctx->yield)(*ctx->master);
+        ctx->yield_to_master();
     }
 }
 
@@ -449,8 +449,8 @@ void DSM::rkey_write(uint32_t rkey,
                   rkey,
                   -1,
                   true,
-                  ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                  ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 
@@ -523,8 +523,8 @@ void DSM::write_batch(RdmaOpRegion *rs, int k, bool signal, CoroContext *ctx)
     }
     else
     {
-        rdmaWriteBatch(iCon->QPs[cur_dir][node_id], rs, k, true, ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+        rdmaWriteBatch(iCon->QPs[cur_dir][node_id], rs, k, true, ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 
@@ -573,8 +573,8 @@ void DSM::write_faa(RdmaOpRegion &write_ror,
                      faa_ror,
                      add_val,
                      true,
-                     ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                     ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 void DSM::write_faa_sync(RdmaOpRegion &write_ror,
@@ -630,8 +630,8 @@ void DSM::write_cas(RdmaOpRegion &write_ror,
                      equal,
                      val,
                      true,
-                     ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                     ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 void DSM::write_cas_sync(RdmaOpRegion &write_ror,
@@ -682,8 +682,8 @@ void DSM::cas_read(RdmaOpRegion &cas_ror,
                     equal,
                     val,
                     true,
-                    ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                    ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 
@@ -733,8 +733,8 @@ void DSM::cas(GlobalAddress gaddr,
                            iCon->cacheLKey,
                            remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
                            true,
-                           ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                           ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 
@@ -816,8 +816,8 @@ void DSM::faa_boundary(GlobalAddress gaddr,
                                 remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
                                 mask,
                                 true,
-                                ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                                ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 Buffer DSM::get_server_internal_buffer()
@@ -870,8 +870,8 @@ void DSM::read_dm(char *buffer,
                  iCon->cacheLKey,
                  remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                  true,
-                 ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                 ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 
@@ -917,8 +917,8 @@ void DSM::write_dm(const char *buffer,
                   remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                   -1,
                   true,
-                  ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                  ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 
@@ -965,8 +965,8 @@ void DSM::cas_dm(GlobalAddress gaddr,
                            iCon->cacheLKey,
                            remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                            true,
-                           ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                           ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 
@@ -1048,8 +1048,8 @@ void DSM::faa_dm_boundary(GlobalAddress gaddr,
                                 remoteInfo[gaddr.nodeID].dmRKey[cur_dir],
                                 mask,
                                 true,
-                                ctx->coro_id);
-        (*ctx->yield)(*ctx->master);
+                                ctx->coro_id());
+        ctx->yield_to_master();
     }
 }
 
@@ -1141,7 +1141,7 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   size_t dirID,
                                   CoroContext *ctx)
 {
-    coro_t coro_id = ctx ? ctx->coro_id : 0;
+    coro_t coro_id = ctx ? ctx->coro_id() : kNotACoro;
 
     struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
     uint32_t rkey =

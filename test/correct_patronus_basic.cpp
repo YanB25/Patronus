@@ -15,12 +15,13 @@ constexpr uint32_t kMachineNr = 2;
 using namespace patronus;
 constexpr static size_t kCoroCnt = 8;
 thread_local CoroCall workers[kCoroCnt];
-thread_local bool workers_finished[kCoroCnt];
 thread_local CoroCall master;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kDirID = 0;
+
+constexpr static size_t kTestTime = 1000;
 
 struct Object
 {
@@ -35,87 +36,122 @@ uint64_t bench_locator(key_t key)
     return key * sizeof(Object);
 }
 
+struct ClientCommunication
+{
+    bool still_has_work[kCoroCnt];
+    bool finish_cur_task[kCoroCnt];
+    bool finish_all_task[kCoroCnt];
+} client_comm;
+
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
-    CoroContext ctx;
-    ctx.yield = &yield;
-    ctx.coro_id = coro_id;
-    ctx.master = &master;
+    CoroContext ctx(&yield, &master, coro_id);
 
     size_t coro_key = kCoroStartKey + coro_id;
     size_t coro_magic = kMagic + coro_id;
 
-    Lease lease = p->get_rlease(
-        kServerNodeId, kDirID, coro_key /* key */, sizeof(Object), 100, &ctx);
-    LOG(WARNING) << "[bench] client coro " << (int) coro_id << " got lease "
-                 << lease;
+    for (size_t time = 0; time < kTestTime; ++time)
+    {
+        client_comm.still_has_work[coro_id] = true;
+        client_comm.finish_cur_task[coro_id] = false;
+        client_comm.finish_all_task[coro_id] = false;
 
-    auto rdma_buf = p->get_rdma_buffer();
-    LOG(WARNING) << "[bench] client coro " << (int) coro_id << " start to read";
-    CHECK_LT(sizeof(Object), rdma_buf.size);
-    p->read(
-        lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, kDirID, &ctx);
-    LOG(WARNING) << "[bench] client coro " << (int) coro_id << " read finished";
-    Object magic_object = *(Object *) rdma_buf.buffer;
-    CHECK_EQ(magic_object.target, coro_magic)
-        << "coro_id " << (int) coro_id << ", Read at key " << coro_key
-        << ", lease.base: " << (void *) lease.base_addr();
+        DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
+        Lease lease = p->get_rlease(kServerNodeId,
+                                    kDirID,
+                                    coro_key /* key */,
+                                    sizeof(Object),
+                                    100,
+                                    &ctx);
+        if (unlikely(!lease.success()))
+        {
+            LOG(WARNING) << "[bench] client coro " << ctx << " get_rlease failed. retry.";
+            continue;
+        }
 
-    p->put_rdma_buffer(rdma_buf.buffer);
+        DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
+
+        auto rdma_buf = p->get_rdma_buffer();
+        memset(rdma_buf.buffer, 0, sizeof(Object));
+
+        DVLOG(2) << "[bench] client coro " << ctx << " start to read";
+        CHECK_LT(sizeof(Object), rdma_buf.size);
+        bool succ = p->read(lease,
+                            rdma_buf.buffer,
+                            sizeof(Object),
+                            0 /* offset */,
+                            kDirID,
+                            &ctx);
+        if (!succ)
+        {
+            LOG(WARNING) << "[bench] client coro " << ctx
+                         << " read FAILED. retry. ";
+            p->put_rdma_buffer(rdma_buf.buffer);
+            continue;
+        }
+        LOG(WARNING) << "[bench] client coro " << ctx << " read finished";
+        Object magic_object = *(Object *) rdma_buf.buffer;
+        CHECK_EQ(magic_object.target, coro_magic)
+            << "coro_id " << ctx << ", Read at key " << coro_key
+            << ", lease.base: " << (void *) lease.base_addr();
+
+        p->put_rdma_buffer(rdma_buf.buffer);
+
+        VLOG(2) << "[bench] client coro " << ctx << " finished current task.";
+        client_comm.still_has_work[coro_id] = true;
+        client_comm.finish_cur_task[coro_id] = true;
+        client_comm.finish_all_task[coro_id] = false;
+        ctx.yield_to_master();
+    }
+    client_comm.still_has_work[coro_id] = false;
+    client_comm.finish_cur_task[coro_id] = true;
+    client_comm.finish_all_task[coro_id] = true;
+
     LOG(WARNING) << "worker coro " << (int) coro_id
-                 << " finished. yield to master.";
+                 << " finished ALL THE TASK. yield to master.";
 
-    workers_finished[coro_id] = true;
-    yield(master);
+    ctx.yield_to_master();
 }
 void client_master(Patronus::pointer p, CoroYield &yield)
 {
+    CoroContext mctx(&yield, workers);
+    CHECK(mctx.is_master());
+
     auto tid = p->get_thread_id();
     auto mid = tid;
 
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        workers_finished[i] = false;
-
-        yield(workers[i]);
+        mctx.yield_to_worker(i);
     }
     LOG(INFO) << "Return back to master. start to recv messages";
     char buf[ReliableConnection::kMaxRecvBuffer];
     coro_t coro_buf[2 * kCoroCnt];
-    while (!std::all_of(std::begin(workers_finished),
-                        std::end(workers_finished),
+    while (!std::all_of(std::begin(client_comm.finish_all_task),
+                        std::end(client_comm.finish_all_task),
                         [](bool i) { return i; }))
     {
         // try to see if messages arrived
-        auto nr =
-            p->reliable_try_recv(mid, buf, ReliableConnection::kRecvLimit);
-        VLOG_IF(1, nr > 0) << "[bench] client recv messages nr : " << nr;
-        p->handle_response_messages(buf, nr);
-        for (size_t i = 0; i < nr; ++i)
-        {
-            auto *msg_start = buf + ReliableConnection::kMessageSize * i;
-            const auto *recv_msg = (BaseMessage *) msg_start;
-            auto coro_id = recv_msg->cid.coro_id;
-            if (unlikely(coro_id == kMasterCoro))
-            {
-                // this should be already handled by the above
-                // p->handle_rsponse_messages
-                VLOG(1) << "[bench] coro master handling admin.";
-            }
-            else
-            {
-                VLOG(1) << "[bench] yielding to coro " << (int) coro_id;
-                yield(workers[coro_id]);
-            }
-        }
-        // try to see if read/write finished
 
-        nr = p->try_get_rdma_finished_coros(coro_buf, 2 * kCoroCnt);
+        auto nr = p->try_get_client_continue_coros(mid, coro_buf, 2 * kCoroCnt);
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
-            yield(workers[coro_id]);
+            VLOG(1) << "[bench] yielding due to CQE";
+            mctx.yield_to_worker(coro_id);
         }
+
+        for (size_t i = 0; i < kCoroCnt; ++i)
+        {
+            if (client_comm.finish_cur_task[i] &&
+                !client_comm.finish_all_task[i])
+            {
+                VLOG(1) << "[bench] yielding to coro " << (int) i
+                        << " for new task";
+                mctx.yield_to_worker(i);
+            }
+        }
+
     }
 
     p->finished();
@@ -157,10 +193,7 @@ struct ServerCoroutineCommunicationContext
 
 void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
-    CoroContext ctx;
-    ctx.yield = &yield;
-    ctx.master = &server_master_coro;
-    ctx.coro_id = coro_id;
+    CoroContext ctx(&yield, &server_master_coro, coro_id);
 
     while (!p->should_exit())
     {
@@ -187,8 +220,8 @@ void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             task->call_back_on_finish();
         }
 
-        // VLOG(1) << "[bench] server " << ctx
-        //         << " finished current task. yield to master.";
+        VLOG(1) << "[bench] server " << ctx
+                << " finished current task. yield to master.";
         server_comm.finished[coro_id] = true;
         ctx.yield_to_master();
     }
@@ -199,6 +232,9 @@ void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
 void server_master(Patronus::pointer p, CoroYield &yield)
 {
+    CoroContext mctx(&yield, server_workers);
+    CHECK(mctx.is_master());
+
     auto tid = p->get_thread_id();
     auto mid = tid;
 
@@ -207,14 +243,16 @@ void server_master(Patronus::pointer p, CoroYield &yield)
         server_comm.finished[i] = true;
     }
 
-    char *__buffer = (char *) malloc(ReliableConnection::kMaxRecvBuffer * 32);
+    constexpr static size_t kServerBufferNr = 1024;
+    char *__buffer =
+        (char *) malloc(ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
     ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer> buffer_pool(
-        __buffer, ReliableConnection::kMaxRecvBuffer * 32);
+        __buffer, ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
     coro_t coro_buf[kCoroCnt * 2];
     while (!p->should_exit())
     {
         char *buffer = (char *) CHECK_NOTNULL(buffer_pool.get());
-        VLOG(3) << "[bench] buffer get. remain size: " << buffer_pool.size();
+        // VLOG(3) << "[bench] buffer get. remain size: " << buffer_pool.size();
         size_t nr =
             p->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
         if (likely(nr > 0))
@@ -230,10 +268,14 @@ void server_master(Patronus::pointer p, CoroYield &yield)
             task->call_back_on_finish = [&buffer_pool, buffer]()
             {
                 buffer_pool.put(buffer);
-                VLOG(3) << "[bench] buffer put. remain size: "
-                        << buffer_pool.size();
+                // VLOG(3) << "[bench] buffer put. remain size: "
+                //         << buffer_pool.size();
             };
             server_comm.task_queue.push(task);
+        }
+        else
+        {
+            buffer_pool.put(buffer);
         }
 
         if (!server_comm.task_queue.empty())
@@ -248,7 +290,7 @@ void server_master(Patronus::pointer p, CoroYield &yield)
                         server_comm.finished[i] = false;
                         VLOG(3) << "[bench] yield to " << (int) i
                                 << " because has task";
-                        yield(server_workers[i]);
+                        mctx.yield_to_worker(i);
                     }
                 }
             }
@@ -263,7 +305,7 @@ void server_master(Patronus::pointer p, CoroYield &yield)
                 VLOG(3) << "[bench] yield to " << (int) coro_id
                         << " because CQE arrvied.";
                 DCHECK(!server_comm.finished[coro_id]);
-                yield(server_workers[coro_id]);
+                mctx.yield_to_worker(coro_id);
             }
         }
     }

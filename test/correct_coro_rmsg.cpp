@@ -68,10 +68,7 @@ void client_worker(std::shared_ptr<DSM> dsm,
                    CoroYield &yield,
                    std::queue<void *> &messages)
 {
-    CoroContext ctx;
-    ctx.coro_id = coro_id;
-    ctx.master = &master;
-    ctx.yield = &yield;
+    CoroContext ctx(&yield, &master, coro_id);
 
     auto tid = dsm->get_thread_id();
     auto mid = tid;

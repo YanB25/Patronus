@@ -2,13 +2,14 @@
 #ifndef PATRONUS_H_
 #define PATRONUS_H_
 
+#include <set>
+#include <unordered_set>
+
 #include "DSM.h"
 #include "Result.h"
 #include "patronus/Lease.h"
 #include "patronus/Type.h"
 #include "util/Debug.h"
-
-#include <unordered_set>
 
 namespace patronus
 {
@@ -19,6 +20,15 @@ struct RpcContext
     Lease *lease{nullptr};
     BaseMessage *request{nullptr};
     std::atomic<bool> ready{false};
+};
+
+struct RWContext
+{
+    bool *success{nullptr};
+    std::atomic<bool> ready{false};
+    coro_t coro_id;
+    size_t target_node;
+    size_t dir_id;
 };
 
 class Patronus
@@ -45,8 +55,9 @@ public:
     Patronus &operator=(const Patronus &) = delete;
     Patronus(const Patronus &) = delete;
     Patronus(const DSMConfig &conf);
+    ~Patronus();
 
-    void reg_locator(const KeyLocator& locator = identity_locator)
+    void reg_locator(const KeyLocator &locator = identity_locator)
     {
         locator_ = locator;
     }
@@ -78,13 +89,13 @@ public:
     Lease downgrade(const Lease &wlease, CoroContext *ctx = nullptr);
     Lease extend(const Lease &rlease, CoroContext *ctx = nullptr);
     Lease relinquish(const Lease &rlease, CoroContext *ctx = nullptr);
-    void read(const Lease &,
+    bool read(const Lease &,
               char *obuf,
               size_t size,
               size_t offset,
               size_t dir_id,
               CoroContext *ctx = nullptr);
-    void write(const Lease &,
+    bool write(const Lease &,
                const char *ibuf,
                size_t size,
                size_t offset,
@@ -154,41 +165,10 @@ public:
     void handle_request_messages(const char *msg_buf,
                                  size_t msg_nr,
                                  CoroContext *ctx = nullptr);
-    void handle_response_messages(const char *msg_buf, size_t msg_nr);
 
     size_t reliable_try_recv(size_t from_mid, char *ibuf, size_t limit = 1)
     {
         return dsm_->reliable_try_recv(from_mid, ibuf, limit);
-    }
-    /**
-     * @brief
-     *
-     * @param buf at least
-     * @param limit
-     * @return size_t
-     */
-    size_t try_get_rdma_finished_coros(coro_t *buf, size_t limit)
-    {
-        constexpr static size_t kBufferSize = 16;
-        static thread_local ibv_wc wc_buffer[kBufferSize];
-        auto nr =
-            dsm_->try_poll_rdma_cq(wc_buffer, std::min(kBufferSize, limit));
-        for (size_t i = 0; i < nr; ++i)
-        {
-            auto &wc = wc_buffer[i];
-            log_wc_handler(&wc);
-            if (unlikely(wc.status == IBV_WC_WR_FLUSH_ERR))
-            {
-                LOG(WARNING)
-                    << "[patronus] QP error. skip all the following wrs.";
-                break;
-            }
-            auto wrid = WRID(wc.wr_id);
-            DCHECK_EQ(wrid.prefix, WRID_PREFIX_PATRONUS_RW);
-            // this will be coro_id by design
-            buf[i] = wrid.id;
-        }
-        return nr;
     }
     size_t try_get_server_finished_coros(coro_t *buf,
                                          size_t dirID,
@@ -232,7 +212,59 @@ public:
     {
         return should_exit_.load(std::memory_order_relaxed);
     }
-    ~Patronus();
+
+    size_t try_get_client_continue_coros(size_t mid,
+                                         coro_t *coro_buf,
+                                         size_t limit)
+    {
+        static thread_local char buf[ReliableConnection::kMaxRecvBuffer];
+        auto nr = dsm_->reliable_try_recv(
+            mid, buf, std::min(limit, ReliableConnection::kRecvLimit));
+
+        size_t cur_idx = 0;
+        cur_idx = handle_response_messages(buf, nr, coro_buf);
+        DCHECK_LT(cur_idx, limit);
+
+        size_t remain_nr = limit - nr;
+        // should be enough
+        constexpr static size_t kBufferSize = kMaxCoroNr + 1;
+        static thread_local ibv_wc wc_buffer[kBufferSize];
+
+        auto rdma_nr =
+            dsm_->try_poll_rdma_cq(wc_buffer, std::min(remain_nr, kBufferSize));
+        DCHECK_LT(rdma_nr, kBufferSize)
+            << "** performance issue: buffer size not enough";
+
+        std::set<std::pair<size_t, size_t>> recovery;
+        size_t rdma_finish_nr = handle_rdma_finishes(
+            wc_buffer, rdma_nr, coro_buf + cur_idx, recovery);
+        DCHECK_EQ(rdma_finish_nr, rdma_nr);
+        cur_idx += rdma_nr;
+        DCHECK_LT(cur_idx, limit);
+
+        if (unlikely(!recovery.empty()))
+        {
+            size_t fail_nr = recovery.size();
+            while (fail_nr < rw_context_.ongoing_size())
+            {
+                auto another_nr =
+                    dsm_->try_poll_rdma_cq(wc_buffer, kBufferSize);
+                auto another_rdma_nr = handle_rdma_finishes(
+                    wc_buffer, another_nr, coro_buf + cur_idx, recovery);
+                DCHECK_EQ(another_rdma_nr, another_nr);
+                cur_idx += another_nr;
+                DCHECK_LT(cur_idx, limit)
+                    << "** Provided buffer not enough to handle error message.";
+                fail_nr += another_nr;
+            }
+            for (const auto &[node_id, dir_id] : recovery)
+            {
+                signal_server_to_recover_qp(node_id, dir_id);
+                CHECK(dsm_->recoverThreadQP(node_id, dir_id));
+            }
+        }
+        return cur_idx;
+    }
 
 private:
     ibv_mw *get_mw(size_t dirID)
@@ -265,14 +297,40 @@ private:
     {
         rpc_context_.put(ctx);
     }
-    uint16_t get_context_id(RpcContext *ctx)
+    uint16_t get_rpc_context_id(RpcContext *ctx)
     {
-        return rpc_context_.obj_to_id(ctx);
+        auto ret = rpc_context_.obj_to_id(ctx);
+        DCHECK_LT(ret, std::numeric_limits<uint16_t>::max());
+        return ret;
+    }
+    RWContext *get_rw_context()
+    {
+        return rw_context_.get();
+    }
+    void put_rw_context(RWContext *ctx)
+    {
+        rw_context_.put(ctx);
+    }
+    uint16_t get_rw_context_id(RWContext *ctx)
+    {
+        auto ret = rw_context_.obj_to_id(ctx);
+        DCHECK_LT(ret, std::numeric_limits<uint16_t>::max());
+        return ret;
     }
 
+    size_t handle_response_messages(const char *msg_buf,
+                                    size_t msg_nr,
+                                    coro_t *o_coro_buf);
+    size_t handle_rdma_finishes(ibv_wc *buffer,
+                                size_t rdma_nr,
+                                coro_t *o_coro_buf,
+                                std::set<std::pair<size_t, size_t>> &recov);
+
+    void signal_server_to_recover_qp(size_t node_id, size_t dir_id);
     void handle_request_acquire(AcquireRequest *, CoroContext *ctx);
     void handle_response_acquire(AcquireResponse *);
-    void handle_admin(AdminRequest *req, CoroContext *ctx);
+    void handle_admin_exit(AdminRequest *req, CoroContext *ctx);
+    void handle_admin_recover(AdminRequest *req, CoroContext *ctx);
 
     // owned by both
     DSM::pointer dsm_;
@@ -281,6 +339,7 @@ private:
 
     // owned by client threads
     static thread_local ThreadUnsafePool<RpcContext, kMaxCoroNr> rpc_context_;
+    static thread_local ThreadUnsafePool<RWContext, kMaxCoroNr> rw_context_;
     static thread_local std::unique_ptr<
         ThreadUnsafeBufferPool<kClientRdmaBufferSize>>
         rdma_client_buffer_;

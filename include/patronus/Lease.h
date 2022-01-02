@@ -12,6 +12,7 @@ enum class LeaseType
     kUnknown,
 };
 
+// TODO(patronus): Change to use Result.
 class Lease
 {
 public:
@@ -20,10 +21,15 @@ public:
     {
         return base_addr_;
     }
+    bool success() const
+    {
+        return success_;
+    }
 
 private:
     friend class Patronus;
     friend std::ostream &operator<<(std::ostream&, const Lease&);
+    bool success_{false};
     // basical information
     LeaseType lease_type_{LeaseType::kUnknown};
     uint64_t base_addr_{0};
