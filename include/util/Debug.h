@@ -9,8 +9,10 @@ template <typename T>
 class Debug
 {
 public:
-    Debug() = defualt;
-    Debug(const T &t)
+    Debug()
+    {
+    }
+    Debug(const T &)
     {
         LOG(FATAL) << "** accessing debug data in release mode.";
     }
@@ -21,7 +23,7 @@ public:
         LOG(FATAL) << "** accessing debug data in release mode.";
         return *this;
     }
-    void set(const T &t)
+    void set(const T &)
     {
         LOG(FATAL) << "** accessing debug data in release mode.";
     }
@@ -34,25 +36,22 @@ public:
         LOG(FATAL) << "** accessing debug data in release mode.";
     }
     ~Debug() = default;
-    bool operator==(const Debug<T> &rhs) const
+    bool operator==(const Debug<T> &) const
     {
         LOG(FATAL) << "** accessing debug data in release mode.";
         return false;
     }
-    bool operator==(const T &rhs) const
+    bool operator==(const T &) const
     {
         LOG(FATAL) << "** accessing debug data in release mode.";
         return false;
     }
-    std::ostream &operator<<(std::ostream &os, const Debug<T> &debug)
-    {
-        LOG(FATAL) << "** accessing debug data in release mode.";
-        return os;
-    }
+    template <typename U>
+    friend std::ostream &operator<<(std::ostream &os, const Debug<U> &debug);
 
 private:
 };
-static_assert(sizeof(Debug<int>) == 0);
+static_assert(sizeof(Debug<int>) == 1);
 
 template <typename T>
 std::ostream &operator<<(std::ostream &os, const Debug<T> &)

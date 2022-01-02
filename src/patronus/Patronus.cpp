@@ -430,7 +430,7 @@ size_t Patronus::handle_rdma_finishes(
     for (size_t i = 0; i < rdma_nr; ++i)
     {
         auto &wc = wc_buffer[i];
-        log_wc_handler(&wc);
+        // log_wc_handler(&wc);
         auto wr_id = WRID(wc.wr_id);
         auto id = wr_id.id;
         DCHECK_EQ(wr_id.prefix, WRID_PREFIX_PATRONUS_RW);
@@ -450,7 +450,7 @@ size_t Patronus::handle_rdma_finishes(
         }
         else
         {
-            LOG(WARNING) << "[patronus] rdma R/W failed. wr_id: " << wr_id
+            VLOG(1) << "[patronus] rdma R/W failed. wr_id: " << wr_id
                          << " for node " << node_id << ", dir: " << dir_id
                          << ", coro_id: " << (int) coro_id;
             *(rw_context->success) = false;

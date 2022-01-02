@@ -258,7 +258,7 @@ public:
         std::set<std::pair<size_t, size_t>> recovery;
         size_t fail_nr = handle_rdma_finishes(
             wc_buffer, rdma_nr, coro_buf + cur_idx, recovery);
-        LOG_IF(WARNING, fail_nr > 0)
+        DLOG_IF(WARNING, fail_nr > 0)
             << "[patronus] handle rdma finishes got failure nr: " << fail_nr
             << ". expect " << rw_context_.ongoing_size();
         cur_idx += rdma_nr;
@@ -266,7 +266,7 @@ public:
 
         if (unlikely(fail_nr))
         {
-            LOG(WARNING) << "[patronus] failed. expect nr: " << rw_context_.ongoing_size();
+            DLOG(WARNING) << "[patronus] failed. expect nr: " << rw_context_.ongoing_size();
             while (fail_nr < rw_context_.ongoing_size())
             {
                 auto another_nr =
@@ -284,7 +284,6 @@ public:
             // then the client corotine will be waiting forever.
             size_t got = msg_nr;
             size_t expect_rpc_nr = rpc_context_.ongoing_size();
-            LOG(INFO) << "expect rpc: " << expect_rpc_nr;
             while (got < rpc_context_.ongoing_size())
             {
                 nr = dsm_->reliable_try_recv(
