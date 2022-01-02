@@ -156,7 +156,7 @@ void server(std::shared_ptr<DSM> dsm)
     LOG(INFO) << "Get client node_id: " << node_id
               << ", thread_id: " << thread_id;
 
-    dsm->bind_memory_region_sync(mw, node_id, thread_id, buffer, 64, dirID);
+    dsm->bind_memory_region_sync(mw, node_id, thread_id, buffer, 64, dirID, 0);
     LOG(INFO) << "bind memory window success. Rkey: " << mw->rkey;
 
     dsm->send((char *) &mw->rkey, sizeof(mw->rkey), kClientNodeId);
@@ -182,7 +182,7 @@ void server(std::shared_ptr<DSM> dsm)
         LOG(INFO) << "[system] begin testing rolling dir";
         auto *mw2 = dsm->alloc_mw(second_dir);
         dsm->bind_memory_region_sync(
-            mw2, node_id, thread_id, buffer, 64, second_dir);
+            mw2, node_id, thread_id, buffer, 64, second_dir, 0);
         LOG(INFO) << "bind memory window 2 success. Rkey: " << mw2->rkey;
         dsm->send((char *) &mw2->rkey, sizeof(mw2->rkey), kClientNodeId);
 

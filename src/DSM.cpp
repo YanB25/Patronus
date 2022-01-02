@@ -1126,11 +1126,12 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
                              const char *buffer,
                              size_t size,
                              size_t dirID,
+                             size_t wr_id,
                              bool signal)
 {
     struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
-        qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, signal);
+        qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, signal, wr_id);
     return rkey != 0;
 }
 bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
@@ -1139,10 +1140,9 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   const char *buffer,
                                   size_t size,
                                   size_t dirID,
+                                  uint64_t wr_id,
                                   CoroContext *ctx)
 {
-    coro_t coro_id = ctx ? ctx->coro_id() : kNotACoro;
-
     struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
     uint32_t rkey =
         rdmaAsyncBindMemoryWindow(qp,
@@ -1151,7 +1151,7 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   (uint64_t) buffer,
                                   size,
                                   true,
-                                  WRID(WRID_PREFIX_PATRONUS_BIND_MW, coro_id).val);
+                                  wr_id);
     if (rkey == 0)
     {
         return false;

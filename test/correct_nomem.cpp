@@ -115,7 +115,7 @@ void client(std::shared_ptr<DSM> dsm)
         for (size_t i = 0; i < kMWNr; ++i)
         {
             bool succ = dsm->bind_memory_region_sync(
-                mw, kServerNodeId, 0, buffer, kBindSize, dir);
+                mw, kServerNodeId, 0, buffer, kBindSize, dir, 0);
             cnt++;
             CHECK(succ);
             if (cnt % (10 * define::K) == 0)

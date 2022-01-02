@@ -160,8 +160,8 @@ bool Patronus::read(const Lease &lease,
 }
 
 size_t Patronus::handle_response_messages(const char *msg_buf,
-                                        size_t msg_nr,
-                                        coro_t *coro_buf)
+                                          size_t msg_nr,
+                                          coro_t *coro_buf)
 {
     size_t cur_idx = 0;
     for (size_t i = 0; i < msg_nr; ++i)
@@ -304,7 +304,7 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
 {
     auto rpc_ctx_id = resp->cid.rpc_ctx_id;
     auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
-    DVLOG(3) << "[debug] getting rpc_context " << (void *) rpc_context
+    DVLOG(5) << "[debug] getting rpc_context " << (void *) rpc_context
              << " at id " << rpc_ctx_id;
     auto *request = (AcquireRequest *) rpc_context->request;
     if constexpr (debug())
@@ -331,6 +331,14 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     lease.cur_rkey_ = lease.rkey_0_;
     lease.ex_rkey_ = 0;  // TODO(patronus): same reason above
     lease.cur_ddl_term_ = resp->term;
+    if (resp->success)
+    {
+        lease.set_finish();
+    }
+    else
+    {
+        lease.set_error();
+    }
     if (resp->type == RequestType::kAcquireRLease)
     {
         lease.lease_type_ = LeaseType::kReadLease;
@@ -357,16 +365,35 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     }
     CHECK_LT(req->size, internal.size);
     DVLOG(4) << "[patronus] Trying to bind with dirID " << dirID
-             << ", internal_buf: " << (void *) internal.buffer << ", size "
-             << internal.size;
+             << ", internal_buf: " << (void *) internal.buffer << ", buf size "
+             << internal.size << ", bind size " << req->size;
     uint64_t actual_position = locator_(req->key);
-    dsm_->bind_memory_region_sync(mw,
-                                  req->cid.node_id,
-                                  req->cid.thread_id,
-                                  internal.buffer + actual_position,
-                                  req->size,
-                                  dirID,
-                                  ctx);
+
+    bool success = false;
+
+    auto *rw_ctx = get_rw_context();
+    auto rw_ctx_id = rw_context_.obj_to_id(rw_ctx);
+    rw_ctx->coro_id = ctx ? ctx->coro_id() : kNotACoro;
+    rw_ctx->dir_id = dirID;
+    rw_ctx->ready = false;
+    rw_ctx->success = &success;
+
+    dsm_->bind_memory_region_sync(
+        mw,
+        req->cid.node_id,
+        req->cid.thread_id,
+        internal.buffer + actual_position,
+        req->size,
+        dirID,
+        WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
+        ctx);
+    if (likely(ctx != nullptr))
+    {
+        DCHECK(rw_ctx->success)
+            << "** Should set to finished when switch back to worker "
+               "coroutine. coro: "
+            << *ctx << " ready: @" << (void *) rw_ctx->success;
+    }
 
     auto *resp_buf = get_rdma_message_buffer();
     auto *resp_msg = (AcquireResponse *) resp_buf;
@@ -377,6 +404,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     resp_msg->cid = req->cid;
     resp_msg->cid.node_id = get_node_id();
     resp_msg->cid.thread_id = get_thread_id();
+    resp_msg->success = success;
+
     if constexpr (debug())
     {
         resp_msg->digest = 0;
@@ -386,14 +415,17 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         (char *) resp_msg, sizeof(AcquireResponse), req->cid.node_id, dirID);
 
     put_rdma_message_buffer(resp_buf);
+    put_rw_context(rw_ctx);
 }
 
-size_t Patronus::handle_rdma_finishes(ibv_wc *wc_buffer,
-                                    size_t rdma_nr,
-                                    coro_t *coro_buf,
-                                    std::set<std::pair<size_t, size_t>>& recov)
+size_t Patronus::handle_rdma_finishes(
+    ibv_wc *wc_buffer,
+    size_t rdma_nr,
+    coro_t *coro_buf,
+    std::set<std::pair<size_t, size_t>> &recov)
 {
     size_t cur_idx = 0;
+    size_t fail_nr = 0;
     for (size_t i = 0; i < rdma_nr; ++i)
     {
         auto &wc = wc_buffer[i];
@@ -405,25 +437,30 @@ size_t Patronus::handle_rdma_finishes(ibv_wc *wc_buffer,
         auto node_id = rw_context->target_node;
         auto dir_id = rw_context->dir_id;
         auto coro_id = rw_context->coro_id;
-        CHECK_NE(coro_id, kMasterCoro) << "** Coro master should not issue R/W.";
+        CHECK_NE(coro_id, kMasterCoro)
+            << "** Coro master should not issue R/W.";
 
         if (likely(wc.status == IBV_WC_SUCCESS))
         {
             *(rw_context->success) = true;
+            VLOG(4) << "[patronus] handle rdma finishes SUCCESS for coro "
+                    << (int) coro_id << ". set " << (void *) rw_context->success
+                    << " to true.";
         }
         else
         {
             LOG(WARNING) << "[patronus] rdma R/W failed. wr_id: " << wr_id
                          << " for node " << node_id << ", dir: " << dir_id
-                         << ", coro_id: " << coro_id;
+                         << ", coro_id: " << (int) coro_id;
             *(rw_context->success) = false;
             recov.insert({node_id, dir_id});
+            fail_nr++;
         }
         rw_context->ready.store(true, std::memory_order_release);
 
         coro_buf[cur_idx++] = coro_id;
     }
-    return cur_idx;
+    return fail_nr;
 }
 
 void Patronus::finished(CoroContext *ctx)
@@ -460,7 +497,8 @@ void Patronus::finished(CoroContext *ctx)
     }
 }
 
-void Patronus::handle_admin_recover(AdminRequest *req, CoroContext *ctx)
+void Patronus::handle_admin_recover(AdminRequest *req,
+                                    [[maybe_unused]] CoroContext *ctx)
 {
     if constexpr (debug())
     {

@@ -148,7 +148,7 @@ void bind_rkeys(std::shared_ptr<DSM> dsm,
     for (size_t t = 0; t < mws.size(); ++t)
     {
         dsm->bind_memory_region_sync(
-            mws[t], kClientNodeId, 0, buffer, size, dirID);
+            mws[t], kClientNodeId, 0, buffer, size, dirID, 0);
     }
 }
 

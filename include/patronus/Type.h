@@ -74,6 +74,7 @@ struct AcquireResponse
     uint32_t rkey_0;
     uint64_t base;
     term_t term;
+    bool success;
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(AcquireResponse) < ReliableConnection::kMessageSize);

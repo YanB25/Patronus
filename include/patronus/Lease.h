@@ -25,11 +25,30 @@ public:
     {
         return success_;
     }
+    bool ready() const
+    {
+        return ready_;
+    }
+    bool error() const
+    {
+        return !success_;
+    }
 
 private:
+    void set_finish()
+    {
+        ready_ = true;
+        success_ = true;
+    }
+    void set_error()
+    {
+        ready_ = true;
+        success_ = false;
+    }
     friend class Patronus;
     friend std::ostream &operator<<(std::ostream&, const Lease&);
     bool success_{false};
+    bool ready_{false};
     // basical information
     LeaseType lease_type_{LeaseType::kUnknown};
     uint64_t base_addr_{0};

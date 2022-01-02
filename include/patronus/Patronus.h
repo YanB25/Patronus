@@ -43,7 +43,7 @@ public:
     constexpr static size_t kClientRdmaBufferSize = 1 * define::MB;
 
     // TODO(patronus): try to tune this parameter up.
-    constexpr static size_t kTotalMwPoolSize = 1 * define::M;
+    constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
 
     using KeyLocator = std::function<uint64_t(key_t)>;
     static KeyLocator identity_locator;
@@ -113,7 +113,9 @@ public:
             std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
                 dsm_rdma_buffer, message_pool_size);
 
-        size_t alloc_mw_nr = kTotalMwPoolSize / MAX_APP_THREAD / NR_DIRECTORY;
+        // TODO(patronus): still not determine the thread model of server side
+        // what should be the number of pre-allocated mw?
+        size_t alloc_mw_nr = kMwPoolSizePerThread / NR_DIRECTORY;
         for (size_t dirID = 0; dirID < NR_DIRECTORY; ++dirID)
         {
             for (size_t i = 0; i < alloc_mw_nr; ++i)
@@ -177,20 +179,37 @@ public:
         constexpr static size_t kBufferSize = 16;
         static thread_local ibv_wc wc_buffer[kBufferSize];
         auto nr = dsm_->try_poll_dir_cq(wc_buffer, dirID, limit);
+
+        // TODO(patronus): server can recovery before client telling it to do.
+        // bool need_recovery = false;
         for (size_t i = 0; i < nr; ++i)
         {
             auto &wc = wc_buffer[i];
             log_wc_handler(&wc);
-            if (unlikely(wc.status == IBV_WC_WR_FLUSH_ERR))
-            {
-                LOG(WARNING)
-                    << "[patronus] QP error. skip all the following wrs.";
-                break;
-            }
             auto wrid = WRID(wc.wr_id);
             DCHECK_EQ(wrid.prefix, WRID_PREFIX_PATRONUS_BIND_MW);
-            // this will be coro_id by design
-            buf[i] = wrid.id;
+            auto rw_ctx_id = wrid.id;
+            auto *rw_ctx = rw_context_.id_to_obj(rw_ctx_id);
+            auto coro_id = rw_ctx->coro_id;
+            CHECK_NE(coro_id, kNotACoro);
+            CHECK_NE(coro_id, kMasterCoro)
+                << "not sure. I this assert fail, rethink about me.";
+            if (unlikely(wc.status != IBV_WC_SUCCESS))
+            {
+                LOG(WARNING) << "[patronus] server got failed wc: " << wrid
+                             << " for coro " << (int) coro_id;
+                // need_recovery = true;
+                *(rw_ctx->success) = false;
+            }
+            else
+            {
+                VLOG(4) << "[patronus] server got dir CQE for coro " << coro_id
+                        << ". wr_id: " << wrid;
+                *(rw_ctx->success) = true;
+            }
+            rw_ctx->ready.store(true, std::memory_order_release);
+
+            buf[i] = coro_id;
         }
         return nr;
     }
@@ -220,6 +239,7 @@ public:
         static thread_local char buf[ReliableConnection::kMaxRecvBuffer];
         auto nr = dsm_->reliable_try_recv(
             mid, buf, std::min(limit, ReliableConnection::kRecvLimit));
+        size_t msg_nr = nr;
 
         size_t cur_idx = 0;
         cur_idx = handle_response_messages(buf, nr, coro_buf);
@@ -236,15 +256,16 @@ public:
             << "** performance issue: buffer size not enough";
 
         std::set<std::pair<size_t, size_t>> recovery;
-        size_t rdma_finish_nr = handle_rdma_finishes(
+        size_t fail_nr = handle_rdma_finishes(
             wc_buffer, rdma_nr, coro_buf + cur_idx, recovery);
-        DCHECK_EQ(rdma_finish_nr, rdma_nr);
+        LOG_IF(WARNING, fail_nr > 0)
+            << "[patronus] handle rdma finishes got failure nr: " << fail_nr
+            << ". expect " << rw_context_.ongoing_size();
         cur_idx += rdma_nr;
         DCHECK_LT(cur_idx, limit);
 
-        if (unlikely(!recovery.empty()))
+        if (unlikely(fail_nr))
         {
-            size_t fail_nr = recovery.size();
             while (fail_nr < rw_context_.ongoing_size())
             {
                 auto another_nr =
@@ -257,11 +278,27 @@ public:
                     << "** Provided buffer not enough to handle error message.";
                 fail_nr += another_nr;
             }
-            for (const auto &[node_id, dir_id] : recovery)
+            // TODO: why we need to join before recovering QP?
+            size_t got = msg_nr;
+            size_t expect_rpc_nr = rpc_context_.ongoing_size();
+            LOG(INFO) << "expect rpc: " << expect_rpc_nr;
+            while (got < rpc_context_.ongoing_size())
             {
-                signal_server_to_recover_qp(node_id, dir_id);
-                CHECK(dsm_->recoverThreadQP(node_id, dir_id));
+                nr = dsm_->reliable_try_recv(
+                    mid, buf, std::min(limit, ReliableConnection::kRecvLimit));
+                got += nr;
+                LOG_IF(INFO, nr > 0) << "got another " << nr << ", cur: " << got
+                                     << ", expect " << expect_rpc_nr;
+                nr = handle_response_messages(buf, nr, coro_buf + cur_idx);
+                cur_idx += nr;
+                CHECK_LT(cur_idx, limit);
             }
+        }
+
+        for (const auto &[node_id, dir_id] : recovery)
+        {
+            signal_server_to_recover_qp(node_id, dir_id);
+            CHECK(dsm_->recoverThreadQP(node_id, dir_id));
         }
         return cur_idx;
     }
@@ -271,7 +308,7 @@ private:
     {
         auto *ret = mw_pool_[dirID].front();
         mw_pool_[dirID].pop();
-        return ret;
+        return DCHECK_NOTNULL(ret);
     }
     void put_mw(size_t dirID, ibv_mw *mw)
     {

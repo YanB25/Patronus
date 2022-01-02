@@ -280,6 +280,7 @@ public:
                             const char *buffer,
                             size_t size,
                             size_t dirID,
+                            size_t wr_id,
                             bool signal = false);
     bool bind_memory_region_sync(struct ibv_mw *mw,
                                  size_t target_node_id,
@@ -287,6 +288,7 @@ public:
                                  const char *buffer,
                                  size_t size,
                                  size_t dirID,
+                                 uint64_t wr_id,
                                  CoroContext* ctx = nullptr);
 
     /**
