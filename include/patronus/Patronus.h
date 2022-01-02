@@ -266,6 +266,7 @@ public:
 
         if (unlikely(fail_nr))
         {
+            LOG(WARNING) << "[patronus] failed. expect nr: " << rw_context_.ongoing_size();
             while (fail_nr < rw_context_.ongoing_size())
             {
                 auto another_nr =
@@ -278,7 +279,9 @@ public:
                     << "** Provided buffer not enough to handle error message.";
                 fail_nr += another_nr;
             }
-            // TODO: why we need to join before recovering QP?
+            // need to wait for server realizes QP errors, and response error to memory bind call
+            // otherwise, the server will recovery QP and drop the failed window_bind calls
+            // then the client corotine will be waiting forever.
             size_t got = msg_nr;
             size_t expect_rpc_nr = rpc_context_.ongoing_size();
             LOG(INFO) << "expect rpc: " << expect_rpc_nr;

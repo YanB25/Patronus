@@ -12,7 +12,8 @@ enum class LeaseType
     kUnknown,
 };
 
-// TODO(patronus): Change to use Result.
+// wont fix: do not use result.
+// it has problems of lifecycle management.
 class Lease
 {
 public:

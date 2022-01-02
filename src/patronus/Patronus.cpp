@@ -108,6 +108,7 @@ bool Patronus::read(const Lease &lease,
                     size_t dir_id,
                     CoroContext *ctx)
 {
+    CHECK(lease.success());
     bool ret = false;
 
     GlobalAddress gaddr;
