@@ -21,8 +21,9 @@ constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kDirID = 0;
 
-constexpr static size_t kTestTime =
-    Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
+// constexpr static size_t kTestTime =
+//     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
+constexpr static size_t kTestTime = 1 * define::M;
 
 struct Object
 {
@@ -85,11 +86,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
-        bool succ = p->read(lease,
-                            rdma_buf.buffer,
-                            sizeof(Object),
-                            0 /* offset */,
-                            &ctx);
+        bool succ = p->read(
+            lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
         if (!succ)
         {
             VLOG(1) << "[bench] client coro " << ctx << " read FAILED. retry. ";
@@ -102,6 +100,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         CHECK_EQ(magic_object.target, coro_magic)
             << "coro_id " << ctx << ", Read at key " << coro_key
             << ", lease.base: " << (void *) lease.base_addr();
+
+        p->relinquish(lease, &ctx);
+        DVLOG(2) << "[bench] client coro " << ctx << " relinquish ";
 
         p->put_rdma_buffer(rdma_buf.buffer);
 
@@ -179,7 +180,7 @@ void client(Patronus::pointer p)
                 auto cur_success = bench_info.success_nr;
                 auto cur_fail = bench_info.fail_nr;
                 auto now = std::chrono::steady_clock::now();
-                usleep(10 * 1000);
+                usleep(1000 * 1000);
                 auto then_success = bench_info.success_nr;
                 auto then_fail = bench_info.fail_nr;
                 auto then = std::chrono::steady_clock::now();
@@ -189,9 +190,10 @@ void client(Patronus::pointer p)
 
                 auto success_op = then_success - cur_success;
                 auto fail_op = then_fail - cur_fail;
-                LOG_IF(INFO, cur_success > 0) << "[bench] Op: " << success_op
-                          << ", fail Op: " << fail_op << " for " << ns
-                          << " ns. OPS: " << 1.0 * 1e9 * success_op / ns;
+                LOG_IF(INFO, cur_success > 0)
+                    << "[bench] Op: " << success_op << ", fail Op: " << fail_op
+                    << " for " << ns
+                    << " ns. OPS: " << 1.0 * 1e9 * success_op / ns;
             }
         });
 
