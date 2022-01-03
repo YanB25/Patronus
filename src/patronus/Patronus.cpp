@@ -538,7 +538,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     rw_ctx->ready = false;
     rw_ctx->success = &success;
 
-    dsm_->bind_memory_region_sync(
+    bool call_succ = dsm_->bind_memory_region_sync(
         mw,
         req->cid.node_id,
         req->cid.thread_id,
@@ -547,12 +547,18 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         dirID,
         WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
         ctx);
+
     if (likely(ctx != nullptr))
     {
+        DCHECK(call_succ);
         DCHECK(rw_ctx->success)
             << "** Should set to finished when switch back to worker "
                "coroutine. coro: "
             << *ctx << " ready: @" << (void *) rw_ctx->success;
+    }
+    else
+    {
+        success = call_succ;
     }
 
     auto *lease_ctx = get_lease_context();
@@ -989,9 +995,8 @@ void Patronus::registerClientThread()
     CHECK_GE(message_pool_size / kMessageSize, 65536)
         << "Consider to tune up message pool size? Less than 64436 "
            "possible messages";
-    LOG_IF(WARNING, rdma_buffer_size < kMaxCoroNr * 1 * define::MB)
-        << "Can not ensure 1MB buffer for each coroutine. consider to tune "
-           "the size up.";
+    CHECK_GE(rdma_buffer_size, kMaxCoroNr * kClientRdmaBufferSize)
+        << "rdma_buffer not enough for maximum coroutine";
 
     auto *dsm_rdma_buffer = dsm_->get_rdma_buffer();
     auto *client_rdma_buffer = dsm_rdma_buffer + message_pool_size;
@@ -1000,7 +1005,7 @@ void Patronus::registerClientThread()
         std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
             dsm_rdma_buffer, message_pool_size);
     rdma_client_buffer_ =
-        std::make_unique<ThreadUnsafeBufferPool<1 * define::MB>>(
+        std::make_unique<ThreadUnsafeBufferPool<kClientRdmaBufferSize>>(
             client_rdma_buffer, rdma_buffer_size);
 }
 

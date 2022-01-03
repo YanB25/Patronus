@@ -45,6 +45,7 @@ class Patronus
 public:
     using pointer = std::shared_ptr<Patronus>;
 
+    constexpr static size_t kMaxCoroNr = 16;
     constexpr static size_t kMessageSize = ReliableConnection::kMessageSize;
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
@@ -167,8 +168,7 @@ public:
     }
 
 private:
-    constexpr static size_t kMaxCoroNr = 8;
-    constexpr static size_t kClientRdmaBufferSize = 1 * define::MB;
+    constexpr static size_t kClientRdmaBufferSize = 4 * define::KB;
     constexpr static size_t kLeaseContextNr = kMaxCoroNr * 16;
 
     ibv_mw *get_mw(size_t dirID)

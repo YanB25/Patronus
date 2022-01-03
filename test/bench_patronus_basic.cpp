@@ -13,7 +13,8 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint32_t kMachineNr = 2;
 
 using namespace patronus;
-constexpr static size_t kCoroCnt = 8;
+constexpr static size_t kCoroCnt = 16;
+static_assert(kCoroCnt <= Patronus::kMaxCoroNr);
 thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
 
@@ -58,6 +59,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     size_t coro_key = kCoroStartKey + coro_id;
     size_t coro_magic = kMagic + coro_id;
 
+    auto rdma_buf = p->get_rdma_buffer();
+    memset(rdma_buf.buffer, 0, sizeof(Object));
+
     for (size_t time = 0; time < kTestTime; ++time)
     {
         client_comm.still_has_work[coro_id] = true;
@@ -81,30 +85,25 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
-        auto rdma_buf = p->get_rdma_buffer();
-        memset(rdma_buf.buffer, 0, sizeof(Object));
-
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
-        CHECK_LT(sizeof(Object), rdma_buf.size);
+        DCHECK_LT(sizeof(Object), rdma_buf.size);
         bool succ = p->read(
             lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
-        if (!succ)
+        if (unlikely(!succ))
         {
-            VLOG(1) << "[bench] client coro " << ctx << " read FAILED. retry. ";
-            p->put_rdma_buffer(rdma_buf.buffer);
+            DVLOG(1) << "[bench] client coro " << ctx << " read FAILED. retry. ";
             bench_info.fail_nr++;
             continue;
         }
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
         Object magic_object = *(Object *) rdma_buf.buffer;
-        CHECK_EQ(magic_object.target, coro_magic)
+        DCHECK_EQ(magic_object.target, coro_magic)
             << "coro_id " << ctx << ", Read at key " << coro_key
             << ", lease.base: " << (void *) lease.base_addr();
 
         p->relinquish(lease, &ctx);
         DVLOG(2) << "[bench] client coro " << ctx << " relinquish ";
 
-        p->put_rdma_buffer(rdma_buf.buffer);
 
         DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
         bench_info.success_nr++;
@@ -116,6 +115,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;
     client_comm.finish_all_task[coro_id] = true;
+
+    p->put_rdma_buffer(rdma_buf.buffer);
 
     LOG(WARNING) << "worker coro " << (int) coro_id
                  << " finished ALL THE TASK. yield to master.";
@@ -143,6 +144,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         // try to see if messages arrived
 
         auto nr = p->try_get_client_continue_coros(mid, coro_buf, 2 * kCoroCnt);
+
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
@@ -233,7 +235,7 @@ void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     CoroContext ctx(&yield, &server_master_coro, coro_id);
 
-    while (!p->should_exit())
+    while (likely(!p->should_exit()))
     {
         auto task = server_comm.task_queue.front();
         CHECK_NE(task->msg_nr, 0);
