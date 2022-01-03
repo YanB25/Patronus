@@ -4,6 +4,9 @@
 
 #include <atomic>
 #include <queue>
+#include <set>
+#include "util/Debug.h"
+#include "util/stacktrace.h"
 
 template <size_t kBufferSize>
 class ThreadUnsafeBufferPool
@@ -19,7 +22,33 @@ public:
             void *addr = (char *) pool_addr_ + i * kBufferSize;
             debug_validity_check(addr);
             pool_.push(addr);
+
+            if constexpr (debug())
+            {
+                DCHECK_EQ(inner_.get().count(addr), 0);
+                inner_.get().insert(addr);
+            }
         }
+    }
+    ~ThreadUnsafeBufferPool()
+    {
+        if (pool_.size() != buffer_nr_)
+        {
+            LOG(WARNING)
+                << "Possible memory leak for ThreadUnsafeBufferPool at "
+                << (void *) this << ", expect " << buffer_nr_ << ", got "
+                << pool_.size() << util::stack_trace;
+        }
+    }
+    void debug_validity_get(void *addr)
+    {
+        DCHECK(outer_.get().insert(addr).second);
+        DCHECK_EQ(inner_.get().erase(addr), 1);
+    }
+    void debug_validity_put(void *addr)
+    {
+        DCHECK_EQ(outer_.get().erase(addr), 1);
+        DCHECK(inner_.get().insert(addr).second);
     }
     void *get()
     {
@@ -30,7 +59,11 @@ public:
         void *ret = pool_.front();
         pool_.pop();
         on_going_++;
-        debug_validity_check(ret);
+        if constexpr (debug())
+        {
+            debug_validity_check(ret);
+            debug_validity_get(ret);
+        }
         return ret;
     }
     size_t size() const
@@ -45,7 +78,11 @@ public:
     {
         pool_.push(buf);
         on_going_--;
-        debug_validity_check(buf);
+        if constexpr (debug())
+        {
+            debug_validity_check(buf);
+            debug_validity_put(buf);
+        }
     }
 
     uint64_t buf_to_id(void *buf)
@@ -92,6 +129,9 @@ private:
     std::queue<void *> pool_;
 
     int64_t on_going_{0};
+
+    Debug<std::set<const void *>> outer_;
+    Debug<std::set<const void *>> inner_;
 };
 template <typename T, size_t kSize>
 class ThreadUnsafePool
@@ -103,6 +143,19 @@ public:
         {
             debug_validity_check(&buffer_[i]);
             pool_.push(&buffer_[i]);
+            if constexpr (debug())
+            {
+                DCHECK(inner_.get().insert(&buffer_[i]).second);
+            }
+        }
+    }
+    ~ThreadUnsafePool()
+    {
+        if (pool_.size() != kSize)
+        {
+            LOG(WARNING) << "** Possible memory leak for ThreadUnsafePool at "
+                         << (void *) this << ", expect " << kSize << ", got "
+                         << pool_.size() << util::stack_trace;
         }
     }
 
@@ -115,14 +168,22 @@ public:
         T *ret = pool_.front();
         pool_.pop();
         on_going_++;
-        debug_validity_check(ret);
+        if constexpr (debug())
+        {
+            debug_validity_check(ret);
+            debug_validity_get(ret);
+        }
         return ret;
     }
     void put(T *obj)
     {
         pool_.push(obj);
         on_going_--;
-        debug_validity_check(obj);
+        if constexpr (debug())
+        {
+            debug_validity_check(obj);
+            debug_validity_put(obj);
+        }
     }
     uint64_t obj_to_id(T *obj)
     {
@@ -141,7 +202,16 @@ public:
     {
         return on_going_;
     }
-
+    void debug_validity_get(const T *obj)
+    {
+        DCHECK_EQ(inner_.get().erase(obj), 1);
+        DCHECK(outer_.get().insert(obj).second);
+    }
+    void debug_validity_put(const T *obj)
+    {
+        DCHECK(inner_.get().insert(obj).second);
+        DCHECK_EQ(outer_.get().erase(obj), 1);
+    }
     void debug_validity_check(const T *obj)
     {
         if constexpr (debug())
@@ -168,6 +238,9 @@ private:
     T buffer_[kSize];
 
     size_t on_going_{0};
+
+    Debug<std::set<const T *>> outer_;
+    Debug<std::set<const T *>> inner_;
 };
 
 template <size_t kObjSize>

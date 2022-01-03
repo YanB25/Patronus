@@ -74,6 +74,7 @@ struct AcquireResponse
     uint32_t rkey_0;
     uint64_t base;
     term_t term;
+    id_t lease_id;
     bool success;
     Debug<uint64_t> digest;
 } __attribute__((packed));
@@ -96,6 +97,29 @@ struct AdminRequest
 } __attribute__((packed));
 static_assert(sizeof(AdminRequest) < ReliableConnection::kMessageSize);
 std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);
+
+struct LeaseModifyRequest
+{
+    enum RequestType type;
+    ClientID cid;
+    id_t lease_id;
+    term_t term;
+    Debug<uint64_t> digest;
+}__attribute__((packed));
+static_assert(sizeof(LeaseModifyRequest) < ReliableConnection::kMessageSize);
+std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest& req);
+
+struct LeaseModifyResponse
+{
+    enum RequestType type;
+    ClientID cid;
+    uint64_t lease_id;
+    bool success;
+    Debug<uint64_t> digest;
+
+}__attribute__((packed));
+static_assert(sizeof(LeaseModifyResponse) < ReliableConnection::kMessageSize);
+std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse& req);
 
 }  // namespace patronus
 

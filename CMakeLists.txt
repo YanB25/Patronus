@@ -39,10 +39,12 @@ find_package(gflags REQUIRED)
 # link_libraries(benchmark::benchmark)
 
 # Link Options
-set(LINKS_FLAGS "-lpthread -libverbs -lmemcached")
+set(LINKS_FLAGS "-lpthread -libverbs -lmemcached -rdynamic")
 find_library(CITYHASH_LIB NAMES libcityhash.a REQUIRED)
 
 link_libraries(${CITYHASH_LIB})
+
+link_libraries(unwind)
 
 # set(ASAN_OPTIONS "fast_unwind_on_fatal=1")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address")

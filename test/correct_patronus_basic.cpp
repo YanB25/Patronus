@@ -82,7 +82,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                             rdma_buf.buffer,
                             sizeof(Object),
                             0 /* offset */,
-                            kDirID,
                             &ctx);
         if (!succ)
         {
@@ -96,6 +95,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         CHECK_EQ(magic_object.target, coro_magic)
             << "coro_id " << ctx << ", Read at key " << coro_key
             << ", lease.base: " << (void *) lease.base_addr();
+        
+        DVLOG(2) << "[bench] client coro " << ctx << " start to relinquish lease ";
+        p->relinquish(lease, &ctx);
 
         p->put_rdma_buffer(rdma_buf.buffer);
 
@@ -323,8 +325,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "I am server. tid " << tid;
 
-    auto dsm = p->get_dsm();
-    auto internal_buf = dsm->get_server_internal_buffer();
+    auto internal_buf = p->get_server_internal_buffer();
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
         auto coro_magic = kMagic + i;

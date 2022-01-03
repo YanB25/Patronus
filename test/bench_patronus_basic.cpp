@@ -89,7 +89,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                             rdma_buf.buffer,
                             sizeof(Object),
                             0 /* offset */,
-                            kDirID,
                             &ctx);
         if (!succ)
         {
@@ -361,8 +360,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "I am server. tid " << tid;
 
-    auto dsm = p->get_dsm();
-    auto internal_buf = dsm->get_server_internal_buffer();
+    auto internal_buf = p->get_server_internal_buffer();
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
         auto coro_magic = kMagic + i;

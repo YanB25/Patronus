@@ -90,8 +90,9 @@ std::ostream &operator<<(std::ostream &os, const AcquireRequest &req)
 std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
 {
     os << "{AcquireResponse type: " << resp.type << ", cid: " << resp.cid
-       << ", success: " << resp.success << ", rkey_0: " << resp.rkey_0
-       << ", base " << resp.base << ", term: " << resp.term << "}";
+       << ", lease_id: " << resp.lease_id << ", rkey_0: " << resp.rkey_0
+       << ", base " << resp.base << ", term: " << resp.term
+       << ", success: " << resp.success << " }";
     return os;
 }
 
@@ -99,6 +100,20 @@ std::ostream &operator<<(std::ostream &os, const AdminRequest &req)
 {
     os << "{AdminRequest type: " << req.type << ", cid: " << req.cid
        << "flags: " << (int) req.flag << " }";
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req)
+{
+    os << "{LeaseModifyRequest type: " << req.type << ", cid: " << req.cid
+       << ", lease_id: " << req.lease_id << ", term: " << req.term << " }";
+    return os;
+}
+std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &resp)
+{
+    os << "{LeaseModifyResponse type: " << resp.type << ", cid : " << resp.cid
+       << ", lease_id: " << resp.lease_id << ", success: " << resp.success
+       << " }";
     return os;
 }
 
