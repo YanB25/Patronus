@@ -10,7 +10,17 @@ TODO:
 [-] refactor: the API for client should combine into one.
 
 [-] implement relinquish, and let the server gc the memory window. so that I can bench for a looong time instead of several ms.
-- try to optimize the performance of single-thread patronus-basic (takes 2-3 days if lucky).
+- try to optimize the performance of single-thread patronus-basic (takes 2-3 days if lucky). actually: I got sick and sleep for 2-3 days =).
 - remember to measure the latency of each op, and the penalty of coroutine switching.
 
 - then, try the correctness and performance of multiple threads. should scale according to NR_DIRECTORY, I guess.
+
+
+- evaluate the maxinum bind_mw performance I can get:
+    - What if pipeline poll cq? for the bench_mw.cpp, advancely post several batch.
+    - What if totally does not poll? just try_poll and does not wait for anything.
+    - tune up the post-send-batch for bench_mw_post_send.
+
+Possible performance optimization:
+- server can bind_mw in a batch (from one ibv_post_send call). There will be only one signal.
+    - use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
