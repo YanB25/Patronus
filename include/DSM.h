@@ -281,7 +281,7 @@ public:
                             size_t size,
                             size_t dirID,
                             size_t wr_id,
-                            bool signal = false);
+                            bool signal);
     bool bind_memory_region_sync(struct ibv_mw *mw,
                                  size_t target_node_id,
                                  size_t target_thread_id,

@@ -76,11 +76,16 @@ void server(std::shared_ptr<DSM> dsm,
         timer.print();
 
         printf("\n-------- bind mw ----------\n");
-        CHECK(window_size < max_size) << 
-              "mw_nr " << mw_nr << " too large, overflow an rdma buffer.";
+        auto bind_mw_begin = std::chrono::steady_clock::now();
+
+        CHECK(window_size < max_size)
+            << "mw_nr " << mw_nr << " too large, overflow an rdma buffer.";
         timer.begin();
         size_t remain_nr = mw_nr;
         size_t window_nr = max_size / window_size;
+
+        ibv_wc wc_buffer[1024];
+
         while (remain_nr > 0)
         {
             size_t work_nr = std::min(remain_nr, batch_poll_size);
@@ -107,14 +112,34 @@ void server(std::shared_ptr<DSM> dsm,
                     // if i too large, we roll back i to 0.
                     buffer_start = buffer + (i % window_nr) * window_size;
                 }
-                dsm->bind_memory_region(
-                    mws[i], kClientNodeId, 0, buffer_start, window_size, dirID, true);
+                // every post send will be signaled.
+                dsm->bind_memory_region(mws[i],
+                                        kClientNodeId,
+                                        0,
+                                        buffer_start,
+                                        window_size,
+                                        dirID,
+                                        0,
+                                        true);
             }
-            dsm->poll_dir_cq(dirID, work_nr);
+            // dsm->poll_dir_cq(dirID, work_nr);
+            size_t polled = 0;
+            while (polled < work_nr)
+            {
+                polled += dsm->try_poll_dir_cq(wc_buffer, dirID, 1024);
+            }
             remain_nr -= work_nr;
         }
         bind_mw_ns += timer.end(mw_nr);
         timer.print();
+
+        auto bind_mw_end = std::chrono::steady_clock::now();
+        auto bind_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           bind_mw_end - bind_mw_begin)
+                           .count();
+        LOG(INFO) << "[bench] bind memory window op: " << mw_nr
+                  << ", ns: " << bind_ns
+                  << ", ops: " << 1.0 * 1e9 * mw_nr / bind_ns;
 
         printf("\n-------- free mw ----------\n");
         timer.begin();
@@ -126,7 +151,7 @@ void server(std::shared_ptr<DSM> dsm,
         timer.print();
     }
 }
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -184,10 +209,12 @@ int main(int argc, char* argv[])
         for (auto window_nr : {10000})
         {
             for (auto window_size : {2 * define::MB})
+            // for (auto window_size : {64})
             {
-                for (int random_addr : {0, 1, 2})
+                // for (int random_addr : {0, 1, 2})
+                for (int random_addr : {2})
                 {
-                    for (size_t batch_poll_size : {10})
+                    for (size_t batch_poll_size : {8})
                     // for (size_t batch_poll_size : {1, 10, 100})
                     {
                         window_nr_ = window_nr;
