@@ -91,7 +91,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
         if (unlikely(!succ))
         {
-            DVLOG(1) << "[bench] client coro " << ctx << " read FAILED. retry. ";
+            DVLOG(1) << "[bench] client coro " << ctx
+                     << " read FAILED. retry. ";
             bench_info.fail_nr++;
             continue;
         }
@@ -103,7 +104,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         p->relinquish(lease, &ctx);
         DVLOG(2) << "[bench] client coro " << ctx << " relinquish ";
-
 
         DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
         bench_info.success_nr++;
@@ -228,7 +228,9 @@ struct Task
 struct ServerCoroutineCommunicationContext
 {
     bool finished[kCoroCnt];
-    std::queue<std::shared_ptr<Task>> task_queue;
+    std::queue<Task *> task_queue;
+
+    ThreadUnsafePool<Task, 1024> task_pool;
 } server_comm;
 
 void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
@@ -248,7 +250,7 @@ void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         {
             server_comm.task_queue.pop();
         }
-        DVLOG(1) << "[bench] server handling task @" << (void *) task.get()
+        DVLOG(1) << "[bench] server handling task @" << (void *) task
                  << ", message_nr " << task->msg_nr << ", cur_fetched "
                  << cur_nr << ", cur_finished: " << task->finished_nr << " "
                  << ctx;
@@ -257,8 +259,9 @@ void server_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         if (task->finished_nr == task->msg_nr)
         {
             DVLOG(1) << "[bench] server handling callback of task @"
-                     << (void *) task.get();
+                     << (void *) task;
             task->call_back_on_finish();
+            server_comm.task_pool.put(task);
         }
 
         DVLOG(1) << "[bench] server " << ctx
@@ -301,7 +304,8 @@ void server_master(Patronus::pointer p, CoroYield &yield)
         {
             DVLOG(1) << "[bench] server recv messages " << nr
                      << ". Dispatch to workers, avg get " << (nr / kCoroCnt);
-            std::shared_ptr<Task> task = std::make_shared<Task>();
+            // std::shared_ptr<Task> task = std::make_shared<Task>();
+            auto *task = server_comm.task_pool.get();
             task->buf = CHECK_NOTNULL(buffer);
             task->msg_nr = nr;
             task->fetched_nr = 0;
