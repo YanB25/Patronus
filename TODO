@@ -1,4 +1,3 @@
-TODO:
 [-] Add API p->should_exit()
 [-] Add key_to_dsm_addr API for addressing.
 - Implemente all the APIs in Patronus
@@ -15,8 +14,7 @@ TODO:
 
 - then, try the correctness and performance of multiple threads. should scale according to NR_DIRECTORY, I guess.
 
-
-- evaluate the maxinum bind_mw performance I can get:
+[-] evaluate the maxinum bind_mw performance I can get:
     - What if pipeline poll cq? for the bench_mw.cpp, advancely post several batch.
     - What if totally does not poll? just try_poll and does not wait for anything.
     - tune up the post-send-batch for bench_mw_post_send.
