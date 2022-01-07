@@ -22,13 +22,27 @@
 [one day]
 Possible performance optimization:
 [-] performance of buffer pool? should be REALLY high: 52.6Mops for obj pool, 69.2Mops for buffer pool.
-- server can bind_mw in a batch (from one ibv_post_send call). There will be only one signal(, or every signal) and one interaction to NIC.
-    - server SHOULD NOT ASSUME that one server thread is bind to a DirectoryConnection.
-    - but server DOES can batch post_send and get rid of coroutine
-    - should test against the correctness of failed mw or failed r/w.
-    - use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
+[-] server can bind_mw in a batch (from one ibv_post_send call). There will be only one signal(, or every signal) and one interaction to NIC.
+    [-] server SHOULD NOT ASSUME that one server thread is bind to a DirectoryConnection.
+    [-] NOT WORK: but server DOES can batch post_send and get rid of coroutine
+    [-] NOT IMPL (feat/mw-server-not-use-coroutine): should test against the correctness of failed mw or failed r/w.
+    [-] NOT IMPL (feat/mw-server-not-use-coroutine): use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
+
+TOMORROW: two days.
+- move the small function to patronus.h, I don't believe linker optimization so much.
 - API change: do not expose server coroutine scheduling to the outer world. Furthermore, no copy is required.
+- evaluation: bench the latency of the whole procedure. with various concurrency.
+- evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
+
 - change to multiple threads: 
-    - each client thread bind to one mid. 
-    - one server thread can handle multiple mid simultaneously. one server thread for one DirectoryConnnection (one-to-one mapping) 
-- Adopt the header to 
+    - tune NR_DIRECTORY to 4
+    - each client thread bind to one mid. (e.g. need 16 client threads)
+    - one server thread can handle multiple mid simultaneously. one server thread for one DirectoryConnnection (one-to-one mapping). Therefore, 4 server threads.
+- bench the performance. see if it is 4 times as one thread.
+
+- Add the header into the design. That would require adding the swaping area.
+
+Future:
+- Add the TIME into patronus. Server should intervally see if any expired lease exists, and destroy them!
+
+If all the things above finish, I can move on to adopt the uPaxos!

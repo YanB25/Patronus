@@ -387,9 +387,9 @@ public:
     void reliable_send(const char *buf,
                        size_t size,
                        uint16_t node_id,
-                       size_t targetID)
+                       size_t mid)
     {
-        reliable_msg_->send(thread_id, buf, size, node_id, targetID);
+        reliable_msg_->send(thread_id, buf, size, node_id, mid);
     }
     void reliable_recv(size_t from_mid, char *ibuf, size_t limit = 1)
     {

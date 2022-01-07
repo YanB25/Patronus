@@ -40,6 +40,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
                                bool is_read_lease,
                                CoroContext *ctx)
 {
+    // TODO(patronus): see if this tid to mid binding is correct.
     auto mid = dsm_->get_thread_id() % RMSG_MULTIPLEXING;
     auto tid = mid;
 
@@ -238,6 +239,7 @@ Lease Patronus::lease_modify_impl(Lease &lease,
           type == RequestType::kUpgrade)
         << "** invalid type " << (int) type;
 
+    // TODO(patronus): see if this tid to mid binding is correct
     auto mid = dsm_->get_thread_id() % RMSG_MULTIPLEXING;
     auto tid = mid;
     auto target_node_id = lease.node_id_;
@@ -595,8 +597,10 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         resp_msg->digest = 0;
         resp_msg->digest = djb2_digest(resp_msg, sizeof(AcquireResponse));
     }
+    
+    auto from_mid = req->cid.mid;
     dsm_->reliable_send(
-        (char *) resp_msg, sizeof(AcquireResponse), req->cid.node_id, dirID);
+        (char *) resp_msg, sizeof(AcquireResponse), req->cid.node_id, from_mid);
 
     put_rdma_message_buffer(resp_buf);
     put_rw_context(rw_ctx);
@@ -716,10 +720,11 @@ void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
         resp_msg->digest = 0;
         resp_msg->digest = djb2_digest(resp_msg, sizeof(LeaseModifyResponse));
     }
+    auto from_mid = req->cid.mid;
     dsm_->reliable_send((char *) resp_msg,
                         sizeof(LeaseModifyResponse),
                         req->cid.node_id,
-                        dir_id);
+                        from_mid);
     put_rdma_message_buffer(resp_buf);
     put_rw_context(rw_ctx);
 }
@@ -794,10 +799,12 @@ void Patronus::handle_request_lease_extend(LeaseModifyRequest *req,
         resp_msg->digest = djb2_digest(resp_msg, sizeof(LeaseModifyResponse));
     }
 
+    auto from_mid = req->cid.mid;
+
     dsm_->reliable_send((char *) resp_msg,
                         sizeof(LeaseModifyResponse),
                         req->cid.node_id,
-                        dir_id);
+                        from_mid);
     put_rdma_message_buffer(resp_buf);
     put_rw_context(rw_ctx);
 }
