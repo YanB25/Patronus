@@ -21,7 +21,7 @@
 
 [one day]
 Possible performance optimization:
-- performance of buffer pool? should be REALLY high.
+[-] performance of buffer pool? should be REALLY high: 52.6Mops for obj pool, 69.2Mops for buffer pool.
 - server can bind_mw in a batch (from one ibv_post_send call). There will be only one signal(, or every signal) and one interaction to NIC.
     - use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
 - API change: do not expose server coroutine scheduling to the outer world. Furthermore, no copy is required.
