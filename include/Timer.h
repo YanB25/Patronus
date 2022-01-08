@@ -109,6 +109,8 @@ class ContTimer<true>
 {
 public:
     ContTimer(const std::string &name, const std::string &step = "Start");
+    ContTimer();
+    void init(const std::string &name, const std::string &first_step = "Start");
     void pin(const std::string this_step);
     ContTimer operator=(const ContTimer &) = delete;
     ContTimer(const ContTimer &) = delete;
@@ -117,8 +119,14 @@ public:
     ~ContTimer();
     friend inline std::ostream &operator<<(std::ostream &os,
                                            const ContTimer<true> &t);
+    void clear()
+    {
+        inited_ = false;
+        event_ns_.clear();
+    }
 
 private:
+    bool inited_{false};
     std::string name_;
     std::string step_;
     std::chrono::time_point<std::chrono::steady_clock> start_;
@@ -128,10 +136,13 @@ private:
 
 std::ostream &operator<<(std::ostream &os, const ContTimer<true> &t)
 {
-    auto now = std::chrono::steady_clock::now();
-    auto total_ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(now - t.start_)
-            .count();
+    size_t total_ns = 0;
+    for (const auto& [event, ns] : t.event_ns_)
+    {
+        std::ignore = event;
+        total_ns += ns;
+    }
+
     auto fmt = boost::format("[%1%]: *summary* takes %2% ns ( %3% ms)\n") %
                t.name_ % total_ns % (total_ns / 1e6);
     auto str = boost::str(fmt);
@@ -150,7 +161,13 @@ template <>
 class ContTimer<false>
 {
 public:
-    ContTimer(const std::string &, const std::string & = "Start")
+    ContTimer(const std::string &, const std::string & = "")
+    {
+    }
+    ContTimer()
+    {
+    }
+    void init(const std::string &, const std::string & = "")
     {
     }
     void pin(const std::string)
@@ -166,6 +183,9 @@ public:
     }
     friend inline std::ostream &operator<<(std::ostream &os,
                                            const ContTimer<false> &t);
+    void clear()
+    {
+    }
 
 private:
 };

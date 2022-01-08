@@ -15,6 +15,7 @@ namespace patronus
 using id_t = uint64_t;
 using term_t = int64_t;
 using rkey_t = uint32_t;
+using chrono_time_t = std::chrono::time_point<std::chrono::steady_clock>;
 
 // force enum to be sizeof(uint8_t)
 enum class RequestType : uint8_t
@@ -63,6 +64,7 @@ struct AcquireRequest
     size_t size;
     term_t require_term;
     uint16_t dir_id;
+    trace_t trace;
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(AcquireRequest) < ReliableConnection::kMessageSize);

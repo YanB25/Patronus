@@ -45,6 +45,20 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
            type == RequestType::kAcquireWLease ||
            type == RequestType::kAcquireRLease);
 
+    bool enable_trace = false;
+    trace_t trace = 0;
+    if constexpr (config::kEnableTrace)
+    {
+        if (likely(ctx != nullptr))
+        {
+            if (likely(ctx->trace() != 0))
+            {
+                enable_trace = true;
+                trace = ctx->trace();
+            }
+        }
+    }
+
     // TODO(patronus): see if this tid to mid binding is correct.
     auto mid = dsm_->get_thread_id() % RMSG_MULTIPLEXING;
     auto tid = mid;
@@ -69,6 +83,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     msg->key = key;
     msg->size = size;
     msg->require_term = term;
+    msg->trace = trace;
 
     rpc_context->ret_lease = &ret_lease;
     rpc_context->origin_lease = nullptr;
@@ -82,6 +97,11 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
         msg->digest = djb2_digest(msg, sizeof(AcquireRequest));
     }
 
+    if (unlikely(enable_trace))
+    {
+        ctx->timer().pin("[get] Before send");
+    }
+
     dsm_->reliable_send(rdma_buf, sizeof(AcquireRequest), node_id, mid);
 
     if (unlikely(ctx == nullptr))
@@ -93,7 +113,17 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     }
     else
     {
+        if (unlikely(enable_trace))
+        {
+            ctx->timer().pin("[get] Requested and yield");
+        }
+
         ctx->yield_to_master();
+
+        if (unlikely(enable_trace))
+        {
+            ctx->timer().pin("[get] Back and Lease prepared");
+        }
     }
     DCHECK(rpc_context->ready) << "** Should have been ready when switch back "
                                   "to worker coro. ctx: "
@@ -106,6 +136,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
 
     put_rpc_context(rpc_context);
     put_rdma_message_buffer(rdma_buf);
+
     return ret_lease;
 }
 

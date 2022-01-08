@@ -14,6 +14,7 @@
 #include "HugePageAlloc.h"
 #include "Statistics.h"
 #include "WRLock.h"
+#include "Timer.h"
 
 // CONFIG_ENABLE_EMBEDDING_LOCK and CONFIG_ENABLE_CRC
 // **cannot** be ON at the same time
@@ -83,84 +84,7 @@ using CoroCall =
 using coro_t = uint8_t;
 static constexpr coro_t kMasterCoro = coro_t(-1);
 static constexpr coro_t kNotACoro = coro_t(-2);
-
-struct CoroContext
-{
-public:
-    CoroContext(CoroYield *yield, CoroCall *master, coro_t coro_id)
-        : yield_(yield), master_(master), coro_id_(coro_id)
-    {
-        CHECK_NE(coro_id, kMasterCoro) << "** This coro should not be a master";
-        CHECK_NE(coro_id, kNotACoro) << "** This coro should not be nullctx";
-    }
-    CoroContext(CoroYield *yield, CoroCall *workers)
-        : yield_(yield), workers_(workers)
-    {
-        coro_id_ = kMasterCoro;
-    }
-    CoroContext(const CoroContext&) = delete;
-    CoroContext& operator=(const CoroContext&) = delete;
-    
-    CoroContext() : coro_id_(kNotACoro)
-    {
-    }
-    bool is_master() const
-    {
-        return coro_id_ == kMasterCoro;
-    }
-    bool is_worker() const
-    {
-        return coro_id_ != kMasterCoro && coro_id_ != kNotACoro;
-    }
-    bool is_nullctx() const
-    {
-        return coro_id_ == kNotACoro;
-    }
-    coro_t coro_id() const
-    {
-        return coro_id_;
-    }
-
-    void yield_to_master() const
-    {
-        DVLOG(4) << "[Coro] " << *this << " yielding to master.";
-        DCHECK(is_worker()) << *this;
-        (*yield_)(*master_);
-    }
-    void yield_to_worker(coro_t wid)
-    {
-        DVLOG(4) << "[Coro] " << *this << " yielding to worker " << (int) wid;
-        DCHECK(is_master()) << *this;
-        (*yield_)(workers_[wid]);
-    }
-    friend std::ostream &operator<<(std::ostream &os, const CoroContext &ctx);
-
-private:
-    CoroYield *yield_{nullptr};
-    CoroCall *master_{nullptr};
-    CoroCall *workers_{nullptr};
-    coro_t coro_id_{kNotACoro};
-};
-
-static CoroContext nullctx;
-
-inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
-{
-    if (ctx.coro_id_ == kMasterCoro)
-    {
-        os << "{Coro Master}";
-    }
-    else if (ctx.coro_id_ == kNotACoro)
-    {
-        os << "{Coro Not a coro}";
-    }
-    else
-    {
-        os << "{Coro " << (int) ctx.coro_id_ << "}";
-    }
-    return os;
-}
-
+using trace_t = uint8_t;
 namespace define
 {
 constexpr uint64_t KB = 1024ull;
@@ -348,7 +272,6 @@ namespace config
 // about enabling monitors, sacrifying performance
 constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
-constexpr static bool kMonitorClientLatency = true;
 
 constexpr static bool kEnableReliableMessageSingleThread = true;
 
@@ -357,6 +280,8 @@ constexpr static bool kEnableReliableMessage = true;
 
 // about higher level of debugging, sacrifying performance.
 constexpr static bool kEnableValidityMutex = false;
+constexpr static bool kEnableTrace = true;
+constexpr static uint64_t kTraceRate = 100000; // (1.0 / kTraceRate) possibility
 }  // namespace config
 
 #define likely(x) __builtin_expect((x), 1)

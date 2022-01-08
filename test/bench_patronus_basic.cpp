@@ -64,11 +64,26 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
     for (size_t time = 0; time < kTestTime; ++time)
     {
+        trace_t trace = 0;
+        bool enable_trace = false;
+        if constexpr (config::kEnableTrace)
+        {
+            enable_trace = (rand() % config::kTraceRate) == 0;
+            if (unlikely(enable_trace))
+            {
+                while (trace == 0)
+                {
+                    trace = rand();
+                }
+                auto &timer = ctx.timer();
+                timer.init(std::to_string(trace));
+                ctx.set_trace(trace);
+            }
+        }
+
         client_comm.still_has_work[coro_id] = true;
         client_comm.finish_cur_task[coro_id] = false;
         client_comm.finish_all_task[coro_id] = false;
-
-        ContTimer<config::kMonitorClientLatency> timer("ClientBasic");
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         Lease lease = p->get_rlease(kServerNodeId,
@@ -77,7 +92,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     sizeof(Object),
                                     100,
                                     &ctx);
-        timer.pin("get rlease finished");
         if (unlikely(!lease.success()))
         {
             DLOG(WARNING) << "[bench] client coro " << ctx
@@ -86,8 +100,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             continue;
         }
 
-        p->pingpong(kServerNodeId, kDirID, coro_key, sizeof(Object), 100, &ctx);
-        timer.pin("pingpong finished");
+        if (unlikely(enable_trace))
+        {
+            ctx.timer().pin("[client] get lease");
+        }
+
+        // p->pingpong(kServerNodeId, kDirID, coro_key, sizeof(Object), 100,
+        // &ctx); timer.pin("pingpong finished");
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
@@ -102,7 +121,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             bench_info.fail_nr++;
             continue;
         }
-        timer.pin("READ finished");
+
+        if (unlikely(enable_trace))
+        {
+            ctx.timer().pin("[client] read finished");
+        }
+
+
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
         Object magic_object = *(Object *) rdma_buf.buffer;
         DCHECK_EQ(magic_object.target, coro_magic)
@@ -110,7 +135,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             << ", lease.base: " << (void *) lease.base_addr();
 
         p->relinquish(lease, &ctx);
-        timer.pin("relinquish finished");
+
+        if (unlikely(enable_trace))
+        {
+            ctx.timer().pin("[client] relinquish");
+        }
+        
         DVLOG(2) << "[bench] client coro " << ctx << " relinquish ";
 
         DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
@@ -119,9 +149,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         client_comm.finish_cur_task[coro_id] = true;
         client_comm.finish_all_task[coro_id] = false;
 
-        if constexpr (config::kMonitorClientLatency)
+        if constexpr (config::kEnableTrace)
         {
-            LOG_FIRST_N(INFO, 200) << "[bench] timer: " << timer;
+            if (unlikely(enable_trace))
+            {
+                LOG(INFO) << "[bench] " << ctx.timer();
+            }
         }
 
         ctx.yield_to_master();

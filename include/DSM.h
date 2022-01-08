@@ -14,6 +14,7 @@
 #include "LocalAllocator.h"
 #include "Pool.h"
 #include "RdmaBuffer.h"
+#include "CoroContext.h"
 
 class DSMKeeper;
 class Directory;
