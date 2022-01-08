@@ -2,6 +2,7 @@
 #include <inttypes.h>
 
 #include <atomic>
+#include <chrono>
 
 #include "Common.h"
 #include "Rdma.h"
@@ -579,7 +580,11 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
 
     // NOTE: can not use ibv_exp_bind_mw.
     // libibverbs: Fatal: device doesn't support function.
+    // auto now = std::chrono::steady_clock::now();
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
+    // auto then = std::chrono::steady_clock::now();
+    // auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(then - now).count();
+    // LOG_FIRST_N(INFO, 200) << "[debug] bind mw latency: " << ns << " ns";
     if (ret == EINVAL)
     {
         PLOG(ERROR)

@@ -348,6 +348,7 @@ namespace config
 // about enabling monitors, sacrifying performance
 constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
+constexpr static bool kMonitorClientLatency = true;
 
 constexpr static bool kEnableReliableMessageSingleThread = true;
 

@@ -38,9 +38,13 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
                                id_t key,
                                size_t size,
                                term_t term,
-                               bool is_read_lease,
+                               RequestType type,
                                CoroContext *ctx)
 {
+    DCHECK(type == RequestType::kAcquireNoLease ||
+           type == RequestType::kAcquireWLease ||
+           type == RequestType::kAcquireRLease);
+
     // TODO(patronus): see if this tid to mid binding is correct.
     auto mid = dsm_->get_thread_id() % RMSG_MULTIPLEXING;
     auto tid = mid;
@@ -55,8 +59,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     ret_lease.node_id_ = node_id;
 
     auto *msg = (AcquireRequest *) rdma_buf;
-    msg->type = is_read_lease ? RequestType::kAcquireRLease
-                              : RequestType::kAcquireWLease;
+    msg->type = type;
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = tid;
     msg->cid.mid = mid;
@@ -299,6 +302,7 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
 
         switch (request_type)
         {
+        case RequestType::kAcquireNoLease:
         case RequestType::kAcquireRLease:
         case RequestType::kAcquireWLease:
         {
@@ -356,6 +360,7 @@ void Patronus::handle_request_messages(const char *msg_buf,
         auto request_type = base->type;
         switch (request_type)
         {
+        case RequestType::kAcquireNoLease:
         case RequestType::kAcquireRLease:
         case RequestType::kAcquireWLease:
         {
@@ -422,7 +427,8 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     }
 
     DCHECK(resp->type == RequestType::kAcquireRLease ||
-           resp->type == RequestType::kAcquireWLease)
+           resp->type == RequestType::kAcquireWLease ||
+           resp->type == RequestType::kAcquireNoLease)
         << "** unexpected request type received. got: " << (int) resp->type;
 
     auto &ret_lease = *rpc_context->ret_lease;
@@ -449,9 +455,13 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     {
         ret_lease.lease_type_ = LeaseType::kReadLease;
     }
-    else
+    else if (resp->type == RequestType::kAcquireWLease)
     {
         ret_lease.lease_type_ = LeaseType::kWriteLease;
+    }
+    else
+    {
+        ret_lease.lease_type_ = LeaseType::kUnknown;
     }
 
     rpc_context->ready.store(true, std::memory_order_release);
@@ -484,15 +494,58 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     rw_ctx->ready = false;
     rw_ctx->success = &success;
 
-    bool call_succ = dsm_->bind_memory_region_sync(
-        mw,
-        req->cid.node_id,
-        req->cid.thread_id,
-        internal.buffer + actual_position,
-        req->size,
-        dirID,
-        WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
-        ctx);
+    bool call_succ = false;
+
+    // TODO(patronus): the protection of RLease and WLease should be different.
+    switch (req->type)
+    {
+    case RequestType::kAcquireRLease:
+    {
+        call_succ = dsm_->bind_memory_region_sync(
+            mw,
+            req->cid.node_id,
+            req->cid.thread_id,
+            internal.buffer + actual_position,
+            req->size,
+            dirID,
+            WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
+            ctx);
+        break;
+    }
+    case RequestType::kAcquireWLease:
+    {
+        call_succ = dsm_->bind_memory_region_sync(
+            mw,
+            req->cid.node_id,
+            req->cid.thread_id,
+            internal.buffer + actual_position,
+            req->size,
+            dirID,
+            WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
+            ctx);
+        break;
+    }
+    case RequestType::kAcquireNoLease:
+    {
+        // call_succ = dsm_->bind_memory_region(
+        //     mw,
+        //     req->cid.node_id,
+        //     req->cid.thread_id,
+        //     internal.buffer + actual_position,
+        //     req->size,
+        //     dirID,
+        //     WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
+        //     false /* no signal, work away */);
+        call_succ = true;
+        *rw_ctx->success = true;
+        break;
+    }
+    default:
+    {
+        LOG(FATAL) << "Unknown or unsupport request type " << (int) req->type
+                   << " for req " << *req;
+    }
+    }
 
     if (likely(ctx != nullptr))
     {
@@ -548,6 +601,13 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 
     put_rdma_message_buffer(resp_buf);
     put_rw_context(rw_ctx);
+
+    // no lease, so we gc here. see @handle_request_lease_relinquish
+    if (unlikely(req->type == RequestType::kAcquireNoLease))
+    {
+        put_mw(lease_ctx->dir_id, lease_ctx->mw);
+        put_lease_context(lease_ctx);
+    }
 }
 
 void Patronus::handle_request_lease_modify(LeaseModifyRequest *req,
@@ -1052,7 +1112,8 @@ void Patronus::handle_response_lease_extend(LeaseModifyResponse *resp)
     }
 
     DCHECK(resp->type != RequestType::kAcquireRLease &&
-           resp->type != RequestType::kAcquireWLease)
+           resp->type != RequestType::kAcquireWLease &&
+           resp->type != RequestType::kAcquireNoLease)
         << "** unexpected request type received. got: " << (int) resp->type;
 
     LOG(WARNING) << "TODO: please double check me";
@@ -1149,8 +1210,6 @@ void Patronus::server_coro_master(CoroYield &yield)
         __buffer.data(), ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
-    constexpr static size_t kCoroBufSize = kMaxCoroNr * 2;
-    coro_t coro_buf[kCoroBufSize];
     while (likely(!should_exit()))
     {
         // handle received messages

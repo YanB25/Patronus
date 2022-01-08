@@ -7,10 +7,10 @@
 
 #include "DSM.h"
 #include "Result.h"
+#include "patronus/Coro.h"
 #include "patronus/Lease.h"
 #include "patronus/Type.h"
 #include "util/Debug.h"
-#include "patronus/Coro.h"
 
 namespace patronus
 {
@@ -105,6 +105,12 @@ public:
                       size_t size,
                       size_t offset,
                       CoroContext *ctx = nullptr);
+    inline bool pingpong(uint16_t node_id,
+                         uint16_t dir_id,
+                         id_t key,
+                         size_t size,
+                         term_t term,
+                         CoroContext *ctx = nullptr);
     /**
      * @brief After all the node call this function, @should_exit() will return
      * true
@@ -119,7 +125,7 @@ public:
 
     /**
      * @brief give the server thread to Patronus.
-     * 
+     *
      */
     void server_serve();
 
@@ -170,7 +176,6 @@ public:
     {
         rdma_client_buffer_->put(buf);
     }
-
 
 private:
     constexpr static size_t kClientRdmaBufferSize = 4 * define::KB;
@@ -266,8 +271,8 @@ private:
     void handle_request_lease_upgrade(LeaseModifyRequest *, CoroContext *ctx);
 
     // server coroutines
-    void server_coro_master(CoroYield& yield);
-    void server_coro_worker(coro_t coro_id, CoroYield& yield);
+    void server_coro_master(CoroYield &yield);
+    void server_coro_worker(coro_t coro_id, CoroYield &yield);
 
     // helpers, actual impls
     Lease get_lease_impl(uint16_t node_id,
@@ -275,7 +280,7 @@ private:
                          id_t key,
                          size_t size,
                          term_t term,
-                         bool is_read_lease,
+                         RequestType type,
                          CoroContext *ctx = nullptr);
     bool read_write_impl(Lease &lease,
                          char *obuf,
@@ -325,7 +330,8 @@ Lease Patronus::get_rlease(uint16_t node_id,
                            term_t term,
                            CoroContext *ctx)
 {
-    return get_lease_impl(node_id, dir_id, key, size, term, true, ctx);
+    return get_lease_impl(
+        node_id, dir_id, key, size, term, RequestType::kAcquireRLease, ctx);
 }
 Lease Patronus::get_wlease(uint16_t node_id,
                            uint16_t dir_id,
@@ -334,7 +340,8 @@ Lease Patronus::get_wlease(uint16_t node_id,
                            term_t term,
                            CoroContext *ctx)
 {
-    return get_lease_impl(node_id, dir_id, key, size, term, false, ctx);
+    return get_lease_impl(
+        node_id, dir_id, key, size, term, RequestType::kAcquireWLease, ctx);
 }
 
 Lease Patronus::upgrade(Lease &lease, CoroContext *ctx)
@@ -349,11 +356,8 @@ void Patronus::relinquish(Lease &lease, CoroContext *ctx)
 {
     lease_modify_impl(lease, RequestType::kRelinquish, 0 /* term */, ctx);
 }
-bool Patronus::read(Lease &lease,
-                    char *obuf,
-                    size_t size,
-                    size_t offset,
-                    CoroContext *ctx)
+bool Patronus::read(
+    Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx)
 {
     return read_write_impl(
         lease, obuf, size, offset, lease.dir_id(), true /* is_read */, ctx);
@@ -371,6 +375,18 @@ bool Patronus::write(Lease &lease,
                            lease.dir_id(),
                            false /* is_read */,
                            ctx);
+}
+
+bool Patronus::pingpong(uint16_t node_id,
+                        uint16_t dir_id,
+                        id_t key,
+                        size_t size,
+                        term_t term,
+                        CoroContext *ctx)
+{
+    auto lease = get_lease_impl(
+        node_id, dir_id, key, size, term, RequestType::kAcquireNoLease, ctx);
+    return lease.success();
 }
 
 }  // namespace patronus

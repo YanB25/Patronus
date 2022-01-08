@@ -11,12 +11,14 @@
 #include <string>
 #include <unordered_map>
 
+#include "boost/format.hpp"
+
 #define DEFINE_VARNAME(base, line) DEFINE_VARNAME_CONCAT(base, line)
 #define DEFINE_VARNAME_CONCAT(base, line) base##line
 #define VAR_OCCURENCE DEFINE_VARNAME(__occurence, __LINE__)
 #define VAR_MAGIC_ENABLED DEFINE_VARNAME(__enabled, __LINE__)
 
-#define ENABLED_FIRST_N(enabled, n)                     \
+#define ENABLED_FIRST_N(enabled, n)               \
     do                                            \
     {                                             \
         static std::atomic<int> VAR_OCCURENCE{0}; \
@@ -113,6 +115,8 @@ public:
 
     void report(std::ostream & = std::cout) const;
     ~ContTimer();
+    friend inline std::ostream &operator<<(std::ostream &os,
+                                           const ContTimer<true> &t);
 
 private:
     std::string name_;
@@ -121,6 +125,26 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> pin_;
     std::unordered_map<std::string, uint64_t> event_ns_;
 };
+
+std::ostream &operator<<(std::ostream &os, const ContTimer<true> &t)
+{
+    auto now = std::chrono::steady_clock::now();
+    auto total_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - t.start_)
+            .count();
+    auto fmt = boost::format("[%1%]: *summary* takes %2% ns ( %3% ms)\n") %
+               t.name_ % total_ns % (total_ns / 1e6);
+    auto str = boost::str(fmt);
+    for (const auto &[event, ns] : t.event_ns_)
+    {
+        fmt = boost::format("%1% %% [%2%] takes %3% ns (%4% ms)\n") %
+              (100.0f * ns / total_ns) % event % ns % (ns / 1e6);
+        str += boost::str(fmt);
+    }
+    os << str << std::endl;
+
+    return os;
+}
 
 template <>
 class ContTimer<false>
@@ -140,16 +164,23 @@ public:
     void report(std::ostream & = std::cout) const
     {
     }
+    friend inline std::ostream &operator<<(std::ostream &os,
+                                           const ContTimer<false> &t);
 
 private:
 };
+
+std::ostream &operator<<(std::ostream &os, const ContTimer<false> &)
+{
+    return os;
+}
 
 template <bool Enabled>
 class OnceContTimer;
 
 #define DefOnceContTimer(name, enabled, msg) \
-    bool VAR_MAGIC_ENABLED = false;       \
-    ENABLED_ONCE(VAR_MAGIC_ENABLED);      \
+    bool VAR_MAGIC_ENABLED = false;          \
+    ENABLED_ONCE(VAR_MAGIC_ENABLED);         \
     OnceContTimer<enabled> name(msg, VAR_MAGIC_ENABLED)
 
 template <bool Enabled>

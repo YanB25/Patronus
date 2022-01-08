@@ -21,6 +21,7 @@ enum class RequestType : uint8_t
 {
     kAcquireRLease,
     kAcquireWLease,
+    kAcquireNoLease, // for debug purpose
     kUpgrade,
     kRelinquish,
     kExtend,
