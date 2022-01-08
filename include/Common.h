@@ -115,7 +115,7 @@ constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
 // level of tree
 constexpr uint64_t kMaxLevelOfTree = 7;
 
-constexpr uint16_t kMaxCoroNr = 16;
+constexpr uint16_t kMaxCoroNr = 32;
 
 constexpr uint8_t kMaxHandOverTime = 8;
 
@@ -280,7 +280,7 @@ constexpr static bool kEnableReliableMessage = true;
 
 // about higher level of debugging, sacrifying performance.
 constexpr static bool kEnableValidityMutex = false;
-constexpr static bool kEnableTrace = true;
+constexpr static bool kEnableTrace = false;
 constexpr static uint64_t kTraceRate = 100000; // (1.0 / kTraceRate) possibility
 }  // namespace config
 

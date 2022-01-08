@@ -28,11 +28,11 @@ Possible performance optimization:
     [-] NOT IMPL (feat/mw-server-not-use-coroutine): should test against the correctness of failed mw or failed r/w.
     [-] NOT IMPL (feat/mw-server-not-use-coroutine): use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
 
-TOMORROW: two days.
+TOMORROW: ONE day.
 [-] move the small function to patronus.h, I don't trust linker optimization so much.
 [-] API change: do not expose server coroutine scheduling to the outer world. 
     [-] NOT WORK(no performance gain): Furthermore, no copy is required.
-- evaluation: bench the latency of the whole procedure. with various concurrency.
+[-] evaluation: bench the latency of the whole procedure. with various concurrency. NOTE: because of a bug, this really took me hours! And I am so reluctant to work today. The result is at Yuque.
 - evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
 
 - should be a quick test: see if rmsg can work correctly, if the QP is used by ONE thread, but not SAME thread.
