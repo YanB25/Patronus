@@ -423,7 +423,7 @@ private:
     static thread_local ThreadConnection *iCon;
     static thread_local char *rdma_buffer;
     static thread_local LocalAllocator local_allocator;
-    static thread_local RdmaBuffer rbuf[define::kMaxCoro];
+    static thread_local RdmaBuffer rbuf[define::kMaxCoroNr];
     static thread_local uint64_t thread_tag;
 
     uint64_t baseAddr;
@@ -463,8 +463,8 @@ public:
     inline Buffer get_server_internal_buffer();
     RdmaBuffer &get_rbuf(coro_t coro_id)
     {
-        DCHECK(coro_id < define::kMaxCoro)
-            << "coro_id should be < define::kMaxCoro";
+        DCHECK(coro_id < define::kMaxCoroNr)
+            << "coro_id should be < define::kMaxCoroNr";
         return rbuf[coro_id];
     }
 

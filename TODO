@@ -29,10 +29,14 @@ Possible performance optimization:
     [-] NOT IMPL (feat/mw-server-not-use-coroutine): use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
 
 TOMORROW: two days.
-- move the small function to patronus.h, I don't trust linker optimization so much.
-- API change: do not expose server coroutine scheduling to the outer world. Furthermore, no copy is required.
+[-] move the small function to patronus.h, I don't trust linker optimization so much.
+[-] API change: do not expose server coroutine scheduling to the outer world. 
+    - Furthermore, no copy is required.
 - evaluation: bench the latency of the whole procedure. with various concurrency.
 - evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
+
+- should be a quick test: see if rmsg can work correctly, if the QP is used by ONE thread, but not SAME thread.
+    if this luckly work well, then the design would be great: one client thread map to one server thread map to one Dir thread.
 
 - change to multiple threads: 
     - tune NR_DIRECTORY to 4

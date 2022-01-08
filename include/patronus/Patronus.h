@@ -10,6 +10,7 @@
 #include "patronus/Lease.h"
 #include "patronus/Type.h"
 #include "util/Debug.h"
+#include "patronus/Coro.h"
 
 namespace patronus
 {
@@ -45,7 +46,7 @@ class Patronus
 public:
     using pointer = std::shared_ptr<Patronus>;
 
-    constexpr static size_t kMaxCoroNr = 16;
+    constexpr static size_t kMaxCoroNr = define::kMaxCoroNr;
     constexpr static size_t kMessageSize = ReliableConnection::kMessageSize;
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
@@ -116,6 +117,12 @@ public:
         return should_exit_.load(std::memory_order_relaxed);
     }
 
+    /**
+     * @brief give the server thread to Patronus.
+     * 
+     */
+    void server_serve();
+
     size_t try_get_server_finished_coros(coro_t *buf,
                                          size_t dirID,
                                          size_t limit);
@@ -167,9 +174,11 @@ public:
         rdma_client_buffer_->put(buf);
     }
 
+
 private:
     constexpr static size_t kClientRdmaBufferSize = 4 * define::KB;
     constexpr static size_t kLeaseContextNr = kMaxCoroNr * 16;
+    constexpr static size_t kServerCoroNr = kMaxCoroNr;
 
     ibv_mw *get_mw(size_t dirID)
     {
@@ -235,6 +244,7 @@ private:
         lease_context_.put(ctx);
     }
 
+    // for clients
     size_t handle_response_messages(const char *msg_buf,
                                     size_t msg_nr,
                                     coro_t *o_coro_buf);
@@ -242,23 +252,26 @@ private:
                                 size_t rdma_nr,
                                 coro_t *o_coro_buf,
                                 std::set<std::pair<size_t, size_t>> &recov);
-
     void signal_server_to_recover_qp(size_t node_id, size_t dir_id);
     void handle_request_acquire(AcquireRequest *, CoroContext *ctx);
-    void handle_response_acquire(AcquireResponse *);
     void handle_request_lease_modify(LeaseModifyRequest *, CoroContext *ctx);
+    void handle_response_lease_extend(LeaseModifyResponse *);
+    void handle_response_lease_upgrade(LeaseModifyResponse *);
+
+    // for servers
+    void handle_response_acquire(AcquireResponse *);
     void handle_response_lease_modify(LeaseModifyResponse *);
     void handle_admin_exit(AdminRequest *req, CoroContext *ctx);
     void handle_admin_recover(AdminRequest *req, CoroContext *ctx);
-
     void handle_request_lease_relinquish(LeaseModifyRequest *,
                                          CoroContext *ctx);
     void handle_request_lease_extend(LeaseModifyRequest *, CoroContext *ctx);
     void handle_request_lease_upgrade(LeaseModifyRequest *, CoroContext *ctx);
 
-    void handle_response_lease_extend(LeaseModifyResponse *);
-    void handle_response_lease_upgrade(LeaseModifyResponse *);
+    void server_coro_master(CoroYield& yield);
+    void server_coro_worker(coro_t coro_id, CoroYield& yield);
 
+    // helpers, actual impls
     Lease get_lease_impl(uint16_t node_id,
                          uint16_t dir_id,
                          id_t key,
@@ -297,6 +310,7 @@ private:
     std::mutex allocated_mws_mu_;
     static thread_local ThreadUnsafePool<LeaseContext, kLeaseContextNr>
         lease_context_;
+    static thread_local ServerCoroContext server_coro_ctx_;
 
     // for admin management
     std::array<std::atomic<bool>, MAX_MACHINE> exits_;

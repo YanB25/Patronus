@@ -191,7 +191,7 @@ constexpr uint64_t kNumOfLock = kLockChipMemSize / sizeof(uint64_t);
 // level of tree
 constexpr uint64_t kMaxLevelOfTree = 7;
 
-constexpr uint16_t kMaxCoro = 8;
+constexpr uint16_t kMaxCoroNr = 16;
 
 constexpr uint8_t kMaxHandOverTime = 8;
 

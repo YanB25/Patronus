@@ -79,7 +79,7 @@ private:
     GlobalAddress root_ptr_ptr;  // the address which stores root pointer;
 
     // static thread_local int coro_id;
-    static thread_local CoroCall worker[define::kMaxCoro];
+    static thread_local CoroCall worker[define::kMaxCoroNr];
     static thread_local CoroCall master;
 
     LocalLockNode *local_locks[MAX_MACHINE];

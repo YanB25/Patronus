@@ -30,9 +30,9 @@ uint64_t hot_filter_count[MAX_APP_THREAD][8];
 uint64_t latency[MAX_APP_THREAD][LATENCY_WINDOWS];
 volatile bool need_stop = false;
 
-thread_local CoroCall Tree::worker[define::kMaxCoro];
+thread_local CoroCall Tree::worker[define::kMaxCoroNr];
 thread_local CoroCall Tree::master;
-thread_local GlobalAddress path_stack[define::kMaxCoro]
+thread_local GlobalAddress path_stack[define::kMaxCoroNr]
                                      [define::kMaxLevelOfTree];
 
 // for coroutine schedule
@@ -1555,7 +1555,7 @@ void Tree::run_coroutine(CoroFunc func, int id, int coro_cnt)
 {
     using namespace std::placeholders;
 
-    assert(coro_cnt <= define::kMaxCoro);
+    assert(coro_cnt <= define::kMaxCoroNr);
     for (int i = 0; i < coro_cnt; ++i)
     {
         auto gen = func(i, dsm.get(), id);

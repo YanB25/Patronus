@@ -16,6 +16,7 @@ thread_local ThreadUnsafePool<RWContext, Patronus::kMaxCoroNr>
 thread_local std::queue<ibv_mw *> Patronus::mw_pool_[NR_DIRECTORY];
 thread_local ThreadUnsafePool<LeaseContext, Patronus::kLeaseContextNr>
     Patronus::lease_context_;
+thread_local ServerCoroContext Patronus::server_coro_ctx_;
 
 Patronus::KeyLocator Patronus::identity_locator = [](key_t key) -> uint64_t
 { return (uint64_t) key; };
@@ -540,7 +541,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         resp_msg->digest = 0;
         resp_msg->digest = djb2_digest(resp_msg, sizeof(AcquireResponse));
     }
-    
+
     auto from_mid = req->cid.mid;
     dsm_->reliable_send(
         (char *) resp_msg, sizeof(AcquireResponse), req->cid.node_id, from_mid);
@@ -1142,6 +1143,157 @@ void Patronus::handle_response_lease_modify(LeaseModifyResponse *resp)
         break;
     }
     }
+}
+
+void Patronus::server_serve()
+{
+    auto &server_workers = server_coro_ctx_.server_workers;
+    auto &server_master = server_coro_ctx_.server_master;
+
+    for (size_t i = 0; i < kServerCoroNr; ++i)
+    {
+        server_workers[i] = CoroCall([this, i](CoroYield &yield)
+                                     { server_coro_worker(i, yield); });
+    }
+    server_master =
+        CoroCall([this](CoroYield &yield) { server_coro_master(yield); });
+
+    server_master();
+}
+
+void Patronus::server_coro_master(CoroYield &yield)
+{
+    auto &server_workers = server_coro_ctx_.server_workers;
+    CoroContext mctx(&yield, server_workers);
+    auto &comm = server_coro_ctx_.comm;
+    auto &task_pool = server_coro_ctx_.task_pool;
+
+    CHECK(mctx.is_master());
+
+    auto tid = get_thread_id();
+    auto mid = tid;
+    auto dir_id = mid;
+
+    DLOG(WARNING) << "[system] about system design: use dir_id " << (int) dir_id
+                  << " equal to mid " << mid << ". see if it correct.";
+
+    for (size_t i = 0; i < kMaxCoroNr; ++i)
+    {
+        comm.finished[i] = true;
+    }
+
+    constexpr static size_t kServerBufferNr = kMaxCoroNr * MAX_MACHINE;
+    std::vector<char> __buffer;
+    __buffer.resize(ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
+    ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer> buffer_pool(
+        __buffer.data(), ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
+    constexpr static size_t kCoroBufSize = kMaxCoroNr * 2;
+    coro_t coro_buf[kCoroBufSize];
+    while (likely(!should_exit()))
+    {
+        char *buffer = (char *) CHECK_NOTNULL(buffer_pool.get());
+        size_t nr =
+            reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
+        if (likely(nr > 0))
+        {
+            DVLOG(4) << "[patronus] server recv messages " << nr;
+            auto *task = task_pool.get();
+            task->buf = DCHECK_NOTNULL(buffer);
+            task->msg_nr = nr;
+            task->fetched_nr = 0;
+            task->finished_nr = 0;
+            task->call_back_on_finish = [&buffer_pool, buffer]()
+            {
+                buffer_pool.put(buffer);
+                DVLOG(6) << "[debug] gc buffer_pool. remain size "
+                         << buffer_pool.size();
+            };
+            comm.task_queue.push(task);
+        }
+        else
+        {
+            buffer_pool.put(buffer);
+        }
+
+        if (!comm.task_queue.empty())
+        {
+            for (size_t i = 0; i < kMaxCoroNr; ++i)
+            {
+                if (!comm.task_queue.empty())
+                {
+                    // it finished its last reqeust.
+                    if (comm.finished[i])
+                    {
+                        comm.finished[i] = false;
+                        DVLOG(4) << "[patronus] yield to " << (int) i
+                                 << " because has task";
+                        mctx.yield_to_worker(i);
+                    }
+                }
+            }
+        }
+
+        nr = try_get_server_finished_coros(coro_buf, dir_id, kCoroBufSize);
+        if (likely(nr > 0))
+        {
+            for (size_t i = 0; i < nr; ++i)
+            {
+                coro_t coro_id = coro_buf[i];
+                DVLOG(3) << "[bench] yield to " << (int) coro_id
+                         << " because CQE arrvied.";
+                DCHECK(!comm.finished[coro_id])
+                    << "coro " << (int) coro_id
+                    << " already finish. should not receive CQE. ";
+
+                mctx.yield_to_worker(coro_id);
+            }
+        }
+    }
+}
+
+void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
+{
+    CoroContext ctx(&yield, &server_coro_ctx_.server_master, coro_id);
+    auto &comm = server_coro_ctx_.comm;
+    auto &task_queue = comm.task_queue;
+    auto &task_pool = server_coro_ctx_.task_pool;
+
+    while (likely(!should_exit()))
+    {
+        DCHECK(!task_queue.empty());
+        auto task = task_queue.front();
+        DCHECK_NE(task->msg_nr, 0);
+        DCHECK_LT(task->fetched_nr, task->msg_nr);
+        auto cur_nr = task->fetched_nr;
+        const char *cur_msg =
+            task->buf + ReliableConnection::kMessageSize * cur_nr;
+        task->fetched_nr++;
+        if (task->fetched_nr == task->msg_nr)
+        {
+            comm.task_queue.pop();
+        }
+        DVLOG(4) << "[patronus] server handling task @" << (void *) task
+                 << ", message_nr " << task->msg_nr << ", cur_fetched "
+                 << cur_nr << ", cur_finished: " << task->finished_nr << " "
+                 << ctx;
+        handle_request_messages(cur_msg, 1, &ctx);
+        task->finished_nr++;
+        if (task->finished_nr == task->msg_nr)
+        {
+            DVLOG(4) << "[patronus] server handling callback of task @"
+                     << (void *) task;
+            task->call_back_on_finish();
+            task_pool.put(task);
+        }
+
+        DVLOG(4) << "[patronus] server " << ctx
+                 << " finished current task. yield to master.";
+        comm.finished[coro_id] = true;
+        ctx.yield_to_master();
+    }
+
+    DVLOG(3) << "[bench] server coro: " << ctx << " exit.";
+    ctx.yield_to_master();
 }
 
 }  // namespace patronus

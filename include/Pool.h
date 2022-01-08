@@ -5,6 +5,7 @@
 #include <atomic>
 #include <queue>
 #include <set>
+
 #include "util/Debug.h"
 #include "util/stacktrace.h"
 
@@ -201,6 +202,10 @@ public:
     size_t ongoing_size() const
     {
         return on_going_;
+    }
+    size_t size() const
+    {
+        return kSize - on_going_;
     }
     void debug_validity_get(const T *obj)
     {

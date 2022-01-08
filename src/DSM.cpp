@@ -14,7 +14,7 @@ thread_local int DSM::thread_id = -1;
 thread_local ThreadConnection *DSM::iCon = nullptr;
 thread_local char *DSM::rdma_buffer = nullptr;
 thread_local LocalAllocator DSM::local_allocator;
-thread_local RdmaBuffer DSM::rbuf[define::kMaxCoro];
+thread_local RdmaBuffer DSM::rbuf[define::kMaxCoroNr];
 thread_local uint64_t DSM::thread_tag = 0;
 
 std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
@@ -242,7 +242,7 @@ void DSM::registerThread()
         << thread_id * define::kRDMABufferSize;
     rdma_buffer = (char *) cache.data + thread_id * define::kRDMABufferSize;
 
-    for (int i = 0; i < define::kMaxCoro; ++i)
+    for (int i = 0; i < define::kMaxCoroNr; ++i)
     {
         CHECK(i * define::kPerCoroRdmaBuf < define::kRDMABufferSize)
             << "Run out of RDMA buffer when allocating coroutine buffer.";
