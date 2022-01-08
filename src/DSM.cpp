@@ -220,15 +220,6 @@ bool DSM::recoverDirQP(int node_id, int thread_id, size_t dirID)
     return true;
 }
 
-ibv_qp *DSM::get_dir_qp(int node_id, int thread_id, size_t dirID)
-{
-    return dirCon[dirID]->QPs[thread_id][node_id];
-}
-ibv_qp *DSM::get_th_qp(int node_id, size_t dirID)
-{
-    return iCon->QPs[dirID][node_id];
-}
-
 void DSM::registerThread()
 {
     if (thread_id != -1)
@@ -361,58 +352,6 @@ bool DSM::rkey_read_sync(uint32_t rkey,
     return true;
 }
 
-void DSM::read(char *buffer,
-               GlobalAddress gaddr,
-               size_t size,
-               bool signal,
-               CoroContext *ctx,
-               uint64_t wr_id)
-{
-    size_t dirID = get_cur_dir();
-    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
-    rkey_read(rkey, buffer, gaddr, size, dirID, signal, ctx, wr_id);
-}
-
-bool DSM::read_sync(char *buffer,
-                    GlobalAddress gaddr,
-                    size_t size,
-                    CoroContext *ctx,
-                    uint64_t wr_id,
-                    const WcErrHandler &handler)
-{
-    size_t dirID = get_cur_dir();
-    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
-    return rkey_read_sync(
-        rkey, buffer, gaddr, size, dirID, ctx, wr_id, handler);
-}
-
-void DSM::write(const char *buffer,
-                GlobalAddress gaddr,
-                size_t size,
-                bool signal,
-                CoroContext *ctx,
-                uint64_t wc_id)
-{
-    size_t dirID = get_cur_dir();
-    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
-    return rkey_write(rkey, buffer, gaddr, size, dirID, signal, ctx, wc_id);
-}
-
-bool DSM::write_sync(const char *buffer,
-                     GlobalAddress gaddr,
-                     size_t size,
-                     CoroContext *ctx,
-                     uint64_t wc_id,
-                     const WcErrHandler &handler)
-{
-    size_t dirID = get_cur_dir();
-    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
-    LOG(INFO) << "[debug] write_sync for rkey: " << std::hex << rkey
-              << ", dirID: " << dirID;
-    return rkey_write_sync(
-        rkey, buffer, gaddr, size, dirID, ctx, wc_id, handler);
-}
-
 void DSM::rkey_write(uint32_t rkey,
                      const char *buffer,
                      GlobalAddress gaddr,
@@ -422,11 +361,6 @@ void DSM::rkey_write(uint32_t rkey,
                      CoroContext *ctx,
                      uint64_t wr_id)
 {
-    // dinfo("RDMA writing rkey: %u, local_buf: %p, gaddr: %lx, size: %lu",
-    //       rkey,
-    //       buffer,
-    //       gaddr.val,
-    //       size);
     if (ctx == nullptr)
     {
         rdmaWrite(iCon->QPs[dirID][gaddr.nodeID],
@@ -523,7 +457,8 @@ void DSM::write_batch(RdmaOpRegion *rs, int k, bool signal, CoroContext *ctx)
     }
     else
     {
-        rdmaWriteBatch(iCon->QPs[cur_dir][node_id], rs, k, true, ctx->coro_id());
+        rdmaWriteBatch(
+            iCon->QPs[cur_dir][node_id], rs, k, true, ctx->coro_id());
         ctx->yield_to_master();
     }
 }
@@ -820,14 +755,6 @@ void DSM::faa_boundary(GlobalAddress gaddr,
         ctx->yield_to_master();
     }
 }
-Buffer DSM::get_server_internal_buffer()
-{
-    size_t node_id = get_node_id();
-    size_t rv = server_internal_buffer_reserve_size();
-    Buffer ret((char *) remoteInfo[node_id].dsmBase + rv, 16 * define::GB - rv);
-    return ret;
-}
-
 void DSM::faa_boundary_sync(GlobalAddress gaddr,
                             uint64_t add_val,
                             uint64_t *rdma_buffer,
@@ -1067,41 +994,6 @@ void DSM::faa_dm_boundary_sync(GlobalAddress gaddr,
     }
 }
 
-size_t DSM::try_poll_rdma_cq(ibv_wc *buf, size_t limit)
-{
-    return ibv_poll_cq(iCon->cq, limit, buf);
-}
-
-uint64_t DSM::poll_rdma_cq(int count)
-{
-    ibv_wc wc;
-    // dinfo("Polling cq %p", iCon->cq);
-    pollWithCQ(iCon->cq, count, &wc);
-
-    return wc.wr_id;
-}
-
-size_t DSM::try_poll_dir_cq(ibv_wc *wcs, size_t dirID, size_t limit)
-{
-    return ibv_poll_cq(dirCon[dirID]->cq, limit, wcs);
-}
-
-int DSM::poll_dir_cq(size_t dirID, size_t count)
-{
-    ibv_wc wc;
-    return pollWithCQ(dirCon[dirID]->cq, count, &wc);
-}
-
-bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
-{
-    ibv_wc wc;
-    int res = pollOnce(iCon->cq, 1, &wc);
-
-    wr_id = wc.wr_id;
-
-    return res == 1;
-}
-
 ibv_mw *DSM::alloc_mw(size_t dirID)
 {
     struct RdmaContext *ctx = &dirCon[dirID]->ctx;
@@ -1144,14 +1036,8 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   CoroContext *ctx)
 {
     struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
-    uint32_t rkey =
-        rdmaAsyncBindMemoryWindow(qp,
-                                  mw,
-                                  dirCon[dirID]->dsmMR,
-                                  (uint64_t) buffer,
-                                  size,
-                                  true,
-                                  wr_id);
+    uint32_t rkey = rdmaAsyncBindMemoryWindow(
+        qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, true, wr_id);
     if (rkey == 0)
     {
         return false;

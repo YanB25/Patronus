@@ -9,8 +9,8 @@
 [-] refactor: the API for client should combine into one.
 
 [-] implement relinquish, and let the server gc the memory window. so that I can bench for a looong time instead of several ms.
-- try to optimize the performance of single-thread patronus-basic (takes 2-3 days if lucky). actually: I got sick and sleep for 2-3 days =).
-- remember to measu  re the latency of each op, and the penalty of coroutine switching.
+[-] try to optimize the performance of single-thread patronus-basic (takes 2-3 days if lucky). actually: I got sick and sleep for 2-3 days =).
+- remember to measure the latency of each op, and the penalty of coroutine switching.
 
 - then, try the correctness and performance of multiple threads. should scale according to NR_DIRECTORY, I guess.
 
@@ -29,7 +29,7 @@ Possible performance optimization:
     [-] NOT IMPL (feat/mw-server-not-use-coroutine): use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
 
 TOMORROW: two days.
-- move the small function to patronus.h, I don't believe linker optimization so much.
+- move the small function to patronus.h, I don't trust linker optimization so much.
 - API change: do not expose server coroutine scheduling to the outer world. Furthermore, no copy is required.
 - evaluation: bench the latency of the whole procedure. with various concurrency.
 - evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!

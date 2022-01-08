@@ -97,18 +97,18 @@ public:
                         CoroContext *ctx = nullptr,
                         uint64_t wr_id = 0,
                         const WcErrHandler &handler = empty_wc_err_handler);
-    void read(char *buffer,
-              GlobalAddress gaddr,
-              size_t size,
-              bool signal = true,
-              CoroContext *ctx = nullptr,
-              uint64_t wr_id = 0);
-    bool read_sync(char *buffer,
-                   GlobalAddress gaddr,
-                   size_t size,
-                   CoroContext *ctx = nullptr,
-                   uint64_t wr_id = 0,
-                   const WcErrHandler &handler = empty_wc_err_handler);
+    inline void read(char *buffer,
+                     GlobalAddress gaddr,
+                     size_t size,
+                     bool signal = true,
+                     CoroContext *ctx = nullptr,
+                     uint64_t wr_id = 0);
+    inline bool read_sync(char *buffer,
+                          GlobalAddress gaddr,
+                          size_t size,
+                          CoroContext *ctx = nullptr,
+                          uint64_t wr_id = 0,
+                          const WcErrHandler &handler = empty_wc_err_handler);
     void rkey_write(uint32_t rkey,
                     const char *buffer,
                     GlobalAddress gaddr,
@@ -125,18 +125,18 @@ public:
                          CoroContext *ctx = nullptr,
                          uint64_t wr_id = 0,
                          const WcErrHandler &handler = empty_wc_err_handler);
-    void write(const char *buffer,
-               GlobalAddress gaddr,
-               size_t size,
-               bool signal = true,
-               CoroContext *ctx = nullptr,
-               uint64_t wr_id = 0);
-    bool write_sync(const char *buffer,
-                    GlobalAddress gaddr,
-                    size_t size,
-                    CoroContext *ctx = nullptr,
-                    uint64_t wc_id = 0,
-                    const WcErrHandler &handler = empty_wc_err_handler);
+    inline void write(const char *buffer,
+                      GlobalAddress gaddr,
+                      size_t size,
+                      bool signal = true,
+                      CoroContext *ctx = nullptr,
+                      uint64_t wr_id = 0);
+    inline bool write_sync(const char *buffer,
+                           GlobalAddress gaddr,
+                           size_t size,
+                           CoroContext *ctx = nullptr,
+                           uint64_t wc_id = 0,
+                           const WcErrHandler &handler = empty_wc_err_handler);
 
     void write_batch(RdmaOpRegion *rs,
                      int k,
@@ -165,8 +165,8 @@ public:
                         uint64_t equal,
                         uint64_t val,
                         CoroContext *ctx = nullptr);
-    ibv_qp *get_dir_qp(int node_id, int thread_id, size_t dirID);
-    ibv_qp *get_th_qp(int node_id, size_t dirID);
+    inline ibv_qp *get_dir_qp(int node_id, int thread_id, size_t dirID);
+    inline ibv_qp *get_th_qp(int node_id, size_t dirID);
 
     void cas(GlobalAddress gaddr,
              uint64_t equal,
@@ -289,7 +289,7 @@ public:
                                  size_t size,
                                  size_t dirID,
                                  uint64_t wr_id,
-                                 CoroContext* ctx = nullptr);
+                                 CoroContext *ctx = nullptr);
 
     /**
      * @brief poll rdma cq
@@ -298,11 +298,11 @@ public:
      * @param limit
      * @return size_t the number of wc actually polled
      */
-    size_t try_poll_rdma_cq(ibv_wc *buf, size_t limit);
-    uint64_t poll_rdma_cq(int count = 1);
-    bool poll_rdma_cq_once(uint64_t &wr_id);
-    int poll_dir_cq(size_t dirID, size_t count);
-    size_t try_poll_dir_cq(ibv_wc *buf, size_t dirID, size_t limit);
+    inline size_t try_poll_rdma_cq(ibv_wc *buf, size_t limit);
+    inline uint64_t poll_rdma_cq(int count = 1);
+    inline bool poll_rdma_cq_once(uint64_t &wr_id);
+    inline int poll_dir_cq(size_t dirID, size_t count);
+    inline size_t try_poll_dir_cq(ibv_wc *buf, size_t dirID, size_t limit);
 
     uint64_t sum(uint64_t value)
     {
@@ -460,7 +460,7 @@ public:
     {
         return rdma_buffer;
     }
-    Buffer get_server_internal_buffer();
+    inline Buffer get_server_internal_buffer();
     RdmaBuffer &get_rbuf(coro_t coro_id)
     {
         DCHECK(coro_id < define::kMaxCoro)
@@ -555,6 +555,110 @@ public:
         return (RawMessage *) iCon->message->getMessage();
     }
 };
+
+ibv_qp *DSM::get_dir_qp(int node_id, int thread_id, size_t dirID)
+{
+    return dirCon[dirID]->QPs[thread_id][node_id];
+}
+ibv_qp *DSM::get_th_qp(int node_id, size_t dirID)
+{
+    return iCon->QPs[dirID][node_id];
+}
+
+void DSM::read(char *buffer,
+               GlobalAddress gaddr,
+               size_t size,
+               bool signal,
+               CoroContext *ctx,
+               uint64_t wr_id)
+{
+    size_t dirID = get_cur_dir();
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    rkey_read(rkey, buffer, gaddr, size, dirID, signal, ctx, wr_id);
+}
+
+bool DSM::read_sync(char *buffer,
+                    GlobalAddress gaddr,
+                    size_t size,
+                    CoroContext *ctx,
+                    uint64_t wr_id,
+                    const WcErrHandler &handler)
+{
+    size_t dirID = get_cur_dir();
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    return rkey_read_sync(
+        rkey, buffer, gaddr, size, dirID, ctx, wr_id, handler);
+}
+
+void DSM::write(const char *buffer,
+                GlobalAddress gaddr,
+                size_t size,
+                bool signal,
+                CoroContext *ctx,
+                uint64_t wc_id)
+{
+    size_t dirID = get_cur_dir();
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    return rkey_write(rkey, buffer, gaddr, size, dirID, signal, ctx, wc_id);
+}
+
+bool DSM::write_sync(const char *buffer,
+                     GlobalAddress gaddr,
+                     size_t size,
+                     CoroContext *ctx,
+                     uint64_t wc_id,
+                     const WcErrHandler &handler)
+{
+    size_t dirID = get_cur_dir();
+    uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
+    LOG(INFO) << "[debug] write_sync for rkey: " << std::hex << rkey
+              << ", dirID: " << dirID;
+    return rkey_write_sync(
+        rkey, buffer, gaddr, size, dirID, ctx, wc_id, handler);
+}
+
+Buffer DSM::get_server_internal_buffer()
+{
+    size_t node_id = get_node_id();
+    size_t rv = server_internal_buffer_reserve_size();
+    Buffer ret((char *) remoteInfo[node_id].dsmBase + rv, 16 * define::GB - rv);
+    return ret;
+}
+
+size_t DSM::try_poll_rdma_cq(ibv_wc *buf, size_t limit)
+{
+    return ibv_poll_cq(iCon->cq, limit, buf);
+}
+
+uint64_t DSM::poll_rdma_cq(int count)
+{
+    ibv_wc wc;
+    // dinfo("Polling cq %p", iCon->cq);
+    pollWithCQ(iCon->cq, count, &wc);
+
+    return wc.wr_id;
+}
+
+size_t DSM::try_poll_dir_cq(ibv_wc *wcs, size_t dirID, size_t limit)
+{
+    return ibv_poll_cq(dirCon[dirID]->cq, limit, wcs);
+}
+
+int DSM::poll_dir_cq(size_t dirID, size_t count)
+{
+    ibv_wc wc;
+    return pollWithCQ(dirCon[dirID]->cq, count, &wc);
+}
+
+bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
+{
+    ibv_wc wc;
+    int res = pollOnce(iCon->cq, 1, &wc);
+
+    wr_id = wc.wr_id;
+
+    return res == 1;
+}
 
 inline GlobalAddress DSM::alloc(size_t size)
 {

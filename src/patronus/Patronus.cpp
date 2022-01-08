@@ -105,26 +105,6 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     return ret_lease;
 }
 
-Lease Patronus::get_rlease(uint16_t node_id,
-                           uint16_t dir_id,
-                           id_t key,
-                           size_t size,
-                           term_t term,
-                           CoroContext *ctx)
-{
-    return get_lease_impl(node_id, dir_id, key, size, term, true, ctx);
-}
-
-Lease Patronus::get_wlease(uint16_t node_id,
-                           uint16_t dir_id,
-                           id_t key,
-                           size_t size,
-                           term_t term,
-                           CoroContext *ctx)
-{
-    return get_lease_impl(node_id, dir_id, key, size, term, false, ctx);
-}
-
 bool Patronus::read_write_impl(Lease &lease,
                                char *iobuf,
                                size_t size,
@@ -206,28 +186,6 @@ bool Patronus::read_write_impl(Lease &lease,
 
     put_rw_context(rw_context);
     return ret;
-}
-
-bool Patronus::read(
-    Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx)
-{
-    return read_write_impl(
-        lease, obuf, size, offset, lease.dir_id(), true /* is_read */, ctx);
-}
-
-bool Patronus::write(Lease &lease,
-                     const char *ibuf,
-                     size_t size,
-                     size_t offset,
-                     CoroContext *ctx)
-{
-    return read_write_impl(lease,
-                           (char *) ibuf,
-                           size,
-                           offset,
-                           lease.dir_id(),
-                           false /* is_read */,
-                           ctx);
 }
 
 Lease Patronus::lease_modify_impl(Lease &lease,
@@ -319,21 +277,6 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     put_rdma_message_buffer(rdma_buf);
 
     return ret_lease;
-}
-
-void Patronus::relinquish(Lease &lease, CoroContext *ctx)
-{
-    lease_modify_impl(lease, RequestType::kRelinquish, 0 /* term */, ctx);
-}
-
-Lease Patronus::upgrade(Lease &lease, CoroContext *ctx)
-{
-    return lease_modify_impl(lease, RequestType::kUpgrade, 0 /* term */, ctx);
-}
-
-Lease Patronus::extend(Lease &lease, term_t term, CoroContext *ctx)
-{
-    return lease_modify_impl(lease, RequestType::kExtend, term, ctx);
 }
 
 size_t Patronus::handle_response_messages(const char *msg_buf,
