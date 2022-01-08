@@ -123,9 +123,6 @@ public:
      */
     void server_serve();
 
-    size_t try_get_server_finished_coros(coro_t *buf,
-                                         size_t dirID,
-                                         size_t limit);
     size_t try_get_client_continue_coros(size_t mid,
                                          coro_t *coro_buf,
                                          size_t limit);
@@ -268,6 +265,7 @@ private:
     void handle_request_lease_extend(LeaseModifyRequest *, CoroContext *ctx);
     void handle_request_lease_upgrade(LeaseModifyRequest *, CoroContext *ctx);
 
+    // server coroutines
     void server_coro_master(CoroYield& yield);
     void server_coro_worker(coro_t coro_id, CoroYield& yield);
 

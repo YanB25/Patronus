@@ -12,9 +12,6 @@ struct ServerCoroTask
     size_t msg_nr{0};
     size_t fetched_nr{0};
     size_t finished_nr{0};
-    // because we need to call put_rdma_buffer(buf) when all the things get
-    // done.
-    std::function<void()> call_back_on_finish;
 };
 
 struct ServerCoroCommunication
@@ -30,6 +27,8 @@ struct ServerCoroContext
     ServerCoroCommunication comm;
     ThreadUnsafePool<ServerCoroTask, define::kMaxCoroNr * MAX_MACHINE>
         task_pool;
+    std::unique_ptr<ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer>>
+        buffer_pool;
 };
 
 };  // namespace patronus

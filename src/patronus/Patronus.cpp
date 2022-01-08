@@ -960,48 +960,6 @@ void Patronus::registerClientThread()
             client_rdma_buffer, rdma_buffer_size);
 }
 
-size_t Patronus::try_get_server_finished_coros(coro_t *buf,
-                                               size_t dirID,
-                                               size_t limit)
-{
-    constexpr static size_t kBufferSize = 16;
-    static thread_local ibv_wc wc_buffer[kBufferSize];
-    auto nr = dsm_->try_poll_dir_cq(wc_buffer, dirID, limit);
-
-    // TODO(patronus): server can recovery before client telling it to do.
-    // bool need_recovery = false;
-    for (size_t i = 0; i < nr; ++i)
-    {
-        auto &wc = wc_buffer[i];
-        log_wc_handler(&wc);
-        auto wrid = WRID(wc.wr_id);
-        DCHECK_EQ(wrid.prefix, WRID_PREFIX_PATRONUS_BIND_MW);
-        auto rw_ctx_id = wrid.id;
-        auto *rw_ctx = rw_context_.id_to_obj(rw_ctx_id);
-        auto coro_id = rw_ctx->coro_id;
-        CHECK_NE(coro_id, kNotACoro);
-        CHECK_NE(coro_id, kMasterCoro)
-            << "not sure. I this assert fail, rethink about me.";
-        if (unlikely(wc.status != IBV_WC_SUCCESS))
-        {
-            LOG(WARNING) << "[patronus] server got failed wc: " << wrid
-                         << " for coro " << (int) coro_id;
-            // need_recovery = true;
-            *(rw_ctx->success) = false;
-        }
-        else
-        {
-            VLOG(4) << "[patronus] server got dir CQE for coro " << coro_id
-                    << ". wr_id: " << wrid;
-            *(rw_ctx->success) = true;
-        }
-        rw_ctx->ready.store(true, std::memory_order_release);
-
-        buf[i] = coro_id;
-    }
-    return nr;
-}
-
 size_t Patronus::try_get_client_continue_coros(size_t mid,
                                                coro_t *coro_buf,
                                                size_t limit)
@@ -1185,12 +1143,17 @@ void Patronus::server_coro_master(CoroYield &yield)
     constexpr static size_t kServerBufferNr = kMaxCoroNr * MAX_MACHINE;
     std::vector<char> __buffer;
     __buffer.resize(ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
-    ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer> buffer_pool(
+
+    server_coro_ctx_.buffer_pool = std::make_unique<
+        ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer>>(
         __buffer.data(), ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
+    auto &buffer_pool = *server_coro_ctx_.buffer_pool;
+
     constexpr static size_t kCoroBufSize = kMaxCoroNr * 2;
     coro_t coro_buf[kCoroBufSize];
     while (likely(!should_exit()))
     {
+        // handle received messages
         char *buffer = (char *) CHECK_NOTNULL(buffer_pool.get());
         size_t nr =
             reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
@@ -1202,12 +1165,6 @@ void Patronus::server_coro_master(CoroYield &yield)
             task->msg_nr = nr;
             task->fetched_nr = 0;
             task->finished_nr = 0;
-            task->call_back_on_finish = [&buffer_pool, buffer]()
-            {
-                buffer_pool.put(buffer);
-                DVLOG(6) << "[debug] gc buffer_pool. remain size "
-                         << buffer_pool.size();
-            };
             comm.task_queue.push(task);
         }
         else
@@ -1233,20 +1190,44 @@ void Patronus::server_coro_master(CoroYield &yield)
             }
         }
 
-        nr = try_get_server_finished_coros(coro_buf, dir_id, kCoroBufSize);
-        if (likely(nr > 0))
-        {
-            for (size_t i = 0; i < nr; ++i)
-            {
-                coro_t coro_id = coro_buf[i];
-                DVLOG(3) << "[bench] yield to " << (int) coro_id
-                         << " because CQE arrvied.";
-                DCHECK(!comm.finished[coro_id])
-                    << "coro " << (int) coro_id
-                    << " already finish. should not receive CQE. ";
+        constexpr static size_t kBufferSize = kMaxCoroNr * 2;
+        static thread_local ibv_wc wc_buffer[kBufferSize];
 
-                mctx.yield_to_worker(coro_id);
+        // handle finished CQEs
+        nr = dsm_->try_poll_dir_cq(wc_buffer, dir_id, kBufferSize);
+
+        // TODO(patronus): server can recovery before client telling it to do.
+        // bool need_recovery = false;
+        for (size_t i = 0; i < nr; ++i)
+        {
+            auto &wc = wc_buffer[i];
+            auto wrid = WRID(wc.wr_id);
+            DCHECK_EQ(wrid.prefix, WRID_PREFIX_PATRONUS_BIND_MW);
+            auto rw_ctx_id = wrid.id;
+            auto *rw_ctx = rw_context_.id_to_obj(rw_ctx_id);
+            auto coro_id = rw_ctx->coro_id;
+            CHECK_NE(coro_id, kNotACoro);
+            CHECK_NE(coro_id, kMasterCoro)
+                << "not sure. I this assert fail, rethink about me.";
+            if (unlikely(wc.status != IBV_WC_SUCCESS))
+            {
+                log_wc_handler(&wc);
+                LOG(WARNING) << "[patronus] server got failed wc: " << wrid
+                             << " for coro " << (int) coro_id;
+                // need_recovery = true;
+                *(rw_ctx->success) = false;
             }
+            else
+            {
+                VLOG(4) << "[patronus] server got dir CQE for coro " << coro_id
+                        << ". wr_id: " << wrid;
+                *(rw_ctx->success) = true;
+            }
+            rw_ctx->ready.store(true, std::memory_order_release);
+
+            VLOG(4) << "[patronus] server yield to coro " << (int) coro_id
+                    << " for Dir CQE.";
+            mctx.yield_to_worker(coro_id);
         }
     }
 }
@@ -1257,6 +1238,7 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
     auto &comm = server_coro_ctx_.comm;
     auto &task_queue = comm.task_queue;
     auto &task_pool = server_coro_ctx_.task_pool;
+    auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
     while (likely(!should_exit()))
     {
@@ -1282,7 +1264,7 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
         {
             DVLOG(4) << "[patronus] server handling callback of task @"
                      << (void *) task;
-            task->call_back_on_finish();
+            buffer_pool.put((void *) task->buf);
             task_pool.put(task);
         }
 
