@@ -68,10 +68,11 @@ void client_worker(std::shared_ptr<DSM> dsm,
                    CoroYield &yield,
                    std::queue<void *> &messages)
 {
-    CoroContext ctx(&yield, &master, coro_id);
-
     auto tid = dsm->get_thread_id();
     auto mid = tid;
+
+    CoroContext ctx(tid, &yield, &master, coro_id);
+
 
     auto *rdma_buf = dsm->get_rdma_buffer();
     auto *my_buf = rdma_buf + ReliableConnection::kMessageSize * coro_id;

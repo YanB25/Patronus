@@ -1249,16 +1249,16 @@ void Patronus::server_serve()
 
 void Patronus::server_coro_master(CoroYield &yield)
 {
+    auto tid = get_thread_id();
+    auto mid = tid;
+    auto dir_id = mid;
+
     auto &server_workers = server_coro_ctx_.server_workers;
-    CoroContext mctx(&yield, server_workers);
+    CoroContext mctx(tid, &yield, server_workers);
     auto &comm = server_coro_ctx_.comm;
     auto &task_pool = server_coro_ctx_.task_pool;
 
     CHECK(mctx.is_master());
-
-    auto tid = get_thread_id();
-    auto mid = tid;
-    auto dir_id = mid;
 
     DLOG(WARNING) << "[system] about system design: use dir_id " << (int) dir_id
                   << " equal to mid " << mid << ". see if it correct.";
@@ -1360,7 +1360,8 @@ void Patronus::server_coro_master(CoroYield &yield)
 
 void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
 {
-    CoroContext ctx(&yield, &server_coro_ctx_.server_master, coro_id);
+    auto tid = get_thread_id();
+    CoroContext ctx(tid, &yield, &server_coro_ctx_.server_master, coro_id);
     auto &comm = server_coro_ctx_.comm;
     auto &task_queue = comm.task_queue;
     auto &task_pool = server_coro_ctx_.task_pool;

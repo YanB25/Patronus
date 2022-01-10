@@ -14,8 +14,6 @@ constexpr uint32_t kMachineNr = 2;
 
 using namespace patronus;
 constexpr static size_t kCoroCnt = 8;
-thread_local CoroCall workers[kCoroCnt];
-thread_local CoroCall master;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
@@ -37,6 +35,12 @@ uint64_t bench_locator(key_t key)
     return key * sizeof(Object);
 }
 
+struct ClientCoro
+{
+    CoroCall workers[kCoroCnt];
+    CoroCall master;
+};
+thread_local ClientCoro client_coro;
 struct ClientCommunication
 {
     bool still_has_work[kCoroCnt];
@@ -46,7 +50,8 @@ struct ClientCommunication
 
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
-    CoroContext ctx(&yield, &master, coro_id);
+    auto tid = p->get_thread_id();
+    CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
     size_t coro_key = kCoroStartKey + coro_id;
     size_t coro_magic = kMagic + coro_id;
@@ -119,11 +124,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 }
 void client_master(Patronus::pointer p, CoroYield &yield)
 {
-    CoroContext mctx(&yield, workers);
-    CHECK(mctx.is_master());
-
     auto tid = p->get_thread_id();
     auto mid = tid;
+
+    CoroContext mctx(tid, &yield, client_coro.workers);
+    CHECK(mctx.is_master());
+
 
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
@@ -167,11 +173,11 @@ void client(Patronus::pointer p)
     LOG(INFO) << "I am client. tid " << tid;
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        workers[i] =
+        client_coro.workers[i] =
             CoroCall([p, i](CoroYield &yield) { client_worker(p, i, yield); });
     }
-    master = CoroCall([p](CoroYield &yield) { client_master(p, yield); });
-    master();
+    client_coro.master = CoroCall([p](CoroYield &yield) { client_master(p, yield); });
+    client_coro.master();
 }
 
 void server(Patronus::pointer p)

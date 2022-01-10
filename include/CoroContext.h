@@ -7,14 +7,20 @@
 struct CoroContext
 {
 public:
-    CoroContext(CoroYield *yield, CoroCall *master, coro_t coro_id)
-        : yield_(yield), master_(master), coro_id_(coro_id)
+    CoroContext(size_t thread_id,
+                CoroYield *yield,
+                CoroCall *master,
+                coro_t coro_id)
+        : thread_id_(thread_id),
+          yield_(yield),
+          master_(master),
+          coro_id_(coro_id)
     {
         CHECK_NE(coro_id, kMasterCoro) << "** This coro should not be a master";
         CHECK_NE(coro_id, kNotACoro) << "** This coro should not be nullctx";
     }
-    CoroContext(CoroYield *yield, CoroCall *workers)
-        : yield_(yield), workers_(workers)
+    CoroContext(size_t thread_id, CoroYield *yield, CoroCall *workers)
+        : thread_id_(thread_id), yield_(yield), workers_(workers)
     {
         coro_id_ = kMasterCoro;
     }
@@ -39,6 +45,10 @@ public:
     coro_t coro_id() const
     {
         return coro_id_;
+    }
+    size_t thread_id() const
+    {
+        return thread_id_;
     }
 
     void yield_to_master() const
@@ -69,6 +79,7 @@ public:
     }
 
 private:
+    size_t thread_id_{0};
     CoroYield *yield_{nullptr};
     CoroCall *master_{nullptr};
     CoroCall *workers_{nullptr};
@@ -84,7 +95,7 @@ inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
 {
     if (ctx.coro_id_ == kMasterCoro)
     {
-        os << "{Coro Master}";
+        os << "{Coro Master T(" << ctx.thread_id_ << ") }";
     }
     else if (ctx.coro_id_ == kNotACoro)
     {
@@ -92,7 +103,7 @@ inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
     }
     else
     {
-        os << "{Coro " << (int) ctx.coro_id_ << "}";
+        os << "{Coro T(" << ctx.thread_id_ << ") " << (int) ctx.coro_id_ << "}";
     }
     return os;
 }

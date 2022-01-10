@@ -1569,10 +1569,10 @@ void Tree::run_coroutine(CoroFunc func, int id, int coro_cnt)
 
 void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id)
 {
-    CoroContext ctx(&yield, &master, coro_id);
+    auto thread_id = dsm->getMyThreadID();
+    CoroContext ctx(thread_id, &yield, &master, coro_id);
 
     Timer coro_timer;
-    auto thread_id = dsm->getMyThreadID();
 
     while (true)
     {

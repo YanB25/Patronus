@@ -34,7 +34,7 @@ struct Comm
 
 void coro_large_stack_master(CoroYield &yield)
 {
-    CoroContext ctx(&yield, comm.workers);
+    CoroContext ctx(0, &yield, comm.workers);
     Timer timer;
     timer.begin();
 
@@ -61,7 +61,7 @@ void coro_large_stack_master(CoroYield &yield)
 
 void coro_large_stack_worker(coro_t coro_id, CoroYield &yield)
 {
-    CoroContext ctx(&yield, &comm.master, coro_id);
+    CoroContext ctx(0, &yield, &comm.master, coro_id);
     
     Scope scope;
 
