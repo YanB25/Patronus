@@ -22,7 +22,7 @@ enum class RequestType : uint8_t
 {
     kAcquireRLease,
     kAcquireWLease,
-    kAcquireNoLease, // for debug purpose
+    kAcquireNoLease,  // for debug purpose
     kUpgrade,
     kRelinquish,
     kExtend,
@@ -94,7 +94,7 @@ struct AdminRequest
 {
     enum RequestType type;
     ClientID cid;
-    uint8_t flag; // enum AdminFlag
+    uint8_t flag;  // enum AdminFlag
     Debug<uint64_t> digest;
     uint16_t dir_id;
 } __attribute__((packed));
@@ -108,9 +108,9 @@ struct LeaseModifyRequest
     id_t lease_id;
     term_t term;
     Debug<uint64_t> digest;
-}__attribute__((packed));
+} __attribute__((packed));
 static_assert(sizeof(LeaseModifyRequest) < ReliableConnection::kMessageSize);
-std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest& req);
+std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req);
 
 struct LeaseModifyResponse
 {
@@ -120,9 +120,10 @@ struct LeaseModifyResponse
     bool success;
     Debug<uint64_t> digest;
 
-}__attribute__((packed));
+} __attribute__((packed));
 static_assert(sizeof(LeaseModifyResponse) < ReliableConnection::kMessageSize);
-std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse& req);
+std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &req);
+
 
 }  // namespace patronus
 

@@ -139,7 +139,7 @@ void server(std::shared_ptr<DSM> dsm,
                     bind_mw_wrs[i].bind_mw.bind_info.length = window_size;
                     bind_mw_wrs[i].bind_mw.bind_info.mr = mr;
                     bind_mw_wrs[i].bind_mw.bind_info.mw_access_flags =
-                        IBV_ACCESS_CUSTOM_REMOTE_ALL;
+                        IBV_ACCESS_CUSTOM_REMOTE_RW;
                 }
                 ibv_send_wr *bad_wr;
                 auto ret = ibv_post_send(qp, bind_mw_wrs, &bad_wr);

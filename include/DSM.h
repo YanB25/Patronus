@@ -9,12 +9,12 @@
 #include "ClockManager.h"
 #include "Config.h"
 #include "Connection.h"
+#include "CoroContext.h"
 #include "DSMKeeper.h"
 #include "GlobalAddress.h"
 #include "LocalAllocator.h"
 #include "Pool.h"
 #include "RdmaBuffer.h"
-#include "CoroContext.h"
 
 class DSMKeeper;
 class Directory;
@@ -168,6 +168,7 @@ public:
                         CoroContext *ctx = nullptr);
     inline ibv_qp *get_dir_qp(int node_id, int thread_id, size_t dirID);
     inline ibv_qp *get_th_qp(int node_id, size_t dirID);
+    inline ibv_mr *get_dir_mr(size_t dirID);
 
     void cas(GlobalAddress gaddr,
              uint64_t equal,
@@ -564,6 +565,10 @@ ibv_qp *DSM::get_dir_qp(int node_id, int thread_id, size_t dirID)
 ibv_qp *DSM::get_th_qp(int node_id, size_t dirID)
 {
     return iCon->QPs[dirID][node_id];
+}
+ibv_mr *DSM::get_dir_mr(size_t dirID)
+{
+    return dirCon[dirID]->dsmMR;
 }
 
 void DSM::read(char *buffer,

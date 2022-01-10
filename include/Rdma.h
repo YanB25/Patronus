@@ -466,8 +466,11 @@ bool rdmaWriteCas(ibv_qp *qp,
                   bool isSignaled,
                   uint64_t wrID = 0);
 
-constexpr int IBV_ACCESS_CUSTOM_REMOTE_ALL =
+constexpr int IBV_ACCESS_CUSTOM_REMOTE_RW =
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+    IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND;
+constexpr int IBV_ACCESS_CUSTOM_REMOTE_RO =
+    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
     IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND;
 
 /**
@@ -486,5 +489,5 @@ uint32_t rdmaAsyncBindMemoryWindow(
     uint64_t mmSize,
     bool signal,
     uint64_t wrID = 0,
-    unsigned int mw_access_flag = IBV_ACCESS_CUSTOM_REMOTE_ALL);
+    unsigned int mw_access_flag = IBV_ACCESS_CUSTOM_REMOTE_RW);
 #endif

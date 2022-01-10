@@ -1,5 +1,6 @@
 #include "patronus/Patronus.h"
 
+#include "patronus/IBOut.h"
 #include "util/Debug.h"
 
 namespace patronus
@@ -498,11 +499,15 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     rpc_context->ready.store(true, std::memory_order_release);
 }
 
+constexpr static size_t kTestBindMwNr = 1;
 void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 {
     auto dirID = req->dir_id;
-    // TODO(patronus): when to put_mw ?
-    auto *mw = get_mw(dirID);
+    ibv_mw *mws[kTestBindMwNr];
+    for (size_t i = 0; i < kTestBindMwNr; ++i)
+    {
+        mws[i] = get_mw(dirID);
+    }
     auto internal = dsm_->get_server_internal_buffer();
     if constexpr (debug())
     {
@@ -517,6 +522,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     uint64_t actual_position = locator_(req->key);
 
     bool success = false;
+    bool bind_success = true;
 
     auto *rw_ctx = get_rw_context();
     auto rw_ctx_id = rw_context_.obj_to_id(rw_ctx);
@@ -525,49 +531,60 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     rw_ctx->ready = false;
     rw_ctx->success = &success;
 
-    bool call_succ = false;
+    bool force_fail = false;
 
-    // TODO(patronus): the protection of RLease and WLease should be different.
+    static thread_local ibv_send_wr wrs[8];
     switch (req->type)
     {
     case RequestType::kAcquireRLease:
-    {
-        call_succ = dsm_->bind_memory_region_sync(
-            mw,
-            req->cid.node_id,
-            req->cid.thread_id,
-            internal.buffer + actual_position,
-            req->size,
-            dirID,
-            WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
-            ctx);
-        break;
-    }
     case RequestType::kAcquireWLease:
     {
-        call_succ = dsm_->bind_memory_region_sync(
-            mw,
-            req->cid.node_id,
-            req->cid.thread_id,
-            internal.buffer + actual_position,
-            req->size,
-            dirID,
-            WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
-            ctx);
+        static thread_local size_t allocated = 0;
+        constexpr static uint32_t magic = 0b1010101010;
+        constexpr static uint16_t mask = 0b1111111111;
+
+        auto *qp =
+            dsm_->get_dir_qp(req->cid.node_id, req->cid.thread_id, dirID);
+        auto *mr = dsm_->get_dir_mr(dirID);
+        int access_flag = req->type == RequestType::kAcquireRLease
+                              ? IBV_ACCESS_CUSTOM_REMOTE_RO
+                              : IBV_ACCESS_CUSTOM_REMOTE_RW;
+        for (size_t i = 0; i < kTestBindMwNr; ++i)
+        {
+            bool last = i + 1 == kTestBindMwNr;
+            fill_bind_mw_wr(wrs[i],
+                            last ? nullptr : &wrs[i + 1],
+                            mws[i],
+                            mr,
+                            (uint64_t) internal.buffer + actual_position,
+                            req->size,
+                            access_flag);
+            wrs[i].send_flags = last ? IBV_SEND_SIGNALED : 0;
+            wrs[i].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
+
+            size_t id = allocated++;
+            if (unlikely((id & mask) == magic))
+            {
+                force_fail = true;
+            }
+        }
+        ibv_send_wr *bad_wr;
+        int ret = ibv_post_send(qp, wrs, &bad_wr);
+        if (unlikely(ret != 0))
+        {
+            PLOG(ERROR)
+                << "[patronus] failed to ibv_post_send for bind_mw. failed wr: "
+                << *bad_wr;
+            bind_success = false;
+        }
+        if (likely(ctx != nullptr))
+        {
+            ctx->yield_to_master();
+        }
         break;
     }
     case RequestType::kAcquireNoLease:
     {
-        // call_succ = dsm_->bind_memory_region(
-        //     mw,
-        //     req->cid.node_id,
-        //     req->cid.thread_id,
-        //     internal.buffer + actual_position,
-        //     req->size,
-        //     dirID,
-        //     WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
-        //     false /* no signal, work away */);
-        call_succ = true;
         *rw_ctx->success = true;
         break;
     }
@@ -580,7 +597,6 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 
     if (likely(ctx != nullptr))
     {
-        DCHECK(call_succ);
         DCHECK(rw_ctx->success)
             << "** Should set to finished when switch back to worker "
                "coroutine. coro: "
@@ -588,11 +604,16 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     }
     else
     {
-        success = call_succ;
+        success = bind_success;
     }
 
     auto *lease_ctx = get_lease_context();
-    lease_ctx->mw = mw;
+    DCHECK_EQ(lease_ctx->mw_nr, 0);
+    for (size_t i = 0; i < kTestBindMwNr; ++i)
+    {
+        lease_ctx->mws[lease_ctx->mw_nr++] = mws[i];
+        DCHECK_LT(lease_ctx->mw_nr, kLeaseContextMwNr);
+    }
     lease_ctx->dir_id = dirID;
     lease_ctx->addr_to_bind = (uint64_t) (internal.buffer + actual_position);
     lease_ctx->size = req->size;
@@ -601,22 +622,28 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     auto *resp_buf = get_rdma_message_buffer();
     auto *resp_msg = (AcquireResponse *) resp_buf;
     resp_msg->type = req->type;
-    resp_msg->rkey_0 = mw->rkey;
+    // TODO(patronus): using the first mw.
+    resp_msg->rkey_0 = mws[0]->rkey;
     resp_msg->base = actual_position;
     resp_msg->term = req->require_term;
     resp_msg->cid = req->cid;
     resp_msg->cid.node_id = get_node_id();
     resp_msg->cid.thread_id = get_thread_id();
 
-    if (likely(success))
+    if (likely(success && !force_fail))
     {
         resp_msg->lease_id = lease_id;
         resp_msg->success = true;
     }
     else
     {
+        // gc here for all allocated resources
         resp_msg->lease_id = 0;
         resp_msg->success = false;
+        for (size_t i = 0; i < lease_ctx->mw_nr; ++i)
+        {
+            put_mw(dirID, lease_ctx->mws[i]);
+        }
         put_lease_context(lease_ctx);
     }
 
@@ -636,7 +663,10 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     // no lease, so we gc here. see @handle_request_lease_relinquish
     if (unlikely(req->type == RequestType::kAcquireNoLease))
     {
-        put_mw(lease_ctx->dir_id, lease_ctx->mw);
+        for (size_t i = 0; i < lease_ctx->mw_nr; ++i)
+        {
+            put_mw(lease_ctx->dir_id, lease_ctx->mws[i]);
+        }
         put_lease_context(lease_ctx);
     }
 }
@@ -679,7 +709,10 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
 
     DVLOG(4) << "[patronus] reqlinquish lease. lease_id " << (id_t) lease_id
              << ", coro: " << (ctx ? *ctx : nullctx);
-    put_mw(lease_ctx->dir_id, lease_ctx->mw);
+    for (size_t i = 0; i < lease_ctx->mw_nr; ++i)
+    {
+        put_mw(lease_ctx->dir_id, lease_ctx->mws[i]);
+    }
 
     put_lease_context(lease_ctx);
 
@@ -693,7 +726,8 @@ void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
     auto lease_id = req->lease_id;
     auto *lease_ctx = get_lease_context(lease_id);
     auto dir_id = lease_ctx->dir_id;
-    auto *mw = lease_ctx->mw;
+    // TODO(patronus): currently only actually use the first mw.
+    auto *mw = lease_ctx->mws[0];
 
     if constexpr (debug())
     {
@@ -771,7 +805,8 @@ void Patronus::handle_request_lease_extend(LeaseModifyRequest *req,
     auto lease_id = req->lease_id;
     auto *lease_ctx = get_lease_context(lease_id);
     auto dir_id = lease_ctx->dir_id;
-    auto *mw = lease_ctx->mw;
+    // TODO(patronus): use the first mw
+    auto *mw = lease_ctx->mws[0];
 
     if constexpr (debug())
     {
@@ -875,9 +910,10 @@ size_t Patronus::handle_rdma_finishes(
         }
         else
         {
-            VLOG(1) << "[patronus] rdma R/W failed. wr_id: " << wr_id
-                    << " for node " << node_id << ", dir: " << dir_id
-                    << ", coro_id: " << (int) coro_id;
+            DLOG(WARNING) << "[patronus] rdma R/W failed. wr_id: " << wr_id
+                          << " for node " << node_id << ", dir: " << dir_id
+                          << ", coro_id: " << (int) coro_id
+                          << ". detail: " << wc;
             *(rw_context->success) = false;
             recov.insert({node_id, dir_id});
             fail_nr++;

@@ -34,9 +34,11 @@ struct RWContext
     size_t dir_id;
 };
 
+constexpr static size_t kLeaseContextMwNr = 8;
 struct LeaseContext
 {
-    ibv_mw *mw{nullptr};
+    ibv_mw *mws[kLeaseContextMwNr];
+    size_t mw_nr{0};
     size_t dir_id{size_t(-1)};
     uint64_t addr_to_bind{0};
     size_t size{0};
@@ -220,7 +222,7 @@ private:
     }
     RWContext *get_rw_context()
     {
-        return rw_context_.get();
+        return DCHECK_NOTNULL(rw_context_.get());
     }
     void put_rw_context(RWContext *ctx)
     {
@@ -235,7 +237,9 @@ private:
 
     LeaseContext *get_lease_context()
     {
-        return DCHECK_NOTNULL(lease_context_.get());
+        auto *ret = DCHECK_NOTNULL(lease_context_.get());
+        ret->mw_nr = 0;
+        return ret;
     }
     LeaseContext *get_lease_context(uint16_t id)
     {
@@ -293,6 +297,13 @@ private:
                             RequestType type,
                             term_t term,
                             CoroContext *ctx = nullptr);
+    inline void fill_bind_mw_wr(ibv_send_wr &wr,
+                                ibv_send_wr *next_wr,
+                                ibv_mw *mw,
+                                ibv_mr *mr,
+                                uint64_t addr,
+                                size_t length,
+                                int access_flag);
 
     // owned by both
     DSM::pointer dsm_;
@@ -387,6 +398,29 @@ bool Patronus::pingpong(uint16_t node_id,
     auto lease = get_lease_impl(
         node_id, dir_id, key, size, term, RequestType::kAcquireNoLease, ctx);
     return lease.success();
+}
+
+void Patronus::fill_bind_mw_wr(ibv_send_wr &wr,
+                               ibv_send_wr *next_wr,
+                               ibv_mw *mw,
+                               ibv_mr *mr,
+                               uint64_t addr,
+                               size_t length,
+                               int access_flag)
+{
+    wr.next = next_wr;
+    wr.sg_list = nullptr;
+    wr.num_sge = 0;
+    wr.opcode = IBV_WR_BIND_MW;
+    wr.imm_data = 0;
+    wr.wr_id = 0;
+    wr.send_flags = 0;
+    wr.bind_mw.mw = mw;
+    wr.bind_mw.rkey = mw->rkey;
+    wr.bind_mw.bind_info.mr = mr;
+    wr.bind_mw.bind_info.addr = addr;
+    wr.bind_mw.bind_info.length = length;
+    wr.bind_mw.bind_info.mw_access_flags = access_flag;
 }
 
 }  // namespace patronus
