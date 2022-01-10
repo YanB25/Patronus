@@ -119,6 +119,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             DVLOG(1) << "[bench] client coro " << ctx
                      << " read FAILED. retry. ";
             bench_info.fail_nr++;
+            p->relinquish(lease, &ctx);
             continue;
         }
 

@@ -88,6 +88,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             LOG(WARNING) << "[bench] client coro " << ctx
                          << " read FAILED. retry. ";
             p->put_rdma_buffer(rdma_buf.buffer);
+            p->relinquish(lease, &ctx);
             continue;
         }
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
