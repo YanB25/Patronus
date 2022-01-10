@@ -1,3 +1,7 @@
+#pragma once
+#ifndef SHERMEM_STATISTICS_H_
+#define SHERMEM_STATISTICS_H_
+
 #include <cstdint>
 #include <iostream>
 
@@ -68,3 +72,5 @@ public:
         // std::cout << "agentReadMissDirty: " << agentReadMissDirty << "\n";
     }
 };
+
+#endif

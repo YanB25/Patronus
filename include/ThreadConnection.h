@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __THREADCONNECTION_H__
 #define __THREADCONNECTION_H__
 

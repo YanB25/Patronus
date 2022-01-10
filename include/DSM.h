@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __DSM_H__
 #define __DSM_H__
 

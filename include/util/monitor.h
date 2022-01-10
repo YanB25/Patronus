@@ -1,5 +1,7 @@
+#pragma once
 #ifndef MONITOR_H_
 #define MONITOR_H_
+
 #include <atomic>
 #include <fstream>
 #include <iostream>

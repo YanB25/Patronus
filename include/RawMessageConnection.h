@@ -6,6 +6,7 @@
  * @Description: In User Settings Edit
  * @FilePath: /Sherman/include/RawMessageConnection.h
  */
+#pragma once
 #ifndef __RAWMESSAGECONNECTION_H__
 #define __RAWMESSAGECONNECTION_H__
 

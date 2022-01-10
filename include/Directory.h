@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __DIRECTORY_H__
 #define __DIRECTORY_H__
 

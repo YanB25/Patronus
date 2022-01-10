@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __DIRECTORYCONNECTION_H__
 #define __DIRECTORYCONNECTION_H__
 

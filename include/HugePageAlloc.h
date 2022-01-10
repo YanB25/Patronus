@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __HUGEPAGEALLOC_H__
 #define __HUGEPAGEALLOC_H__
 

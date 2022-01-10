@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_CACHE_H_)
 #define _CACHE_H_
 

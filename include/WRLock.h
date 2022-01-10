@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __WRLOCK_H__
 #define __WRLOCK_H__
 

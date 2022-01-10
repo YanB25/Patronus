@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __ABSTRACTMESSAGECONNECTION_H__
 #define __ABSTRACTMESSAGECONNECTION_H__
 

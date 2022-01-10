@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __GLOBALADDRESS_H__
 #define __GLOBALADDRESS_H__
 

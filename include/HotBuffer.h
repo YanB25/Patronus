@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_HOT_BUFFER_H_)
 #define _HOT_BUFFER_H_
 

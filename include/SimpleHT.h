@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_SIMPLE_HT_H_)
 #define _SIMPLE_HT_H_
 

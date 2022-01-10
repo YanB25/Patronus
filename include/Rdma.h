@@ -1,6 +1,7 @@
 /**
  * @file rdma
  */
+#pragma once
 #ifndef _RDMA_H__
 #define _RDMA_H__
 

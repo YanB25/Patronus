@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef SHERMEM_STACKTRACE_H_
 #define SHERMEM_STACKTRACE_H_
 

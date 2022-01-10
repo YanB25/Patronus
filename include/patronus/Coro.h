@@ -1,3 +1,4 @@
+#pragma once
 #ifndef PATRONUS_CORO_H_
 #define PATRONUS_CORO_H_
 

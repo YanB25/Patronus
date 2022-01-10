@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_LOCAL_ALLOC_H_)
 #define _LOCAL_ALLOC_H_
 

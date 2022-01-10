@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_LOCAL_LOCK_QUEUE_H_)
 #define _LOCAL_LOCK_QUEUE_H_
 

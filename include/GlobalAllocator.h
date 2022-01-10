@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_GLOBAL_ALLOCATOR_H_)
 #define _GLOBAL_ALLOCATOR_H_
 

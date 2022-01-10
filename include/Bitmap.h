@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __BITMAP_H__
 #define __BITMAP_H__
 

@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_RDMA_BUFFER_H_)
 #define _RDMA_BUFFER_H_
 

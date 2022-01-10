@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __KEEPER__H__
 #define __KEEPER__H__
 

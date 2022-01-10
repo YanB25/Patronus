@@ -1,3 +1,4 @@
+#pragma once
 #ifndef PATRONUS_LEASE_H_
 #define PATRONUS_LEASE_H_
 

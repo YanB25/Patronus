@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __LINEAR_KEEPER__H__
 #define __LINEAR_KEEPER__H__
 
