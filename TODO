@@ -38,7 +38,10 @@ Possible performance optimization:
     - 1 mw get 1.5 Mops. 2 mw get 1.36 Mops. 4 mw get 1 Mops. 8 mw get 890 Kops.
 [-] WORK, PASSED: should be a quick test: see if rmsg can work correctly, if the QP is used by ONE thread, but not SAME thread.
     if this luckly work well, then the design would be great: one client thread map to one server thread map to one Dir thread.
-- measure the overhead of boost coroutine: especially for large stack (std::array<1024>), or deep stack (recursive calls)
+[-] DONE measure the overhead of boost coroutine: especially for large stack (std::array<1024>), or deep stack (recursive calls)
+    - got 40 Mops.
+    - boost::coroutine is stackful. runtime overhead only contains registers load/store. will not copy the whole stack. GREAT
+    
 - change to multiple threads: 
     - tune NR_DIRECTORY to 4
     - each client thread bind to one mid. (e.g. need 16 client threads)
