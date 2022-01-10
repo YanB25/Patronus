@@ -46,6 +46,11 @@ link_libraries(${CITYHASH_LIB})
 
 link_libraries(unwind)
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(ASAN_OPTIONS "fast_unwind_on_fatal=1")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address")
+endif()
+
 # set(ASAN_OPTIONS "fast_unwind_on_fatal=1")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address")
 

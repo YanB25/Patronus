@@ -1,7 +1,6 @@
 [-] Add API p->should_exit()
 [-] Add key_to_dsm_addr API for addressing.
-- Implemente all the APIs in Patronus
-- Bench the performance / coroutine.
+[-] Bench the performance / coroutine.
 
 [-] when QP fails, before recovery, we should wait for all the on-going contexts, and set result to false.
 [-] then, we should return all the onging coro ids. so that, the client_master will yield to these coroutines
@@ -10,7 +9,7 @@
 
 [-] implement relinquish, and let the server gc the memory window. so that I can bench for a looong time instead of several ms.
 [-] try to optimize the performance of single-thread patronus-basic (takes 2-3 days if lucky). actually: I got sick and sleep for 2-3 days =).
-- remember to measure the latency of each op, and the penalty of coroutine switching.
+[-] remember to measure the latency of each op, and the penalty of coroutine switching.
 
 - then, try the correctness and performance of multiple threads. should scale according to NR_DIRECTORY, I guess.
 
@@ -28,25 +27,26 @@ Possible performance optimization:
     [-] NOT IMPL (feat/mw-server-not-use-coroutine): should test against the correctness of failed mw or failed r/w.
     [-] NOT IMPL (feat/mw-server-not-use-coroutine): use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
 
-TOMORROW: ONE day.
 [-] move the small function to patronus.h, I don't trust linker optimization so much.
 [-] API change: do not expose server coroutine scheduling to the outer world. 
     [-] NOT WORK(no performance gain): Furthermore, no copy is required.
 [-] evaluation: bench the latency of the whole procedure. with various concurrency. NOTE: because of a bug, this really took me hours! And I am so reluctant to work today. The result is at Yuque.
-- evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
 
+
+1th Three days DDL: 1/10-1/12
+- evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
 - should be a quick test: see if rmsg can work correctly, if the QP is used by ONE thread, but not SAME thread.
     if this luckly work well, then the design would be great: one client thread map to one server thread map to one Dir thread.
-
+- measure the overhead of boost coroutine: especially for large stack (std::array<1024>), or deep stack (recursive calls)
 - change to multiple threads: 
     - tune NR_DIRECTORY to 4
     - each client thread bind to one mid. (e.g. need 16 client threads)
     - one server thread can handle multiple mid simultaneously. one server thread for one DirectoryConnnection (one-to-one mapping). Therefore, 4 server threads.
 - bench the performance. see if it is 4 times as one thread.
+- Add the header into the design. That would require adding the swaping area, and makes everything works well.
 
-- Add the header into the design. That would require adding the swaping area.
 
-Future:
+Futures:
 - Add the TIME into patronus. Server should intervally see if any expired lease exists, and destroy them!
-
+- Implemente all the APIs in Patronus
 If all the things above finish, I can move on to adopt the uPaxos!
