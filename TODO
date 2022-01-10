@@ -34,8 +34,9 @@ Possible performance optimization:
 
 
 1th Three days DDL: 1/10-1/12
-- evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
-- should be a quick test: see if rmsg can work correctly, if the QP is used by ONE thread, but not SAME thread.
+[-] evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
+    - 1 mw get 1.5 Mops. 2 mw get 1.36 Mops. 4 mw get 1 Mops. 8 mw get 890 Kops.
+[-] WORK, PASSED: should be a quick test: see if rmsg can work correctly, if the QP is used by ONE thread, but not SAME thread.
     if this luckly work well, then the design would be great: one client thread map to one server thread map to one Dir thread.
 - measure the overhead of boost coroutine: especially for large stack (std::array<1024>), or deep stack (recursive calls)
 - change to multiple threads: 
