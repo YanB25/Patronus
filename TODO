@@ -11,7 +11,7 @@
 [-] try to optimize the performance of single-thread patronus-basic (takes 2-3 days if lucky). actually: I got sick and sleep for 2-3 days =).
 [-] remember to measure the latency of each op, and the penalty of coroutine switching.
 
-- then, try the correctness and performance of multiple threads. should scale according to NR_DIRECTORY, I guess.
+[-] then, try the correctness and performance of multiple threads. should scale according to NR_DIRECTORY, I guess.
 
 [-] evaluate the maxinum bind_mw performance I can get:
     - What if pipeline poll cq? for the bench_mw.cpp, advancely post several batch.
@@ -48,7 +48,7 @@ Possible performance optimization:
     - one server thread can handle multiple mid simultaneously. one server thread for one DirectoryConnnection (one-to-one mapping). Therefore, 4 server threads.
 [-] bench the performance. see if it is 4 times as one thread. RESULT: nearly 4 times. when thread = 8, got 77% performance of one thread.
 [-] use gperf or other tools to profile the program. DONE: nothing new. everywhere is not a hotspot. averagely spread to the Patronus APIs.
-- bench the latency of QP recoverying.
+[-] bench the latency of QP recoverying. RESULT: 1 ms for BOTH server and client. matches the previous result I get.
 - Add the header into the design. That would require adding the swaping area, and makes everything works well.
 
 

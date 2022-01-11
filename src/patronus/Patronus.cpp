@@ -563,10 +563,13 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
             wrs[i].send_flags = last ? IBV_SEND_SIGNALED : 0;
             wrs[i].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
 
-            size_t id = allocated++;
-            if (unlikely((id & mask) == magic))
+            if constexpr (config::kEnableSkipMagicMw)
             {
-                force_fail = true;
+                size_t id = allocated++;
+                if (unlikely((id & mask) == magic))
+                {
+                    force_fail = true;
+                }
             }
         }
         ibv_send_wr *bad_wr;
@@ -906,8 +909,8 @@ size_t Patronus::handle_rdma_finishes(
         {
             *(rw_context->success) = true;
             DVLOG(4) << "[patronus] handle rdma finishes SUCCESS for coro "
-                    << (int) coro_id << ". set " << (void *) rw_context->success
-                    << " to true.";
+                     << (int) coro_id << ". set "
+                     << (void *) rw_context->success << " to true.";
         }
         else
         {
@@ -974,10 +977,16 @@ void Patronus::handle_admin_recover(AdminRequest *req,
         DCHECK_EQ(digest, djb2_digest(req, sizeof(AdminRequest)));
     }
 
+    ContTimer<config::kMonitorFailureRecovery> timer;
+    timer.init("Recover Dir QP");
     auto from_node = req->cid.node_id;
     auto tid = req->cid.thread_id;
     auto dir_id = req->dir_id;
     CHECK(dsm_->recoverDirQP(from_node, tid, dir_id));
+    timer.pin("finished");
+
+    LOG_IF(INFO, config::kMonitorFailureRecovery)
+        << "[patronus] timer: " << timer;
 }
 
 void Patronus::handle_admin_exit(AdminRequest *req,
@@ -997,8 +1006,8 @@ void Patronus::handle_admin_exit(AdminRequest *req,
     {
         if (!exits_[i])
         {
-            DVLOG(1) << "[patronus] receive exit request by " << from_node << ". but node " << i
-                      << " not finished yet.";
+            DVLOG(1) << "[patronus] receive exit request by " << from_node
+                     << ". but node " << i << " not finished yet.";
             return;
         }
     }
@@ -1122,6 +1131,9 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
 
     if (unlikely(fail_nr))
     {
+        ContTimer<config::kMonitorFailureRecovery> timer;
+        timer.init("Failure recovery");
+
         DLOG(WARNING) << "[patronus] failed. expect nr: "
                       << rw_context_.ongoing_size();
         while (fail_nr < rw_context_.ongoing_size())
@@ -1135,6 +1147,7 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
                 << "** Provided buffer not enough to handle error message.";
             fail_nr += another_nr;
         }
+        timer.pin("Wait R/W");
         // need to wait for server realizes QP errors, and response error to
         // memory bind call otherwise, the server will recovery QP and drop the
         // failed window_bind calls then the client corotine will be waiting
@@ -1152,13 +1165,25 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
             cur_idx += nr;
             CHECK_LT(cur_idx, limit);
         }
+        timer.pin("Wait RPC");
+
+        for (const auto &[node_id, dir_id] : recovery)
+        {
+            signal_server_to_recover_qp(node_id, dir_id);
+        }
+        timer.pin("signal server");
+        for (const auto &[node_id, dir_id] : recovery)
+        {
+            CHECK(dsm_->recoverThreadQP(node_id, dir_id));
+        }
+        timer.pin("recover QP");
+        LOG_IF(INFO, config::kMonitorFailureRecovery) << "[patronus] client recovery: " << timer;
+    }
+    else
+    {
+        DCHECK(recovery.empty());
     }
 
-    for (const auto &[node_id, dir_id] : recovery)
-    {
-        signal_server_to_recover_qp(node_id, dir_id);
-        CHECK(dsm_->recoverThreadQP(node_id, dir_id));
-    }
     return cur_idx;
 }
 

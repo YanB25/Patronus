@@ -583,8 +583,9 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     // auto now = std::chrono::steady_clock::now();
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     // auto then = std::chrono::steady_clock::now();
-    // auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(then - now).count();
-    // LOG_FIRST_N(INFO, 200) << "[debug] bind mw latency: " << ns << " ns";
+    // auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(then -
+    // now).count(); LOG_FIRST_N(INFO, 200) << "[debug] bind mw latency: " << ns
+    // << " ns";
     if (ret == EINVAL)
     {
         PLOG(ERROR)
@@ -616,21 +617,31 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
 
     // TODO(patronus), CRITICAL(patronus): I don't know how to handle this.
     // size_t id = id_.fetch_add(1, std::memory_order_relaxed);
-    size_t id = id_++;
-    if ((id & mask) == magic)
+    if constexpr (config::kEnableSkipMagicMw)
     {
-        if constexpr (debug())
+        size_t id = id_++;
+        if ((id & mask) == magic)
         {
-            LOG_FIRST_N(WARNING, 1)
-                << "TODO: Strange bug: reallocate mw: " << mw << ", idx: " << id;
+            if constexpr (debug())
+            {
+                LOG_FIRST_N(WARNING, 1)
+                    << "TODO: Strange bug: reallocate mw: " << mw
+                    << ", idx: " << id;
+            }
+            // TODO(patronus):
+            // set signal to false may have race condition:
+            // client R/W to dsm before the window take effects
+            // however, setting signal to true is difficult to do right for
+            // coroutines should be fixed later.
+            return rdmaAsyncBindMemoryWindow(qp,
+                                             mw,
+                                             mr,
+                                             mm,
+                                             mmSize,
+                                             false /* signal */,
+                                             wrID,
+                                             mw_access_flag);
         }
-        // TODO(patronus):
-        // set signal to false may have race condition:
-        // client R/W to dsm before the window take effects
-        // however, setting signal to true is difficult to do right for coroutines
-        // should be fixed later.
-        return rdmaAsyncBindMemoryWindow(
-            qp, mw, mr, mm, mmSize, false /* signal */, wrID, mw_access_flag);
     }
 
     DVLOG(4) << "[BIND_MW] Binding addr " << (void *) mm << " size " << mmSize
