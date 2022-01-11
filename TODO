@@ -47,7 +47,7 @@ Possible performance optimization:
     - each client thread bind to one mid. (e.g. need 16 client threads)
     - one server thread can handle multiple mid simultaneously. one server thread for one DirectoryConnnection (one-to-one mapping). Therefore, 4 server threads.
 [-] bench the performance. see if it is 4 times as one thread. RESULT: nearly 4 times. when thread = 8, got 77% performance of one thread.
-- use gperf or other tools to profile the program.
+[-] use gperf or other tools to profile the program. DONE: nothing new. everywhere is not a hotspot. averagely spread to the Patronus APIs.
 - bench the latency of QP recoverying.
 - Add the header into the design. That would require adding the swaping area, and makes everything works well.
 
