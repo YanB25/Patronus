@@ -67,7 +67,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
     for (size_t i = 0; i < thread_nr; ++i)
     {
         threads.emplace_back(
-            [dsm, i, &count = counts[i]]()
+            [dsm, &count = counts[i]]()
             {
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
@@ -179,7 +179,7 @@ void server_burn(std::shared_ptr<DSM> dsm,
     for (size_t i = 0; i < thread_nr; ++i)
     {
         threads.emplace_back(
-            [dsm, i, &gots, &finished]()
+            [dsm, &gots, &finished]()
             {
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();

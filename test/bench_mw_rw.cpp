@@ -478,7 +478,7 @@ int main(int argc, char *argv[])
     for (size_t i = 0; i < kMaxThread; ++i)
     {
         threads.emplace_back(
-            [i, dsm, &client_bar, &b]()
+            [dsm, &client_bar, &b]()
             {
                 dsm->registerThread();
                 auto nid = dsm->getMyNodeID();

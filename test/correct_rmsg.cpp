@@ -157,7 +157,7 @@ void server_multithread(std::shared_ptr<DSM> dsm,
     for (size_t i = 0; i < thread_nr; ++i)
     {
         threads.emplace_back(
-            [i, dsm, &finished_nr, total_nr]()
+            [dsm, &finished_nr, total_nr]()
             {
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
@@ -215,7 +215,7 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
     for (size_t i = 0; i < thread_nr; ++i)
     {
         threads.emplace_back(
-            [i, dsm]()
+            [dsm]()
             {
                 dsm->registerThread();
 
