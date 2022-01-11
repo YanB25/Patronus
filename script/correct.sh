@@ -1,8 +1,13 @@
 #!/bin/bash
+set -e
+set -o xtrace
 
-cd ../build
+./build_debug.sh
+
+cd ../build/
 arr=(correct*)
+cd ../script/
 for file in "${arr[@]}" 
 do
-    echo "${file}"
+    ./bench.sh "${file}"
 done

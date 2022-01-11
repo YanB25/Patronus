@@ -49,7 +49,12 @@ Possible performance optimization:
 [-] bench the performance. see if it is 4 times as one thread. RESULT: nearly 4 times. when thread = 8, got 77% performance of one thread.
 [-] use gperf or other tools to profile the program. DONE: nothing new. everywhere is not a hotspot. averagely spread to the Patronus APIs.
 [-] bench the latency of QP recoverying. RESULT: 1 ms for BOTH server and client. matches the previous result I get.
+- support the correct.sh script. this should be easy. I have to fix all the correct_*.cpp files.
+    - for example, correct_nomem is wrong.
+    - remove all the unnecessary sleep. This kill the test phases.
 - Add the header into the design. That would require adding the swaping area, and makes everything works well.
+    - bind two mw, and return two mw to the user.
+    - think about how user will use the meta area of the ProtectionRegion
 
 
 Futures:
