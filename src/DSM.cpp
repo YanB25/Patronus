@@ -246,6 +246,8 @@ void DSM::registerThread()
             << "Run out of RDMA buffer when allocating coroutine buffer.";
         rbuf[i].set_buffer(rdma_buffer + i * define::kPerCoroRdmaBuf);
     }
+
+    bindCore(thread_id);
 }
 
 void DSM::initRDMAConnection()

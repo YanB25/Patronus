@@ -905,7 +905,7 @@ size_t Patronus::handle_rdma_finishes(
         if (likely(wc.status == IBV_WC_SUCCESS))
         {
             *(rw_context->success) = true;
-            VLOG(4) << "[patronus] handle rdma finishes SUCCESS for coro "
+            DVLOG(4) << "[patronus] handle rdma finishes SUCCESS for coro "
                     << (int) coro_id << ". set " << (void *) rw_context->success
                     << " to true.";
         }

@@ -46,8 +46,6 @@ int main(int argc, char *argv[])
     VLOG(3) << "It is 3 vlog";
     LOG(INFO) << "Support color ? " << getenv("TERM");
 
-    bindCore(0);
-
     rdmaQueryDevice();
 
     DSMConfig config;

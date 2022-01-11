@@ -31,8 +31,6 @@ int main(int argc, char* argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    bindCore(0);
-
     rdmaQueryDevice();
 
     DSMConfig config;
@@ -42,7 +40,6 @@ int main(int argc, char* argv[])
     auto patronus = Patronus::ins(config);
 
     sleep(1);
-
 
     // let client spining
     auto nid = patronus->get_node_id();

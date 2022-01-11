@@ -446,23 +446,9 @@ int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
-    // if (argc < 2)
-    // {
-    //     fprintf(stderr, "%s [window_nr]\n", argv[0]);
-    //     return -1;
-    // }
-    // size_t window_nr = 0;
-    // size_t window_size = 0;
-    // sscanf(argv[1], "%lu", &window_nr);
-    // sscanf(argv[2], "%lu", &window_size);
-
     constexpr static size_t kSize = 2 * define::GB;
 
-    // printf("window_nr: %lu, window_size: %lu\n", window_nr, window_size);
-    // info("memory window nr: %lu from %s", window_nr, argv[1]);
     fflush(stdout);
-
-    bindCore(0);
 
     rdmaQueryDevice();
 
@@ -494,7 +480,6 @@ int main(int argc, char *argv[])
         threads.emplace_back(
             [i, dsm, &client_bar, &b]()
             {
-                bindCore(i + 1);
                 dsm->registerThread();
                 auto nid = dsm->getMyNodeID();
                 uint64_t tid = dsm->get_thread_id();

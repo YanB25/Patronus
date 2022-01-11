@@ -69,7 +69,6 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
         threads.emplace_back(
             [dsm, i, &count = counts[i]]()
             {
-                bindCore(i + 1);
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
                 auto mid = tid % RMSG_MULTIPLEXING;
@@ -182,7 +181,6 @@ void server_burn(std::shared_ptr<DSM> dsm,
         threads.emplace_back(
             [dsm, i, &gots, &finished]()
             {
-                bindCore(i + 1);
                 dsm->registerThread();
                 auto tid = dsm->get_thread_id();
                 auto mid = tid % RMSG_MULTIPLEXING;
@@ -292,8 +290,6 @@ int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
-
-    bindCore(0);
 
     rdmaQueryDevice();
 

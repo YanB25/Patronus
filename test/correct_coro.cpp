@@ -128,7 +128,6 @@ int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
-    bindCore(0);
 
     LOG(WARNING) << "correct_coro does not *correct*. boost::coroutine (and "
                     "boost::coroutine2) does not work with asan.";
