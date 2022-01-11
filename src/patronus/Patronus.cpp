@@ -513,7 +513,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     {
         uint64_t digest = req->digest.get();
         req->digest = 0;
-        DCHECK_EQ(digest, djb2_digest(req, sizeof(AcquireRequest)));
+        DCHECK_EQ(digest, djb2_digest(req, sizeof(AcquireRequest)))
+            << "** digest mismatch for req " << *req;
     }
     CHECK_LT(req->size, internal.size);
     DVLOG(4) << "[patronus] Trying to bind with dirID " << dirID
@@ -996,13 +997,13 @@ void Patronus::handle_admin_exit(AdminRequest *req,
     {
         if (!exits_[i])
         {
-            DVLOG(4) << "[patronus] Not exit becasue node " << i
-                     << " not finished yet.";
+            DVLOG(1) << "[patronus] receive exit request by " << from_node << ". but node " << i
+                      << " not finished yet.";
             return;
         }
     }
 
-    DVLOG(4) << "[patronux] set should_exit to true.";
+    DVLOG(1) << "[patronus] set should_exit to true";
     should_exit_.store(true, std::memory_order_release);
 }
 void Patronus::signal_server_to_recover_qp(size_t node_id, size_t dir_id)
@@ -1403,6 +1404,50 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
 
     DVLOG(3) << "[bench] server coro: " << ctx << " exit.";
     ctx.yield_to_master();
+}
+
+void Patronus::wait_join(std::vector<std::thread> &threads)
+{
+    auto tid = get_thread_id();
+    auto mid = tid;
+    CHECK_EQ(tid, 0) << "[patronus] should use the master thread, i.e. the "
+                        "thread constructing Patronus, to join";
+
+    constexpr static size_t kAdminBufferNr = MAX_MACHINE;
+    std::vector<char> __buffer;
+    __buffer.resize(ReliableConnection::kMaxRecvBuffer * kAdminBufferNr);
+
+    auto buffer_pool = std::make_unique<
+        ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer>>(
+        __buffer.data(), ReliableConnection::kMaxRecvBuffer * kAdminBufferNr);
+    while (!should_exit())
+    {
+        char *buffer = (char *) CHECK_NOTNULL(buffer_pool->get());
+        DCHECK_EQ(mid, 0)
+            << "[patronus] by design, use mid == 0 for admin messages";
+        size_t nr =
+            reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
+        for (size_t i = 0; i < nr; ++i)
+        {
+            auto *base = (BaseMessage *) (buffer + i * kMessageSize);
+            auto request_type = base->type;
+            CHECK_EQ(request_type, RequestType::kAdmin)
+                << "[patronus] Master thread only handles admin request. got "
+                << request_type;
+            auto *msg = (AdminRequest *) base;
+            auto admin_type = (AdminFlag) msg->flag;
+            CHECK_EQ(admin_type, AdminFlag::kAdminReqExit)
+                << "[patronus] only handles exit admin requests";
+            handle_admin_exit(msg, nullptr);
+        }
+        buffer_pool->put(buffer);
+    }
+    LOG(INFO) << "[patronus] all nodes finishes their work. joining...";
+
+    for (auto &t : threads)
+    {
+        t.join();
+    }
 }
 
 }  // namespace patronus

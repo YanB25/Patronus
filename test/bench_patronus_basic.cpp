@@ -58,7 +58,7 @@ struct BenchInformation
 
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
-    auto tid = p ->get_thread_id();
+    auto tid = p->get_thread_id();
 
     CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
@@ -257,7 +257,8 @@ void client(Patronus::pointer p)
         client_coro.workers[i] =
             CoroCall([p, i](CoroYield &yield) { client_worker(p, i, yield); });
     }
-    client_coro.master = CoroCall([p](CoroYield &yield) { client_master(p, yield); });
+    client_coro.master =
+        CoroCall([p](CoroYield &yield) { client_master(p, yield); });
     client_coro.master();
 
     finish.store(true);

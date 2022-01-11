@@ -112,10 +112,7 @@ bool DSM::reinitializeDir(size_t dirID)
     ContTimer<config::kMonitorReconnection> timer("DSM::reinitialzeDir");
     LOG(INFO) << "[DSM] Reinitialize DirectoryConnetion[" << dirID << "]";
 
-    if (dirID > dirCon.size())
-    {
-        return false;
-    }
+    CHECK_LT(dirID, dirCon.size());
     // here destroy connection
     dirCon[dirID].reset();
     dirCon[dirID] = std::make_unique<DirectoryConnection>(
@@ -147,6 +144,7 @@ bool DSM::reinitializeDir(size_t dirID)
 bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
 {
     ContTimer<config::kMonitorReconnection> timer("DSM::reconnectThreadToDir");
+    DCHECK_LT(dirID, NR_DIRECTORY);
 
     LOG(INFO) << "[DSM] reconnect ThreadConnection for node " << node_id
               << ", dir " << dirID;
@@ -294,6 +292,8 @@ void DSM::rkey_read(uint32_t rkey,
                     CoroContext *ctx,
                     uint64_t wr_id)
 {
+    DCHECK_LT(dirID, iCon->QPs.size());
+    DCHECK_LT(gaddr.nodeID, iCon->QPs[dirID].size());
     if (ctx == nullptr)
     {
         rdmaRead(iCon->QPs[dirID][gaddr.nodeID],
@@ -361,6 +361,7 @@ void DSM::rkey_write(uint32_t rkey,
                      CoroContext *ctx,
                      uint64_t wr_id)
 {
+    DCHECK_LT(dirID, iCon->QPs.size());
     if (ctx == nullptr)
     {
         rdmaWrite(iCon->QPs[dirID][gaddr.nodeID],
@@ -426,6 +427,7 @@ void DSM::fill_keys_dest(RdmaOpRegion &ror,
                          bool is_chip,
                          size_t dirID)
 {
+    DCHECK_LT(dirID, NR_DIRECTORY);
     ror.lkey = iCon->cacheLKey;
     if (is_chip)
     {
@@ -996,6 +998,7 @@ void DSM::faa_dm_boundary_sync(GlobalAddress gaddr,
 
 ibv_mw *DSM::alloc_mw(size_t dirID)
 {
+    DCHECK_LT(dirID, dirCon.size());
     struct RdmaContext *ctx = &dirCon[dirID]->ctx;
     // dinfo("[dsm] dirCon ID: %d, pd: %p", dirCon[cur_dir].dirID, ctx->pd);
     struct ibv_mw *mw = ibv_alloc_mw(ctx->pd, ctx->mw_type);
@@ -1021,6 +1024,7 @@ bool DSM::bind_memory_region(struct ibv_mw *mw,
                              size_t wr_id,
                              bool signal)
 {
+    DCHECK_LT(dirID, dirCon.size());
     struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
         qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, signal, wr_id);
@@ -1035,6 +1039,7 @@ bool DSM::bind_memory_region_sync(struct ibv_mw *mw,
                                   uint64_t wr_id,
                                   CoroContext *ctx)
 {
+    DCHECK_LT(dirID, dirCon.size());
     struct ibv_qp *qp = dirCon[dirID]->QPs[target_thread_id][target_node_id];
     uint32_t rkey = rdmaAsyncBindMemoryWindow(
         qp, mw, dirCon[dirID]->dsmMR, (uint64_t) buffer, size, true, wr_id);

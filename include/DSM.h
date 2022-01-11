@@ -561,14 +561,17 @@ public:
 
 ibv_qp *DSM::get_dir_qp(int node_id, int thread_id, size_t dirID)
 {
+    DCHECK_LT(dirID, dirCon.size());
     return dirCon[dirID]->QPs[thread_id][node_id];
 }
 ibv_qp *DSM::get_th_qp(int node_id, size_t dirID)
 {
+    DCHECK_LT(dirID, iCon->QPs.size());
     return iCon->QPs[dirID][node_id];
 }
 ibv_mr *DSM::get_dir_mr(size_t dirID)
 {
+    DCHECK_LT(dirID, dirCon.size());
     return dirCon[dirID]->dsmMR;
 }
 
@@ -648,12 +651,14 @@ uint64_t DSM::poll_rdma_cq(int count)
 
 size_t DSM::try_poll_dir_cq(ibv_wc *wcs, size_t dirID, size_t limit)
 {
+    DCHECK_LT(dirID, dirCon.size());
     return ibv_poll_cq(dirCon[dirID]->cq, limit, wcs);
 }
 
 int DSM::poll_dir_cq(size_t dirID, size_t count)
 {
     ibv_wc wc;
+    DCHECK_LT(dirID, dirCon.size());
     return pollWithCQ(dirCon[dirID]->cq, count, &wc);
 }
 

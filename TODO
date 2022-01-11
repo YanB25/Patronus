@@ -41,7 +41,8 @@ Possible performance optimization:
 [-] DONE measure the overhead of boost coroutine: especially for large stack (std::array<1024>), or deep stack (recursive calls)
     - got 40 Mops.
     - boost::coroutine is stackful. runtime overhead only contains registers load/store. will not copy the whole stack. GREAT
-
+[-] boost::coroutine is just DOES NOT WORK WITH ASAN. 
+- use gperf or other tools to profile the program.
 - change to multiple threads: 
     - tune NR_DIRECTORY to 4
     - each client thread bind to one mid. (e.g. need 16 client threads)

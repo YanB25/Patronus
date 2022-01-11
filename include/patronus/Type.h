@@ -89,6 +89,7 @@ enum class AdminFlag : uint8_t
     kAdminReqExit = 0,
     kAdminReqRecovery = 1,
 };
+std::ostream& operator<<(std::ostream& os, const AdminFlag& f);
 
 struct AdminRequest
 {
