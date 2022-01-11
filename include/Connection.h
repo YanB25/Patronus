@@ -2,11 +2,12 @@
 #ifndef __CONNECTION_H__
 #define __CONNECTION_H__
 
+#include <glog/logging.h>
+
 #include "Common.h"
 #include "DirectoryConnection.h"
 #include "RawMessageConnection.h"
 #include "ThreadConnection.h"
-#include <glog/logging.h>
 
 /**
  * @brief RemoteConnection is a combination of @see ThreadConnection
@@ -39,13 +40,15 @@ struct RemoteConnection
         {
             for (size_t j = 0; j < MAX_APP_THREAD; ++j)
             {
-                if (ibv_destroy_ah(dirToAppAh[i][j]))
+                if (dirToAppAh[i][j])
                 {
-                    PLOG(ERROR) << "failed to destroy ah";
+                    PLOG_IF(ERROR, ibv_destroy_ah(dirToAppAh[i][j])) << "failed to destroy ah";
+                    dirToAppAh[i][j] = nullptr;
                 }
-                if (ibv_destroy_ah(appToDirAh[j][i]))
+                if (appToDirAh[j][i])
                 {
-                    PLOG(ERROR) << "failed to destroy ah";
+                    PLOG_IF(ERROR, ibv_destroy_ah(appToDirAh[j][i])) << "failed to destroy ah";
+                    appToDirAh[j][i] = nullptr;
                 }
             }
         }

@@ -29,8 +29,6 @@ int main(int argc, char* argv[])
 
     auto dsm = DSM::getInstance(config);
 
-    sleep(1);
-
     dsm->registerThread();
 
     // let client spining

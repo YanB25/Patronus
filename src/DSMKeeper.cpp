@@ -380,9 +380,8 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
                        exMeta.appTh[i].lid,
                        exMeta.appTh[i].gid,
                        &dirCon[k]->ctx);
-            remote.dirToAppAh[k][i] = ibv_create_ah(dirCon[k]->ctx.pd, &ahAttr);
-
-            assert(remote.dirToAppAh[k][i]);
+            remote.dirToAppAh[k][i] =
+                DCHECK_NOTNULL(ibv_create_ah(dirCon[k]->ctx.pd, &ahAttr));
         }
     }
 }
@@ -442,8 +441,4 @@ uint64_t DSMKeeper::sum(const std::string &sum_key, uint64_t value)
 DSMKeeper::~DSMKeeper()
 {
     disconnectMemcached();
-    for (auto &rc : remoteCon)
-    {
-        rc.destroy();
-    }
 }

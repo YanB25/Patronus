@@ -2,6 +2,10 @@
 #ifndef PROTECTION_REGION_H_
 #define PROTECTION_REGION_H_
 
+#include "patronus/Type.h"
+#include <cstddef>
+#include <cinttypes>
+
 namespace patronus
 {
 constexpr static size_t kSpeculativeLeaseNr = 4;
@@ -20,8 +24,8 @@ struct ProtectionRegionMeta
     small_bit_t relinquished;
     small_bit_t wait;
 }__attribute__((packed));
-static_assert(sizeof(ProtectionRegionMeta::granted) * 8 <= kSpeculativeLeaseNr);
-static_assert(sizeof(ProtectionRegionMeta::relinquished) * 8 <= kSpeculativeLeaseNr);
+static_assert(sizeof(ProtectionRegionMeta::granted) * 8 >= kSpeculativeLeaseNr);
+static_assert(sizeof(ProtectionRegionMeta::relinquished) * 8 >= kSpeculativeLeaseNr);
 
 struct ProtectionRegion
 {
@@ -34,20 +38,6 @@ struct ProtectionRegion
     // need external data to determine the buffer length.
     char buf[0];
 }__attribute__((packed));
-
-// TODO: this design is too complicated.
-// just ignore it for now.
-struct SplitProtectionRegion
-{
-    small_size_t lease_nr;
-    LeaseDescriptor ex_lease;
-    LeaseDescriptor spec_leases[kSpeculativeLeaseNr];
-    LeaseDescriptor spec_ex_leases[kSpeculativeLeaseNr];
-    ProtectionRegionMeta meta;
-    // pointer to the actual buffer
-    char* buf;
-}
-
 }
 
 #endif

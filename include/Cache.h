@@ -27,5 +27,11 @@ struct Buffer
     {
     }
 };
+inline std::ostream &operator<<(std::ostream &os, const Buffer &buf)
+{
+    os << "{Buffer base: " << (void *) buf.buffer << ", len: " << buf.size
+       << "}";
+    return os;
+}
 
 #endif  // _CACHE_H_

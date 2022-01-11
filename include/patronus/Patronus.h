@@ -9,12 +9,22 @@
 #include "Result.h"
 #include "patronus/Coro.h"
 #include "patronus/Lease.h"
+#include "patronus/ProtectionRegion.h"
 #include "patronus/Type.h"
 #include "util/Debug.h"
 
 namespace patronus
 {
 class Patronus;
+using KeyLocator = std::function<uint64_t(key_t)>;
+static KeyLocator identity_locator = [](key_t key) -> uint64_t
+{ return (uint64_t) key; };
+struct PatronusConfig
+{
+    size_t machine_nr{0};
+    size_t buffer_size{kDSMCacheSize};
+    KeyLocator key_locator{identity_locator};
+};
 
 struct RpcContext
 {
@@ -53,22 +63,15 @@ public:
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
 
-    using KeyLocator = std::function<uint64_t(key_t)>;
-    static KeyLocator identity_locator;
-
-    static pointer ins(const DSMConfig &conf)
+    static pointer ins(const PatronusConfig &conf)
     {
         return std::make_shared<Patronus>(conf);
     }
     Patronus &operator=(const Patronus &) = delete;
     Patronus(const Patronus &) = delete;
-    Patronus(const DSMConfig &conf);
+    Patronus(const PatronusConfig &conf);
     ~Patronus();
 
-    void reg_locator(const KeyLocator &locator = identity_locator)
-    {
-        locator_ = locator;
-    }
     /**
      * @brief Get the rlease object
      *
@@ -133,10 +136,10 @@ public:
 
     /**
      * @brief handling admin messages while joining the threads.
-     * 
-     * @param threads 
+     *
+     * @param threads
      */
-    void wait_join(std::vector<std::thread>& threads);
+    void wait_join(std::vector<std::thread> &threads);
 
     size_t try_get_client_continue_coros(size_t mid,
                                          coro_t *coro_buf,
@@ -187,9 +190,20 @@ public:
     }
 
 private:
+    // How many leases on average may a tenant hold?
+    // It determines how much resources we should reserve
+    constexpr static size_t kGuessActiveLeasePerCoro = 16;
     constexpr static size_t kClientRdmaBufferSize = 4 * define::KB;
-    constexpr static size_t kLeaseContextNr = kMaxCoroNr * 16;
+    constexpr static size_t kLeaseContextNr =
+        kMaxCoroNr * kGuessActiveLeasePerCoro;
     constexpr static size_t kServerCoroNr = kMaxCoroNr;
+    constexpr static size_t kTotalProtectionRegionNr =
+        NR_DIRECTORY * MAX_APP_THREAD * kMaxCoroNr * kGuessActiveLeasePerCoro;
+
+    void reg_locator(const KeyLocator &locator = identity_locator)
+    {
+        locator_ = locator;
+    }
 
     ibv_mw *get_mw(size_t dirID)
     {
@@ -255,6 +269,11 @@ private:
     void put_lease_context(LeaseContext *ctx)
     {
         lease_context_.put(ctx);
+    }
+    static size_t required_dsm_reserve_size()
+    {
+        size_t ret = sizeof(ProtectionRegion) * kTotalProtectionRegionNr;
+        return ROUND_UP(ret, 4096);
     }
 
     // for clients

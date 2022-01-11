@@ -13,8 +13,8 @@ DirectoryConnection::DirectoryConnection(
     void *dsmPool,
     uint64_t dsmSize,
     uint32_t machineNR,
-    const std::vector<RemoteConnection> &remoteInfo)
-    : dirID(dirID), remoteInfo(remoteInfo)
+    std::vector<RemoteConnection> &remoteInfo)
+    : dirID(dirID), remoteInfo(&remoteInfo)
 {
     DefOnceContTimer(timer,
                      config::kMonitorControlPath,
@@ -61,7 +61,8 @@ DirectoryConnection::DirectoryConnection(
         QPs.emplace_back(machineNR);
         for (size_t k = 0; k < machineNR; ++k)
         {
-            CHECK(createQueuePair(&QPs.back()[k], IBV_QPT_RC, cq, &ctx, 128, 0, nullptr));
+            CHECK(createQueuePair(
+                &QPs.back()[k], IBV_QPT_RC, cq, &ctx, 128, 0, nullptr));
         }
     }
     timer.pin("create QPs");
@@ -74,8 +75,8 @@ void DirectoryConnection::sendMessage2App(RawMessage *m,
                                           uint16_t th_id)
 {
     message->sendRawMessage(m,
-                            remoteInfo[node_id].appMessageQPN[th_id],
-                            remoteInfo[node_id].dirToAppAh[dirID][th_id]);
+                            (*remoteInfo)[node_id].appMessageQPN[th_id],
+                            (*remoteInfo)[node_id].dirToAppAh[dirID][th_id]);
 }
 DirectoryConnection::~DirectoryConnection()
 {
@@ -106,6 +107,19 @@ DirectoryConnection::~DirectoryConnection()
     CHECK(destroyCompleteQueue(cq));
     CHECK(destroyCompleteQueue(rpc_cq));
     timer.pin("destroy cqs");
+    // must free AH before freeing PD, otherwise it crashes when trying to free
+    // AH.
+    for (size_t i = 0; i < MAX_APP_THREAD; ++i)
+    {
+        CHECK_NE(node_id_, size_t(-1));
+        ibv_ah *pah = (*remoteInfo)[node_id_].dirToAppAh[dirID][i];
+        if (unlikely(pah == nullptr))
+        {
+            continue;
+        }
+        PLOG_IF(ERROR, ibv_destroy_ah(pah)) << "failed to destroy ah";
+        (*remoteInfo)[node_id_].dirToAppAh[dirID][i] = nullptr;
+    }
     CHECK(destroyContext(&ctx));
     timer.pin("destroy context (dealloc PD, close device)");
     timer.report();

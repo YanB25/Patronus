@@ -309,10 +309,10 @@ int main(int argc, char *argv[])
 
     rdmaQueryDevice();
 
-    DSMConfig config;
-    config.machineNR = kMachineNr;
+    PatronusConfig config;
+    config.machine_nr = kMachineNr;
+    config.key_locator = bench_locator;
 
-    // auto dsm = DSM::getInstance(config);
     auto patronus = Patronus::ins(config);
 
     boost::barrier bar(kThreadNr);
@@ -347,7 +347,6 @@ int main(int argc, char *argv[])
                 [patronus, i]()
                 {
                     patronus->registerServerThread();
-                    patronus->reg_locator(bench_locator);
                     if (i == 0)
                     {
                         patronus->finished();

@@ -33,10 +33,9 @@ int main(int argc, char* argv[])
 
     rdmaQueryDevice();
 
-    DSMConfig config;
-    config.machineNR = kMachineNr;
+    PatronusConfig config;
+    config.machine_nr = kMachineNr;
 
-    // auto dsm = DSM::getInstance(config);
     auto patronus = Patronus::ins(config);
 
     sleep(1);

@@ -35,19 +35,19 @@ public:
     void registerThread();
     static std::shared_ptr<DSM> getInstance(const DSMConfig &conf);
 
-    uint16_t getMyNodeID()
+    uint16_t getMyNodeID() const
     {
         return myNodeID;
     }
-    uint16_t getMyThreadID()
+    uint16_t getMyThreadID() const
     {
         return thread_id;
     }
-    uint16_t getClusterSize()
+    uint16_t getClusterSize() const
     {
         return conf.machineNR;
     }
-    uint64_t getThreadTag()
+    uint64_t getThreadTag() const
     {
         return thread_tag;
     }
@@ -313,16 +313,27 @@ public:
         return keeper->sum(std::string("sum-") + std::to_string(count++),
                            value);
     }
-    size_t server_internal_buffer_reserve_size()
+    size_t server_internal_buffer_dsm_reserve_size() const
     {
-        size_t reserve = getClusterSize() * sizeof(ExchangeMeta);
-        return ROUND_UP(reserve, 4096);
+        // an area for ExchangeMeta data
+        size_t reserve_for_bootstrap = getClusterSize() * sizeof(ExchangeMeta);
+        reserve_for_bootstrap = ROUND_UP(reserve_for_bootstrap, 4096);
+        return reserve_for_bootstrap;
+    }
+    size_t server_internal_buffer_total_reserve_size() const
+    {
+        size_t dsm_reserve = server_internal_buffer_dsm_reserve_size();
+        size_t user_reserve = conf.dsmReserveSize;
+        size_t reserve = dsm_reserve + user_reserve;
+
+        DCHECK_LT(reserve, conf.dsmSize);
+        return reserve;
     }
 
     uint64_t dsm_pool_addr(const GlobalAddress &gaddr)
     {
         auto base = remoteInfo[gaddr.nodeID].dsmBase +
-                    server_internal_buffer_reserve_size();
+                    server_internal_buffer_total_reserve_size();
         return base + gaddr.offset;
     }
 
@@ -430,6 +441,7 @@ private:
     static thread_local uint64_t thread_tag;
 
     uint64_t baseAddr;
+    uint64_t baseAddrSize;
     uint32_t myNodeID;
 
     std::vector<RemoteConnection> remoteInfo;
@@ -464,6 +476,8 @@ public:
         return rdma_buffer;
     }
     inline Buffer get_server_internal_buffer();
+    inline Buffer get_server_user_reserved_buffer();
+    inline Buffer get_server_dsm_reserved_buffer();
     RdmaBuffer &get_rbuf(coro_t coro_id)
     {
         DCHECK(coro_id < define::kMaxCoroNr)
@@ -557,6 +571,26 @@ public:
         pollWithCQ(iCon->rpc_cq, 1, &wc);
         return (RawMessage *) iCon->message->getMessage();
     }
+
+    void explain()
+    {
+        auto dsm_buffer = get_server_dsm_reserved_buffer();
+        auto resv_buffer = get_server_user_reserved_buffer();
+        auto int_buffer = get_server_internal_buffer();
+        LOG(INFO) << "[DSM] node_id: " << get_node_id()
+                  << ", dsm_internal_base: " << (void *) baseAddr
+                  << ", dsm_internal_len: " << baseAddrSize
+                  << ", dsm reserved buffer: " << dsm_buffer
+                  << ", user reserved buffer: " << resv_buffer
+                  << ", DSM buffer: " << int_buffer;
+        CHECK_GE((uint64_t) dsm_buffer.buffer, baseAddr);
+        CHECK_GE(resv_buffer.buffer, dsm_buffer.buffer);
+        CHECK_GE(int_buffer.buffer, resv_buffer.buffer);
+        CHECK_EQ(int_buffer.buffer - resv_buffer.buffer, resv_buffer.size);
+        CHECK_EQ(resv_buffer.buffer - dsm_buffer.buffer, dsm_buffer.size);
+        CHECK_EQ(resv_buffer.size + int_buffer.size + dsm_buffer.size,
+                 baseAddrSize);
+    }
 };
 
 ibv_qp *DSM::get_dir_qp(int node_id, int thread_id, size_t dirID)
@@ -621,17 +655,32 @@ bool DSM::write_sync(const char *buffer,
 {
     size_t dirID = get_cur_dir();
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
-    LOG(INFO) << "[debug] write_sync for rkey: " << std::hex << rkey
-              << ", dirID: " << dirID;
+    DLOG(INFO) << "[debug] write_sync for rkey: " << std::hex << rkey
+               << ", dirID: " << dirID;
     return rkey_write_sync(
         rkey, buffer, gaddr, size, dirID, ctx, wc_id, handler);
+}
+Buffer DSM::get_server_dsm_reserved_buffer()
+{
+    size_t node_id = get_node_id();
+    size_t buffer_len = server_internal_buffer_dsm_reserve_size();
+    Buffer ret((char *) remoteInfo[node_id].dsmBase, buffer_len);
+    return ret;
 }
 
 Buffer DSM::get_server_internal_buffer()
 {
     size_t node_id = get_node_id();
-    size_t rv = server_internal_buffer_reserve_size();
-    Buffer ret((char *) remoteInfo[node_id].dsmBase + rv, 16 * define::GB - rv);
+    size_t rv = server_internal_buffer_total_reserve_size();
+    Buffer ret((char *) remoteInfo[node_id].dsmBase + rv, conf.dsmSize);
+    return ret;
+}
+Buffer DSM::get_server_user_reserved_buffer()
+{
+    size_t node_id = get_node_id();
+    size_t dsm_rv = server_internal_buffer_dsm_reserve_size();
+    size_t buffer_len = conf.dsmReserveSize;
+    Buffer ret((char *) remoteInfo[node_id].dsmBase + dsm_rv, buffer_len);
     return ret;
 }
 

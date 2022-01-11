@@ -210,10 +210,10 @@ int main(int argc, char *argv[])
 
     rdmaQueryDevice();
 
-    DSMConfig config;
-    config.machineNR = kMachineNr;
+    PatronusConfig config;
+    config.machine_nr = kMachineNr;
+    config.key_locator = bench_locator;
 
-    // auto dsm = DSM::getInstance(config);
     auto patronus = Patronus::ins(config);
 
     sleep(1);
@@ -229,7 +229,6 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
-        patronus->reg_locator(bench_locator);
         patronus->finished();
         server(patronus);
     }

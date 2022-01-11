@@ -24,15 +24,14 @@ std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
 
 DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
-    baseAddr = (uint64_t) hugePageAlloc(conf.dsmSize);
-
-    LOG(INFO) << "shared memory size: " << smart::smartSize(conf.dsmSize)
-              << " at " << (void *) baseAddr;
-    LOG(INFO) << "cache size: " << smart::smartSize(conf.cacheConfig.cacheSize);
+    baseAddrSize = server_internal_buffer_dsm_reserve_size() + conf.dsmSize +
+                   conf.dsmReserveSize;
+    baseAddr = (uint64_t) hugePageAlloc(baseAddrSize);
+    LOG(INFO) << "[DSM] Total buffer: "
+              << Buffer((char *) baseAddr, baseAddrSize);
 
     // warmup
-    // memset((char *)baseAddr, 0, conf.dsmSize * define::GB);
-    for (uint64_t i = baseAddr; i < baseAddr + conf.dsmSize * define::GB;
+    for (uint64_t i = baseAddr; i < baseAddr + baseAddrSize;
          i += 2 * define::MB)
     {
         *(char *) i = 0;
@@ -51,6 +50,8 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
     keeper->barrier("DSM-init");
 
     LOG(WARNING) << "[system] DSM ready. node_id: " << get_node_id();
+
+    explain();
 }
 
 void DSM::initExchangeMetadataBootstrap()
@@ -97,6 +98,10 @@ void DSM::syncMetadataBootstrap(const ExchangeMeta &self_meta, size_t remoteID)
 
 DSM::~DSM()
 {
+    for (auto &rc : remoteInfo)
+    {
+        rc.destroy();
+    }
 }
 
 ExchangeMeta &DSM::getExchangeMetaBootstrap(size_t node_id) const
@@ -109,6 +114,7 @@ ExchangeMeta &DSM::getExchangeMetaBootstrap(size_t node_id) const
 
 bool DSM::reinitializeDir(size_t dirID)
 {
+    auto nid = get_node_id();
     ContTimer<config::kMonitorReconnection> timer("DSM::reinitialzeDir");
     LOG(INFO) << "[DSM] Reinitialize DirectoryConnetion[" << dirID << "]";
 
@@ -116,7 +122,8 @@ bool DSM::reinitializeDir(size_t dirID)
     // here destroy connection
     dirCon[dirID].reset();
     dirCon[dirID] = std::make_unique<DirectoryConnection>(
-        dirID, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo);
+        dirID, (void *) baseAddr, baseAddrSize, conf.machineNR, remoteInfo);
+    dirCon[dirID]->set_node_id(nid);
 
     timer.pin("Reinit DirConnection");
 
@@ -268,7 +275,7 @@ void DSM::initRDMAConnection()
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
         dirCon.emplace_back(std::make_unique<DirectoryConnection>(
-            i, (void *) baseAddr, conf.dsmSize, conf.machineNR, remoteInfo));
+            i, (void *) baseAddr, baseAddrSize, conf.machineNR, remoteInfo));
     }
     timer.pin("dirCons " + std::to_string(NR_DIRECTORY));
 
@@ -283,6 +290,11 @@ void DSM::initRDMAConnection()
 
     myNodeID = keeper->getMyNodeID();
     timer.report();
+
+    for (int i = 0; i < NR_DIRECTORY; ++i)
+    {
+        dirCon[i]->set_node_id(myNodeID);
+    }
 }
 
 void DSM::rkey_read(uint32_t rkey,

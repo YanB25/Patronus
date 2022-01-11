@@ -19,12 +19,24 @@ thread_local ThreadUnsafePool<LeaseContext, Patronus::kLeaseContextNr>
     Patronus::lease_context_;
 thread_local ServerCoroContext Patronus::server_coro_ctx_;
 
-Patronus::KeyLocator Patronus::identity_locator = [](key_t key) -> uint64_t
-{ return (uint64_t) key; };
-
-Patronus::Patronus(const DSMConfig &conf)
+Patronus::Patronus(const PatronusConfig &conf)
 {
-    dsm_ = DSM::getInstance(conf);
+    DSMConfig dsm_config;
+    dsm_config.machineNR = conf.machine_nr;
+    dsm_config.dsmReserveSize = required_dsm_reserve_size();
+    dsm_config.dsmSize = conf.buffer_size;
+    dsm_ = DSM::getInstance(dsm_config);
+
+    // validate dsm
+    auto internal_buf = dsm_->get_server_internal_buffer();
+    auto reserve_buf = dsm_->get_server_user_reserved_buffer();
+    CHECK_GE(internal_buf.size, conf.buffer_size)
+        << "** dsm should allocate DSM buffer at least what Patronus requires";
+    CHECK_GE(reserve_buf.size, required_dsm_reserve_size())
+        << "**dsm should provide reserved buffer at least what Patronus "
+           "requries";
+
+    reg_locator(conf.key_locator);
 }
 Patronus::~Patronus()
 {
@@ -1177,7 +1189,8 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
             CHECK(dsm_->recoverThreadQP(node_id, dir_id));
         }
         timer.pin("recover QP");
-        LOG_IF(INFO, config::kMonitorFailureRecovery) << "[patronus] client recovery: " << timer;
+        LOG_IF(INFO, config::kMonitorFailureRecovery)
+            << "[patronus] client recovery: " << timer;
     }
     else
     {
