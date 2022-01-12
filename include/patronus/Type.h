@@ -67,6 +67,8 @@ struct AcquireRequest
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(AcquireRequest) < ReliableConnection::kMessageSize);
+static_assert(NR_DIRECTORY <
+              std::numeric_limits<decltype(AcquireRequest::dir_id)>::max());
 std::ostream &operator<<(std::ostream &os, const AcquireRequest &req);
 
 struct AcquireResponse
@@ -74,9 +76,11 @@ struct AcquireResponse
     enum RequestType type;
     ClientID cid;
     uint32_t rkey_0;
-    uint64_t base;
+    uint32_t rkey_header;
+    uint64_t buffer_base;
+    uint64_t header_base;
     term_t term;
-    id_t lease_id;
+    uint16_t lease_id;
     bool success;
     Debug<uint64_t> digest;
 } __attribute__((packed));

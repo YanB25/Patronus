@@ -36,11 +36,12 @@ public:
     {
         return !success_;
     }
-    bool is_read_lease() const
+    bool is_readable() const
     {
-        return lease_type_ == LeaseType::kReadLease;
+        return lease_type_ == LeaseType::kReadLease ||
+               lease_type_ == LeaseType::kWriteLease;
     }
-    bool is_write_lease() const
+    bool is_writable() const
     {
         return lease_type_ == LeaseType::kWriteLease;
     }
@@ -57,13 +58,14 @@ public:
     {
         lease_type_ = rhs.lease_type_;
         base_addr_ = rhs.base_addr_;
+        header_addr_ = rhs.header_addr_;
         node_id_ = rhs.node_id_;
         dir_id_ = rhs.dir_id_;
         header_size_ = rhs.header_size_;
         buffer_size_ = rhs.buffer_size_;
         rkey_0_ = rhs.rkey_0_;
         cur_rkey_ = rhs.cur_rkey_;
-        ex_rkey_ = rhs.ex_rkey_;
+        header_rkey_ = rhs.header_rkey_;
         cur_ddl_term_ = rhs.cur_ddl_term_;
 
         success_ = false;
@@ -100,14 +102,14 @@ private:
     id_t id_{0};
     LeaseType lease_type_{LeaseType::kUnknown};
     uint64_t base_addr_{0};
+    uint64_t header_addr_{0};
     uint16_t node_id_{0};
     size_t dir_id_{0};
-    // total_size = header_size_ + buffer_size_
-    size_t header_size_{0};
     size_t buffer_size_{0};
+    size_t header_size_{0};
     rkey_t rkey_0_{0};
     rkey_t cur_rkey_{0};
-    rkey_t ex_rkey_{0};
+    rkey_t header_rkey_{0};
     term_t cur_ddl_term_{0};
 };
 

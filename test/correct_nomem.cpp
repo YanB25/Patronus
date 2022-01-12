@@ -106,7 +106,7 @@ void client(std::shared_ptr<DSM> dsm)
     }
     LOG(INFO) << "OK. RPC does not leak memory. perfect.";
 
-    const auto &buf_conf = dsm->get_server_internal_buffer();
+    const auto &buf_conf = dsm->get_server_buffer();
     char *buffer = buf_conf.buffer;
 
     size_t cnt = 0;

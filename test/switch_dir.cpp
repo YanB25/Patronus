@@ -72,7 +72,7 @@ void server(std::shared_ptr<DSM> dsm)
     LOG(WARNING) << "I am server.";
     dsm->debug_show_exchanges();
 
-    const auto &buf_conf = dsm->get_server_internal_buffer();
+    const auto &buf_conf = dsm->get_server_buffer();
     char *buffer = buf_conf.buffer;
 
     loop_expect(buffer, (char *) &kMagic, sizeof(kMagic));

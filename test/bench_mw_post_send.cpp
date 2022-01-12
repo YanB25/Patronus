@@ -61,7 +61,7 @@ void server(std::shared_ptr<DSM> dsm,
             size_t signal_batch,
             size_t batch_post_send_size)
 {
-    const auto &cache = dsm->get_server_internal_buffer();
+    const auto &cache = dsm->get_server_buffer();
     char *buffer = (char *) cache.buffer;
     size_t max_size = cache.size;
 

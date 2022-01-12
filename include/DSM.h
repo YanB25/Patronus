@@ -313,28 +313,93 @@ public:
         return keeper->sum(std::string("sum-") + std::to_string(count++),
                            value);
     }
-    size_t server_internal_buffer_dsm_reserve_size() const
+    // clang-format off
+    /**
+     * The layout of buffer:
+     * [dsm_reserve_size()] [user_reserve_size()] [buffer_size()]
+     * ^-- dsm_base()                             ^-- get_server_buffer();
+     *                      ^-- get_server_reserved_buffer()
+     * ^-- get_server_internal_dsm_buffer()
+     * 
+     * DSM offset:
+     *                      |<---------------------------->|
+     * call dsm_offset_to_addr(dsm_offset) / addr_to_dsm_offset(addr)
+     * 
+     * Buffer offset:
+     *                                             |<----->|
+     * call buffer_offset_to_addr(buf_offset) / addr_to_buffer_offset(addr)
+     * 
+     * The DSM reserved region:
+     * |<---------------->|
+     * It is reserved by DSM. Will never expose to the outer world
+     * 
+     */
+    // clang-format on
+    size_t dsm_reserve_size() const
     {
         // an area for ExchangeMeta data
         size_t reserve_for_bootstrap = getClusterSize() * sizeof(ExchangeMeta);
         reserve_for_bootstrap = ROUND_UP(reserve_for_bootstrap, 4096);
         return reserve_for_bootstrap;
     }
-    size_t server_internal_buffer_total_reserve_size() const
+    size_t user_reserve_size() const
     {
-        size_t dsm_reserve = server_internal_buffer_dsm_reserve_size();
-        size_t user_reserve = conf.dsmReserveSize;
-        size_t reserve = dsm_reserve + user_reserve;
+        return conf.dsmReserveSize;
+    }
+    size_t total_reserve_size() const
+    {
+        auto dsm_reserve = dsm_reserve_size();
+        auto user_reserve = user_reserve_size();
+        auto reserve = dsm_reserve + user_reserve;
 
-        DCHECK_LT(reserve, conf.dsmSize);
+        DCHECK_LT(reserve, total_dsm_buffer_size());
         return reserve;
     }
-
-    uint64_t dsm_pool_addr(const GlobalAddress &gaddr)
+    size_t buffer_size() const
     {
-        auto base = remoteInfo[gaddr.nodeID].dsmBase +
-                    server_internal_buffer_total_reserve_size();
+        return conf.dsmSize;
+    }
+    size_t total_dsm_buffer_size() const
+    {
+        DCHECK_EQ(baseAddrSize,
+                  dsm_reserve_size() + user_reserve_size() + buffer_size());
+        return baseAddrSize;
+    }
+
+    uint64_t gaddr_to_addr(const GlobalAddress &gaddr)
+    {
+        auto base =
+            (uint64_t) remoteInfo[gaddr.nodeID].dsmBase + dsm_reserve_size();
         return base + gaddr.offset;
+    }
+    void *dsm_offset_to_addr(uint64_t offset)
+    {
+        return (char *) dsm_base() + dsm_reserve_size() + offset;
+    }
+    uint64_t addr_to_dsm_offset(void *addr)
+    {
+        auto exposed_base = baseAddr + dsm_reserve_size();
+        CHECK_GE((void *) addr, (void *) exposed_base) << "** addr underflow";
+        return (uint64_t) addr - exposed_base;
+    }
+    void *buffer_offset_to_addr(uint64_t offset)
+    {
+        return (char *) dsm_base() + offset + total_reserve_size();
+    }
+    uint64_t addr_to_buffer_offset(void *addr)
+    {
+        void *base = (char *) dsm_base() + total_reserve_size();
+        CHECK_GE(addr, base);
+        return (char *) addr - (char *) base;
+    }
+    uint64_t buffer_offset_to_dsm_offset(uint64_t buf_offset)
+    {
+        return buf_offset + user_reserve_size();
+    }
+    uint64_t dsm_offset_to_buffer_offset(uint64_t dsm_offset)
+    {
+        CHECK_GE(dsm_offset, user_reserve_size());
+        return dsm_offset - user_reserve_size();
     }
 
     ExchangeMeta &getExchangeMetaBootstrap(size_t node_id) const;
@@ -415,8 +480,12 @@ public:
     }
 
     // below used as lease
-
 private:
+    inline void *dsm_base() const
+    {
+        DCHECK_EQ(baseAddr, remoteInfo[get_node_id()].dsmBase);
+        return (void *) baseAddr;
+    }
     void initRDMAConnection();
     void initExchangeMetadataBootstrap();
     void fill_keys_dest(RdmaOpRegion &ror,
@@ -475,9 +544,9 @@ public:
     {
         return rdma_buffer;
     }
-    inline Buffer get_server_internal_buffer();
-    inline Buffer get_server_user_reserved_buffer();
-    inline Buffer get_server_dsm_reserved_buffer();
+    inline Buffer get_server_internal_dsm_buffer();
+    inline Buffer get_server_reserved_buffer();
+    inline Buffer get_server_buffer();
     RdmaBuffer &get_rbuf(coro_t coro_id)
     {
         DCHECK(coro_id < define::kMaxCoroNr)
@@ -574,9 +643,9 @@ public:
 
     void explain()
     {
-        auto dsm_buffer = get_server_dsm_reserved_buffer();
-        auto resv_buffer = get_server_user_reserved_buffer();
-        auto int_buffer = get_server_internal_buffer();
+        auto dsm_buffer = get_server_internal_dsm_buffer();
+        auto resv_buffer = get_server_reserved_buffer();
+        auto int_buffer = get_server_buffer();
         LOG(INFO) << "[DSM] node_id: " << get_node_id()
                   << ", dsm_internal_base: " << (void *) baseAddr
                   << ", dsm_internal_len: " << baseAddrSize
@@ -660,27 +729,23 @@ bool DSM::write_sync(const char *buffer,
     return rkey_write_sync(
         rkey, buffer, gaddr, size, dirID, ctx, wc_id, handler);
 }
-Buffer DSM::get_server_dsm_reserved_buffer()
+Buffer DSM::get_server_internal_dsm_buffer()
 {
-    size_t node_id = get_node_id();
-    size_t buffer_len = server_internal_buffer_dsm_reserve_size();
-    Buffer ret((char *) remoteInfo[node_id].dsmBase, buffer_len);
+    size_t buffer_len = dsm_reserve_size();
+    Buffer ret((char *) dsm_base(), buffer_len);
     return ret;
 }
-
-Buffer DSM::get_server_internal_buffer()
+Buffer DSM::get_server_buffer()
 {
-    size_t node_id = get_node_id();
-    size_t rv = server_internal_buffer_total_reserve_size();
-    Buffer ret((char *) remoteInfo[node_id].dsmBase + rv, conf.dsmSize);
+    size_t rv = total_reserve_size();
+    Buffer ret((char *) dsm_base() + rv, buffer_size());
     return ret;
 }
-Buffer DSM::get_server_user_reserved_buffer()
+Buffer DSM::get_server_reserved_buffer()
 {
-    size_t node_id = get_node_id();
-    size_t dsm_rv = server_internal_buffer_dsm_reserve_size();
-    size_t buffer_len = conf.dsmReserveSize;
-    Buffer ret((char *) remoteInfo[node_id].dsmBase + dsm_rv, buffer_len);
+    size_t dsm_rv = dsm_reserve_size();
+    size_t buffer_len = user_reserve_size();
+    Buffer ret((char *) dsm_base() + dsm_rv, buffer_len);
     return ret;
 }
 

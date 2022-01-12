@@ -140,7 +140,7 @@ void server(std::shared_ptr<DSM> dsm)
 {
     Timer timer;
 
-    const auto &buf_conf = dsm->get_server_internal_buffer();
+    const auto &buf_conf = dsm->get_server_buffer();
     char *buffer = buf_conf.buffer;
     LOG(INFO) << "get buffer addr: " << (void *) buffer;
     // size_t max_size = buf_conf.size;

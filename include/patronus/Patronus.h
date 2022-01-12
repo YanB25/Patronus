@@ -45,14 +45,14 @@ struct RWContext
     size_t dir_id;
 };
 
-constexpr static size_t kLeaseContextMwNr = 8;
 struct LeaseContext
 {
-    ibv_mw *mws[kLeaseContextMwNr];
-    size_t mw_nr{0};
+    ibv_mw *buffer_mw;
+    ibv_mw *header_mw;
     size_t dir_id{size_t(-1)};
     uint64_t addr_to_bind{0};
-    size_t size{0};
+    size_t buffer_size{0};
+    size_t protection_region_id;
 };
 class Patronus
 {
@@ -101,6 +101,7 @@ public:
     inline Lease upgrade(Lease &lease, CoroContext *ctx = nullptr);
     inline Lease extend(Lease &lease, term_t term, CoroContext *ctx = nullptr);
     inline void relinquish(Lease &lease, CoroContext *ctx = nullptr);
+    inline void relinquish_write(Lease &lease, CoroContext *ctx = nullptr);
     inline bool read(Lease &lease,
                      char *obuf,
                      size_t size,
@@ -168,7 +169,7 @@ public:
     }
     Buffer get_server_internal_buffer()
     {
-        return dsm_->get_server_internal_buffer();
+        return dsm_->get_server_buffer();
     }
 
     void handle_request_messages(const char *msg_buf,
@@ -190,6 +191,11 @@ public:
         rdma_client_buffer_->put(buf);
     }
 
+    DSM::pointer get_dsm()
+    {
+        return dsm_;
+    }
+
 private:
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
@@ -197,6 +203,9 @@ private:
     constexpr static size_t kClientRdmaBufferSize = 4 * define::KB;
     constexpr static size_t kLeaseContextNr =
         kMaxCoroNr * kGuessActiveLeasePerCoro;
+    static_assert(
+        kLeaseContextNr <
+        std::numeric_limits<decltype(AcquireResponse::lease_id)>::max());
     constexpr static size_t kServerCoroNr = kMaxCoroNr;
     constexpr static size_t kProtectionRegionPerThreadNr =
         NR_DIRECTORY * kMaxCoroNr * kGuessActiveLeasePerCoro;
@@ -262,7 +271,6 @@ private:
     LeaseContext *get_lease_context()
     {
         auto *ret = DCHECK_NOTNULL(lease_context_.get());
-        ret->mw_nr = 0;
         return ret;
     }
     LeaseContext *get_lease_context(uint16_t id)
@@ -273,6 +281,21 @@ private:
     {
         lease_context_.put(ctx);
     }
+    ProtectionRegion *get_protection_region()
+    {
+        auto *ret = DCHECK_NOTNULL(protection_region_pool_->get());
+        return (ProtectionRegion *) ret;
+    }
+    void put_protection_region(ProtectionRegion *p)
+    {
+        protection_region_pool_->put(p);
+    }
+    ProtectionRegion *get_protection_region(size_t id)
+    {
+        auto *ret = protection_region_pool_->id_to_buf(id);
+        return (ProtectionRegion *) ret;
+    }
+
     static size_t required_dsm_reserve_size()
     {
         size_t ret = sizeof(ProtectionRegion) * kTotalProtectionRegionNr;
@@ -315,13 +338,27 @@ private:
                          term_t term,
                          RequestType type,
                          CoroContext *ctx = nullptr);
-    bool read_write_impl(Lease &lease,
-                         char *obuf,
+    bool buffer_rw_impl(Lease &lease,
+                        char *iobuf,
+                        size_t size,
+                        size_t offset,
+                        bool is_read,
+                        CoroContext *ctx = nullptr);
+    bool protection_region_rw_impl(Lease &lease,
+                                   char *io_buf,
+                                   size_t size,
+                                   size_t offset,
+                                   bool is_read,
+                                   CoroContext *ctx = nullptr);
+    bool read_write_impl(char *iobuf,
                          size_t size,
-                         size_t offset,
+                         size_t node_id,
                          size_t dir_id,
+                         uint32_t rkey,
+                         size_t remote_addr,
                          bool is_read,
-                         CoroContext *ctx);
+                         uint16_t wrid_prefix,
+                         CoroContext *ctx = nullptr);
     Lease lease_modify_impl(Lease &lease,
                             RequestType type,
                             term_t term,
@@ -355,7 +392,7 @@ private:
         lease_context_;
     static thread_local ServerCoroContext server_coro_ctx_;
     static thread_local std::unique_ptr<
-        ThreadUnsafePool<ProtectionRegion, kProtectionRegionPerThreadNr>>
+        ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
         protection_region_pool_;
 
     // for admin management
@@ -402,8 +439,7 @@ void Patronus::relinquish(Lease &lease, CoroContext *ctx)
 bool Patronus::read(
     Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx)
 {
-    return read_write_impl(
-        lease, obuf, size, offset, lease.dir_id(), true /* is_read */, ctx);
+    return buffer_rw_impl(lease, obuf, size, offset, true /* is_read */, ctx);
 }
 bool Patronus::write(Lease &lease,
                      const char *ibuf,
@@ -411,13 +447,8 @@ bool Patronus::write(Lease &lease,
                      size_t offset,
                      CoroContext *ctx)
 {
-    return read_write_impl(lease,
-                           (char *) ibuf,
-                           size,
-                           offset,
-                           lease.dir_id(),
-                           false /* is_read */,
-                           ctx);
+    return buffer_rw_impl(
+        lease, (char *) ibuf, size, offset, false /* is_read */, ctx);
 }
 
 bool Patronus::pingpong(uint16_t node_id,
@@ -453,6 +484,28 @@ void Patronus::fill_bind_mw_wr(ibv_send_wr &wr,
     wr.bind_mw.bind_info.addr = addr;
     wr.bind_mw.bind_info.length = length;
     wr.bind_mw.bind_info.mw_access_flags = access_flag;
+}
+
+void Patronus::relinquish_write(Lease &lease, CoroContext *ctx)
+{
+    auto offset = offsetof(ProtectionRegion, meta) +
+                  offsetof(ProtectionRegionMeta, relinquished);
+    auto rdma_buffer = get_rdma_buffer();
+    DCHECK_LT(sizeof(small_bit_t), rdma_buffer.size);
+    *(small_bit_t *) rdma_buffer.buffer = 1;
+
+    DVLOG(4) << "[patronus] relinquish write. write to "
+                "ProtectionRegionMeta::relinquished at offset "
+             << offset;
+
+    protection_region_rw_impl(lease,
+                              rdma_buffer.buffer,
+                              sizeof(ProtectionRegionMeta::relinquished),
+                              offset,
+                              false /* is_read */,
+                              ctx);
+
+    put_rdma_buffer(rdma_buffer.buffer);
 }
 
 }  // namespace patronus

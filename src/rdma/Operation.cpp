@@ -386,6 +386,10 @@ bool rdmaWrite(ibv_qp *qp,
     wr.wr.rdma.rkey = remoteRKey;
     wr.wr_id = wrID;
 
+    DVLOG(3) << "[WRITE] remote_addr: " << (void *) dest << ", size " << size
+             << ", rkey: " << remoteRKey << ", QPN: " << qp->qp_num
+             << ", signal: " << isSignaled << ", wr_id: " << WRID(wrID);
+
     if (ibv_post_send(qp, &wr, &wrBad) != 0)
     {
         LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";

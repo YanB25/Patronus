@@ -18,8 +18,7 @@ thread_local std::queue<ibv_mw *> Patronus::mw_pool_[NR_DIRECTORY];
 thread_local ThreadUnsafePool<LeaseContext, Patronus::kLeaseContextNr>
     Patronus::lease_context_;
 thread_local ServerCoroContext Patronus::server_coro_ctx_;
-thread_local std::unique_ptr<
-    ThreadUnsafePool<ProtectionRegion, Patronus::kProtectionRegionPerThreadNr>>
+thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
     Patronus::protection_region_pool_;
 
 Patronus::Patronus(const PatronusConfig &conf)
@@ -31,8 +30,8 @@ Patronus::Patronus(const PatronusConfig &conf)
     dsm_ = DSM::getInstance(dsm_config);
 
     // validate dsm
-    auto internal_buf = dsm_->get_server_internal_buffer();
-    auto reserve_buf = dsm_->get_server_user_reserved_buffer();
+    auto internal_buf = dsm_->get_server_buffer();
+    auto reserve_buf = dsm_->get_server_reserved_buffer();
     CHECK_GE(internal_buf.size, conf.buffer_size)
         << "** dsm should allocate DSM buffer at least what Patronus requires";
     CHECK_GE(reserve_buf.size, required_dsm_reserve_size())
@@ -156,32 +155,23 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     return ret_lease;
 }
 
-bool Patronus::read_write_impl(Lease &lease,
-                               char *iobuf,
+bool Patronus::read_write_impl(char *iobuf,
                                size_t size,
-                               size_t offset,
+                               size_t node_id,
                                size_t dir_id,
+                               uint32_t rkey,
+                               uint64_t remote_addr,
                                bool is_read,
-                               CoroContext *ctx = nullptr)
+                               uint16_t wrid_prefix,
+                               CoroContext *ctx)
 {
-    CHECK(lease.success());
-
-    if (is_read)
-    {
-        CHECK(lease.is_read_lease());
-    }
-    else
-    {
-        CHECK(lease.is_write_lease());
-    }
     bool ret = false;
 
     GlobalAddress gaddr;
-    gaddr.nodeID = lease.node_id_;
+    gaddr.nodeID = node_id;
     DCHECK_NE(gaddr.nodeID, get_node_id())
-        << "make no sense to read local buffer with RDMA.";
-    gaddr.offset = offset + lease.base_addr_;
-    CHECK_LE(size, lease.buffer_size_);
+        << "make no sense to R/W local buffer with RDMA.";
+    gaddr.offset = remote_addr;
     auto coro_id = ctx ? ctx->coro_id() : kNotACoro;
     if constexpr (debug())
     {
@@ -199,25 +189,25 @@ bool Patronus::read_write_impl(Lease &lease,
     // already switch ctx if not null
     if (is_read)
     {
-        dsm_->rkey_read(lease.cur_rkey_,
+        dsm_->rkey_read(rkey,
                         iobuf,
                         gaddr,
                         size,
                         dir_id,
                         true,
                         ctx,
-                        WRID(WRID_PREFIX_PATRONUS_RW, rw_ctx_id).val);
+                        WRID(wrid_prefix, rw_ctx_id).val);
     }
     else
     {
-        dsm_->rkey_write(lease.cur_rkey_,
+        dsm_->rkey_write(rkey,
                          iobuf,
                          gaddr,
                          size,
                          dir_id,
                          true,
                          ctx,
-                         WRID(WRID_PREFIX_PATRONUS_RW, rw_ctx_id).val);
+                         WRID(wrid_prefix, rw_ctx_id).val);
     }
 
     if (unlikely(ctx == nullptr))
@@ -237,6 +227,61 @@ bool Patronus::read_write_impl(Lease &lease,
 
     put_rw_context(rw_context);
     return ret;
+}
+
+bool Patronus::buffer_rw_impl(Lease &lease,
+                              char *iobuf,
+                              size_t size,
+                              size_t offset,
+                              bool is_read,
+                              CoroContext *ctx)
+{
+    CHECK(lease.success());
+    if (is_read)
+    {
+        CHECK(lease.is_readable());
+    }
+    else
+    {
+        CHECK(lease.is_writable());
+    }
+    uint32_t rkey = lease.cur_rkey_;
+    uint64_t remote_addr = lease.base_addr_ + offset;
+
+    return read_write_impl(iobuf,
+                           size,
+                           lease.node_id_,
+                           lease.dir_id_,
+                           rkey,
+                           remote_addr,
+                           is_read,
+                           WRID_PREFIX_PATRONUS_RW,
+                           ctx);
+}
+
+bool Patronus::protection_region_rw_impl(Lease &lease,
+                                         char *io_buf,
+                                         size_t size,
+                                         size_t offset,
+                                         bool is_read,
+                                         CoroContext *ctx)
+{
+    CHECK(lease.success());
+
+    uint32_t rkey = lease.header_rkey_;
+    uint64_t remote_addr = lease.header_addr_ + offset;
+    VLOG(4) << "[patronus] protection_region_rw_impl. remote_addr: "
+            << remote_addr << ", rkey: " << rkey
+            << " (header_addr: " << lease.header_addr_ << ")";
+    return read_write_impl(io_buf,
+                           size,
+                           lease.node_id_,
+                           lease.dir_id_,
+                           rkey,
+                           remote_addr,
+                           is_read,
+                           WRID_PREFIX_PATRONUS_PR_RW,
+                           ctx);
 }
 
 Lease Patronus::lease_modify_impl(Lease &lease,
@@ -479,51 +524,52 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
         << "** unexpected request type received. got: " << (int) resp->type;
 
     auto &ret_lease = *rpc_context->ret_lease;
-    ret_lease.base_addr_ = resp->base;
-    ret_lease.node_id_ = resp->cid.node_id;
-    // TODO(patronus), CRITICAL(patronus):
-    // not consider header yet. please fix me.
-    ret_lease.buffer_size_ = request->size;
-    ret_lease.rkey_0_ = resp->rkey_0;
-    ret_lease.cur_rkey_ = ret_lease.rkey_0_;
-    ret_lease.ex_rkey_ = 0;  // TODO(patronus): same reason above
-    ret_lease.cur_ddl_term_ = resp->term;
-    ret_lease.id_ = resp->lease_id;
-    ret_lease.dir_id_ = rpc_context->dir_id;
-    if (resp->success)
+    if (likely(resp->success))
     {
+        ret_lease.base_addr_ = resp->buffer_base;
+        ret_lease.header_addr_ = resp->header_base;
+        ret_lease.node_id_ = resp->cid.node_id;
+        ret_lease.buffer_size_ = request->size;
+        ret_lease.header_size_ = sizeof(ProtectionRegion);
+        ret_lease.rkey_0_ = resp->rkey_0;
+        ret_lease.header_rkey_ = resp->rkey_header;
+        ret_lease.cur_rkey_ = ret_lease.rkey_0_;
+        ret_lease.cur_ddl_term_ = resp->term;
+        ret_lease.id_ = resp->lease_id;
+        ret_lease.dir_id_ = rpc_context->dir_id;
+        if (resp->type == RequestType::kAcquireRLease)
+        {
+            ret_lease.lease_type_ = LeaseType::kReadLease;
+        }
+        else if (resp->type == RequestType::kAcquireWLease)
+        {
+            ret_lease.lease_type_ = LeaseType::kWriteLease;
+        }
+        else
+        {
+            ret_lease.lease_type_ = LeaseType::kUnknown;
+        }
         ret_lease.set_finish();
     }
     else
     {
         ret_lease.set_error();
     }
-    if (resp->type == RequestType::kAcquireRLease)
-    {
-        ret_lease.lease_type_ = LeaseType::kReadLease;
-    }
-    else if (resp->type == RequestType::kAcquireWLease)
-    {
-        ret_lease.lease_type_ = LeaseType::kWriteLease;
-    }
-    else
-    {
-        ret_lease.lease_type_ = LeaseType::kUnknown;
-    }
 
     rpc_context->ready.store(true, std::memory_order_release);
 }
 
-constexpr static size_t kTestBindMwNr = 1;
 void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 {
     auto dirID = req->dir_id;
-    ibv_mw *mws[kTestBindMwNr];
-    for (size_t i = 0; i < kTestBindMwNr; ++i)
-    {
-        mws[i] = get_mw(dirID);
-    }
-    auto internal = dsm_->get_server_internal_buffer();
+    auto *buffer_mw = get_mw(dirID);
+    auto *header_mw = get_mw(dirID);
+
+    // auto internal = dsm_->get_server_buffer();
+    auto *protection_region = get_protection_region();
+    auto protection_region_id =
+        protection_region_pool_->buf_to_id(protection_region);
+
     if constexpr (debug())
     {
         uint64_t digest = req->digest.get();
@@ -531,11 +577,14 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         DCHECK_EQ(digest, djb2_digest(req, sizeof(AcquireRequest)))
             << "** digest mismatch for req " << *req;
     }
-    CHECK_LT(req->size, internal.size);
-    DVLOG(4) << "[patronus] Trying to bind with dirID " << dirID
-             << ", internal_buf: " << (void *) internal.buffer << ", buf size "
-             << internal.size << ", bind size " << req->size;
-    uint64_t actual_position = locator_(req->key);
+    size_t object_buffer_offset = locator_(req->key);
+    uint64_t object_dsm_offset =
+        dsm_->buffer_offset_to_dsm_offset(object_buffer_offset);
+    void *object_addr = dsm_->buffer_offset_to_addr(object_buffer_offset);
+    DCHECK_EQ(object_addr, dsm_->dsm_offset_to_addr(object_dsm_offset));
+
+    void *header_addr = protection_region;
+    uint64_t header_dsm_offset = dsm_->addr_to_dsm_offset(header_addr);
 
     bool success = false;
     bool bind_success = true;
@@ -565,20 +614,37 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         int access_flag = req->type == RequestType::kAcquireRLease
                               ? IBV_ACCESS_CUSTOM_REMOTE_RO
                               : IBV_ACCESS_CUSTOM_REMOTE_RW;
-        for (size_t i = 0; i < kTestBindMwNr; ++i)
+        // for buffer
+        fill_bind_mw_wr(wrs[0],
+                        &wrs[1],
+                        buffer_mw,
+                        mr,
+                        (uint64_t) object_addr,
+                        req->size,
+                        access_flag);
+        wrs[0].send_flags = 0;
+        DVLOG(4) << "[patronus] Bind mw for buffer. addr "
+                 << (void *) object_addr << "(dsm_offset: " << object_dsm_offset
+                 << "), size: " << req->size << " with access flag "
+                 << (int) access_flag;
+        // for header
+        fill_bind_mw_wr(wrs[1],
+                        nullptr,
+                        header_mw,
+                        mr,
+                        (uint64_t) header_addr,
+                        sizeof(ProtectionRegion),
+                        IBV_ACCESS_CUSTOM_REMOTE_RW);
+        DVLOG(4) << "[patronus] Bind mw for header. addr: "
+                 << (void *) header_addr
+                 << " (dsm_offset: " << header_dsm_offset << ")"
+                 << ", size: " << sizeof(ProtectionRegion)
+                 << " with R/W access";
+        wrs[1].send_flags = IBV_SEND_SIGNALED;
+        wrs[1].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
+        if constexpr (config::kEnableSkipMagicMw)
         {
-            bool last = i + 1 == kTestBindMwNr;
-            fill_bind_mw_wr(wrs[i],
-                            last ? nullptr : &wrs[i + 1],
-                            mws[i],
-                            mr,
-                            (uint64_t) internal.buffer + actual_position,
-                            req->size,
-                            access_flag);
-            wrs[i].send_flags = last ? IBV_SEND_SIGNALED : 0;
-            wrs[i].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
-
-            if constexpr (config::kEnableSkipMagicMw)
+            for (size_t time = 0; time < 2; time++)
             {
                 size_t id = allocated++;
                 if (unlikely((id & mask) == magic))
@@ -587,6 +653,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                 }
             }
         }
+
         ibv_send_wr *bad_wr;
         int ret = ibv_post_send(qp, wrs, &bad_wr);
         if (unlikely(ret != 0))
@@ -626,31 +693,29 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         success = bind_success;
     }
 
-    auto *lease_ctx = get_lease_context();
-    DCHECK_EQ(lease_ctx->mw_nr, 0);
-    for (size_t i = 0; i < kTestBindMwNr; ++i)
-    {
-        lease_ctx->mws[lease_ctx->mw_nr++] = mws[i];
-        DCHECK_LT(lease_ctx->mw_nr, kLeaseContextMwNr);
-    }
-    lease_ctx->dir_id = dirID;
-    lease_ctx->addr_to_bind = (uint64_t)(internal.buffer + actual_position);
-    lease_ctx->size = req->size;
-    auto lease_id = lease_context_.obj_to_id(lease_ctx);
-
     auto *resp_buf = get_rdma_message_buffer();
     auto *resp_msg = (AcquireResponse *) resp_buf;
     resp_msg->type = req->type;
-    // TODO(patronus): using the first mw.
-    resp_msg->rkey_0 = mws[0]->rkey;
-    resp_msg->base = actual_position;
-    resp_msg->term = req->require_term;
     resp_msg->cid = req->cid;
     resp_msg->cid.node_id = get_node_id();
     resp_msg->cid.thread_id = get_thread_id();
-
     if (likely(success && !force_fail))
     {
+        auto *lease_ctx = get_lease_context();
+        lease_ctx->buffer_mw = buffer_mw;
+        lease_ctx->header_mw = header_mw;
+        lease_ctx->dir_id = dirID;
+        lease_ctx->addr_to_bind = (uint64_t) object_addr;
+        lease_ctx->buffer_size = req->size;
+        lease_ctx->protection_region_id = protection_region_id;
+        auto lease_id = lease_context_.obj_to_id(lease_ctx);
+
+        resp_msg->rkey_0 = buffer_mw->rkey;
+        resp_msg->rkey_header = header_mw->rkey;
+        resp_msg->buffer_base = object_dsm_offset;
+        resp_msg->header_base = header_dsm_offset;
+        resp_msg->term = req->require_term;
+
         resp_msg->lease_id = lease_id;
         resp_msg->success = true;
     }
@@ -659,11 +724,9 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         // gc here for all allocated resources
         resp_msg->lease_id = 0;
         resp_msg->success = false;
-        for (size_t i = 0; i < lease_ctx->mw_nr; ++i)
-        {
-            put_mw(dirID, lease_ctx->mws[i]);
-        }
-        put_lease_context(lease_ctx);
+        put_mw(dirID, buffer_mw);
+        put_mw(dirID, header_mw);
+        put_protection_region(protection_region);
     }
 
     if constexpr (debug())
@@ -682,11 +745,9 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     // no lease, so we gc here. see @handle_request_lease_relinquish
     if (unlikely(req->type == RequestType::kAcquireNoLease))
     {
-        for (size_t i = 0; i < lease_ctx->mw_nr; ++i)
-        {
-            put_mw(lease_ctx->dir_id, lease_ctx->mws[i]);
-        }
-        put_lease_context(lease_ctx);
+        put_mw(dirID, buffer_mw);
+        put_mw(dirID, header_mw);
+        put_protection_region(protection_region);
     }
 }
 
@@ -728,13 +789,18 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
 
     DVLOG(4) << "[patronus] reqlinquish lease. lease_id " << (id_t) lease_id
              << ", coro: " << (ctx ? *ctx : nullctx);
-    for (size_t i = 0; i < lease_ctx->mw_nr; ++i)
-    {
-        put_mw(lease_ctx->dir_id, lease_ctx->mws[i]);
-    }
 
+    put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
+    put_mw(lease_ctx->dir_id, lease_ctx->header_mw);
+
+    auto *pr = get_protection_region(lease_ctx->protection_region_id);
+    CHECK_EQ(pr->meta.relinquished, 1)
+        << "debug: Lease was not relinquishes. pr_id: "
+        << lease_ctx->protection_region_id
+        << ", offset: " << ((char *) &pr->meta.relinquished - (char *) pr);
+
+    put_protection_region(pr);
     put_lease_context(lease_ctx);
-
     // no rely is needed
 }
 
@@ -744,9 +810,10 @@ void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
     DCHECK_EQ(req->type, RequestType::kUpgrade);
     auto lease_id = req->lease_id;
     auto *lease_ctx = get_lease_context(lease_id);
+    CHECK(false) << "TODO:";
     auto dir_id = lease_ctx->dir_id;
-    // TODO(patronus): currently only actually use the first mw.
-    auto *mw = lease_ctx->mws[0];
+    // TODO(patronus): rethink about it.
+    auto *mw = lease_ctx->buffer_mw;
 
     if constexpr (debug())
     {
@@ -771,7 +838,7 @@ void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
         req->cid.node_id,
         req->cid.thread_id,
         (const char *) lease_ctx->addr_to_bind,
-        lease_ctx->size,
+        lease_ctx->buffer_size,
         dir_id,
         WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
         ctx);
@@ -823,9 +890,10 @@ void Patronus::handle_request_lease_extend(LeaseModifyRequest *req,
     DCHECK_EQ(req->type, RequestType::kExtend);
     auto lease_id = req->lease_id;
     auto *lease_ctx = get_lease_context(lease_id);
+    CHECK(false) << "TODO:";
     auto dir_id = lease_ctx->dir_id;
-    // TODO(patronus): use the first mw
-    auto *mw = lease_ctx->mws[0];
+    // TODO(patronus): rethink about it
+    auto *mw = lease_ctx->buffer_mw;
 
     if constexpr (debug())
     {
@@ -850,7 +918,7 @@ void Patronus::handle_request_lease_extend(LeaseModifyRequest *req,
         req->cid.node_id,
         req->cid.thread_id,
         (const char *) lease_ctx->addr_to_bind,
-        lease_ctx->size,
+        lease_ctx->buffer_size,
         dir_id,
         WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val,
         ctx);
@@ -912,7 +980,9 @@ size_t Patronus::handle_rdma_finishes(
         // log_wc_handler(&wc);
         auto wr_id = WRID(wc.wr_id);
         auto id = wr_id.id;
-        DCHECK_EQ(wr_id.prefix, WRID_PREFIX_PATRONUS_RW);
+        CHECK(wr_id.prefix == WRID_PREFIX_PATRONUS_RW ||
+              wr_id.prefix == WRID_PREFIX_PATRONUS_PR_RW)
+            << "** unexpected prefix " << (int) wr_id.prefix;
         auto *rw_context = rw_context_.id_to_obj(id);
         auto node_id = rw_context->target_node;
         auto dir_id = rw_context->dir_id;
@@ -1084,6 +1154,10 @@ void Patronus::registerServerThread()
             }
         }
     }
+    auto reserve_buffer = dsm_->get_server_reserved_buffer();
+    protection_region_pool_ =
+        std::make_unique<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>(
+            reserve_buffer.buffer, reserve_buffer.size);
 }
 
 void Patronus::registerClientThread()
@@ -1387,8 +1461,8 @@ void Patronus::server_coro_master(CoroYield &yield)
             }
             else
             {
-                VLOG(4) << "[patronus] server got dir CQE for coro " << coro_id
-                        << ". wr_id: " << wrid;
+                VLOG(4) << "[patronus] server got dir CQE for coro "
+                        << (int) coro_id << ". wr_id: " << wrid;
                 *(rw_ctx->success) = true;
             }
             rw_ctx->ready.store(true, std::memory_order_release);

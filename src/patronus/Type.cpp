@@ -91,8 +91,9 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
 {
     os << "{AcquireResponse type: " << resp.type << ", cid: " << resp.cid
        << ", lease_id: " << resp.lease_id << ", rkey_0: " << resp.rkey_0
-       << ", base " << resp.base << ", term: " << resp.term
-       << ", success: " << resp.success << " }";
+       << ", rkey_header: " << resp.rkey_header << ", buffer_base "
+       << resp.buffer_base << "< header_base: " << resp.header_base
+       << ", term: " << resp.term << ", success: " << resp.success << " }";
     return os;
 }
 

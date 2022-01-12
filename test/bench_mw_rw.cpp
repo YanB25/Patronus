@@ -139,7 +139,7 @@ void bind_rkeys(std::shared_ptr<DSM> dsm,
                 std::vector<ibv_mw *> &mws,
                 size_t size)
 {
-    const auto &buf_conf = dsm->get_server_internal_buffer();
+    const auto &buf_conf = dsm->get_server_buffer();
     char *buffer = buf_conf.buffer;
     size_t buffer_size = buf_conf.size;
 
