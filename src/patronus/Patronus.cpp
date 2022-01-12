@@ -794,10 +794,15 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
     put_mw(lease_ctx->dir_id, lease_ctx->header_mw);
 
     auto *pr = get_protection_region(lease_ctx->protection_region_id);
-    CHECK_EQ(pr->meta.relinquished, 1)
-        << "debug: Lease was not relinquishes. pr_id: "
-        << lease_ctx->protection_region_id
-        << ", offset: " << ((char *) &pr->meta.relinquished - (char *) pr);
+    if constexpr (debug())
+    {
+        LOG_FIRST_N(WARNING, 1)
+            << "[patronus] not enable pr->meta.relinquished checks.";
+    }
+    // CHECK_EQ(pr->meta.relinquished, 1)
+    //     << "debug: Lease was not relinquishes. pr_id: "
+    //     << lease_ctx->protection_region_id
+    //     << ", offset: " << ((char *) &pr->meta.relinquished - (char *) pr);
 
     put_protection_region(pr);
     put_lease_context(lease_ctx);
