@@ -81,8 +81,8 @@ void bench_coro_large_stack()
 {
     for (size_t i = 0; i < kCoroNr; ++i)
     {
-        comm.workers[i] = CoroCall([i](CoroYield &yield)
-                                   { coro_large_stack_worker(i, yield); });
+        comm.workers[i] = CoroCall(
+            [i](CoroYield &yield) { coro_large_stack_worker(i, yield); });
     }
     comm.master =
         CoroCall([](CoroYield &yield) { coro_large_stack_master(yield); });

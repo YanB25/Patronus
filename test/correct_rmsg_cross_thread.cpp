@@ -5,8 +5,8 @@
 
 #include "DSM.h"
 #include "Timer.h"
-#include "util/monitor.h"
 #include "boost/thread/barrier.hpp"
+#include "util/monitor.h"
 
 // Two nodes
 // one node issues cas operations
@@ -48,7 +48,7 @@ void check_valid(const BenchMessage &msg)
 }
 
 template <class T, class... Args>
-inline T &TLS(Args &&...args)
+inline T &TLS(Args &&... args)
 {
     thread_local T _tls_item(std::forward<Args>(args)...);
     return _tls_item;
@@ -82,7 +82,6 @@ void server_wait(std::shared_ptr<DSM> dsm)
     dsm->reliable_recv(0, nullptr);
     LOG(INFO) << "[bench] server finished wait().";
 }
-
 
 void client_varsize_correct(std::shared_ptr<DSM> dsm, size_t mid)
 {
@@ -216,28 +215,26 @@ void server_multithread(std::shared_ptr<DSM> dsm,
     boost::barrier bar(thread_nr);
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [dsm, &finished_nr, total_nr, &bar]()
+        threads.emplace_back([dsm, &finished_nr, total_nr, &bar]() {
+            dsm->registerThread();
+            auto tid = dsm->get_thread_id();
+
+            LOG(INFO) << "[bench] server entering 1st burn";
+            server_burn(dsm, finished_nr, total_nr, tid, 0);
+            LOG(INFO) << "[bench] server finished 1st burn";
+
+            bar.wait();
+            if (tid == 1)
             {
-                dsm->registerThread();
-                auto tid = dsm->get_thread_id();
+                server_wait(dsm);
+                finished_nr = 0;
+            }
+            bar.wait();
 
-                LOG(INFO) << "[bench] server entering 1st burn";
-                server_burn(dsm, finished_nr, total_nr, tid, 0);
-                LOG(INFO) << "[bench] server finished 1st burn";
-
-                bar.wait();
-                if (tid == 1)
-                {
-                    server_wait(dsm);
-                    finished_nr = 0;
-                }
-                bar.wait();
-
-                LOG(INFO) << "[bench] server entering 2nd burn";
-                server_burn(dsm, finished_nr, total_nr, tid, 1);
-                LOG(INFO) << "[bench] server finished 2nd burn";
-            });
+            LOG(INFO) << "[bench] server entering 2nd burn";
+            server_burn(dsm, finished_nr, total_nr, tid, 1);
+            LOG(INFO) << "[bench] server finished 2nd burn";
+        });
     }
     for (auto &t : threads)
     {
@@ -295,26 +292,24 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
     boost::barrier bar(thread_nr);
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [dsm, &bar]()
+        threads.emplace_back([dsm, &bar]() {
+            dsm->registerThread();
+
+            auto tid = dsm->get_thread_id();
+
+            LOG(INFO) << "[bench] client entering 1st burn";
+            client_burn(dsm, tid, 0);
+            LOG(INFO) << "[bench] client finished 1st burn";
+            bar.wait();
+            if (tid == 1)
             {
-                dsm->registerThread();
-
-                auto tid = dsm->get_thread_id();
-
-                LOG(INFO) << "[bench] client entering 1st burn";
-                client_burn(dsm, tid, 0);
-                LOG(INFO) << "[bench] client finished 1st burn";
-                bar.wait();
-                if (tid == 1)
-                {
-                    client_wait(dsm);
-                }
-                bar.wait();
-                LOG(INFO) << "[bench] client entering 2nd burn";
-                client_burn(dsm, tid, 1);
-                LOG(INFO) << "[bench] client finished 2nd burn";
-            });
+                client_wait(dsm);
+            }
+            bar.wait();
+            LOG(INFO) << "[bench] client entering 2nd burn";
+            client_burn(dsm, tid, 1);
+            LOG(INFO) << "[bench] client finished 2nd burn";
+        });
     }
     for (auto &t : threads)
     {

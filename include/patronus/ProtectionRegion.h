@@ -2,9 +2,10 @@
 #ifndef PROTECTION_REGION_H_
 #define PROTECTION_REGION_H_
 
-#include "patronus/Type.h"
-#include <cstddef>
 #include <cinttypes>
+#include <cstddef>
+
+#include "patronus/Type.h"
 
 namespace patronus
 {
@@ -16,16 +17,17 @@ struct LeaseDescriptor
 {
     uint32_t rkey;
     term_t term;
-}__attribute__((packed));
+} __attribute__((packed));
 
 struct ProtectionRegionMeta
 {
     small_bit_t granted;
     small_bit_t relinquished;
     small_bit_t wait;
-}__attribute__((packed));
+} __attribute__((packed));
 static_assert(sizeof(ProtectionRegionMeta::granted) * 8 >= kSpeculativeLeaseNr);
-static_assert(sizeof(ProtectionRegionMeta::relinquished) * 8 >= kSpeculativeLeaseNr);
+static_assert(sizeof(ProtectionRegionMeta::relinquished) * 8 >=
+              kSpeculativeLeaseNr);
 
 struct ProtectionRegion
 {
@@ -35,9 +37,7 @@ struct ProtectionRegion
     // these cover the buffer part
     LeaseDescriptor spec_leases[kSpeculativeLeaseNr];
     ProtectionRegionMeta meta;
-    // need external data to determine the buffer length.
-    char buf[0];
-}__attribute__((packed));
-}
+} __attribute__((packed));
+}  // namespace patronus
 
 #endif

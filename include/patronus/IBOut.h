@@ -3,9 +3,10 @@
 #define PATRONUS_IBOUT_H_
 
 #include <infiniband/verbs.h>
-#include "Common.h"
 
 #include <iostream>
+
+#include "Common.h"
 
 namespace patronus
 {

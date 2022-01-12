@@ -50,20 +50,20 @@ public:
     }
 
     // Copy the specified status.
-    Status(const Status& s);
-    Status& operator=(const Status& s);
-    Status(Status&& s)
-#if !(defined _MSC_VER) || ((defined _MSC_VER) && (_MSC_VER >= 1900))
-    noexcept
-#endif
-        ;
-    Status& operator=(Status&& s)
+    Status(const Status &s);
+    Status &operator=(const Status &s);
+    Status(Status &&s)
 #if !(defined _MSC_VER) || ((defined _MSC_VER) && (_MSC_VER >= 1900))
         noexcept
 #endif
         ;
-    bool operator==(const Status& rhs) const;
-    bool operator!=(const Status& rhs) const;
+    Status &operator=(Status &&s)
+#if !(defined _MSC_VER) || ((defined _MSC_VER) && (_MSC_VER >= 1900))
+        noexcept
+#endif
+        ;
+    bool operator==(const Status &rhs) const;
+    bool operator!=(const Status &rhs) const;
 
     // In case of intentionally swallowing an error, user must explicitly call
     // this function. That way we are easily able to search the code to find
@@ -142,7 +142,7 @@ public:
         kMaxSeverity
     };
 
-    Status(const Status& s, Severity sev);
+    Status(const Status &s, Severity sev);
     Severity severity() const
     {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
@@ -152,7 +152,7 @@ public:
     }
 
     // Returns a C style string indicating the message of the Status
-    const char* getState() const
+    const char *getState() const
     {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
         checked_ = true;
@@ -176,7 +176,7 @@ public:
     }
 
     // Return error status of an appropriate type.
-    static Status NotFound(const Slice& msg, const Slice& msg2 = Slice())
+    static Status NotFound(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kNotFound, msg, msg2);
     }
@@ -186,7 +186,7 @@ public:
         return Status(kNotFound, msg);
     }
 
-    static Status Corruption(const Slice& msg, const Slice& msg2 = Slice())
+    static Status Corruption(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kCorruption, msg, msg2);
     }
@@ -195,7 +195,7 @@ public:
         return Status(kCorruption, msg);
     }
 
-    static Status NotSupported(const Slice& msg, const Slice& msg2 = Slice())
+    static Status NotSupported(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kNotSupported, msg, msg2);
     }
@@ -204,7 +204,7 @@ public:
         return Status(kNotSupported, msg);
     }
 
-    static Status InvalidArgument(const Slice& msg, const Slice& msg2 = Slice())
+    static Status InvalidArgument(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kInvalidArgument, msg, msg2);
     }
@@ -213,7 +213,7 @@ public:
         return Status(kInvalidArgument, msg);
     }
 
-    static Status IOError(const Slice& msg, const Slice& msg2 = Slice())
+    static Status IOError(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kIOError, msg, msg2);
     }
@@ -222,7 +222,7 @@ public:
         return Status(kIOError, msg);
     }
 
-    static Status MergeInProgress(const Slice& msg, const Slice& msg2 = Slice())
+    static Status MergeInProgress(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kMergeInProgress, msg, msg2);
     }
@@ -231,7 +231,7 @@ public:
         return Status(kMergeInProgress, msg);
     }
 
-    static Status Incomplete(const Slice& msg, const Slice& msg2 = Slice())
+    static Status Incomplete(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kIncomplete, msg, msg2);
     }
@@ -244,8 +244,8 @@ public:
     {
         return Status(kShutdownInProgress, msg);
     }
-    static Status ShutdownInProgress(const Slice& msg,
-                                     const Slice& msg2 = Slice())
+    static Status ShutdownInProgress(const Slice &msg,
+                                     const Slice &msg2 = Slice())
     {
         return Status(kShutdownInProgress, msg, msg2);
     }
@@ -253,7 +253,7 @@ public:
     {
         return Status(kAborted, msg);
     }
-    static Status Aborted(const Slice& msg, const Slice& msg2 = Slice())
+    static Status Aborted(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kAborted, msg, msg2);
     }
@@ -262,7 +262,7 @@ public:
     {
         return Status(kBusy, msg);
     }
-    static Status Busy(const Slice& msg, const Slice& msg2 = Slice())
+    static Status Busy(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kBusy, msg, msg2);
     }
@@ -271,7 +271,7 @@ public:
     {
         return Status(kTimedOut, msg);
     }
-    static Status TimedOut(const Slice& msg, const Slice& msg2 = Slice())
+    static Status TimedOut(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kTimedOut, msg, msg2);
     }
@@ -280,7 +280,7 @@ public:
     {
         return Status(kExpired, msg);
     }
-    static Status Expired(const Slice& msg, const Slice& msg2 = Slice())
+    static Status Expired(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kExpired, msg, msg2);
     }
@@ -289,7 +289,7 @@ public:
     {
         return Status(kTryAgain, msg);
     }
-    static Status TryAgain(const Slice& msg, const Slice& msg2 = Slice())
+    static Status TryAgain(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kTryAgain, msg, msg2);
     }
@@ -298,8 +298,8 @@ public:
     {
         return Status(kCompactionTooLarge, msg);
     }
-    static Status CompactionTooLarge(const Slice& msg,
-                                     const Slice& msg2 = Slice())
+    static Status CompactionTooLarge(const Slice &msg,
+                                     const Slice &msg2 = Slice())
     {
         return Status(kCompactionTooLarge, msg, msg2);
     }
@@ -309,8 +309,8 @@ public:
         return Status(kColumnFamilyDropped, msg);
     }
 
-    static Status ColumnFamilyDropped(const Slice& msg,
-                                      const Slice& msg2 = Slice())
+    static Status ColumnFamilyDropped(const Slice &msg,
+                                      const Slice &msg2 = Slice())
     {
         return Status(kColumnFamilyDropped, msg, msg2);
     }
@@ -319,7 +319,7 @@ public:
     {
         return Status(kIOError, kNoSpace);
     }
-    static Status NoSpace(const Slice& msg, const Slice& msg2 = Slice())
+    static Status NoSpace(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kIOError, kNoSpace, msg, msg2);
     }
@@ -328,7 +328,7 @@ public:
     {
         return Status(kAborted, kMemoryLimit);
     }
-    static Status MemoryLimit(const Slice& msg, const Slice& msg2 = Slice())
+    static Status MemoryLimit(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kAborted, kMemoryLimit, msg, msg2);
     }
@@ -337,7 +337,7 @@ public:
     {
         return Status(kIOError, kSpaceLimit);
     }
-    static Status SpaceLimit(const Slice& msg, const Slice& msg2 = Slice())
+    static Status SpaceLimit(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kIOError, kSpaceLimit, msg, msg2);
     }
@@ -346,7 +346,7 @@ public:
     {
         return Status(kIOError, kPathNotFound);
     }
-    static Status PathNotFound(const Slice& msg, const Slice& msg2 = Slice())
+    static Status PathNotFound(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kIOError, kPathNotFound, msg, msg2);
     }
@@ -355,7 +355,7 @@ public:
     {
         return Status(kInvalidArgument, kTxnNotPrepared);
     }
-    static Status TxnNotPrepared(const Slice& msg, const Slice& msg2 = Slice())
+    static Status TxnNotPrepared(const Slice &msg, const Slice &msg2 = Slice())
     {
         return Status(kInvalidArgument, kTxnNotPrepared, msg, msg2);
     }
@@ -602,7 +602,7 @@ protected:
     Code code_;
     SubCode subcode_;
     Severity sev_;
-    const char* state_;
+    const char *state_;
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
     mutable bool checked_ = false;
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
@@ -612,16 +612,16 @@ protected:
     {
     }
 
-    Status(Code _code, SubCode _subcode, const Slice& msg, const Slice& msg2);
-    Status(Code _code, const Slice& msg, const Slice& msg2)
+    Status(Code _code, SubCode _subcode, const Slice &msg, const Slice &msg2);
+    Status(Code _code, const Slice &msg, const Slice &msg2)
         : Status(_code, kNone, msg, msg2)
     {
     }
 
-    static const char* CopyState(const char* s);
+    static const char *CopyState(const char *s);
 };
 
-inline Status::Status(const Status& s)
+inline Status::Status(const Status &s)
     : code_(s.code_), subcode_(s.subcode_), sev_(s.sev_)
 {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
@@ -629,7 +629,7 @@ inline Status::Status(const Status& s)
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
 }
-inline Status::Status(const Status& s, Severity sev)
+inline Status::Status(const Status &s, Severity sev)
     : code_(s.code_), subcode_(s.subcode_), sev_(sev)
 {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
@@ -637,7 +637,7 @@ inline Status::Status(const Status& s, Severity sev)
 #endif  // ROCKSDB_ASSERT_STATUS_CHECKED
     state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
 }
-inline Status& Status::operator=(const Status& s)
+inline Status &Status::operator=(const Status &s)
 {
     if (this != &s)
     {
@@ -654,7 +654,7 @@ inline Status& Status::operator=(const Status& s)
     return *this;
 }
 
-inline Status::Status(Status&& s)
+inline Status::Status(Status &&s)
 #if !(defined _MSC_VER) || ((defined _MSC_VER) && (_MSC_VER >= 1900))
     noexcept
 #endif
@@ -666,7 +666,7 @@ inline Status::Status(Status&& s)
     *this = std::move(s);
 }
 
-inline Status& Status::operator=(Status&& s)
+inline Status &Status::operator=(Status &&s)
 #if !(defined _MSC_VER) || ((defined _MSC_VER) && (_MSC_VER >= 1900))
     noexcept
 #endif
@@ -690,7 +690,7 @@ inline Status& Status::operator=(Status&& s)
     return *this;
 }
 
-inline bool Status::operator==(const Status& rhs) const
+inline bool Status::operator==(const Status &rhs) const
 {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
     checked_ = true;
@@ -699,7 +699,7 @@ inline bool Status::operator==(const Status& rhs) const
     return (code_ == rhs.code_);
 }
 
-inline bool Status::operator!=(const Status& rhs) const
+inline bool Status::operator!=(const Status &rhs) const
 {
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED
     checked_ = true;

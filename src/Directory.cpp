@@ -49,7 +49,7 @@ Directory::~Directory()
 
 void Directory::dirThread()
 {
-    CHECK(false) <<  "TODO:";
+    CHECK(false) << "TODO:";
     bindCore(23 - dirID);
     LOG(INFO) << "dir " << dirID << " launch!\n";
 

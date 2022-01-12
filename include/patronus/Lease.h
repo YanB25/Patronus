@@ -53,7 +53,7 @@ public:
         return dir_id_;
     }
 
-    void copy_from(const Lease& rhs)
+    void copy_from(const Lease &rhs)
     {
         lease_type_ = rhs.lease_type_;
         base_addr_ = rhs.base_addr_;
@@ -70,7 +70,6 @@ public:
         ready_ = false;
         id_ = 0;
     }
-
 
 private:
     void set_finish()

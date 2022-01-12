@@ -1,7 +1,8 @@
 #include "RawMessageConnection.h"
 
-#include <cassert>
 #include <glog/logging.h>
+
+#include <cassert>
 
 RawMessageConnection::RawMessageConnection(RdmaContext &ctx,
                                            ibv_cq *cq,
@@ -36,13 +37,12 @@ void RawMessageConnection::syncSendRawMessage(RawMessage *m,
              ah,
              remoteQPN,
              true,
-             false, 
+             false,
              magic_wr_id);
     ibv_wc wc;
 
     std::atomic<bool> found{false};
-    auto handler = [&found, magic_wr_id](ibv_wc *wc)
-    {
+    auto handler = [&found, magic_wr_id](ibv_wc *wc) {
         if (wc->wr_id == magic_wr_id)
         {
             found = true;

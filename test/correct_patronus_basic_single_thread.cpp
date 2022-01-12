@@ -80,11 +80,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
-        bool succ = p->read(lease,
-                            rdma_buf.buffer,
-                            sizeof(Object),
-                            0 /* offset */,
-                            &ctx);
+        bool succ = p->read(
+            lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
         if (!succ)
         {
             LOG(WARNING) << "[bench] client coro " << ctx
@@ -98,8 +95,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         CHECK_EQ(magic_object.target, coro_magic)
             << "coro_id " << ctx << ", Read at key " << coro_key
             << ", lease.base: " << (void *) lease.base_addr();
-        
-        DVLOG(2) << "[bench] client coro " << ctx << " start to relinquish lease ";
+
+        DVLOG(2) << "[bench] client coro " << ctx
+                 << " start to relinquish lease ";
         p->relinquish(lease, &ctx);
 
         p->put_rdma_buffer(rdma_buf.buffer);
@@ -153,7 +151,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
                 !client_comm.finish_all_task[i])
             {
                 DVLOG(1) << "[bench] yielding to coro " << (int) i
-                        << " for new task";
+                         << " for new task";
                 mctx.yield_to_worker(i);
             }
         }
@@ -194,8 +192,9 @@ void server(Patronus::pointer p)
         where->target = coro_magic;
 
         DVLOG(1) << "[bench] server setting " << coro_magic << " to offset "
-                << coro_offset << ". actual addr: " << (void *) &(where->target)
-                << " for coro " << i;
+                 << coro_offset
+                 << ". actual addr: " << (void *) &(where->target)
+                 << " for coro " << i;
     }
 
     p->server_serve();

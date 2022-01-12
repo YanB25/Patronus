@@ -1,5 +1,7 @@
 #include "AbstractMessageConnection.h"
+
 #include <glog/logging.h>
+
 #include "Common.h"
 
 AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
@@ -42,7 +44,7 @@ void AbstractMessageConnection::destroy()
     CHECK(hugePageFree(messagePool, 2 * messageNR * MESSAGE_SIZE));
     CHECK(destroyQueuePair(message));
     CHECK(destroyCompleteQueue(send_cq));
-    
+
     for (int i = 0; i < kBatchCount; ++i)
     {
         delete[] recvs[i];

@@ -21,7 +21,7 @@ int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
-    
+
     {
         char __buffer[sizeof(Object) * 1024];
         ThreadUnsafeBufferPool<sizeof(Object)> buff_pool(__buffer,
@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
                 .count();
         LOG(INFO) << "[bench] buf pool, ns: " << ns << ", op: " << kTestTime
                   << ", ops: " << 1.0 * 1e9 * kTestTime / ns;
-        for (auto* addr: addrs)
+        for (auto *addr : addrs)
         {
             buff_pool.put(addr);
         }
@@ -105,11 +105,9 @@ int main(int argc, char *argv[])
                 .count();
         LOG(INFO) << "[bench] obj pool, ns: " << ns << ", op: " << kTestTime
                   << ", ops: " << 1.0 * 1e9 * kTestTime / ns;
-        for (auto* addr: addrs)
+        for (auto *addr : addrs)
         {
             obj_pool.put(addr);
         }
-
     }
-
 }

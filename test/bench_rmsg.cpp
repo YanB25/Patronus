@@ -66,65 +66,59 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
     Perthread<std::atomic<size_t>> counts;
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [dsm, &count = counts[i]]()
+        threads.emplace_back([dsm, &count = counts[i]]() {
+            dsm->registerThread();
+            auto tid = dsm->get_thread_id();
+            auto mid = tid % RMSG_MULTIPLEXING;
+            LOG(WARNING) << "[bench] threadID " << tid << ", mid " << mid;
+
+            CHECK_NE(mid, 0);
+
+            auto *buf = dsm->get_rdma_buffer();
+            auto *send_msg = (BenchMsg *) buf;
+            send_msg->mid = mid;
+
+            size_t sent = 0;
+            char buffer[ReliableConnection::kMessageSize *
+                        ReliableConnection::kRecvLimit];
+            int64_t token = kTokenNr;
+            for (size_t t = 0; t < kBurnCnt; ++t)
             {
-                dsm->registerThread();
-                auto tid = dsm->get_thread_id();
-                auto mid = tid % RMSG_MULTIPLEXING;
-                LOG(WARNING) << "[bench] threadID " << tid << ", mid " << mid;
-
-                CHECK_NE(mid, 0);
-
-                auto *buf = dsm->get_rdma_buffer();
-                auto *send_msg = (BenchMsg *) buf;
-                send_msg->mid = mid;
-
-                size_t sent = 0;
-                char buffer[ReliableConnection::kMessageSize *
-                            ReliableConnection::kRecvLimit];
-                int64_t token = kTokenNr;
-                for (size_t t = 0; t < kBurnCnt; ++t)
+                dsm->reliable_send(buf, sizeof(BenchMsg), kServerNodeId, mid);
+                sent++;
+                if (sent % msg_each_token == 0)
                 {
-                    dsm->reliable_send(
-                        buf, sizeof(BenchMsg), kServerNodeId, mid);
-                    sent++;
-                    if (sent % msg_each_token == 0)
-                    {
-                        count.fetch_add(msg_each_token,
-                                        std::memory_order_relaxed);
+                    count.fetch_add(msg_each_token, std::memory_order_relaxed);
 
-                        token--;
-                        VLOG(3)
-                            << "[wait] tid " << tid << " sent " << sent
+                    token--;
+                    VLOG(3) << "[wait] tid " << tid << " sent " << sent
                             << " at " << msg_each_token << ", wait for ack.";
-                        do
+                    do
+                    {
+                        size_t recv_nr = dsm->reliable_try_recv(
+                            mid, buffer, ReliableConnection::kRecvLimit);
+                        // handle possbile recv token
+                        for (size_t r = 0; r < recv_nr; ++r)
                         {
-                            size_t recv_nr = dsm->reliable_try_recv(
-                                mid, buffer, ReliableConnection::kRecvLimit);
-                            // handle possbile recv token
-                            for (size_t r = 0; r < recv_nr; ++r)
-                            {
-                                void *msg_addr =
-                                    buffer +
-                                    ReliableConnection::kMessageSize * r;
-                                auto *recv_msg = (BenchMsg *) msg_addr;
-                                VLOG(3) << "[wait] tid " << tid
-                                        << " recv continue msg for mid "
-                                        << recv_msg->mid << ". add one token";
-                                token++;
-                            }
-                            if (token <= 0)
-                            {
-                                VLOG(1) << "[wait] tid " << tid << " mid "
-                                             << mid << " blocked.";
-                            }
-                        } while (token <= 0);
-                        VLOG(3) << "[wait] tid " << tid << " from mid " << mid
-                                << " has enough token. current: " << token;
-                    }
+                            void *msg_addr =
+                                buffer + ReliableConnection::kMessageSize * r;
+                            auto *recv_msg = (BenchMsg *) msg_addr;
+                            VLOG(3) << "[wait] tid " << tid
+                                    << " recv continue msg for mid "
+                                    << recv_msg->mid << ". add one token";
+                            token++;
+                        }
+                        if (token <= 0)
+                        {
+                            VLOG(1) << "[wait] tid " << tid << " mid " << mid
+                                    << " blocked.";
+                        }
+                    } while (token <= 0);
+                    VLOG(3) << "[wait] tid " << tid << " from mid " << mid
+                            << " has enough token. current: " << token;
                 }
-            });
+            }
+        });
     }
 
     size_t expect_nr = thread_nr * kBurnCnt;
@@ -178,40 +172,38 @@ void server_burn(std::shared_ptr<DSM> dsm,
 
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [dsm, &gots, &finished]()
+        threads.emplace_back([dsm, &gots, &finished]() {
+            dsm->registerThread();
+            auto tid = dsm->get_thread_id();
+            auto mid = tid % RMSG_MULTIPLEXING;
+
+            CHECK_NE(mid, 0);
+
+            char buffer[ReliableConnection::kMessageSize *
+                        ReliableConnection::kRecvLimit];
+            auto *rdma_buf = dsm->get_rdma_buffer();
+            memset(rdma_buf, 0, sizeof(BenchMsg));
+            size_t recv_msg_nr = 0;
+            while (!finished.load(std::memory_order_relaxed))
             {
-                dsm->registerThread();
-                auto tid = dsm->get_thread_id();
-                auto mid = tid % RMSG_MULTIPLEXING;
-
-                CHECK_NE(mid, 0);
-
-                char buffer[ReliableConnection::kMessageSize *
-                            ReliableConnection::kRecvLimit];
-                auto *rdma_buf = dsm->get_rdma_buffer();
-                memset(rdma_buf, 0, sizeof(BenchMsg));
-                size_t recv_msg_nr = 0;
-                while (!finished.load(std::memory_order_relaxed))
+                auto get = dsm->reliable_try_recv(
+                    mid, buffer, ReliableConnection::kRecvLimit);
+                gots[mid].fetch_add(get, std::memory_order_relaxed);
+                recv_msg_nr += get;
+                constexpr size_t credit_for_token =
+                    ReliableConnection::kPostRecvBufferBatch / kTokenNr;
+                if (recv_msg_nr >= credit_for_token)
                 {
-                    auto get = dsm->reliable_try_recv(
-                        mid, buffer, ReliableConnection::kRecvLimit);
-                    gots[mid].fetch_add(get, std::memory_order_relaxed);
-                    recv_msg_nr += get;
-                    constexpr size_t credit_for_token =
-                        ReliableConnection::kPostRecvBufferBatch / kTokenNr;
-                    if (recv_msg_nr >= credit_for_token)
-                    {
-                        recv_msg_nr -= credit_for_token;
-                        VLOG(3) << "[wait] server tid " << tid << " let go mid "
-                                << mid;
-                        dsm->reliable_send((char *) rdma_buf,
-                                           sizeof(BenchMsg),
-                                           kClientNodeId,
-                                           mid);
-                    }
+                    recv_msg_nr -= credit_for_token;
+                    VLOG(3)
+                        << "[wait] server tid " << tid << " let go mid " << mid;
+                    dsm->reliable_send((char *) rdma_buf,
+                                       sizeof(BenchMsg),
+                                       kClientNodeId,
+                                       mid);
                 }
-            });
+            }
+        });
     }
     while (true)
     {

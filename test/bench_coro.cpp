@@ -56,13 +56,12 @@ void coro_large_stack_master(CoroYield &yield)
     LOG(INFO) << "[bench] large stack: op: " << comm.yielded_nr
               << ", ns: " << ns
               << ", ops: " << 1.0 * 1e9 * comm.yielded_nr / ns;
-
 }
 
 void coro_large_stack_worker(coro_t coro_id, CoroYield &yield)
 {
     CoroContext ctx(0, &yield, &comm.master, coro_id);
-    
+
     Scope scope;
 
     for (size_t i = 0; i < kTestTime; ++i)
@@ -82,12 +81,12 @@ void bench_coro_large_stack()
 {
     for (size_t i = 0; i < kCoroNr; ++i)
     {
-        comm.workers[i] = CoroCall([i](CoroYield &yield)
-                                   { coro_large_stack_worker(i, yield); });
+        comm.workers[i] = CoroCall(
+            [i](CoroYield &yield) { coro_large_stack_worker(i, yield); });
     }
     comm.master =
         CoroCall([](CoroYield &yield) { coro_large_stack_master(yield); });
-    
+
     comm.master();
 }
 

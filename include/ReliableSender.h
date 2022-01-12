@@ -10,7 +10,7 @@ class ReliableSendMessageConnection
 
 public:
     ReliableSendMessageConnection(std::vector<std::vector<ibv_qp *>> &QPs,
-                                  std::array<ibv_cq *, RMSG_MULTIPLEXING>& cqs,
+                                  std::array<ibv_cq *, RMSG_MULTIPLEXING> &cqs,
                                   uint32_t lkey);
     ~ReliableSendMessageConnection();
     void send(size_t threadID,

@@ -62,7 +62,7 @@ void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 // thread. Only use this when you prefer multiple callers share the same
 // instance.
 template <class T, class... Args>
-inline T &TLS(Args &&...args)
+inline T &TLS(Args &&... args)
 {
     thread_local T _tls_item(std::forward<Args>(args)...);
     return _tls_item;
@@ -174,8 +174,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
     GlobalAddress gaddr;
     gaddr.nodeID = kServerNodeId;
 
-    auto handler = [sequantial, warmup](ibv_wc *wc)
-    {
+    auto handler = [sequantial, warmup](ibv_wc *wc) {
         Data data;
         CHECK(sizeof(Data) == sizeof(uint64_t));
         memcpy(&data, &wc->wr_id, sizeof(uint64_t));
@@ -477,71 +476,70 @@ int main(int argc, char *argv[])
 
     for (size_t i = 0; i < kMaxThread; ++i)
     {
-        threads.emplace_back(
-            [dsm, &client_bar, &b]()
+        threads.emplace_back([dsm, &client_bar, &b]() {
+            dsm->registerThread();
+            auto nid = dsm->getMyNodeID();
+            uint64_t tid = dsm->get_thread_id();
+
+            // select a leader
+            uint64_t old = (uint64_t) -1;
+            if (master_tid.compare_exchange_strong(
+                    old, tid, std::memory_order_seq_cst))
             {
-                dsm->registerThread();
-                auto nid = dsm->getMyNodeID();
-                uint64_t tid = dsm->get_thread_id();
+                LOG(INFO) << "Leader is tid " << tid;
+            }
 
-                // select a leader
-                uint64_t old = (uint64_t) -1;
-                if (master_tid.compare_exchange_strong(
-                        old, tid, std::memory_order_seq_cst))
+            // for (Type bt : {kRO, kWO})
+            for (RWType bt : {kRO})
+            {
+                for (size_t window_nr : {1, 100, 10000})
+                // for (size_t window_nr : {100, 10000})
                 {
-                    LOG(INFO) << "Leader is tid " << tid;
-                }
-
-                // for (Type bt : {kRO, kWO})
-                for (RWType bt : {kRO})
-                {
-                    for (size_t window_nr : {1, 100, 10000})
-                    // for (size_t window_nr : {100, 10000})
+                    // for (size_t thread_nr : {1, 8, 16, int(kMaxThread)})
+                    for (size_t thread_nr : {1, 8, 16})
                     {
-                        // for (size_t thread_nr : {1, 8, 16, int(kMaxThread)})
-                        for (size_t thread_nr : {1, 8, 16})
+                        for (size_t size : {2 * define::MB, kSize})
                         {
-                            for (size_t size : {2 * define::MB, kSize})
+                            for (size_t io_size : {8})
+                            // for (size_t io_size : {8, 64, 256, 1024})
                             {
-                                for (size_t io_size : {8})
-                                // for (size_t io_size : {8, 64, 256, 1024})
+                                if (tid == master_tid)
                                 {
-                                    if (tid == master_tid)
-                                    {
-                                        window_nr_x = window_nr;
-                                        thread_nr_x = thread_nr;
-                                        size_x = size;
-                                        io_size_x = io_size;
-                                        bench_type = bt;
-                                        expr_id.fetch_add(1);
-                                    }
-                                    LOG_IF(INFO,
-                                           tid == master_tid && nid == kClientNodeId)
-                                        << "Benchmarking mw: " << window_nr
-                                        << ", thread: " << thread_nr
-                                        << ", "
-                                           "io_size: "
-                                        << io_size;
-                                    thread_main(dsm,
-                                                window_nr,
-                                                thread_nr,
-                                                nid,
-                                                tid,
-                                                kSize,
-                                                io_size,
-                                                bt,
-                                                client_bar);
-                                    if (tid == master_tid)
-                                    {
-                                        b.snapshot();
-                                        b.clear();
-                                    }
+                                    window_nr_x = window_nr;
+                                    thread_nr_x = thread_nr;
+                                    size_x = size;
+                                    io_size_x = io_size;
+                                    bench_type = bt;
+                                    expr_id.fetch_add(1);
+                                }
+                                LOG_IF(
+                                    INFO,
+                                    tid == master_tid && nid == kClientNodeId)
+                                    << "Benchmarking mw: " << window_nr
+                                    << ", thread: " << thread_nr
+                                    << ", "
+                                       "io_size: "
+                                    << io_size;
+                                thread_main(dsm,
+                                            window_nr,
+                                            thread_nr,
+                                            nid,
+                                            tid,
+                                            kSize,
+                                            io_size,
+                                            bt,
+                                            client_bar);
+                                if (tid == master_tid)
+                                {
+                                    b.snapshot();
+                                    b.clear();
                                 }
                             }
                         }
                     }
                 }
-            });
+            }
+        });
     }
     for (auto &t : threads)
     {

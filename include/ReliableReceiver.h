@@ -2,8 +2,8 @@
 #ifndef RELIABLE_RECEIVER_H_
 #define RELIABLE_RECEIVER_H_
 
-#include "ReliableMessageConnection.h"
 #include "PerThread.h"
+#include "ReliableMessageConnection.h"
 
 class ReliableRecvMessageConnection
 {
@@ -62,7 +62,7 @@ private:
     ibv_sge recv_sgl[RMSG_MULTIPLEXING][MAX_MACHINE][kRecvBuffer];
 
     Aligned<std::atomic<size_t>, 64> msg_recv_index_[RMSG_MULTIPLEXING]
-                                                           [MAX_MACHINE] = {};
+                                                    [MAX_MACHINE] = {};
 };
 
 #endif

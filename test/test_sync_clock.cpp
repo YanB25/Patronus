@@ -9,7 +9,7 @@
 // one node issues cas operations
 
 constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]]constexpr uint16_t kServerNodeId = 1;
+[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
 void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
@@ -26,7 +26,7 @@ void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
 // thread. Only use this when you prefer multiple callers share the same
 // instance.
 template <class T, class... Args>
-inline T &TLS(Args &&...args)
+inline T &TLS(Args &&... args)
 {
     thread_local T _tls_item(std::forward<Args>(args)...);
     return _tls_item;

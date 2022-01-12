@@ -1,5 +1,6 @@
-#include "Rdma.h"
 #include <glog/logging.h>
+
+#include "Rdma.h"
 
 // RC & UC
 /**

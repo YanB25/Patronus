@@ -105,8 +105,8 @@ void client(std::shared_ptr<DSM> dsm)
         {
             *(uint64_t *) buffer = kMagic3;
             gaddr.offset = kOffset3 + i * sizeof(kMagic3);
-            dsm->rkey_write_sync(rkey, buffer, gaddr, sizeof(kMagic3),
-            second_dir);
+            dsm->rkey_write_sync(
+                rkey, buffer, gaddr, sizeof(kMagic3), second_dir);
         }
         dsm->send(nullptr, 0, kServerNodeId);
     }
@@ -119,7 +119,7 @@ void client(std::shared_ptr<DSM> dsm)
 // thread. Only use this when you prefer multiple callers share the same
 // instance.
 template <class T, class... Args>
-inline T &TLS(Args &&...args)
+inline T &TLS(Args &&... args)
 {
     thread_local T _tls_item(std::forward<Args>(args)...);
     return _tls_item;
@@ -142,7 +142,7 @@ void server(std::shared_ptr<DSM> dsm)
 
     const auto &buf_conf = dsm->get_server_internal_buffer();
     char *buffer = buf_conf.buffer;
-    LOG(INFO) << "get buffer addr: " << (void*) buffer;
+    LOG(INFO) << "get buffer addr: " << (void *) buffer;
     // size_t max_size = buf_conf.size;
 
     loop_expect(buffer + kOffset, (char *) &kMagic, sizeof(kMagic));

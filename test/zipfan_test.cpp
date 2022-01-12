@@ -10,7 +10,6 @@ void mehcached_test_zipf(double theta);
 
 int main()
 {
-
     mehcached_test_zipf(0.99);
 
     struct zipf_gen_state state;

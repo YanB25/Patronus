@@ -15,7 +15,6 @@
 #include <thread>
 
 #include "Config.h"
-
 #include "Rdma.h"
 
 class Keeper

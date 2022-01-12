@@ -2,10 +2,10 @@
 #if !defined(_LOCAL_ALLOC_H_)
 #define _LOCAL_ALLOC_H_
 
+#include <vector>
+
 #include "Common.h"
 #include "GlobalAddress.h"
-
-#include <vector>
 
 // for fine-grained shared memory alloc
 // not thread safe
@@ -13,7 +13,6 @@
 // TODO: slab-based alloctor
 class LocalAllocator
 {
-
 public:
     LocalAllocator()
     {
@@ -23,7 +22,6 @@ public:
 
     GlobalAddress malloc(size_t size, bool &need_chunck, bool align = false)
     {
-
         if (align)
         {
         }

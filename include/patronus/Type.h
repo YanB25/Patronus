@@ -32,8 +32,7 @@ std::ostream &operator<<(std::ostream &os, const RequestType &t);
 
 struct ClientID
 {
-    union
-    {
+    union {
         struct
         {
             uint16_t node_id;
@@ -89,7 +88,7 @@ enum class AdminFlag : uint8_t
     kAdminReqExit = 0,
     kAdminReqRecovery = 1,
 };
-std::ostream& operator<<(std::ostream& os, const AdminFlag& f);
+std::ostream &operator<<(std::ostream &os, const AdminFlag &f);
 
 struct AdminRequest
 {
@@ -124,7 +123,6 @@ struct LeaseModifyResponse
 } __attribute__((packed));
 static_assert(sizeof(LeaseModifyResponse) < ReliableConnection::kMessageSize);
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &req);
-
 
 }  // namespace patronus
 

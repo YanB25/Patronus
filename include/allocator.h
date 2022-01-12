@@ -26,7 +26,7 @@ public:
     // bytes, huge_page_size
     char *AllocateAligned(size_t bytes, size_t = 0)
     {
-        return (char *)aligned_alloc(8, bytes);
+        return (char *) aligned_alloc(8, bytes);
     }
 };
 #endif

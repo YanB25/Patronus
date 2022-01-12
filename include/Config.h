@@ -24,14 +24,17 @@ public:
               uint32_t machineNR = kDefaultMachineNr,
               uint64_t dsmSize = kDSMCacheSize,
               size_t dsmReserveSize = 0)
-        : cacheConfig(cacheConfig), machineNR(machineNR), dsmSize(dsmSize), dsmReserveSize(dsmReserveSize)
+        : cacheConfig(cacheConfig),
+          machineNR(machineNR),
+          dsmSize(dsmSize),
+          dsmReserveSize(dsmReserveSize)
     {
     }
 
     CacheConfig cacheConfig;
     uint32_t machineNR;
     uint64_t dsmSize;
-    size_t dsmReserveSize; // how much size dsm should reserve for its user
+    size_t dsmReserveSize;  // how much size dsm should reserve for its user
 };
 
 #endif /* __CONFIG_H__ */

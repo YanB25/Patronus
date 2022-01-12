@@ -1,7 +1,8 @@
 
+#include <glog/logging.h>
+
 #include "Rdma.h"
 #include "Util.h"
-#include <glog/logging.h>
 
 int kMaxDeviceMemorySize = 0;
 
@@ -69,7 +70,7 @@ void checkDctSupported(struct ibv_context *ctx)
     else
     {
         kMaxDeviceMemorySize = attrs.max_dm_size;
-        LOG(INFO) << "NIC Device Memory is " << 
-             smart::smartSize(kMaxDeviceMemorySize);
+        LOG(INFO) << "NIC Device Memory is "
+                  << smart::smartSize(kMaxDeviceMemorySize);
     }
 }

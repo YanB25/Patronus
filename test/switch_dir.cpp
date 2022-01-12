@@ -18,7 +18,6 @@ constexpr static uint64_t kMagic3 = 0xcccccccccccccccc;
 
 struct SwitchNotifyMsg
 {
-
 } __attribute__((packed));
 
 void loop_expect(const char *lhs_buf, const char *rhs_buf, size_t size)
@@ -93,7 +92,7 @@ void server(std::shared_ptr<DSM> dsm)
     loop_expect(buffer, (char *) &kMagic3, sizeof(kMagic3));
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);

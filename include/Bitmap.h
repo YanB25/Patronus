@@ -2,11 +2,10 @@
 #ifndef __BITMAP_H__
 #define __BITMAP_H__
 
-#include <cstdint>
 #include <cassert>
-#include <cstring>
-
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 class BitMap
 {
@@ -17,7 +16,6 @@ private:
 public:
     BitMap(int n) : n(n)
     {
-
         assert(n % 64 == 0);
         bits = new uint64_t[n / 64];
         memset(bits, 0, n / 8);

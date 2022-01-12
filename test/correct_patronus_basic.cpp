@@ -186,15 +186,13 @@ void client(Patronus::pointer p)
     LOG(INFO) << "I am client. tid " << tid;
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        client_coro.workers[i] = CoroCall(
-            [p, i](CoroYield &yield)
-            {
-                LOG(INFO) << "[debug] tell you my addr: p: " << (void *) &p
-                          << ", p.get(): " << (void *) p.get() << ", &i "
-                          << (void *) &i << ", &yield: " << (void *) &yield
-                          << " client_worker: " << (void *) client_worker;
-                client_worker(p, i, yield);
-            });
+        client_coro.workers[i] = CoroCall([p, i](CoroYield &yield) {
+            LOG(INFO) << "[debug] tell you my addr: p: " << (void *) &p
+                      << ", p.get(): " << (void *) p.get() << ", &i "
+                      << (void *) &i << ", &yield: " << (void *) &yield
+                      << " client_worker: " << (void *) client_worker;
+            client_worker(p, i, yield);
+        });
     }
     client_coro.master =
         CoroCall([p](CoroYield &yield) { client_master(p, yield); });
@@ -235,64 +233,60 @@ int main(int argc, char *argv[])
     {
         for (size_t i = 0; i < kThreadNr; ++i)
         {
-            threads.emplace_back(
-                [patronus, &bar, i]()
+            threads.emplace_back([patronus, &bar, i]() {
+                patronus->registerClientThread();
+                auto tid = patronus->get_thread_id();
+                sleep(2);
+                client(patronus);
+                LOG(INFO) << "[bench] thread " << tid << " finish it work";
+                bar.wait();
+                if (i == 0)
                 {
-                    patronus->registerClientThread();
-                    auto tid = patronus->get_thread_id();
-                    sleep(2);
-                    client(patronus);
-                    LOG(INFO) << "[bench] thread " << tid << " finish it work";
-                    bar.wait();
-                    if (i == 0)
-                    {
-                        LOG(INFO) << "[bench] joined. thread " << tid
-                                  << " call p->finished()";
-                        patronus->finished();
-                    }
-                });
+                    LOG(INFO) << "[bench] joined. thread " << tid
+                              << " call p->finished()";
+                    patronus->finished();
+                }
+            });
         }
     }
     else
     {
         for (size_t i = 0; i < kThreadNr; ++i)
         {
-            threads.emplace_back(
-                [patronus, i]()
+            threads.emplace_back([patronus, i]() {
+                patronus->registerServerThread();
+                if (i == 0)
                 {
-                    patronus->registerServerThread();
-                    if (i == 0)
+                    patronus->finished();
+                }
+
+                auto internal_buf = patronus->get_server_internal_buffer();
+                for (size_t t = 0; t < kThreadNr; ++t)
+                {
+                    for (size_t i = 0; i < kCoroCnt; ++i)
                     {
-                        patronus->finished();
+                        auto thread_id = t + 1;
+                        auto coro_id = i;
+                        auto coro_magic = gen_magic(thread_id, coro_id);
+                        auto coro_key = gen_coro_key(thread_id, coro_id);
+                        auto coro_offset = bench_locator(coro_key);
+
+                        auto *server_internal_buf = internal_buf.buffer;
+                        Object *where =
+                            (Object *) &server_internal_buf[coro_offset];
+                        where->target = coro_magic;
+
+                        DLOG(INFO)
+                            << "[bench] server setting " << coro_magic
+                            << " to offset " << coro_offset
+                            << ". actual addr: " << (void *) &(where->target)
+                            << " for coro " << coro_id << ", thread "
+                            << thread_id;
                     }
+                }
 
-                    auto internal_buf = patronus->get_server_internal_buffer();
-                    for (size_t t = 0; t < kThreadNr; ++t)
-                    {
-                        for (size_t i = 0; i < kCoroCnt; ++i)
-                        {
-                            auto thread_id = t + 1;
-                            auto coro_id = i;
-                            auto coro_magic = gen_magic(thread_id, coro_id);
-                            auto coro_key = gen_coro_key(thread_id, coro_id);
-                            auto coro_offset = bench_locator(coro_key);
-
-                            auto *server_internal_buf = internal_buf.buffer;
-                            Object *where =
-                                (Object *) &server_internal_buf[coro_offset];
-                            where->target = coro_magic;
-
-                            DLOG(INFO)
-                                << "[bench] server setting " << coro_magic
-                                << " to offset " << coro_offset
-                                << ". actual addr: "
-                                << (void *) &(where->target) << " for coro "
-                                << coro_id << ", thread " << thread_id;
-                        }
-                    }
-
-                    server(patronus);
-                });
+                server(patronus);
+            });
         }
     }
 

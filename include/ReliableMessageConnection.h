@@ -85,8 +85,7 @@ private:
     std::unique_ptr<ReliableRecvMessageConnection> recv_;
     std::unique_ptr<ReliableSendMessageConnection> send_;
 
-    std::array<DebugMutex, RMSG_MULTIPLEXING>
-        debug_locks_;
+    std::array<DebugMutex, RMSG_MULTIPLEXING> debug_locks_;
 };
 
 #endif

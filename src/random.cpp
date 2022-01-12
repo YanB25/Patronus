@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <string.h>
+
 #include <thread>
 #include <utility>
 
@@ -20,7 +21,7 @@ Random *Random::GetTLSInstance()
     if (rv == nullptr)
     {
         size_t seed = std::hash<std::thread::id>()(std::this_thread::get_id());
-        rv = new (&tls_instance_bytes) Random((uint32_t)seed);
+        rv = new (&tls_instance_bytes) Random((uint32_t) seed);
         tls_instance = rv;
     }
     return rv;

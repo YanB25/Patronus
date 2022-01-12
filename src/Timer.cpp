@@ -16,7 +16,7 @@ void ContTimer<true>::init(const std::string &name,
                            const std::string &first_step)
 {
     clear();
-    
+
     name_ = name;
     step_ = first_step;
     start_ = pin_ = std::chrono::steady_clock::now();

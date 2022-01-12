@@ -138,7 +138,7 @@ private:
 std::ostream &operator<<(std::ostream &os, const ContTimer<true> &t)
 {
     size_t total_ns = 0;
-    for (const auto& [event, ns] : t.event_ns_)
+    for (const auto &[event, ns] : t.event_ns_)
     {
         std::ignore = event;
         total_ns += ns;

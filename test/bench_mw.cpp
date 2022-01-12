@@ -34,7 +34,7 @@ std::atomic<size_t> bind_mw_ns;
 // thread. Only use this when you prefer multiple callers share the same
 // instance.
 template <class T, class... Args>
-inline T &TLS(Args &&...args)
+inline T &TLS(Args &&... args)
 {
     thread_local T _tls_item(std::forward<Args>(args)...);
     return _tls_item;

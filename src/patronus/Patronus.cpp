@@ -18,6 +18,9 @@ thread_local std::queue<ibv_mw *> Patronus::mw_pool_[NR_DIRECTORY];
 thread_local ThreadUnsafePool<LeaseContext, Patronus::kLeaseContextNr>
     Patronus::lease_context_;
 thread_local ServerCoroContext Patronus::server_coro_ctx_;
+thread_local std::unique_ptr<
+    ThreadUnsafePool<ProtectionRegion, Patronus::kProtectionRegionPerThreadNr>>
+    Patronus::protection_region_pool_;
 
 Patronus::Patronus(const PatronusConfig &conf)
 {
@@ -631,7 +634,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         DCHECK_LT(lease_ctx->mw_nr, kLeaseContextMwNr);
     }
     lease_ctx->dir_id = dirID;
-    lease_ctx->addr_to_bind = (uint64_t) (internal.buffer + actual_position);
+    lease_ctx->addr_to_bind = (uint64_t)(internal.buffer + actual_position);
     lease_ctx->size = req->size;
     auto lease_id = lease_context_.obj_to_id(lease_ctx);
 
@@ -1277,8 +1280,8 @@ void Patronus::server_serve()
 
     for (size_t i = 0; i < kServerCoroNr; ++i)
     {
-        server_workers[i] = CoroCall([this, i](CoroYield &yield)
-                                     { server_coro_worker(i, yield); });
+        server_workers[i] = CoroCall(
+            [this, i](CoroYield &yield) { server_coro_worker(i, yield); });
     }
     server_master =
         CoroCall([this](CoroYield &yield) { server_coro_master(yield); });

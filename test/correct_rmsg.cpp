@@ -47,7 +47,7 @@ void check_valid(const BenchMessage &msg)
 }
 
 template <class T, class... Args>
-inline T &TLS(Args &&...args)
+inline T &TLS(Args &&... args)
 {
     thread_local T _tls_item(std::forward<Args>(args)...);
     return _tls_item;
@@ -156,46 +156,43 @@ void server_multithread(std::shared_ptr<DSM> dsm,
 
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [dsm, &finished_nr, total_nr]()
+        threads.emplace_back([dsm, &finished_nr, total_nr]() {
+            dsm->registerThread();
+            auto tid = dsm->get_thread_id();
+            auto mid = tid % RMSG_MULTIPLEXING;
+            CHECK_NE(mid, 0);
+
+            char buffer[102400];
+            auto *rdma_buf = dsm->get_rdma_buffer();
+
+            size_t recv_msg_nr = 0;
+            while (finished_nr < total_nr)
             {
-                dsm->registerThread();
-                auto tid = dsm->get_thread_id();
-                auto mid = tid % RMSG_MULTIPLEXING;
-                CHECK_NE(mid, 0);
-
-                char buffer[102400];
-                auto *rdma_buf = dsm->get_rdma_buffer();
-
-                size_t recv_msg_nr = 0;
-                while (finished_nr < total_nr)
+                size_t get = dsm->reliable_try_recv(mid, buffer, 64);
+                finished_nr.fetch_add(get);
+                for (size_t i = 0; i < get; ++i)
                 {
-                    size_t get = dsm->reliable_try_recv(mid, buffer, 64);
-                    finished_nr.fetch_add(get);
-                    for (size_t i = 0; i < get; ++i)
-                    {
-                        auto *recv_msg =
-                            (BenchMessage *) ((char *) buffer +
-                                              ReliableConnection::kMessageSize *
-                                                  i);
-                        check_valid(*recv_msg);
+                    auto *recv_msg =
+                        (BenchMessage *) ((char *) buffer +
+                                          ReliableConnection::kMessageSize * i);
+                    check_valid(*recv_msg);
 
-                        recv_msg_nr++;
-                        BenchMessage *send_msg = (BenchMessage *) rdma_buf;
-                        memcpy(send_msg, recv_msg, sizeof(BenchMessage));
-                        if (recv_msg_nr % 64 == 0)
-                        {
-                            recv_msg_nr -= 64;
-                            VLOG(3) << "[wait] server tid " << tid
-                                    << " let go mid " << recv_msg->from_mid;
-                            dsm->reliable_send((char *) send_msg,
-                                               sizeof(BenchMessage),
-                                               kClientNodeId,
-                                               mid);
-                        }
+                    recv_msg_nr++;
+                    BenchMessage *send_msg = (BenchMessage *) rdma_buf;
+                    memcpy(send_msg, recv_msg, sizeof(BenchMessage));
+                    if (recv_msg_nr % 64 == 0)
+                    {
+                        recv_msg_nr -= 64;
+                        VLOG(3) << "[wait] server tid " << tid << " let go mid "
+                                << recv_msg->from_mid;
+                        dsm->reliable_send((char *) send_msg,
+                                           sizeof(BenchMessage),
+                                           kClientNodeId,
+                                           mid);
                     }
                 }
-            });
+            }
+        });
     }
     for (auto &t : threads)
     {
@@ -205,7 +202,8 @@ void server_multithread(std::shared_ptr<DSM> dsm,
 
 constexpr static size_t kMidOffset = 0;
 
-// we can not reserve mid == 0 in this situation, because we set it to thread safe.
+// we can not reserve mid == 0 in this situation, because we set it to thread
+// safe.
 void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
 {
     LOG(WARNING) << "[bench] testing multithread for thread = " << thread_nr;
@@ -214,56 +212,52 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
     // std::array<std::atomic<bool>, RMSG_MULTIPLEXING> can_continue_{};
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [dsm]()
+        threads.emplace_back([dsm]() {
+            dsm->registerThread();
+
+            auto tid = dsm->get_thread_id();
+            auto from_mid = (tid + kMidOffset) % RMSG_MULTIPLEXING;
+            // CHECK_NE(from_mid, 0);
+
+            size_t sent = 0;
+
+            char buffer[1024];
+
+            auto *rdma_buf = dsm->get_rdma_buffer();
+            BenchMessage *msg = (BenchMessage *) rdma_buf;
+            for (size_t time = 0; time < kBurnCnt; ++time)
             {
-                dsm->registerThread();
-
-                auto tid = dsm->get_thread_id();
-                auto from_mid = (tid + kMidOffset) % RMSG_MULTIPLEXING;
-                // CHECK_NE(from_mid, 0);
-
-                size_t sent = 0;
-
-                char buffer[1024];
-
-                auto *rdma_buf = dsm->get_rdma_buffer();
-                BenchMessage *msg = (BenchMessage *) rdma_buf;
-                for (size_t time = 0; time < kBurnCnt; ++time)
+                msg->size = rand_int(0, kBenchMessageBufSize);
+                for (size_t s = 0; s < msg->size; ++s)
                 {
-                    msg->size = rand_int(0, kBenchMessageBufSize);
-                    for (size_t s = 0; s < msg->size; ++s)
-                    {
-                        msg->buf[s] = rand();
-                    }
-                    msg->from_node = kClientNodeId;
-                    CHECK_NE(tid, 0) << "The tid == 0 is reserved. So we (tid "
-                                        "- 1) at the below line.";
-                    msg->from_mid = from_mid;
-                    msg->digest = djb2_digest(msg->buf, msg->size);
-                    dsm->reliable_send(rdma_buf,
-                                       sizeof(BenchMessage),
-                                       kServerNodeId,
-                                       from_mid);
-                    sent++;
-                    if (sent % 64 == 0)
-                    {
-                        DVLOG(3) << "[wait] tid " << tid
-                                << " sent 64. wait for ack. ";
-                        dsm->reliable_recv(from_mid, buffer);
-                        auto *recv_msg = (BenchMessage *) buffer;
-                        DVLOG(3) << "[wait] tid " << tid
-                                << " recv continue msg for mid "
-                                << recv_msg->from_mid;
-                    }
-
-                    if (time % (100 * define::K) == 0)
-                    {
-                        LOG(WARNING) << "[bench] client tid " << tid
-                                     << " finish 100K. time: " << time;
-                    }
+                    msg->buf[s] = rand();
                 }
-            });
+                msg->from_node = kClientNodeId;
+                CHECK_NE(tid, 0) << "The tid == 0 is reserved. So we (tid "
+                                    "- 1) at the below line.";
+                msg->from_mid = from_mid;
+                msg->digest = djb2_digest(msg->buf, msg->size);
+                dsm->reliable_send(
+                    rdma_buf, sizeof(BenchMessage), kServerNodeId, from_mid);
+                sent++;
+                if (sent % 64 == 0)
+                {
+                    DVLOG(3)
+                        << "[wait] tid " << tid << " sent 64. wait for ack. ";
+                    dsm->reliable_recv(from_mid, buffer);
+                    auto *recv_msg = (BenchMessage *) buffer;
+                    DVLOG(3)
+                        << "[wait] tid " << tid << " recv continue msg for mid "
+                        << recv_msg->from_mid;
+                }
+
+                if (time % (100 * define::K) == 0)
+                {
+                    LOG(WARNING) << "[bench] client tid " << tid
+                                 << " finish 100K. time: " << time;
+                }
+            }
+        });
     }
     for (auto &t : threads)
     {

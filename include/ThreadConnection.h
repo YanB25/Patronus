@@ -2,9 +2,10 @@
 #ifndef __THREADCONNECTION_H__
 #define __THREADCONNECTION_H__
 
+#include <vector>
+
 #include "Common.h"
 #include "RawMessageConnection.h"
-#include <vector>
 #include "ReliableMessageConnection.h"
 
 struct RemoteConnection;
@@ -36,16 +37,16 @@ struct ThreadConnection
     ibv_mr *cacheMR{nullptr};
     void *cachePool{nullptr};
     uint32_t cacheLKey{0};
-    const std::vector<RemoteConnection>* remoteInfo{nullptr};
+    const std::vector<RemoteConnection> *remoteInfo{nullptr};
 
     ThreadConnection(uint16_t threadID,
                      void *cachePool,
                      uint64_t cacheSize,
                      uint32_t machineNR,
                      const std::vector<RemoteConnection> &remoteInfo);
-    ThreadConnection(const ThreadConnection&) = delete;
-    ThreadConnection& operator=(const ThreadConnection&) = delete;
-    ThreadConnection& operator=(ThreadConnection&& rhs)
+    ThreadConnection(const ThreadConnection &) = delete;
+    ThreadConnection &operator=(const ThreadConnection &) = delete;
+    ThreadConnection &operator=(ThreadConnection &&rhs)
     {
         threadID = std::move(rhs.threadID);
         ctx = std::move(rhs.ctx);
@@ -65,12 +66,15 @@ struct ThreadConnection
         rhs.remoteInfo = nullptr;
         return *this;
     }
-    ThreadConnection(ThreadConnection&& rhs)
+    ThreadConnection(ThreadConnection &&rhs)
     {
         (*this) = std::move(rhs);
     }
     bool resetQP(size_t node_id, size_t dir_id);
-    void sendMessage2Dir(RawMessage *m, uint16_t node_id, uint16_t dir_id = 0, bool eager_signal = false);
+    void sendMessage2Dir(RawMessage *m,
+                         uint16_t node_id,
+                         uint16_t dir_id = 0,
+                         bool eager_signal = false);
     ~ThreadConnection();
 };
 

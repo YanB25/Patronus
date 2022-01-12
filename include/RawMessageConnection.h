@@ -37,7 +37,7 @@ struct RawMessage
 
 static_assert(sizeof(RawMessage) < MESSAGE_SIZE, "failed");
 
-std::ostream& operator<<(std::ostream&, const RawMessage& msg);
+std::ostream &operator<<(std::ostream &, const RawMessage &msg);
 
 class RawMessageConnection : public AbstractMessageConnection
 {

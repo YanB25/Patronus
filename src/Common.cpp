@@ -1,13 +1,13 @@
 #include "Common.h"
 
 #include <arpa/inet.h>
+#include <glog/logging.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <glog/logging.h>
 
 void bindCore(uint16_t core)
 {

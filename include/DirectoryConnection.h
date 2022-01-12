@@ -2,10 +2,11 @@
 #ifndef __DIRECTORYCONNECTION_H__
 #define __DIRECTORYCONNECTION_H__
 
+#include <vector>
+
 #include "Common.h"
 #include "RawMessageConnection.h"
 #include "ReliableMessageConnection.h"
-#include <vector>
 
 struct RemoteConnection;
 
@@ -42,7 +43,7 @@ struct DirectoryConnection
     uint32_t lockLKey{0};
     size_t node_id_{size_t(-1)};
 
-    std::vector<RemoteConnection>* remoteInfo;
+    std::vector<RemoteConnection> *remoteInfo;
 
     void set_node_id(size_t nid)
     {
@@ -54,9 +55,9 @@ struct DirectoryConnection
                         uint64_t dsmSize,
                         uint32_t machineNR,
                         std::vector<RemoteConnection> &remoteInfo);
-    DirectoryConnection(DirectoryConnection&) = delete;
-    DirectoryConnection& operator=(DirectoryConnection&) = delete;
-    DirectoryConnection& operator=(DirectoryConnection&& rhs)
+    DirectoryConnection(DirectoryConnection &) = delete;
+    DirectoryConnection &operator=(DirectoryConnection &) = delete;
+    DirectoryConnection &operator=(DirectoryConnection &&rhs)
     {
         dirID = rhs.dirID;
         ctx = std::move(rhs.ctx);
@@ -85,7 +86,7 @@ struct DirectoryConnection
         rhs.node_id_ = 0;
         return *this;
     }
-    DirectoryConnection(DirectoryConnection&& rhs)
+    DirectoryConnection(DirectoryConnection &&rhs)
     {
         *this = std::move(rhs);
     }

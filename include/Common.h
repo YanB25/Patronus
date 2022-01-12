@@ -14,8 +14,8 @@
 
 #include "HugePageAlloc.h"
 #include "Statistics.h"
-#include "WRLock.h"
 #include "Timer.h"
+#include "WRLock.h"
 
 // CONFIG_ENABLE_EMBEDDING_LOCK and CONFIG_ENABLE_CRC
 // **cannot** be ON at the same time
@@ -166,12 +166,12 @@ inline void compiler_barrier()
 namespace future
 {
 template <typename T, typename... Args>
-std::unique_ptr<T> make_unique(Args &&...args)
+std::unique_ptr<T> make_unique(Args &&... args)
 {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
 template <typename T, typename... Args>
-std::shared_ptr<T> make_shared(Args &&...args)
+std::shared_ptr<T> make_shared(Args &&... args)
 {
     return std::shared_ptr<T>(new T(std::forward<Args>(args)...));
 }
@@ -180,8 +180,7 @@ std::shared_ptr<T> make_shared(Args &&...args)
 
 struct Data
 {
-    union
-    {
+    union {
         struct
         {
             uint32_t lower;
@@ -206,14 +205,12 @@ struct WRID
     WRID(uint16_t p, uint16_t a16, uint32_t id) : prefix(p), u16_a(a16), id(id)
     {
     }
-    union
-    {
+    union {
         struct
         {
             uint16_t prefix;
             uint16_t u16_a;
-            union
-            {
+            union {
                 struct
                 {
                     uint16_t u16_b;
@@ -284,7 +281,8 @@ constexpr static bool kEnableReliableMessage = true;
 // about higher level of debugging, sacrifying performance.
 constexpr static bool kEnableValidityMutex = false;
 constexpr static bool kEnableTrace = false;
-constexpr static uint64_t kTraceRate = 100000; // (1.0 / kTraceRate) possibility
+constexpr static uint64_t kTraceRate =
+    100000;  // (1.0 / kTraceRate) possibility
 }  // namespace config
 
 #define likely(x) __builtin_expect((x), 1)

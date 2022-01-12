@@ -67,5 +67,6 @@
     },
     "C_Cpp.default.compilerArgs": [
         "--std=c++17"
-    ]
+    ],
+    "editor.formatOnSave": true
 }

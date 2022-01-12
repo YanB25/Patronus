@@ -6,7 +6,6 @@
 
 class WRLock
 {
-
 private:
     std::atomic<uint16_t> l;
     const static uint16_t UNLOCKED = 0;

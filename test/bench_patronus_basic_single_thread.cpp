@@ -130,7 +130,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             ctx.timer().pin("[client] read finished");
         }
 
-
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
         Object magic_object = *(Object *) rdma_buf.buffer;
         DCHECK_EQ(magic_object.target, coro_magic)
@@ -143,7 +142,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         {
             ctx.timer().pin("[client] relinquish");
         }
-        
+
         DVLOG(2) << "[bench] client coro " << ctx << " relinquish ";
 
         DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
@@ -224,30 +223,27 @@ void client(Patronus::pointer p)
     LOG(INFO) << "I am client. tid " << tid;
 
     std::atomic<bool> finish{false};
-    std::thread monitor_thread(
-        [&finish]()
+    std::thread monitor_thread([&finish]() {
+        while (!finish.load(std::memory_order_relaxed))
         {
-            while (!finish.load(std::memory_order_relaxed))
-            {
-                auto cur_success = bench_info.success_nr;
-                auto cur_fail = bench_info.fail_nr;
-                auto now = std::chrono::steady_clock::now();
-                usleep(1000 * 1000);
-                auto then_success = bench_info.success_nr;
-                auto then_fail = bench_info.fail_nr;
-                auto then = std::chrono::steady_clock::now();
-                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                              then - now)
-                              .count();
+            auto cur_success = bench_info.success_nr;
+            auto cur_fail = bench_info.fail_nr;
+            auto now = std::chrono::steady_clock::now();
+            usleep(1000 * 1000);
+            auto then_success = bench_info.success_nr;
+            auto then_fail = bench_info.fail_nr;
+            auto then = std::chrono::steady_clock::now();
+            auto ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(then - now)
+                    .count();
 
-                auto success_op = then_success - cur_success;
-                auto fail_op = then_fail - cur_fail;
-                LOG_IF(INFO, cur_success > 0)
-                    << "[bench] Op: " << success_op << ", fail Op: " << fail_op
-                    << " for " << ns
-                    << " ns. OPS: " << 1.0 * 1e9 * success_op / ns;
-            }
-        });
+            auto success_op = then_success - cur_success;
+            auto fail_op = then_fail - cur_fail;
+            LOG_IF(INFO, cur_success > 0)
+                << "[bench] Op: " << success_op << ", fail Op: " << fail_op
+                << " for " << ns << " ns. OPS: " << 1.0 * 1e9 * success_op / ns;
+        }
+    });
 
     for (size_t i = 0; i < kCoroCnt; ++i)
     {

@@ -12,7 +12,6 @@ class Message;
 // #messageNR send pool and #messageNR message pool
 class AbstractMessageConnection
 {
-
     const static int kBatchCount = 4;
 
 protected:
@@ -36,9 +35,9 @@ protected:
     uint64_t sendCounter{0};
 
     uint16_t sendPadding{0};  // ud: 0
-                           // rp: ?
+                              // rp: ?
     uint16_t recvPadding{0};  // ud: 40
-                           // rp: ?
+                              // rp: ?
 
 public:
     AbstractMessageConnection(ibv_qp_type type,
@@ -47,13 +46,14 @@ public:
                               RdmaContext &ctx,
                               ibv_cq *cq,
                               uint32_t messageNR);
-    AbstractMessageConnection(const AbstractMessageConnection&) = delete;
-    AbstractMessageConnection& operator=(const AbstractMessageConnection&) = delete;
-    AbstractMessageConnection(AbstractMessageConnection&& rhs)
+    AbstractMessageConnection(const AbstractMessageConnection &) = delete;
+    AbstractMessageConnection &operator=(const AbstractMessageConnection &) =
+        delete;
+    AbstractMessageConnection(AbstractMessageConnection &&rhs)
     {
         *this = std::move(rhs);
     }
-    AbstractMessageConnection& operator=(AbstractMessageConnection&& rhs)
+    AbstractMessageConnection &operator=(AbstractMessageConnection &&rhs)
     {
         message = rhs.message;
         rhs.message = nullptr;

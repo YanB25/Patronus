@@ -9,6 +9,7 @@
 
 #pragma once
 #include <stdint.h>
+
 #include <algorithm>
 #include <random>
 
@@ -111,7 +112,7 @@ public:
 
     // Returns a Random instance for use by the current thread without
     // additional locking
-    static Random* GetTLSInstance();
+    static Random *GetTLSInstance();
 };
 
 // A good 32-bit random number generator based on std::mt19937.
@@ -226,8 +227,5 @@ void RandomShuffle(RandomIt first, RandomIt last, uint32_t seed)
 template <class RandomIt>
 void RandomShuffle(RandomIt first, RandomIt last)
 {
-    RandomShuffle(first,
-                  last,
-                  std::random_device
-    {}());
+    RandomShuffle(first, last, std::random_device{}());
 }

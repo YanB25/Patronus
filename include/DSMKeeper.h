@@ -111,8 +111,8 @@ public:
                        int dirID,
                        const ExchangeMeta &exMeta);
     void connectReliableMsg(ReliableConnection &cond,
-                     int remoteID,
-                     const ExchangeMeta &);
+                            int remoteID,
+                            const ExchangeMeta &);
     void updateRemoteConnectionForDir(RemoteConnection &,
                                       const ExchangeMeta &exMeta,
                                       size_t dirID);

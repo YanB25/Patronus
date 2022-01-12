@@ -41,8 +41,7 @@ void do_master(std::shared_ptr<DSM> dsm, CoroYield &yield)
 
 struct CID
 {
-    union
-    {
+    union {
         struct
         {
             uint16_t node_id;
@@ -73,7 +72,6 @@ void client_worker(std::shared_ptr<DSM> dsm,
 
     CoroContext ctx(tid, &yield, &master, coro_id);
 
-
     auto *rdma_buf = dsm->get_rdma_buffer();
     auto *my_buf = rdma_buf + ReliableConnection::kMessageSize * coro_id;
     auto *send_msg = (EchoMessage *) my_buf;
@@ -102,10 +100,10 @@ void client_worker(std::shared_ptr<DSM> dsm,
             client_finish = true;
         }
     }
-    LOG(WARNING) << "[bench] tid " << tid << " coro " << (int) coro_id << " exit. sent " << kMsgNr << ". go back to server";
+    LOG(WARNING) << "[bench] tid " << tid << " coro " << (int) coro_id
+                 << " exit. sent " << kMsgNr << ". go back to server";
     yield(master);
 }
-
 
 void client_master(std::shared_ptr<DSM> dsm,
                    CoroYield &yield,
@@ -149,7 +147,8 @@ void client_master(std::shared_ptr<DSM> dsm,
             }
         }
     }
-    LOG(WARNING) << "recv_nr " << recv_nr << ", expect " << expect_nr << ". master exit";
+    LOG(WARNING) << "recv_nr " << recv_nr << ", expect " << expect_nr
+                 << ". master exit";
 }
 
 void client(std::shared_ptr<DSM> dsm)
@@ -159,12 +158,14 @@ void client(std::shared_ptr<DSM> dsm)
 
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        workers[i] = CoroCall([dsm, i, &msg_queues](CoroYield &yield)
-                              { client_worker(dsm, i, yield, msg_queues[i]); });
+        workers[i] = CoroCall([dsm, i, &msg_queues](CoroYield &yield) {
+            client_worker(dsm, i, yield, msg_queues[i]);
+        });
     }
 
-    master = CoroCall([dsm, &msg_queues](CoroYield &yield)
-                      { client_master(dsm, yield, msg_queues); });
+    master = CoroCall([dsm, &msg_queues](CoroYield &yield) {
+        client_master(dsm, yield, msg_queues);
+    });
 
     master();
 }

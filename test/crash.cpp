@@ -1,5 +1,5 @@
 int main()
 {
-    int* p = nullptr;
+    int *p = nullptr;
     return *p;
 }

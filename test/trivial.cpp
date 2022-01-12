@@ -4,7 +4,6 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "util/monitor.h"
-#include "Timer.h"
 
 // Two nodes
 // one node issues cas operations
@@ -13,7 +12,7 @@ constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);

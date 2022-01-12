@@ -1,9 +1,10 @@
-#include "Rdma.h"
 #include <glog/logging.h>
+
+#include "Rdma.h"
 bool modifyErrQPtoNormal(struct ibv_qp *qp,
                          uint32_t remoteQPN,
                          uint16_t remoteLid,
-                         const uint8_t* remoteGid,
+                         const uint8_t *remoteGid,
                          RdmaContext *context)
 {
     if (!modifyQPtoReset(qp))
@@ -25,7 +26,7 @@ bool modifyErrQPtoNormal(struct ibv_qp *qp,
     DLOG(INFO) << "Succeed in switch QP: " << qp << " to normal state.";
     return true;
 }
-bool modifyQPtoReset(struct ibv_qp* qp)
+bool modifyQPtoReset(struct ibv_qp *qp)
 {
     struct ibv_qp_attr attr;
     memset(&attr, 0, sizeof(attr));

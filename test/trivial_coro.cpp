@@ -63,8 +63,8 @@ int main(int argc, char *argv[])
     {
         for (size_t i = 0; i < kCoroCnt; ++i)
         {
-            workers[i] = CoroCall([dsm, i](CoroYield &yield)
-                                  { do_worker(dsm, yield, i); });
+            workers[i] = CoroCall(
+                [dsm, i](CoroYield &yield) { do_worker(dsm, yield, i); });
         }
         master = CoroCall([dsm](CoroYield &yield) { do_master(dsm, yield); });
 

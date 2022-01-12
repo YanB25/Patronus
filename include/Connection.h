@@ -42,12 +42,14 @@ struct RemoteConnection
             {
                 if (dirToAppAh[i][j])
                 {
-                    PLOG_IF(ERROR, ibv_destroy_ah(dirToAppAh[i][j])) << "failed to destroy ah";
+                    PLOG_IF(ERROR, ibv_destroy_ah(dirToAppAh[i][j]))
+                        << "failed to destroy ah";
                     dirToAppAh[i][j] = nullptr;
                 }
                 if (appToDirAh[j][i])
                 {
-                    PLOG_IF(ERROR, ibv_destroy_ah(appToDirAh[j][i])) << "failed to destroy ah";
+                    PLOG_IF(ERROR, ibv_destroy_ah(appToDirAh[j][i]))
+                        << "failed to destroy ah";
                     appToDirAh[j][i] = nullptr;
                 }
             }

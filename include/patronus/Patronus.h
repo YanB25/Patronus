@@ -17,8 +17,9 @@ namespace patronus
 {
 class Patronus;
 using KeyLocator = std::function<uint64_t(key_t)>;
-static KeyLocator identity_locator = [](key_t key) -> uint64_t
-{ return (uint64_t) key; };
+static KeyLocator identity_locator = [](key_t key) -> uint64_t {
+    return (uint64_t) key;
+};
 struct PatronusConfig
 {
     size_t machine_nr{0};
@@ -197,8 +198,10 @@ private:
     constexpr static size_t kLeaseContextNr =
         kMaxCoroNr * kGuessActiveLeasePerCoro;
     constexpr static size_t kServerCoroNr = kMaxCoroNr;
+    constexpr static size_t kProtectionRegionPerThreadNr =
+        NR_DIRECTORY * kMaxCoroNr * kGuessActiveLeasePerCoro;
     constexpr static size_t kTotalProtectionRegionNr =
-        NR_DIRECTORY * MAX_APP_THREAD * kMaxCoroNr * kGuessActiveLeasePerCoro;
+        kProtectionRegionPerThreadNr * MAX_APP_THREAD;
 
     void reg_locator(const KeyLocator &locator = identity_locator)
     {
@@ -351,6 +354,9 @@ private:
     static thread_local ThreadUnsafePool<LeaseContext, kLeaseContextNr>
         lease_context_;
     static thread_local ServerCoroContext server_coro_ctx_;
+    static thread_local std::unique_ptr<
+        ThreadUnsafePool<ProtectionRegion, kProtectionRegionPerThreadNr>>
+        protection_region_pool_;
 
     // for admin management
     std::array<std::atomic<bool>, MAX_MACHINE> exits_;

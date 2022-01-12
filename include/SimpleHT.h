@@ -2,14 +2,13 @@
 #if !defined(_SIMPLE_HT_H_)
 #define _SIMPLE_HT_H_
 
+#include <map>
+
 #include "Common.h"
 #include "GlobalAddress.h"
 
-#include <map>
-
 class SimpleHT
 {
-
     const static uint64_t kBuckSize = 640000;
 
 public:

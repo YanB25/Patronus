@@ -256,8 +256,7 @@ constexpr int kLeafCardinality =
 class InternalPage
 {
 private:
-    union
-    {
+    union {
         uint32_t crc;
         uint64_t embedding_lock;
         uint64_t index_cache_freq;
@@ -353,8 +352,7 @@ public:
 class LeafPage
 {
 private:
-    union
-    {
+    union {
         uint32_t crc;
         uint64_t embedding_lock;
     };

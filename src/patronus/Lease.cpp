@@ -2,7 +2,6 @@
 
 namespace patronus
 {
-
 std::ostream &operator<<(std::ostream &os, const Lease &lease)
 {
     os << "{" << (lease.lease_type_ == LeaseType::kReadLease ? "R" : "W")
@@ -13,4 +12,4 @@ std::ostream &operator<<(std::ostream &os, const Lease &lease)
        << ", cur_ddl: " << lease.cur_ddl_term_ << "}";
     return os;
 }
-}
+}  // namespace patronus

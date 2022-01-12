@@ -7,7 +7,6 @@
 
 class LocalLockQueue
 {
-
     const static int kMaxQueueSize = 512;
     static_assert(kMaxQueueSize > MAX_APP_THREAD * define::kMaxCoroNr, "XX");
 

@@ -2,12 +2,12 @@
 #if !defined(_GLOBAL_ALLOCATOR_H_)
 #define _GLOBAL_ALLOCATOR_H_
 
+#include <glog/logging.h>
+
 #include <cstring>
 
 #include "Common.h"
-
 #include "GlobalAddress.h"
-#include <glog/logging.h>
 
 // global allocator for coarse-grained (chunck level) alloc
 // used by home agent

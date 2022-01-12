@@ -8,6 +8,7 @@
 #define forceinline inline __attribute__((always_inline))
 
 #include <assert.h>
+#include <glog/logging.h>
 #include <infiniband/verbs.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -20,7 +21,6 @@
 #include <string>
 
 #include "Common.h"
-#include <glog/logging.h>
 
 #define MAX_POST_LIST 32
 #define DCT_ACCESS_KEY 3185
@@ -35,8 +35,7 @@ struct RdmaOpRegion
     uint64_t size;
 
     uint32_t lkey;
-    union
-    {
+    union {
         uint32_t remoteRKey;
         bool is_on_chip;
     };
@@ -190,8 +189,7 @@ using WcHandler = std::function<void(ibv_wc *)>;
 using WcErrHandler = WcHandler;
 static WcErrHandler empty_wc_err_handler = [](ibv_wc *) {};
 static WcHandler empty_wc_handler = [](ibv_wc *) {};
-static WcHandler log_wc_handler = [](ibv_wc *wc)
-{
+static WcHandler log_wc_handler = [](ibv_wc *wc) {
     if (unlikely(wc->status != IBV_WC_SUCCESS))
     {
         LOG(ERROR) << "[wc] Failed status " << ibv_wc_status_str(wc->status)
@@ -471,8 +469,8 @@ constexpr int IBV_ACCESS_CUSTOM_REMOTE_RW =
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
     IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND;
 constexpr int IBV_ACCESS_CUSTOM_REMOTE_RO =
-    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-    IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND;
+    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
+    IBV_ACCESS_MW_BIND;
 
 /**
  * bind a memory window to a part of memory region.

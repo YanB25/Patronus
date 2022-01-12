@@ -14,9 +14,9 @@ struct SyncTimeMessage
 class ClockManager
 {
 public:
-    ClockManager(const ClockManager&) = delete;
-    ClockManager& operator=(const ClockManager&) = delete;
-    ClockManager(DSM* dsm);
+    ClockManager(const ClockManager &) = delete;
+    ClockManager &operator=(const ClockManager &) = delete;
+    ClockManager(DSM *dsm);
 
     uint64_t rdtsc()
     {
@@ -33,6 +33,7 @@ public:
 
     void init_sync_clock();
     void sync_clock();
+
 private:
     void primary_init_sync_clock();
     void backup_init_sync_clock();
@@ -49,7 +50,7 @@ private:
         int64_t offset = target_clock - my_clock;
         set_offset(offset);
     }
-    DSM* dsm_;
+    DSM *dsm_;
     int64_t offset_{0};
 };
 

@@ -7,8 +7,7 @@
 class GlobalAddress
 {
 public:
-    union
-    {
+    union {
         struct
         {
             uint64_t nodeID : 16;

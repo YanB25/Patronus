@@ -129,10 +129,9 @@ public:
                                      depend_col + "`");
         }
         auto pcolumn = future::make_unique<DependentColumn>(
-            inner->name(), 
-            inner->name() + " (ops)",
-            inner,
-            [](double input) { return input == 0 ? 0 : 1e9 / input; });
+            inner->name(), inner->name() + " (ops)", inner, [](double input) {
+                return input == 0 ? 0 : 1e9 / input;
+            });
         columns_.emplace_back(std::move(pcolumn));
         return *this;
     }
@@ -151,10 +150,9 @@ public:
                                      depend_col + "`");
         }
         auto pcolumn = future::make_unique<DependentColumn>(
-            inner->name(), 
-            inner->name() + " (ns)",
-            inner,
-            [](double input) { return input == 0 ? 0 : 1e9 / input; });
+            inner->name(), inner->name() + " (ns)", inner, [](double input) {
+                return input == 0 ? 0 : 1e9 / input;
+            });
         return *this;
     }
     void snapshot()

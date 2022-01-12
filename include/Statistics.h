@@ -53,7 +53,6 @@ public:
 
     static void dispaly()
     {
-
         // std::cout << "dir recv " << (dirRecvDataCounter +
         // dirRecvControlCounter) << std::endl;
         // std::cout << "dir send " << (dirSendDataCounter +

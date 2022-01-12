@@ -80,8 +80,7 @@ void DSM::syncMetadataBootstrap(const ExchangeMeta &self_meta, size_t remoteID)
     }
     else
     {
-        static auto wc_err_h = [](ibv_wc *wc)
-        {
+        static auto wc_err_h = [](ibv_wc *wc) {
             LOG(ERROR)
                 << "[keeper] failed to broadcast metadata bootstrap. wr_id: "
                 << wc->wr_id;

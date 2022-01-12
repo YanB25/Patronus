@@ -1,10 +1,9 @@
 #include <algorithm>
 #include <random>
 
+#include "Timer.h"
 #include "patronus/Patronus.h"
-#include "Timer.h"
 #include "util/monitor.h"
-#include "Timer.h"
 
 // Two nodes
 // one node issues cas operations
@@ -26,7 +25,7 @@ void server(Patronus::pointer p)
     LOG(INFO) << "I am server. tid " << tid;
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);

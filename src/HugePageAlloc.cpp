@@ -1,12 +1,13 @@
 #include "HugePageAlloc.h"
-#include <stdexcept>
+
+#include <glog/logging.h>
 #include <memory.h>
 #include <sys/mman.h>
 
 #include <cstdint>
+#include <stdexcept>
 
 #include "Common.h"
-#include <glog/logging.h>
 void *hugePageAlloc(size_t size)
 {
     void *res = mmap(NULL,
@@ -24,7 +25,7 @@ void *hugePageAlloc(size_t size)
     return res;
 }
 
-bool hugePageFree(void* ptr, size_t size)
+bool hugePageFree(void *ptr, size_t size)
 {
     size_t align = 2 * 1024 * 1024;
     CHECK((uint64_t) ptr % align == 0);
