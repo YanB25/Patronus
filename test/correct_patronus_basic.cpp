@@ -188,13 +188,8 @@ void client(Patronus::pointer p)
     LOG(INFO) << "I am client. tid " << tid;
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        client_coro.workers[i] = CoroCall([p, i](CoroYield &yield) {
-            LOG(INFO) << "[debug] tell you my addr: p: " << (void *) &p
-                      << ", p.get(): " << (void *) p.get() << ", &i "
-                      << (void *) &i << ", &yield: " << (void *) &yield
-                      << " client_worker: " << (void *) client_worker;
-            client_worker(p, i, yield);
-        });
+        client_coro.workers[i] =
+            CoroCall([p, i](CoroYield &yield) { client_worker(p, i, yield); });
     }
     client_coro.master =
         CoroCall([p](CoroYield &yield) { client_master(p, yield); });
