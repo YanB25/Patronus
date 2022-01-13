@@ -63,7 +63,8 @@
         "random": "cpp",
         "set": "cpp",
         "string_view": "cpp",
-        "shared_mutex": "cpp"
+        "shared_mutex": "cpp",
+        "unordered_set": "cpp"
     },
     "C_Cpp.default.compilerArgs": [
         "--std=c++17"
