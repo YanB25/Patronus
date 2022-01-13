@@ -33,7 +33,7 @@ Possible performance optimization:
 [-] evaluation: bench the latency of the whole procedure. with various concurrency. NOTE: because of a bug, this really took me hours! And I am so reluctant to work today. The result is at Yuque.
 
 
-1th Three days DDL: 1/10-1/12
+1st Three days DDL: 1/10-1/12
 [-] evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
     - 1 mw get 1.5 Mops. 2 mw get 1.36 Mops. 4 mw get 1 Mops. 8 mw get 890 Kops.
 [-] WORK, PASSED: should be a quick test: see if rmsg can work correctly, if the QP is used by ONE thread, but not SAME thread.
@@ -52,12 +52,24 @@ Possible performance optimization:
 [-] DONE: rename script to test_all.sh. support the correct.sh script. this should be easy. I have to fix all the correct_*.cpp files.
     - for example, correct_nomem is wrong.
     - remove all the unnecessary sleep. This kill the test phases.
-- Add the header into the design. That would require adding the swaping area, and makes everything works well.
+[-] Add the header into the design. That would require adding the swaping area, and makes everything works well.
     - bind two mw, and return two mw to the user.
     - think about how user will use the meta area of the ProtectionRegion
 
+Sorry I take one day off. Just too tired to work. Can not focus. 
+2nd Tree days DDL: 1/14-1/16
+- See how to fix the frequency of the CPU. See if rdtsc() is stable. See if rdtsc() can map to real time (like ns).
+- Add the TIME concepts into patronus. Server should intervally see if any expired lease exists, and destroy them!
+    - IMPORTANT: what if server speculatively gc the resource, then client requires the gc the resource, i.e. the ABA problem? The resource is currently owns by others.
+    - I think, should attach clientID to the on-going resource. If client requires to gc, see if 1) the resource is on-going (if gc-ed, will not do twice), and 2) the clientID matches (if not match, also skip.)
+- Carefully thinks about lock conflict, fairness, client synchronizations at swap area, ...
+- Implemente all the APIs in Patronus. Extend, upgrade would be the most important ones.
 
-Futures:
-- Add the TIME into patronus. Server should intervally see if any expired lease exists, and destroy them!
-- Implemente all the APIs in Patronus
+FUTURES:
+
 If all the things above finish, I can move on to adopt the uPaxos!
+
+- uPaxos
+- some KVs
+- motivation data
+- micro evaluations
