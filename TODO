@@ -58,7 +58,16 @@ Possible performance optimization:
 
 Sorry I take one day off. Just too tired to work. Can not focus. 
 2nd Tree days DDL: 1/14-1/16
-- See how to fix the frequency of the CPU. See if rdtsc() is stable. See if rdtsc() can map to real time (like ns).
+- Won't Fix: See how to fix the frequency of the CPU. See if rdtsc() is stable. See if rdtsc() can map to real time (like ns).
+    - Won't Fix: std::chrono already has great performance: 25 ns to get time_point, and a uint64_t-like performance.
+    - and the std::chrono provides great API to compare and modify times.
+    - Won't consider rdtsc.
+- Test the performance of std::chrono::system_clock? because Lease actually relies on real time...
+- Implement a task_manager
+    - could use single thread (per-thread) design, or a thread-safe queue design (let the master to do all the tasks)
+- Change the acquire lease API, and add some flags into it. server could react according to the flags.
+    - so that, Server could know it is a bench_test (not automatically gc), or actual deploy (register gc task to the task manager).
+    - so that, we could let server know whether it needs to speculatively binds a longer lease for one-sided extends.
 - Add the TIME concepts into patronus. Server should intervally see if any expired lease exists, and destroy them!
     - IMPORTANT: what if server speculatively gc the resource, then client requires the gc the resource, i.e. the ABA problem? The resource is currently owns by others.
     - I think, should attach clientID to the on-going resource. If client requires to gc, see if 1) the resource is on-going (if gc-ed, will not do twice), and 2) the clientID matches (if not match, also skip.)
