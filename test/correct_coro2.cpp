@@ -88,7 +88,8 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     bindCore(0);
 
-    bench_coro_large_stack();
+    // bench_coro_large_stack();
+    LOG(WARNING) << "not work, crash, but won't fix";
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
