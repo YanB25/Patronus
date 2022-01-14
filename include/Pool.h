@@ -275,15 +275,15 @@ public:
                 continue;
             }
             allocated_[my_idx] = true;
-            return base_ + kObjSize * my_idx;
+            return (char *) base_ + kObjSize * my_idx;
         }
     }
     void put(const void *buf)
     {
         char *buf_addr = (char *) buf;
         DCHECK_GT(buf_addr, base_);
-        DCHECK_EQ((buf_addr - base_) % kObjSize, 0);
-        size_t idx = (buf_addr - base_) / kObjSize;
+        DCHECK_EQ((buf_addr - (char *) base_) % kObjSize, 0);
+        size_t idx = (buf_addr - (char *) base_) / kObjSize;
         DCHECK(allocated_[idx]);
         allocated_[idx] = false;
     }

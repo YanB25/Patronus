@@ -62,6 +62,11 @@ Sorry I take one day off. Just too tired to work. Can not focus.
     - Won't Fix: std::chrono already has great performance: 25 ns to get time_point, and a uint64_t-like performance.
     - and the std::chrono provides great API to compare and modify times.
     - Won't consider rdtsc.
+[-] Won't Do: consider one dedicated core for gc
+    - If I need Task manager accord threads, I actually need lock free map / skiplist / priority queue
+    - Boost does not provide one, and folly doest. But folly is not buildable by clang (can workaround, but don't want to brother). Don't want to roll this proj back to using g++.
+    - Also the latest clang (with -stdlib=libc++) can not build folly (which use boost, which use removed std::bind1st), so cannot use folly::coro.
+    - It makes me reluctant to try folly's thread safe skip list. just too tired to try.
 - Test the performance of std::chrono::system_clock? because Lease actually relies on real time...
 - Implement a task_manager
     - could use single thread (per-thread) design, or a thread-safe queue design (let the master to do all the tasks)
