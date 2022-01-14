@@ -58,7 +58,7 @@ Possible performance optimization:
 
 Sorry I take one day off. Just too tired to work. Can not focus. 
 2nd Tree days DDL: 1/14-1/16
-- Won't Fix: See how to fix the frequency of the CPU. See if rdtsc() is stable. See if rdtsc() can map to real time (like ns).
+[-] Won't Fix: See how to fix the frequency of the CPU. See if rdtsc() is stable. See if rdtsc() can map to real time (like ns).
     - Won't Fix: std::chrono already has great performance: 25 ns to get time_point, and a uint64_t-like performance.
     - and the std::chrono provides great API to compare and modify times.
     - Won't consider rdtsc.
