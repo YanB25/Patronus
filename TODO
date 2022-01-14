@@ -68,7 +68,7 @@ Sorry I take one day off. Just too tired to work. Can not focus.
     - Also the latest clang (with -stdlib=libc++) can not build folly (which use boost, which use removed std::bind1st), so cannot use folly::coro.
     - It makes me reluctant to try folly's thread safe skip list. just too tired to try.
 - Test the performance of std::chrono::system_clock? because Lease actually relies on real time...
-- Implement a task_manager
+[-] Implement a task_manager
     - could use single thread (per-thread) design, or a thread-safe queue design (let the master to do all the tasks)
 - Change the acquire lease API, and add some flags into it. server could react according to the flags.
     - so that, Server could know it is a bench_test (not automatically gc), or actual deploy (register gc task to the task manager).
