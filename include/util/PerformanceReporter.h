@@ -2,53 +2,223 @@
 #ifndef PERFORMANCE_REPORTER_H_
 #define PERFORMANCE_REPORTER_H_
 
+#include <atomic>
 #include <chrono>
+#include <string>
+#include <thread>
+
+#include "PerThread.h"
+
+class Averager
+{
+public:
+    Averager() = default;
+    void add(double n)
+    {
+        num_ += n;
+        times_++;
+        avg_ = 1.0 * num_ / times_;
+    }
+    double average() const
+    {
+        return avg_;
+    }
+
+private:
+    double num_{0};
+    size_t times_{0};
+    double avg_{0};
+};
 
 class PerformanceReporter
 {
 public:
-    PerformanceReporter(const std::string &name,
-                        std::atomic<uint64_t> &op,
-                        std::atomic<bool> &finished)
-        : name_(name), op_(op), finished_(finished)
+    PerformanceReporter(const std::string &name) : name_(name)
     {
+        thread_finished_.fill(false);
+        thread_op_.fill(0);
     }
 
     template <typename T>
-    void start(const T &duration)
+    void start(const T &duration, bool report)
     {
-        monitor_thread = std::thread([this, duration]() {
-            while (likely(!finished_.load(std::memory_order_relaxed)))
+        monitor_thread = std::thread([this, duration, report]() {
+            while (likely(!is_finish()))
             {
-                size_t before = op_.load(std::memory_order_relaxed);
+                auto before = sum_op();
                 auto before_time = std::chrono::steady_clock::now();
 
                 std::this_thread::sleep_for(duration);
 
                 auto after_time = std::chrono::steady_clock::now();
-                size_t after = op_.load(std::memory_order_relaxed);
+                auto after = sum_op();
 
-                size_t op = after - before;
+                auto op = after - before;
                 size_t ns =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(
                         after_time - before_time)
                         .count();
                 double ops = 1.0 * op * 1e9 / ns;
-                LOG(INFO) << "[performance] " << name_ << " op: " << op
-                          << ", ns: " << ns << ", ops: " << ops;
+
+                double ns_per_op = 1.0 * ns / op;
+                double ns_per_op_per_thread = ns_per_op / bench_threads_.size();
+
+                // determine finished
+                bool should_finish = true;
+                for (size_t i = 0; i < bench_threads_.size(); ++i)
+                {
+                    if (!thread_finished_[i].load(std::memory_order_relaxed))
+                    {
+                        should_finish = false;
+                        break;
+                    }
+                }
+                if (unlikely(should_finish))
+                {
+                    g_finished_ = true;
+                    continue;
+                }
+
+                // only calculate the measure if not finished
+                // only calculate the before > 0 (already started)
+                if (before > 0)
+                {
+                    max_op_ = std::max(max_op_, op);
+                    min_op_ = std::min(min_op_, op);
+                    avg_ops_.add(ops);
+                    max_ops_ = std::max(max_ops_, ops);
+                    min_ops_ = std::min(min_ops_, ops);
+                    avg_ns_.add(ns_per_op);
+                    avg_ns_perthread_.add(ns_per_op_per_thread);
+
+                    LOG_IF(INFO, report)
+                        << "[performance] `" << name_ << "` op: " << op
+                        << ", ns: " << ns << ", ops: " << ops
+                        << ", aggregated avg-ns: " << ns_per_op
+                        << ", avg-ns-thread: " << ns_per_op_per_thread;
+                }
             }
         });
     }
+
+    std::string name() const
+    {
+        return name_;
+    }
+
+    using ThreadID = uint64_t;
+    using BenchTask = std::function<void(
+        ThreadID, std::atomic<size_t> &, std::atomic<bool> &)>;
+    void bench_task(size_t thread_nr, const BenchTask task)
+    {
+        CHECK_LE(thread_nr, MAX_APP_THREAD);
+        for (size_t i = 0; i < thread_nr; ++i)
+        {
+            bench_threads_.emplace_back(
+                [tid = i,
+                 task,
+                 &thread_op = thread_op_[i],
+                 &thread_finish = thread_finished_[i]]() {
+                    // leave the 0 core idle
+                    bindCore(tid + 1);
+                    task(tid, thread_op, thread_finish);
+                });
+        }
+    }
+
+    bool is_finish() const
+    {
+        return g_finished_.load(std::memory_order_relaxed);
+    }
+
+    double max_ops() const
+    {
+        return max_ops_;
+    }
+    double min_ops() const
+    {
+        return min_ops_;
+    }
+    size_t max_op() const
+    {
+        return max_op_;
+    }
+    size_t min_op() const
+    {
+        return min_op_;
+    }
+    double avg_ops() const
+    {
+        return avg_ops_.average();
+    }
+    double avg_ns() const
+    {
+        return avg_ns_.average();
+    }
+    double avg_ns_per_thread() const
+    {
+        return avg_ns_perthread_.average();
+    }
+    void wait()
+    {
+        for (auto &t : bench_threads_)
+        {
+            if (t.joinable())
+            {
+                t.join();
+            }
+        }
+        if (monitor_thread.joinable())
+        {
+            monitor_thread.join();
+        }
+    }
     ~PerformanceReporter()
     {
-        monitor_thread.join();
+        wait();
     }
 
 private:
+    uint64_t sum_op() const
+    {
+        uint64_t ret = 0;
+        for (size_t i = 0; i < bench_threads_.size(); ++i)
+        {
+            ret += thread_op_[i].load(std::memory_order_relaxed);
+        }
+        return ret;
+    }
+
+    friend std::ostream &operator<<(std::ostream &,
+                                    const PerformanceReporter &);
     std::string name_;
-    std::atomic<uint64_t> &op_;
-    std::atomic<bool> &finished_;
     std::thread monitor_thread;
+    double max_ops_{std::numeric_limits<double>::min()};
+    double min_ops_{std::numeric_limits<double>::max()};
+    size_t max_op_{std::numeric_limits<size_t>::min()};
+    size_t min_op_{std::numeric_limits<size_t>::max()};
+
+    // used to calculate avg
+    Averager avg_ops_;
+    Averager avg_ns_;
+    Averager avg_ns_perthread_;
+
+    // for management
+    std::atomic<bool> g_finished_{false};
+
+    // for bench tasks
+    std::vector<std::thread> bench_threads_;
+    Perthread<std::atomic<uint64_t>> thread_op_;
+    Perthread<std::atomic<bool>> thread_finished_;
 };
+
+inline std::ostream &operator<<(std::ostream &os, const PerformanceReporter &r)
+{
+    os << "SUMMARY [Performance `" << r.name() << "`] avg_ops: " << r.avg_ops()
+       << ", max_ops: " << r.max_ops() << ", min_ops: " << r.min_ops()
+       << ", aggregated avg-ns: " << r.avg_ns()
+       << ", avg-ns(thread): " << r.avg_ns_per_thread();
+    return os;
+}
 
 #endif

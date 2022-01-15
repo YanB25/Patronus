@@ -44,6 +44,10 @@ private:
     {
         return (T *) &t_;
     }
+    const T *pget() const
+    {
+        return (const T *) &t_;
+    }
 
     using aligned_t = typename std::aligned_storage<sizeof(T), kAligned>::type;
     aligned_t t_;
@@ -74,11 +78,12 @@ public:
     {
         return per_thread_.empty();
     }
-    void fill(const T &value)
+    template <typename U>
+    void fill(const U &value)
     {
         for (size_t i = 0; i < per_thread_.size(); ++i)
         {
-            per_thread_[i] = value;
+            per_thread_[i].get() = value;
         }
     }
 
