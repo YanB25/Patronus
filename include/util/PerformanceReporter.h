@@ -30,6 +30,42 @@ private:
     double avg_{0};
 };
 
+class OnePassMonitor
+{
+public:
+    OnePassMonitor() = default;
+    void collect(double n)
+    {
+        min_ = std::min(min_, n);
+        max_ = std::max(max_, n);
+        avg_.add(n);
+    }
+    double min() const
+    {
+        return min_;
+    }
+    double max() const
+    {
+        return max_;
+    }
+    double average() const
+    {
+        return avg_.average();
+    }
+
+private:
+    double min_{std::numeric_limits<double>::max()};
+    double max_{std::numeric_limits<double>::lowest()};
+
+    Averager avg_;
+};
+inline std::ostream &operator<<(std::ostream &os, const OnePassMonitor &m)
+{
+    os << "{min: " << m.min() << ", max: " << m.max()
+       << ", avg: " << m.average() << "}";
+    return os;
+}
+
 class PerformanceReporter
 {
 public:
@@ -83,11 +119,8 @@ public:
                 // only calculate the before > 0 (already started)
                 if (before > 0)
                 {
-                    max_op_ = std::max(max_op_, op);
-                    min_op_ = std::min(min_op_, op);
-                    avg_ops_.add(ops);
-                    max_ops_ = std::max(max_ops_, ops);
-                    min_ops_ = std::min(min_ops_, ops);
+                    op_.collect(op);
+                    ops_.collect(ops);
                     avg_ns_.add(ns_per_op);
                     avg_ns_perthread_.add(ns_per_op_per_thread);
 
@@ -133,23 +166,23 @@ public:
 
     double max_ops() const
     {
-        return max_ops_;
+        return ops_.max();
     }
     double min_ops() const
     {
-        return min_ops_;
+        return ops_.min();
     }
     size_t max_op() const
     {
-        return max_op_;
+        return op_.max();
     }
     size_t min_op() const
     {
-        return min_op_;
+        return op_.min();
     }
     double avg_ops() const
     {
-        return avg_ops_.average();
+        return ops_.average();
     }
     double avg_ns() const
     {
@@ -193,13 +226,10 @@ private:
                                     const PerformanceReporter &);
     std::string name_;
     std::thread monitor_thread;
-    double max_ops_{std::numeric_limits<double>::min()};
-    double min_ops_{std::numeric_limits<double>::max()};
-    size_t max_op_{std::numeric_limits<size_t>::min()};
-    size_t min_op_{std::numeric_limits<size_t>::max()};
+    OnePassMonitor ops_;
+    OnePassMonitor op_;
 
     // used to calculate avg
-    Averager avg_ops_;
     Averager avg_ns_;
     Averager avg_ns_perthread_;
 

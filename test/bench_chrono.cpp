@@ -288,14 +288,32 @@ double bench_chrono()
     return max_tp;
 }
 
+void explain_system_clock()
+{
+    auto now = std::chrono::system_clock::now();
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  now.time_since_epoch())
+                  .count();
+    auto us = ns / 1_K;
+    auto ms = us / 1_K;
+    auto s = ms / 1_K;
+    auto hours =
+        std::chrono::duration_cast<std::chrono::hours>(now.time_since_epoch())
+            .count();
+    auto days = hours / 24;
+    auto month = days / 30;
+    auto years = days / 365;
+    LOG(INFO) << "Now: " << years << " years, " << month << " months, " << days
+              << " days, " << hours << " hours, " << s << " s, " << ms
+              << " ms, " << us << " us, " << ns << " ns";
+}
+
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    // bench_compare_times_per_sec();
-    // bench_time_point_modification();
-    // steady_clock();
+    explain_system_clock();
     bench_steady_clock_compare_times_per_sec();
 
     bench_system_clock_now();
