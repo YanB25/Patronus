@@ -14,14 +14,19 @@ namespace patronus::time
 {
 struct ClockInfo
 {
+    // be atomic, because don't want to cache them in registers
+    // could be volatile, but I think atomic is fine.
     std::atomic<int64_t> ns;
     std::atomic<int64_t> adjustment;
+    std::atomic<uint64_t> self_epsilon;
+    std::atomic<uint64_t> g_epsilon;
     std::atomic<uint64_t> magic;
 };
 inline std::ostream &operator<<(std::ostream &os, const ClockInfo &clock)
 {
     os << "{ClockInfo adjustment: " << clock.adjustment << ", ns: " << clock.ns
-       << "}";
+       << ", self_epsilon: " << clock.self_epsilon
+       << ", g_epsilon: " << clock.g_epsilon << "}";
     return os;
 }
 
@@ -29,6 +34,7 @@ struct SyncFinishedMessage
 {
     enum RequestType type;
     ClientID cid;
+    int64_t self_epsilon;
 };
 using namespace define::literals;
 class TimeSyncer
@@ -50,6 +56,23 @@ public:
      */
     void sync();
 
+    patronus_time_t to_patronus_time(
+        const std::chrono::time_point<std::chrono::steady_clock> &t)
+    {
+        auto raw = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       t.time_since_epoch())
+                       .count();
+        return raw + clock_info_.adjustment;
+    }
+    patronus_time_t to_patronus_time(
+        const std::chrono::time_point<std::chrono::system_clock> &t)
+    {
+        auto raw = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       t.time_since_epoch())
+                       .count();
+        return raw + clock_info_.adjustment;
+    }
+
 private:
     /**
      * @brief Signal to the cluster that this node finishes its syncing
@@ -67,7 +90,7 @@ private:
         return std::chrono::system_clock::now();
     }
 
-    void finish();
+    void wait_finish();
 
     DSM::pointer dsm_;
     GlobalAddress target_gaddr_;

@@ -48,12 +48,12 @@ void client(DSM::pointer dsm)
     {
         auto &msg = *(BenchMessage *) buf;
         auto now = std::chrono::system_clock::now();
-        msg.time = patronus::to_ns(now);
+        msg.time = patronus::time::to_ns(now);
         dsm->reliable_send(buf, sizeof(msg), kServerNodeId, kMid);
         dsm->reliable_recv(kMid, recv_buffer, 1);
 
         auto &recv_msg = *(BenchMessage *) recv_buffer;
-        auto that_time = patronus::ns_to_system_clock(recv_msg.time);
+        auto that_time = patronus::time::ns_to_system_clock(recv_msg.time);
         now = std::chrono::system_clock::now();
         // CHECK_LT(that_time, now) << "recv BenchMessage from future";
 
@@ -77,7 +77,7 @@ void server(DSM::pointer dsm)
     {
         dsm->reliable_recv(kMid, recv_buf);
         auto &msg = *(BenchMessage *) recv_buf;
-        auto that_time = patronus::ns_to_system_clock(msg.time);
+        auto that_time = patronus::time::ns_to_system_clock(msg.time);
         auto now = std::chrono::system_clock::now();
         // CHECK_LT(that_time, now) << "Receive a msg from future";
         auto diff_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -87,7 +87,7 @@ void server(DSM::pointer dsm)
 
         auto &send_msg = *(BenchMessage *) buf;
         now = std::chrono::system_clock::now();
-        send_msg.time = patronus::to_ns(now);
+        send_msg.time = patronus::time::to_ns(now);
         dsm->reliable_send(buf, sizeof(BenchMessage), kClientNodeId, kMid);
     }
 

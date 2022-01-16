@@ -3,8 +3,10 @@
 
 #include <chrono>
 
-namespace patronus
+namespace patronus::time
 {
+using patronus_time_t = uint64_t;
+
 inline std::chrono::time_point<std::chrono::system_clock> ns_to_system_clock(
     uint64_t ns)
 {
@@ -37,5 +39,5 @@ inline uint64_t to_ns(
         .count();
 }
 
-}  // namespace patronus
+}  // namespace patronus::time
 #endif

@@ -64,13 +64,14 @@ void client(DSM::pointer dsm)
         CHECK_EQ(server_clock_info.magic, kMagic);
         auto server_time = server_clock_info.ns + server_clock_info.adjustment;
         auto now = std::chrono::steady_clock::now();
-        auto client_time = patronus::to_ns(now) + my_clock_info.adjustment;
+        auto client_time =
+            patronus::time::to_ns(now) + my_clock_info.adjustment;
 
         int64_t this_adjustment = server_time - client_time;
         my_clock_info.adjustment += this_adjustment;
 
         auto after_client_time =
-            patronus::to_ns(now) + my_clock_info.adjustment;
+            patronus::time::to_ns(now) + my_clock_info.adjustment;
         LOG(INFO) << "[bench] adjust " << this_adjustment
                   << ", total_adjustment: " << my_clock_info.adjustment
                   << ", server_time: " << server_time
@@ -109,7 +110,7 @@ void server(DSM::pointer dsm)
         while (!finish.load(std::memory_order_relaxed))
         {
             auto now = std::chrono::steady_clock::now();
-            uint64_t ns = patronus::to_ns(now);
+            uint64_t ns = patronus::time::to_ns(now);
             clock_info.ns = ns;
         }
     });

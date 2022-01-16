@@ -16,18 +16,26 @@ public:
     void add(double n)
     {
         num_ += n;
+        absolute_num_ += abs(n);
         times_++;
         avg_ = 1.0 * num_ / times_;
+        absolute_avg_ = 1.0 * absolute_num_ / times_;
     }
     double average() const
     {
         return avg_;
     }
+    double abs_average() const
+    {
+        return absolute_avg_;
+    }
 
 private:
     double num_{0};
+    double absolute_num_{0};
     size_t times_{0};
     double avg_{0};
+    double absolute_avg_{0};
 };
 
 class OnePassMonitor
@@ -38,11 +46,16 @@ public:
     {
         min_ = std::min(min_, n);
         max_ = std::max(max_, n);
+        abs_min_ = std::min(abs_min_, abs(n));
         avg_.add(n);
     }
     double min() const
     {
         return min_;
+    }
+    double abs_min() const
+    {
+        return abs_min_;
     }
     double max() const
     {
@@ -52,17 +65,23 @@ public:
     {
         return avg_.average();
     }
+    double abs_average() const
+    {
+        return avg_.abs_average();
+    }
 
 private:
     double min_{std::numeric_limits<double>::max()};
     double max_{std::numeric_limits<double>::lowest()};
+    double abs_min_{std::numeric_limits<double>::max()};
 
     Averager avg_;
 };
 inline std::ostream &operator<<(std::ostream &os, const OnePassMonitor &m)
 {
     os << "{min: " << m.min() << ", max: " << m.max()
-       << ", avg: " << m.average() << "}";
+       << ", avg: " << m.average() << ", abs_avg: " << m.abs_average()
+       << ", abs_min: " << m.abs_min() << "}";
     return os;
 }
 
