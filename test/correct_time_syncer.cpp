@@ -28,21 +28,15 @@ std::ostream &operator<<(std::ostream &os,
 
 using namespace define::literals;
 using namespace std::chrono_literals;
+using namespace patronus;
 
 constexpr uint16_t kClientNodeId = 0;
-constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-void client(DSM::pointer dsm)
+void client(patronus::Patronus::pointer p)
 {
-    GlobalAddress gaddr;
-    gaddr.nodeID = kServerNodeId;
-    gaddr.offset = 0;
-    auto server_buf = dsm->get_server_buffer();
-    patronus::time::TimeSyncer syncer(dsm, gaddr, server_buf.buffer, 4096);
-    syncer.sync();
-
     // okay, continue unit test
+    auto &syncer = p->time_syncer();
     auto epsilon = syncer.epsilon();
     auto now = std::chrono::system_clock::now();
     CHECK(syncer.may_eq(now, now));
@@ -73,14 +67,9 @@ void client(DSM::pointer dsm)
     }
     LOG(INFO) << "ignore me: loop_nr: " << loop_nr;
 }
-void server(DSM::pointer dsm)
+void server([[maybe_unused]] Patronus::pointer p)
 {
-    GlobalAddress gaddr;
-    gaddr.nodeID = kServerNodeId;  // set to server deliberately
-    gaddr.offset = 0;
-    auto server_buf = dsm->get_server_buffer();
-    patronus::time::TimeSyncer syncer(dsm, gaddr, server_buf.buffer, 4096);
-    syncer.sync();
+    // do nothing
 }
 
 int main(int argc, char *argv[])
@@ -89,22 +78,22 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     rdmaQueryDevice();
 
-    DSMConfig config;
-    config.machineNR = kMachineNr;
+    // DSMConfig config;
+    // config.machineNR = kMachineNr;
+    PatronusConfig config;
+    config.machine_nr = kMachineNr;
 
-    auto dsm = DSM::getInstance(config);
+    auto patronus = Patronus::ins(config);
 
-    dsm->registerThread();
-
+    auto nid = patronus->get_node_id();
     // let client spining
-    auto nid = dsm->getMyNodeID();
     if (nid == kClientNodeId)
     {
-        client(dsm);
+        client(patronus);
     }
     else
     {
-        server(dsm);
+        server(patronus);
     }
 
     LOG(INFO) << "finished. ctrl+C to quit.";

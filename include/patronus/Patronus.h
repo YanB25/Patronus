@@ -26,7 +26,17 @@ struct PatronusConfig
     size_t machine_nr{0};
     size_t buffer_size{kDSMCacheSize};
     KeyLocator key_locator{identity_locator};
+    // for sync time
+    bool skip_sync_time{false};
+    size_t time_parent_node_id{0};
 };
+inline std::ostream &operator<<(std::ostream &os, const PatronusConfig &conf)
+{
+    os << "{PatronusConfig machine_nr: " << conf.machine_nr
+       << ", buffer_size: " << conf.buffer_size
+       << ", skip_sync_time: " << conf.skip_sync_time << "}";
+    return os;
+}
 
 struct RpcContext
 {
@@ -197,6 +207,11 @@ public:
         return dsm_;
     }
 
+    const time::TimeSyncer &time_syncer() const
+    {
+        return *time_syncer_;
+    }
+
 private:
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
@@ -213,6 +228,7 @@ private:
     constexpr static size_t kTotalProtectionRegionNr =
         kProtectionRegionPerThreadNr * MAX_APP_THREAD;
 
+    void explain(const PatronusConfig &);
     void reg_locator(const KeyLocator &locator = identity_locator)
     {
         locator_ = locator;
@@ -407,6 +423,7 @@ private:
 
     // owned by both
     DSM::pointer dsm_;
+    time::TimeSyncer::pointer time_syncer_;
     static thread_local std::unique_ptr<ThreadUnsafeBufferPool<kMessageSize>>
         rdma_message_buffer_pool_;
 

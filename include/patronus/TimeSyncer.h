@@ -75,11 +75,22 @@ class TimeSyncer
     constexpr static uint64_t kMid = 0;
 
 public:
+    using pointer = std::unique_ptr<TimeSyncer>;
     using ns_t = int64_t;
     TimeSyncer(DSM::pointer dsm,
                GlobalAddress gaddr,
                char *buffer,
                size_t buf_size);
+    TimeSyncer(const TimeSyncer &) = delete;
+    TimeSyncer &operator=(const TimeSyncer &) = delete;
+
+    static pointer new_instance(DSM::pointer dsm,
+                                GlobalAddress gaddr,
+                                char *buffer,
+                                size_t buf_size)
+    {
+        return std::make_unique<TimeSyncer>(dsm, gaddr, buffer, buf_size);
+    }
     /**
      * @brief When return, the TimeSyncer is ready to provide synced time
      * service

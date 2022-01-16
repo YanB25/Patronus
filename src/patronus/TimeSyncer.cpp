@@ -40,8 +40,8 @@ void TimeSyncer::sync()
 
     if (unlikely(nid == parent_node))
     {
-        DVLOG(1) << "[TimeSyncer] nid " << nid
-                 << " equal to parent node. Will not try to sync clock.";
+        LOG(INFO) << "[TimeSyncer] nid " << nid
+                  << " equal to parent node. Will not try to sync clock.";
     }
     else
     {
