@@ -51,6 +51,9 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
     LOG(WARNING) << "[system] DSM ready. node_id: " << get_node_id();
 
     explain();
+
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(1s);
 }
 
 void DSM::initExchangeMetadataBootstrap()

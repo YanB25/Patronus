@@ -41,6 +41,37 @@ void client(DSM::pointer dsm)
     auto server_buf = dsm->get_server_buffer();
     patronus::time::TimeSyncer syncer(dsm, gaddr, server_buf.buffer, 4096);
     syncer.sync();
+
+    // okay, continue unit test
+    auto epsilon = syncer.epsilon();
+    auto now = std::chrono::system_clock::now();
+    CHECK(syncer.may_eq(now, now));
+    CHECK(syncer.may_eq(now, now + std::chrono::nanoseconds(epsilon - 1)));
+    CHECK(syncer.may_eq(now, now - std::chrono::nanoseconds(epsilon - 1)));
+    CHECK(
+        syncer.definitely_gt(now + std::chrono::nanoseconds(epsilon + 1), now));
+    CHECK(
+        syncer.definitely_lt(now - std::chrono::nanoseconds(epsilon + 1), now));
+
+    auto now2 = std::chrono::steady_clock::now();
+    CHECK(syncer.may_eq(now2, now2));
+    CHECK(syncer.may_eq(now2, now2 + std::chrono::nanoseconds(epsilon - 1)));
+    CHECK(syncer.may_eq(now2, now2 - std::chrono::nanoseconds(epsilon - 1)));
+    CHECK(syncer.definitely_gt(now2 + std::chrono::nanoseconds(epsilon + 1),
+                               now2));
+    CHECK(syncer.definitely_lt(now2 - std::chrono::nanoseconds(epsilon + 1),
+                               now2));
+
+    // do a typical wait
+    auto begin_now = syncer.chrono_now();
+    auto cur_now = syncer.chrono_now();
+    size_t loop_nr = 0;
+    while (!syncer.definitely_gt(cur_now, begin_now))
+    {
+        loop_nr++;
+        cur_now = syncer.chrono_now();
+    }
+    LOG(INFO) << "ignore me: loop_nr: " << loop_nr;
 }
 void server(DSM::pointer dsm)
 {

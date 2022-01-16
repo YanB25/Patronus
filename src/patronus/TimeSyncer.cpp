@@ -18,6 +18,7 @@ TimeSyncer::TimeSyncer(DSM::pointer dsm,
       buf_size_(buf_size)
 {
     CHECK_LE(sizeof(ClockInfo), buf_size_);
+    node_finished_.fill(false);
 }
 
 void TimeSyncer::sync()
@@ -114,19 +115,22 @@ void TimeSyncer::do_sync()
             continue;
         }
         auto now = chrono_now();
-        auto client_time = to_ns(now) + clock_info_.adjustment;
+        auto client_time =
+            to_ns(now) + clock_info_.adjustment.load(std::memory_order_relaxed);
 
         int64_t this_adjustment = actual_parent_time - client_time;
         clock_info_.adjustment += this_adjustment;
 
-        auto after_client_time = to_ns(now) + clock_info_.adjustment;
+        auto after_client_time =
+            to_ns(now) + clock_info_.adjustment.load(std::memory_order_relaxed);
         DVLOG(4) << "[TimeSyncer] adjust " << this_adjustment
                  << ", total_adjustment: " << clock_info_.adjustment
                  << ", parent_time: " << parent_time
                  << ", estimated actual parent_time: " << actual_parent_time
                  << ", parent nid: " << target_gaddr_.nodeID
                  << ", before_client_time: " << client_time
-                 << ", after client time: " << after_client_time;
+                 << ", after client time: " << after_client_time
+                 << ", detail: " << parent_clock_info;
 
         // only detect if we can converge after syncing for 500 ms
         auto sync_now = std::chrono::steady_clock::now();
@@ -159,6 +163,13 @@ void TimeSyncer::do_sync()
         std::this_thread::sleep_for(1ms);
     }
 }
+// TODO(TimeSyncer): currently, the time syncing is a Tree-like procedure: each
+// node sync to its parent.
+// However, the estimation of @epsilon is a broadcast
+// precedure, which may cause problem.
+// If the tree has multiple layers, the g_epsilon should be *added*, not *maxed*
+// Not fix now, since for a small cluster, there will be only one node as
+// the gobal parent
 void TimeSyncer::wait_finish()
 {
     char recv_buf[1024];
@@ -190,6 +201,7 @@ void TimeSyncer::wait_finish()
             auto target_epsilon = sync_finished_message.self_epsilon;
             epsilons.collect(target_epsilon);
             node_finished_[target_nid] = true;
+            // LOG(INFO) << "debug: recv message " << sync_finished_message;
         }
 
         if (can_exit)
@@ -197,9 +209,10 @@ void TimeSyncer::wait_finish()
             break;
         }
     }
-    clock_info_.g_epsilon = epsilons.max();
-    LOG(INFO) << "[TimeSyncer] set g_epsilon to " << clock_info_.g_epsilon
+    global_epsilon_ = epsilons.max();
+    LOG(INFO) << "[TimeSyncer] set g_epsilon to " << global_epsilon_
               << " according to " << epsilons;
+    ready_ = true;
 }
 
 }  // namespace patronus::time
