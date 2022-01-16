@@ -64,7 +64,10 @@ void TimeSyncer::signal_finish()
             node_finished_[nid] = true;
             continue;
         }
-        auto *buf = dsm_->get_rdma_buffer();
+        auto rdma_buffer = dsm_->get_rdma_buffer();
+        auto *buf = rdma_buffer.buffer;
+        DCHECK_LT(sizeof(SyncFinishedMessage) * dsm_->getClusterSize(),
+                  rdma_buffer.size);
         auto &sync_finish_message =
             *(SyncFinishedMessage *) (buf + sizeof(SyncFinishedMessage) * nid);
         sync_finish_message.type = RequestType::kTimeSync;
@@ -82,9 +85,11 @@ void TimeSyncer::signal_finish()
 
 void TimeSyncer::do_sync()
 {
-    auto *rdma_buffer = dsm_->get_rdma_buffer();
+    auto rdma_buffer_ = dsm_->get_rdma_buffer();
+    auto *rdma_buffer = rdma_buffer_.buffer;
     auto &parent_clock_info = *(ClockInfo *) rdma_buffer;
     DCHECK_LE(sizeof(ClockInfo), buf_size_);
+    DCHECK_LT(sizeof(ClockInfo), rdma_buffer_.size);
 
     size_t continuous_converge_nr = 0;
     size_t sync_nr = 0;

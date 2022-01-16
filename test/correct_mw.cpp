@@ -46,7 +46,8 @@ void client(std::shared_ptr<DSM> dsm)
     gaddr.nodeID = kServerNodeId;
     gaddr.offset = kOffset;
 
-    auto *buffer = dsm->get_rdma_buffer();
+    auto rdma_buffer = dsm->get_rdma_buffer();
+    auto *buffer = rdma_buffer.buffer;
 
     *(uint64_t *) buffer = kMagic;
 

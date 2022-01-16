@@ -30,7 +30,7 @@ void send_cas(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer();
+    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer().buffer;
     size_t buffer_size = sizeof(uint64_t) * kBucketPerThread;
 
     GlobalAddress gaddr;
@@ -91,7 +91,7 @@ void send_skew_cas([[maybe_unused]] int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer();
+    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer().buffer;
     size_t buffer_size = sizeof(uint64_t) * kCounterBucket;
 
     GlobalAddress gaddr;
@@ -135,7 +135,7 @@ void send_write(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    char *buffer = dsm->get_rdma_buffer();
+    char *buffer = dsm->get_rdma_buffer().buffer;
     size_t buffer_size = kPacketSize * kDifferLocation;
 
     GlobalAddress gaddr;

@@ -167,7 +167,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
     constexpr static size_t test_times = 100 * define::K;
     Timer timer;
 
-    auto *buffer = dsm->get_rdma_buffer();
+    auto *buffer = dsm->get_rdma_buffer().buffer;
     size_t dsm_size = size;
     size_t io_rng = dsm_size / io_size;
 

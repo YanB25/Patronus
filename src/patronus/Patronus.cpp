@@ -1138,8 +1138,9 @@ void Patronus::registerServerThread()
     // for server, all the buffers are given to rdma_message_buffer_pool_
     dsm_->registerThread();
 
-    auto *dsm_rdma_buffer = dsm_->get_rdma_buffer();
-    size_t message_pool_size = define::kRDMABufferSize;
+    auto rdma_buffer = dsm_->get_rdma_buffer();
+    auto *dsm_rdma_buffer = rdma_buffer.buffer;
+    size_t message_pool_size = rdma_buffer.size;
     rdma_message_buffer_pool_ =
         std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
             dsm_rdma_buffer, message_pool_size);
@@ -1171,16 +1172,19 @@ void Patronus::registerClientThread()
     // - reserve 4MB for message pool. total 65536 messages, far then enough
     // - reserve other 12 MB for client's usage. If coro_nr == 8, could
     // get 1.5 MB each coro.
+
+    auto rdma_buffer = dsm_->get_rdma_buffer();
+    auto *dsm_rdma_buffer = rdma_buffer.buffer;
+
     size_t message_pool_size = 4 * define::MB;
-    CHECK_GT(define::kRDMABufferSize, message_pool_size);
-    size_t rdma_buffer_size = define::kRDMABufferSize - message_pool_size;
+    CHECK_GT(rdma_buffer.size, message_pool_size);
+    size_t rdma_buffer_size = rdma_buffer.size - message_pool_size;
     CHECK_GE(message_pool_size / kMessageSize, 65536)
         << "Consider to tune up message pool size? Less than 64436 "
            "possible messages";
     CHECK_GE(rdma_buffer_size, kMaxCoroNr * kClientRdmaBufferSize)
         << "rdma_buffer not enough for maximum coroutine";
 
-    auto *dsm_rdma_buffer = dsm_->get_rdma_buffer();
     auto *client_rdma_buffer = dsm_rdma_buffer + message_pool_size;
 
     rdma_message_buffer_pool_ =

@@ -42,7 +42,7 @@ void client(std::shared_ptr<DSM> dsm)
     gaddr.nodeID = kServerNodeId;
     gaddr.offset = 0;
 
-    auto *buffer = dsm->get_rdma_buffer();
+    auto *buffer = dsm->get_rdma_buffer().buffer;
     *(uint64_t *) buffer = kMagic;
 
     CHECK(dsm->write_sync(buffer, gaddr, sizeof(uint64_t), nullptr, 1));

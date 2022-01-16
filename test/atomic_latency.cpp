@@ -34,7 +34,7 @@ int main()
     gaddr.nodeID = kTargetNodeId;
     gaddr.offset = 1024;
 
-    auto *buffer = dsm->get_rdma_buffer();
+    auto *buffer = dsm->get_rdma_buffer().buffer;
 
     {
         uint64_t cur_val = 0;

@@ -52,7 +52,9 @@ void client(DSM::pointer dsm)
     auto &my_clock_info = *(ClockInfo *) buffer.buffer;
     my_clock_info.magic = kMagic;
 
-    auto *rdma_buffer = dsm->get_rdma_buffer();
+    auto rdma_buffer_ = dsm->get_rdma_buffer();
+    auto *rdma_buffer = rdma_buffer_.buffer;
+    CHECK_LT(sizeof(ClockInfo), rdma_buffer_.size);
     auto &server_clock_info = *(ClockInfo *) rdma_buffer;
 
     size_t cont_converge_nr = 0;

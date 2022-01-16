@@ -69,7 +69,7 @@ void client_wait(std::shared_ptr<DSM> dsm)
 {
     // sync
     LOG(INFO) << "[bench] client entering wait()";
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     dsm->reliable_recv(0, nullptr);
     dsm->reliable_send(buf, 0, kServerNodeId, 0);
     LOG(INFO) << "[bench] client finished wait()";
@@ -77,7 +77,7 @@ void client_wait(std::shared_ptr<DSM> dsm)
 void server_wait(std::shared_ptr<DSM> dsm)
 {
     LOG(INFO) << "[bench] server entering wait().";
-    auto *buffer = dsm->get_rdma_buffer();
+    auto *buffer = dsm->get_rdma_buffer().buffer;
     dsm->reliable_send(buffer, 0, kClientNodeId, 0);
     dsm->reliable_recv(0, nullptr);
     LOG(INFO) << "[bench] server finished wait().";
@@ -86,7 +86,7 @@ void server_wait(std::shared_ptr<DSM> dsm)
 void client_varsize_correct(std::shared_ptr<DSM> dsm, size_t mid)
 {
     LOG(WARNING) << "[bench] testing varsize for mid = " << mid;
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buf[1024];
 
     for (size_t i = 0; i < kPingpoingCnt; ++i)
@@ -120,7 +120,7 @@ void client_varsize_correct(std::shared_ptr<DSM> dsm, size_t mid)
 void server_varsize_correct(std::shared_ptr<DSM> dsm, size_t mid)
 {
     char recv_buf[1024];
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
         dsm->reliable_recv(mid, recv_buf);
@@ -132,7 +132,7 @@ void server_varsize_correct(std::shared_ptr<DSM> dsm, size_t mid)
 void client_pingpong_correct(std::shared_ptr<DSM> dsm, size_t mid)
 {
     LOG(WARNING) << "[bench] testing mid = " << mid;
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buf[1024];
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
@@ -151,7 +151,7 @@ void client_pingpong_correct(std::shared_ptr<DSM> dsm, size_t mid)
 void server_pingpong_correct(std::shared_ptr<DSM> dsm, size_t mid)
 {
     char recv_buf[1024];
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
         dsm->reliable_recv(mid, recv_buf);
@@ -171,7 +171,7 @@ void server_burn(DSM::pointer dsm,
                  size_t offset)
 {
     char buffer[102400];
-    auto *rdma_buf = dsm->get_rdma_buffer();
+    auto *rdma_buf = dsm->get_rdma_buffer().buffer;
 
     auto mid = (tid + offset) % RMSG_MULTIPLEXING;
     CHECK_NE(mid, 0);
@@ -250,7 +250,7 @@ void client_burn(DSM::pointer dsm, size_t tid, size_t offset)
     size_t sent = 0;
     char buffer[1024];
 
-    auto *rdma_buf = dsm->get_rdma_buffer();
+    auto *rdma_buf = dsm->get_rdma_buffer().buffer;
     BenchMessage *msg = (BenchMessage *) rdma_buf;
     for (size_t time = 0; time < kBurnCnt; ++time)
     {

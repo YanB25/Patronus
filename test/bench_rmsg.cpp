@@ -34,7 +34,9 @@ struct BenchMsg
 
 void client_pingpong_correct(std::shared_ptr<DSM> dsm)
 {
-    auto *buf = dsm->get_rdma_buffer();
+    auto rdma_buffer = dsm->get_rdma_buffer();
+    auto *buf = rdma_buffer.buffer;
+    DCHECK_GT(rdma_buffer.size, sizeof(uint64_t));
     char recv_buf[1024];
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
@@ -74,7 +76,9 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
 
             CHECK_NE(mid, 0);
 
-            auto *buf = dsm->get_rdma_buffer();
+            auto rdma_buffer = dsm->get_rdma_buffer();
+            auto *buf = rdma_buffer.buffer;
+            DCHECK_LT(sizeof(BenchMsg), rdma_buffer.size);
             auto *send_msg = (BenchMsg *) buf;
             send_msg->mid = mid;
 
@@ -181,7 +185,7 @@ void server_burn(std::shared_ptr<DSM> dsm,
 
             char buffer[ReliableConnection::kMessageSize *
                         ReliableConnection::kRecvLimit];
-            auto *rdma_buf = dsm->get_rdma_buffer();
+            auto *rdma_buf = dsm->get_rdma_buffer().buffer;
             memset(rdma_buf, 0, sizeof(BenchMsg));
             size_t recv_msg_nr = 0;
             while (!finished.load(std::memory_order_relaxed))
@@ -229,7 +233,7 @@ void server_burn(std::shared_ptr<DSM> dsm,
 void server_pingpong_correct(std::shared_ptr<DSM> dsm)
 {
     char recv_buf[1024];
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
         dsm->reliable_recv(0, recv_buf, 0);
@@ -243,7 +247,7 @@ void server_pingpong_correct(std::shared_ptr<DSM> dsm)
 void client_wait(std::shared_ptr<DSM> dsm)
 {
     // sync
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     dsm->reliable_recv(0, nullptr);
     dsm->reliable_send(buf, 0, kServerNodeId, 0);
 }
@@ -261,7 +265,7 @@ void client(std::shared_ptr<DSM> dsm)
 
 void server_wait(std::shared_ptr<DSM> dsm)
 {
-    auto *buffer = dsm->get_rdma_buffer();
+    auto *buffer = dsm->get_rdma_buffer().buffer;
     dsm->reliable_send(buffer, 0, kClientNodeId, 0);
     dsm->reliable_recv(0, nullptr);
 }

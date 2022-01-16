@@ -21,7 +21,7 @@ int main()
         gaddr.nodeID = 1;
         gaddr.offset = 8;
 
-        auto *buffer = dsm->get_rdma_buffer();
+        auto *buffer = dsm->get_rdma_buffer().buffer;
         char s[] = "hello, world";
         int size = strlen(s);
         memcpy(buffer, s, size);

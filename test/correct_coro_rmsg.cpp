@@ -72,7 +72,7 @@ void client_worker(std::shared_ptr<DSM> dsm,
 
     CoroContext ctx(tid, &yield, &master, coro_id);
 
-    auto *rdma_buf = dsm->get_rdma_buffer();
+    auto *rdma_buf = dsm->get_rdma_buffer().buffer;
     auto *my_buf = rdma_buf + ReliableConnection::kMessageSize * coro_id;
     auto *send_msg = (EchoMessage *) my_buf;
     send_msg->cid.node_id = kClientNodeId;
@@ -173,7 +173,7 @@ void server(std::shared_ptr<DSM> dsm)
 {
     auto tid = dsm->get_thread_id();
     auto mid = tid;
-    auto *rdma_buffer = dsm->get_rdma_buffer();
+    auto *rdma_buffer = dsm->get_rdma_buffer().buffer;
 
     size_t expect_nr = kCoroCnt * kMsgNr;
     size_t recv_nr = 0;

@@ -23,7 +23,7 @@ void send_write(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    char *buffer = dsm->get_rdma_buffer();
+    char *buffer = dsm->get_rdma_buffer().buffer;
     size_t buffer_size = kPacketSize * kDifferLocation;
 
     GlobalAddress gaddr;

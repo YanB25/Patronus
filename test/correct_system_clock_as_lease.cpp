@@ -42,7 +42,7 @@ struct BenchMessage
 void client(DSM::pointer dsm)
 {
     OnePassMonitor m;
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buffer[1024];
     for (size_t i = 0; i < kTestTime; ++i)
     {
@@ -71,7 +71,7 @@ void client(DSM::pointer dsm)
 void server(DSM::pointer dsm)
 {
     OnePassMonitor m;
-    auto *buf = dsm->get_rdma_buffer();
+    auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buf[1024];
     for (size_t i = 0; i < kTestTime; ++i)
     {

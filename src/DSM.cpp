@@ -91,7 +91,9 @@ void DSM::syncMetadataBootstrap(const ExchangeMeta &self_meta, size_t remoteID)
         GlobalAddress gaddr;
         gaddr.nodeID = remoteID;
         gaddr.offset = get_node_id() * sizeof(ExchangeMeta);
-        auto *buffer = get_rdma_buffer();
+        auto rdma_buffer = get_rdma_buffer();
+        auto *buffer = rdma_buffer.buffer;
+        DCHECK_LT(sizeof(ExchangeMeta), rdma_buffer.size);
         memcpy(buffer, &src_meta, sizeof(src_meta));
         write_sync(buffer, gaddr, sizeof(ExchangeMeta), nullptr, 0, wc_err_h);
     }

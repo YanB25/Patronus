@@ -540,9 +540,9 @@ public:
      *
      * @return char*
      */
-    char *get_rdma_buffer()
+    Buffer get_rdma_buffer()
     {
-        return rdma_buffer;
+        return Buffer(rdma_buffer, define::kRDMABufferSize);
     }
     inline Buffer get_server_internal_dsm_buffer();
     inline Buffer get_server_reserved_buffer();
