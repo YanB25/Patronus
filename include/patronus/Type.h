@@ -27,6 +27,7 @@ enum class RequestType : uint8_t
     kRelinquish,
     kExtend,
     kAdmin,
+    kTimeSync,
 };
 std::ostream &operator<<(std::ostream &os, const RequestType &t);
 

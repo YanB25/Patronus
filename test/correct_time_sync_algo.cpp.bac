@@ -33,7 +33,6 @@ constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kMid = 0;
-constexpr static size_t kTestTime = 10_M;
 constexpr static size_t kMagic = 0xaabbccdd11223355;
 
 struct ClockInfo

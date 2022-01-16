@@ -38,6 +38,11 @@ std::ostream &operator<<(std::ostream &os, const RequestType &t)
         os << "Adm";
         break;
     }
+    case RequestType::kTimeSync:
+    {
+        os << "TimeSync";
+        break;
+    }
     default:
     {
         os << "Unknown(" << (int) t << ")";
