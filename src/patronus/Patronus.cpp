@@ -1159,10 +1159,10 @@ void Patronus::registerServerThread()
             }
         }
     }
-    auto reserve_buffer = dsm_->get_server_reserved_buffer();
+    auto protection_region_buffer = get_protection_region_buffer();
     protection_region_pool_ =
         std::make_unique<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>(
-            reserve_buffer.buffer, reserve_buffer.size);
+            protection_region_buffer.buffer, protection_region_buffer.size);
 }
 
 void Patronus::registerClientThread()

@@ -10,6 +10,7 @@
 #include "patronus/Coro.h"
 #include "patronus/Lease.h"
 #include "patronus/ProtectionRegion.h"
+#include "patronus/TimeSyncer.h"
 #include "patronus/Type.h"
 #include "util/Debug.h"
 
@@ -296,10 +297,43 @@ private:
         return (ProtectionRegion *) ret;
     }
 
+    // clang-format off
+    /**
+     * The layout of dsm_->uget_server_reserve_buffer():
+     * [required_time_sync_size()] [required_protection_region_size()]
+     * 
+     * ^-- get_time_sync_buffer()
+     *                             ^-- get_protection_region_buffer()
+     */
+    // clang-format on
     static size_t required_dsm_reserve_size()
+    {
+        return required_protection_region_size() + required_time_sync_size();
+    }
+    static size_t required_protection_region_size()
     {
         size_t ret = sizeof(ProtectionRegion) * kTotalProtectionRegionNr;
         return ROUND_UP(ret, 4096);
+    }
+    Buffer get_protection_region_buffer()
+    {
+        auto reserve_buffer = dsm_->get_server_reserved_buffer();
+        auto *buf_addr = reserve_buffer.buffer + required_time_sync_size();
+        auto buf_size = required_protection_region_size();
+        return Buffer(buf_addr, buf_size);
+    }
+    static size_t required_time_sync_size()
+    {
+        size_t ret = sizeof(time::ClockInfo);
+        return ROUND_UP(ret, 4096);
+    }
+    Buffer get_time_sync_buffer()
+    {
+        auto reserve_buffer = dsm_->get_server_reserved_buffer();
+        DCHECK_GE(reserve_buffer.size, required_dsm_reserve_size());
+        auto *buf_addr = reserve_buffer.buffer;
+        auto buf_size = required_time_sync_size();
+        return Buffer(buf_addr, buf_size);
     }
 
     // for clients
