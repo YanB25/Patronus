@@ -183,6 +183,11 @@ public:
     {
         return std::chrono::system_clock::now();
     }
+    static std::chrono::time_point<std::chrono::system_clock> chrono_later(
+        uint64_t ns)
+    {
+        return std::chrono::system_clock::now() + std::chrono::nanoseconds(ns);
+    }
 
 private:
     /**

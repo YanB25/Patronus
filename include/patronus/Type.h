@@ -56,6 +56,19 @@ struct BaseMessage
     char others[0];
 } __attribute__((packed));
 
+enum class AcquireRequestFlag : uint8_t
+{
+    kNoGc = 1 << 0,
+    kReserved = 1 << 1,
+};
+struct AcquireRequestFlagOut
+{
+    AcquireRequestFlagOut(uint8_t flag) : flag(flag)
+    {
+    }
+    uint8_t flag;
+};
+std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag);
 struct AcquireRequest
 {
     enum RequestType type;
@@ -65,6 +78,7 @@ struct AcquireRequest
     term_t require_term;
     uint16_t dir_id;
     trace_t trace;
+    uint8_t flag;  // should be AcquireRequestFlag
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(AcquireRequest) < ReliableConnection::kMessageSize);
@@ -80,7 +94,7 @@ struct AcquireResponse
     uint32_t rkey_header;
     uint64_t buffer_base;
     uint64_t header_base;
-    term_t term;
+    term_t ddl_term;
     uint16_t lease_id;
     bool success;
     Debug<uint64_t> digest;

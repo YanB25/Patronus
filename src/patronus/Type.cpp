@@ -83,6 +83,17 @@ std::ostream &operator<<(std::ostream &os, const ClientID &cid)
     return os;
 }
 
+std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
+{
+    os << "{AcquireRequestFlag ";
+    if (flag.flag & (uint8_t) AcquireRequestFlag::kNoGc)
+    {
+        os << "no-gc, ";
+    }
+    os << "}";
+    return os;
+}
+
 std::ostream &operator<<(std::ostream &os, const AcquireRequest &req)
 {
     os << "{AcquireRequest type: " << req.type << ", cid: " << req.cid
@@ -98,7 +109,8 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
        << ", lease_id: " << resp.lease_id << ", rkey_0: " << resp.rkey_0
        << ", rkey_header: " << resp.rkey_header << ", buffer_base "
        << resp.buffer_base << "< header_base: " << resp.header_base
-       << ", term: " << resp.term << ", success: " << resp.success << " }";
+       << ", ddl_term: " << resp.ddl_term << ", success: " << resp.success
+       << " }";
     return os;
 }
 

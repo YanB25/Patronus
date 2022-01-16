@@ -65,6 +65,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     coro_key /* key */,
                                     sizeof(Object),
                                     100,
+                                    (uint8_t) AcquireRequestFlag::kNoGc,
                                     &ctx);
         if (unlikely(!lease.success()))
         {
@@ -72,6 +73,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                          << " get_rlease failed. retry.";
             continue;
         }
+
+        DCHECK_EQ(lease.ddl_term(), std::numeric_limits<term_t>::max())
+            << "Set no-gc flag. should not be gc, so the valid term should be "
+               "MAX";
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 

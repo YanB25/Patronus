@@ -53,6 +53,10 @@ public:
     {
         return dir_id_;
     }
+    term_t ddl_term() const
+    {
+        return cur_ddl_term_;
+    }
 
     void copy_from(const Lease &rhs)
     {

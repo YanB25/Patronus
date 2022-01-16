@@ -8,6 +8,7 @@
 #include "DSM.h"
 #include "Result.h"
 #include "patronus/Coro.h"
+#include "patronus/DDLManager.h"
 #include "patronus/Lease.h"
 #include "patronus/ProtectionRegion.h"
 #include "patronus/TimeSyncer.h"
@@ -102,12 +103,14 @@ public:
                             id_t key,
                             size_t size,
                             term_t term,
+                            uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     inline Lease get_wlease(uint16_t node_id,
                             uint16_t dir_id,
                             id_t key,
                             size_t size,
                             term_t term,
+                            uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     inline Lease upgrade(Lease &lease, CoroContext *ctx = nullptr);
     inline Lease extend(Lease &lease, term_t term, CoroContext *ctx = nullptr);
@@ -387,6 +390,7 @@ private:
                          size_t size,
                          term_t term,
                          RequestType type,
+                         uint8_t flag,
                          CoroContext *ctx = nullptr);
     bool buffer_rw_impl(Lease &lease,
                         char *iobuf,
@@ -445,6 +449,7 @@ private:
     static thread_local std::unique_ptr<
         ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
         protection_region_pool_;
+    static thread_local DDLManager ddl_manager_;
 
     // for admin management
     std::array<std::atomic<bool>, MAX_MACHINE> exits_;
@@ -459,20 +464,34 @@ Lease Patronus::get_rlease(uint16_t node_id,
                            id_t key,
                            size_t size,
                            term_t term,
+                           uint8_t flag,
                            CoroContext *ctx)
 {
-    return get_lease_impl(
-        node_id, dir_id, key, size, term, RequestType::kAcquireRLease, ctx);
+    return get_lease_impl(node_id,
+                          dir_id,
+                          key,
+                          size,
+                          term,
+                          RequestType::kAcquireRLease,
+                          flag,
+                          ctx);
 }
 Lease Patronus::get_wlease(uint16_t node_id,
                            uint16_t dir_id,
                            id_t key,
                            size_t size,
                            term_t term,
+                           uint8_t flag,
                            CoroContext *ctx)
 {
-    return get_lease_impl(
-        node_id, dir_id, key, size, term, RequestType::kAcquireWLease, ctx);
+    return get_lease_impl(node_id,
+                          dir_id,
+                          key,
+                          size,
+                          term,
+                          RequestType::kAcquireWLease,
+                          flag,
+                          ctx);
 }
 
 Lease Patronus::upgrade(Lease &lease, CoroContext *ctx)
@@ -509,8 +528,14 @@ bool Patronus::pingpong(uint16_t node_id,
                         term_t term,
                         CoroContext *ctx)
 {
-    auto lease = get_lease_impl(
-        node_id, dir_id, key, size, term, RequestType::kAcquireNoLease, ctx);
+    auto lease = get_lease_impl(node_id,
+                                dir_id,
+                                key,
+                                size,
+                                term,
+                                RequestType::kAcquireNoLease,
+                                (uint8_t) AcquireRequestFlag::kNoGc,
+                                ctx);
     return lease.success();
 }
 

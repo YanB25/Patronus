@@ -20,6 +20,7 @@ thread_local ThreadUnsafePool<LeaseContext, Patronus::kLeaseContextNr>
 thread_local ServerCoroContext Patronus::server_coro_ctx_;
 thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
     Patronus::protection_region_pool_;
+thread_local DDLManager Patronus::ddl_manager_;
 
 Patronus::Patronus(const PatronusConfig &conf)
 {
@@ -77,6 +78,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
                                size_t size,
                                term_t term,
                                RequestType type,
+                               uint8_t flag,
                                CoroContext *ctx)
 {
     DCHECK(type == RequestType::kAcquireNoLease ||
@@ -122,6 +124,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     msg->size = size;
     msg->require_term = term;
     msg->trace = trace;
+    msg->flag = flag;
 
     rpc_context->ret_lease = &ret_lease;
     rpc_context->origin_lease = nullptr;
@@ -557,7 +560,7 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
         ret_lease.rkey_0_ = resp->rkey_0;
         ret_lease.header_rkey_ = resp->rkey_header;
         ret_lease.cur_rkey_ = ret_lease.rkey_0_;
-        ret_lease.cur_ddl_term_ = resp->term;
+        ret_lease.cur_ddl_term_ = resp->ddl_term;
         ret_lease.id_ = resp->lease_id;
         ret_lease.dir_id_ = rpc_context->dir_id;
         if (resp->type == RequestType::kAcquireRLease)
@@ -737,10 +740,31 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         resp_msg->rkey_header = header_mw->rkey;
         resp_msg->buffer_base = object_dsm_offset;
         resp_msg->header_base = header_dsm_offset;
-        resp_msg->term = req->require_term;
 
         resp_msg->lease_id = lease_id;
         resp_msg->success = true;
+
+        bool reserved = req->flag & (uint8_t) AcquireRequestFlag::kReserved;
+        DCHECK(!reserved)
+            << "reserved flag should not be set. Possible corrupted message";
+
+        // success, so register Lease expiring logic here.
+        bool no_gc = req->flag & (uint8_t) AcquireRequestFlag::kNoGc;
+        if (likely(!no_gc))
+        {
+            auto ddl_term = time_syncer_->chrono_later(req->require_term);
+            auto ddl_ns = time_syncer_->to_ns(ddl_term);
+            ddl_manager_.push(ddl_ns, []() {
+                LOG(WARNING) << "TODO: here should be the gc logic for Lease";
+            });
+
+            resp_msg->ddl_term = ddl_ns;
+        }
+        else
+        {
+            resp_msg->ddl_term =
+                std::numeric_limits<decltype(resp_msg->ddl_term)>::max();
+        }
     }
     else
     {
