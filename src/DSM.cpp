@@ -211,8 +211,8 @@ bool DSM::recoverThreadQP(int node_id, size_t dirID)
 bool DSM::recoverDirQP(int node_id, int thread_id, size_t dirID)
 {
     ibv_qp *qp = get_dir_qp(node_id, thread_id, dirID);
-    LOG(INFO) << "Recovering dir qp " << qp << ". node_id: " << node_id
-              << ", thread_id: " << thread_id;
+    DLOG(INFO) << "Recovering dir qp " << qp << ". node_id: " << node_id
+               << ", thread_id: " << thread_id;
     const auto &ex = getExchangeMetaBootstrap(node_id);
     if (!modifyErrQPtoNormal(qp,
                              ex.appRcQpn2dir[thread_id][dirID],

@@ -21,6 +21,7 @@ thread_local ServerCoroContext Patronus::server_coro_ctx_;
 thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
     Patronus::protection_region_pool_;
 thread_local DDLManager Patronus::ddl_manager_;
+thread_local size_t Patronus::allocated_mw_nr_;
 
 Patronus::Patronus(const PatronusConfig &conf)
 {
@@ -630,7 +631,6 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     case RequestType::kAcquireRLease:
     case RequestType::kAcquireWLease:
     {
-        static thread_local size_t allocated = 0;
         constexpr static uint32_t magic = 0b1010101010;
         constexpr static uint16_t mask = 0b1111111111;
 
@@ -672,7 +672,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         {
             for (size_t time = 0; time < 2; time++)
             {
-                size_t id = allocated++;
+                size_t id = allocated_mw_nr_++;
                 if (unlikely((id & mask) == magic))
                 {
                     force_fail = true;
@@ -728,12 +728,14 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     if (likely(success && !force_fail))
     {
         auto *lease_ctx = get_lease_context();
+        lease_ctx->client_cid = req->cid;
         lease_ctx->buffer_mw = buffer_mw;
         lease_ctx->header_mw = header_mw;
         lease_ctx->dir_id = dirID;
         lease_ctx->addr_to_bind = (uint64_t) object_addr;
         lease_ctx->buffer_size = req->size;
         lease_ctx->protection_region_id = protection_region_id;
+        lease_ctx->valid = true;
         auto lease_id = lease_context_.obj_to_id(lease_ctx);
 
         resp_msg->rkey_0 = buffer_mw->rkey;
@@ -753,15 +755,14 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         if (likely(!no_gc))
         {
             auto patronus_ddl = time_syncer_->patronus_later(req->required_ns);
-            ddl_manager_.push(
-                patronus_ddl.term(),
-                []() {
-                    LOG(WARNING)
-                        << "TODO: here should be the gc logic for Lease";
-                });
+            // set the DDL a little bit (@epsilon()) before actual DDL.
+            ddl_manager_.push(patronus_ddl.term(),
+                              [this, lease_id, ctx, cid = req->cid]()
+                              { task_gc_lease(lease_id, cid, ctx); });
 
             DVLOG(4) << "[debug] get client require ns " << req->required_ns
-                     << ", patronus_ddl: " << patronus_ddl;
+                     << ", patronus_ddl: " << patronus_ddl
+                     << ", epsilon: " << time_syncer_->epsilon();
 
             resp_msg->ddl_term = patronus_ddl.term();
         }
@@ -837,28 +838,7 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
 {
     DCHECK_EQ(req->type, RequestType::kRelinquish);
     auto lease_id = req->lease_id;
-    auto *lease_ctx = get_lease_context(lease_id);
-
-    DVLOG(4) << "[patronus] reqlinquish lease. lease_id " << (id_t) lease_id
-             << ", coro: " << (ctx ? *ctx : nullctx);
-
-    put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
-    put_mw(lease_ctx->dir_id, lease_ctx->header_mw);
-
-    auto *pr = get_protection_region(lease_ctx->protection_region_id);
-    if constexpr (debug())
-    {
-        LOG_FIRST_N(WARNING, 1)
-            << "[patronus] not enable pr->meta.relinquished checks.";
-    }
-    // CHECK_EQ(pr->meta.relinquished, 1)
-    //     << "debug: Lease was not relinquishes. pr_id: "
-    //     << lease_ctx->protection_region_id
-    //     << ", offset: " << ((char *) &pr->meta.relinquished - (char *) pr);
-
-    put_protection_region(pr);
-    put_lease_context(lease_ctx);
-    // no rely is needed
+    task_gc_lease(lease_id, req->cid, ctx);
 }
 
 void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
@@ -866,7 +846,9 @@ void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
 {
     DCHECK_EQ(req->type, RequestType::kUpgrade);
     auto lease_id = req->lease_id;
-    auto *lease_ctx = get_lease_context(lease_id);
+    auto *lease_ctx = CHECK_NOTNULL(get_lease_context(lease_id));
+    CHECK_EQ(lease_ctx->client_cid, req->cid)
+        << "if cid not match, should return false";
     CHECK(false) << "TODO:";
     auto dir_id = lease_ctx->dir_id;
     // TODO(patronus): rethink about it.
@@ -946,7 +928,9 @@ void Patronus::handle_request_lease_extend(LeaseModifyRequest *req,
 {
     DCHECK_EQ(req->type, RequestType::kExtend);
     auto lease_id = req->lease_id;
-    auto *lease_ctx = get_lease_context(lease_id);
+    auto *lease_ctx = CHECK_NOTNULL(get_lease_context(lease_id));
+    CHECK_EQ(lease_ctx->client_cid, req->cid)
+        << "If cid not match, should return error the client.";
     CHECK(false) << "TODO:";
     auto dir_id = lease_ctx->dir_id;
     // TODO(patronus): rethink about it
@@ -1187,6 +1171,7 @@ void Patronus::signal_server_to_recover_qp(size_t node_id, size_t dir_id)
 }
 void Patronus::registerServerThread()
 {
+    allocated_mw_nr_ = 0;
     // for server, all the buffers are given to rdma_message_buffer_pool_
     dsm_->registerThread();
 
@@ -1415,8 +1400,8 @@ void Patronus::server_serve()
 
     for (size_t i = 0; i < kServerCoroNr; ++i)
     {
-        server_workers[i] = CoroCall(
-            [this, i](CoroYield &yield) { server_coro_worker(i, yield); });
+        server_workers[i] = CoroCall([this, i](CoroYield &yield)
+                                     { server_coro_worker(i, yield); });
     }
     server_master =
         CoroCall([this](CoroYield &yield) { server_coro_master(yield); });
@@ -1532,7 +1517,82 @@ void Patronus::server_coro_master(CoroYield &yield)
                     << " for Dir CQE.";
             mctx.yield_to_worker(coro_id);
         }
+
+        // handle any DDL Tasks
+        // TODO(patronus): should worker also test the ddl_manager
+        ddl_manager_.do_task(time_syncer_->patronus_now().term());
     }
+}
+
+void Patronus::task_gc_lease(uint64_t lease_id, ClientID cid, CoroContext *ctx)
+{
+    DVLOG(4) << "[patronus][gc_lease] task_gc_lease for lease_id " << lease_id
+             << ", expect cid " << cid << ", coro: " << (ctx ? *ctx : nullctx)
+             << ", at patronus time: " << time_syncer_->patronus_now();
+    auto *lease_ctx = get_lease_context(lease_id);
+
+    if (unlikely(lease_ctx == nullptr))
+    {
+        DVLOG(4) << "[patronus][gc_lease] skip relinquish. lease_id "
+                 << lease_id << " no valid lease context.";
+        return;
+    }
+    if (unlikely(lease_ctx->client_cid != cid))
+    {
+        DVLOG(4)
+            << "[patronus][gc_lease] skip relinquish. cid mismatch: expect: "
+            << lease_ctx->client_cid << ", got: " << cid;
+    }
+    // should issue unbind here.
+    static thread_local ibv_send_wr wrs[8];
+    auto dir_id = lease_ctx->dir_id;
+    auto *qp = dsm_->get_dir_qp(
+        lease_ctx->client_cid.node_id, lease_ctx->client_cid.thread_id, dir_id);
+    auto *mr = dsm_->get_dir_mr(dir_id);
+    void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
+
+    fill_bind_mw_wr(wrs[0],
+                    &wrs[1],
+                    lease_ctx->header_mw,
+                    mr,
+                    (uint64_t) bind_nulladdr,
+                    0,
+                    IBV_ACCESS_CUSTOM_REMOTE_NORW);
+    fill_bind_mw_wr(wrs[1],
+                    nullptr,
+                    lease_ctx->buffer_mw,
+                    mr,
+                    (uint64_t) bind_nulladdr,
+                    0,
+                    IBV_ACCESS_CUSTOM_REMOTE_NORW);
+    // never signal
+    wrs[0].send_flags = 0;
+    wrs[1].send_flags = 0;
+    // but want to detect failure
+    wrs[0].wr_id = wrs[1].wr_id =
+        WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
+    ibv_send_wr *bad_wr;
+    int ret = ibv_post_send(qp, wrs, &bad_wr);
+    PLOG_IF(WARNING, ret != 0) << "[patronus][gc_lease] failed to "
+                                  "ibv_post_send to unbind memory window. "
+                               << *bad_wr;
+
+    if constexpr (config::kEnableSkipMagicMw)
+    {
+        for (size_t time = 0; time < 2; time++)
+        {
+            allocated_mw_nr_++;
+            // should not fail, so not consider @force_fail = true;
+        }
+    }
+
+    put_mw(lease_ctx->dir_id, lease_ctx->header_mw);
+    put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
+    auto *pr = get_protection_region(lease_ctx->protection_region_id);
+    // TODO(patronus): not considering any checks here
+    // for example, the pr->meta.relinquished bits.
+    put_protection_region(pr);
+    put_lease_context(lease_ctx);
 }
 
 void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
@@ -1544,7 +1604,7 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
     auto &task_pool = server_coro_ctx_.task_pool;
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
-    while (likely(!should_exit()))
+    while (likely(!should_exit() || !task_queue.empty()))
     {
         DCHECK(!task_queue.empty());
         auto task = task_queue.front();

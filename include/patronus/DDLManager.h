@@ -75,6 +75,9 @@ public:
             {
                 return done;
             }
+            DVLOG(4) << "[DDLManager] protronus_now: "
+                     << time::PatronusTime(until)
+                     << ", ns_diff: " << until - front.ddl();
             auto &task = front.task();
             task();
             done++;

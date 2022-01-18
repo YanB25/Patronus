@@ -45,6 +45,14 @@ struct ClientID
         } __attribute__((packed));
         uint64_t cid;
     };
+    bool operator==(const ClientID &rhs) const
+    {
+        return cid == rhs.cid;
+    }
+    bool operator!=(const ClientID &rhs) const
+    {
+        return !(cid == rhs.cid);
+    }
 } __attribute__((packed));
 static_assert(sizeof(ClientID) == sizeof(uint64_t));
 std::ostream &operator<<(std::ostream &os, const ClientID &cid);

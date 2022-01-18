@@ -59,12 +59,23 @@ struct RWContext
 
 struct LeaseContext
 {
+    // correctness related fields:
+    // will refuse relinquish requests from unrelated clients.
+    ClientID client_cid;
+    bool valid;
+    // end
     ibv_mw *buffer_mw;
     ibv_mw *header_mw;
     size_t dir_id{size_t(-1)};
     uint64_t addr_to_bind{0};
     size_t buffer_size{0};
     size_t protection_region_id;
+};
+
+enum class RWFlag : uint8_t
+{
+    kDisableLocalExpireCheck = 1 << 0,
+    kReserved = 1 << 1,
 };
 class Patronus
 {
@@ -122,11 +133,13 @@ public:
                      char *obuf,
                      size_t size,
                      size_t offset,
+                     uint8_t flag /* RWFlag */,
                      CoroContext *ctx = nullptr);
     inline bool write(Lease &lease,
                       const char *ibuf,
                       size_t size,
                       size_t offset,
+                      uint8_t flag /* RWFlag */,
                       CoroContext *ctx = nullptr);
     inline bool pingpong(uint16_t node_id,
                          uint16_t dir_id,
@@ -293,14 +306,24 @@ private:
     LeaseContext *get_lease_context()
     {
         auto *ret = DCHECK_NOTNULL(lease_context_.get());
+        DCHECK(!ret->valid)
+            << "** A newly allocated context should not be valid.";
         return ret;
     }
     LeaseContext *get_lease_context(uint16_t id)
     {
-        return DCHECK_NOTNULL(lease_context_.id_to_obj(id));
+        auto *ret = DCHECK_NOTNULL(lease_context_.id_to_obj(id));
+        if (unlikely(!ret->valid))
+        {
+            DVLOG(4) << "[Patronus] get_lease_context(id) related to invalid "
+                        "contexts";
+            return nullptr;
+        }
+        return ret;
     }
     void put_lease_context(LeaseContext *ctx)
     {
+        ctx->valid = false;
         lease_context_.put(ctx);
     }
     ProtectionRegion *get_protection_region()
@@ -381,6 +404,8 @@ private:
     void handle_request_lease_extend(LeaseModifyRequest *, CoroContext *ctx);
     void handle_request_lease_upgrade(LeaseModifyRequest *, CoroContext *ctx);
 
+    void task_gc_lease(uint64_t lease_id, ClientID cid, CoroContext *ctx = nullptr);
+
     // server coroutines
     void server_coro_master(CoroYield &yield);
     void server_coro_worker(coro_t coro_id, CoroYield &yield);
@@ -453,6 +478,9 @@ private:
         ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
         protection_region_pool_;
     static thread_local DDLManager ddl_manager_;
+    static thread_local size_t allocated_mw_nr_;
+    constexpr static uint32_t magic = 0b1010101010;
+    constexpr static uint16_t mask = 0b1111111111;
 
     // for admin management
     std::array<std::atomic<bool>, MAX_MACHINE> exits_;
@@ -500,22 +528,47 @@ void Patronus::relinquish(Lease &lease, CoroContext *ctx)
 
 bool Patronus::validate_lease([[maybe_unused]] const Lease &lease)
 {
-    // auto lease_patronus_ddl = lease.
-    LOG(WARNING) << "TODO!";
-    return true;
+    auto lease_patronus_ddl = lease.ddl_term();
+    auto patronus_now = time_syncer_->patronus_now();
+    return time_syncer_->definitely_lt(patronus_now, lease_patronus_ddl);
 }
 
-bool Patronus::read(
-    Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx)
+bool Patronus::read(Lease &lease,
+                    char *obuf,
+                    size_t size,
+                    size_t offset,
+                    uint8_t flag,
+                    CoroContext *ctx)
 {
+    bool disable_check = flag & (uint8_t) RWFlag::kDisableLocalExpireCheck;
+    if (likely(!disable_check))
+    {
+        if (!validate_lease(lease))
+        {
+            return false;
+        }
+    }
+    bool reserved = flag & (uint8_t) RWFlag::kReserved;
+    DCHECK(!reserved);
     return buffer_rw_impl(lease, obuf, size, offset, true /* is_read */, ctx);
 }
 bool Patronus::write(Lease &lease,
                      const char *ibuf,
                      size_t size,
                      size_t offset,
+                     uint8_t flag,
                      CoroContext *ctx)
 {
+    bool disable_check = flag & (uint8_t) RWFlag::kDisableLocalExpireCheck;
+    if (likely(!disable_check))
+    {
+        if (!validate_lease(lease))
+        {
+            return false;
+        }
+    }
+    bool reserved = flag & (uint8_t) RWFlag::kReserved;
+    DCHECK(!reserved);
     return buffer_rw_impl(
         lease, (char *) ibuf, size, offset, false /* is_read */, ctx);
 }

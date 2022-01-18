@@ -115,8 +115,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
         DCHECK_LT(sizeof(Object), rdma_buf.size);
-        bool succ = p->read(
-            lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
+        bool succ = p->read(lease,
+                            rdma_buf.buffer,
+                            sizeof(Object),
+                            0 /* offset */,
+                            0 /* flag */,
+                            &ctx);
         if (unlikely(!succ))
         {
             DVLOG(1) << "[bench] client coro " << ctx

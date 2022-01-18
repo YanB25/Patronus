@@ -5,8 +5,10 @@
 
 #include "Timer.h"
 #include "patronus/Patronus.h"
+#include "util/PerformanceReporter.h"
 #include "util/monitor.h"
 using namespace std::chrono_literals;
+using namespace define::literals;
 
 // Two nodes
 // one node issues cas operations
@@ -14,6 +16,7 @@ using namespace std::chrono_literals;
 constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
+constexpr static size_t kTestTime = 10_K;
 
 using namespace patronus;
 constexpr static size_t kCoroCnt = 1;
@@ -61,7 +64,11 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     client_comm.finish_cur_task[coro_id] = false;
     client_comm.finish_all_task[coro_id] = false;
 
-    for (size_t i = 0; i < 3; ++i)
+    OnePassMonitor read_nr_before_expire_m;
+    OnePassMonitor fail_to_unbind_m;
+    OnePassMonitor remain_ddl_m;
+
+    for (size_t i = 0; i < kTestTime; ++i)
     {
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto before_get_rlease = std::chrono::steady_clock::now();
@@ -82,41 +89,97 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto lease_ddl = lease.ddl_term();
         auto now = syncer.patronus_now();
         time::ns_t diff_ns = lease_ddl - now;
-        LOG(INFO) << "The term of lease is " << lease_ddl << ", now is " << now
-                  << ", DDL remains " << diff_ns
-                  << " ns. Latency of get_rlease: " << get_rlease_ns << " ns";
+        VLOG(2) << "The term of lease is " << lease_ddl << ", now is " << now
+                << ", DDL remains " << diff_ns
+                << " ns. Latency of get_rlease: " << get_rlease_ns << " ns";
+        remain_ddl_m.collect(diff_ns);
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
         auto rdma_buf = p->get_rdma_buffer();
         memset(rdma_buf.buffer, 0, sizeof(Object));
 
-        DVLOG(2) << "[bench] client coro " << ctx << " start to read";
+        VLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
-        bool succ = p->read(
-            lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
-        CHECK(succ);
+        // read three times, should both success
+        size_t read_nr = 0;
+        for (size_t t = 0; t < 100; ++t)
+        {
+            bool succ = p->read(lease,
+                                rdma_buf.buffer,
+                                sizeof(Object),
+                                0 /* offset */,
+                                0 /* flag */,
+                                &ctx);
+            if (!succ)
+            {
+                auto patronus_now = syncer.patronus_now();
+                time::ns_t ns_diff = lease.ddl_term() - patronus_now;
+                if (ns_diff <= syncer.epsilon())
+                {
+                    VLOG(2) << "[bench] read fails because of lease expired";
+                }
+                else
+                {
+                    CHECK(succ) << "[bench] " << i << "-th, read " << t
+                                << "-th failed. lease until DDL: " << ns_diff
+                                << ", patronus_now: " << patronus_now;
+                }
+            }
+            else
+            {
+                read_nr++;
+                DVLOG(2) << "[bench] client coro " << ctx << " read finished";
+                Object magic_object = *(Object *) rdma_buf.buffer;
+                CHECK_EQ(magic_object.target, kMagic)
+                    << "coro_id " << ctx << ", Read at key " << key
+                    << ", lease.base: " << (void *) lease.base_addr();
+            }
+        }
+        read_nr_before_expire_m.collect(read_nr);
 
-        DVLOG(2) << "[bench] client coro " << ctx << " read finished";
-        Object magic_object = *(Object *) rdma_buf.buffer;
-        CHECK_EQ(magic_object.target, kMagic)
-            << "coro_id " << ctx << ", Read at key " << key
-            << ", lease.base: " << (void *) lease.base_addr();
+        // to make sure the server really gc the lea se
+        std::this_thread::sleep_for(100us +
+                                    std::chrono::nanoseconds(syncer.epsilon()));
+        // the lease is expired (maybe by client's decision)
+        // force to send here
+        // if actually issue read, QP should fails
+        VLOG(3) << "[bench] before read, patronus_time: "
+                << syncer.patronus_now();
+        bool succ = p->read(lease,
+                            rdma_buf.buffer,
+                            sizeof(Object),
+                            0,
+                            (uint8_t) RWFlag::kDisableLocalExpireCheck,
+                            &ctx);
 
-        // sleep for a while, the Lease should expire
-        std::this_thread::sleep_for(100us);
-        succ = p->read(
-            lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
-        // CHECK(!succ) << "The lease should be already expired";
-        LOG_IF(ERROR, succ) << "The lease should already be expired";
+        if (succ)
+        {
+            fail_to_unbind_m.collect(1);
+        }
+        else
+        {
+            fail_to_unbind_m.collect(0);
+        }
 
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
-        p->relinquish_write(lease, &ctx);
+
+        // make sure this will take no harm.
         p->relinquish(lease, &ctx);
 
         p->put_rdma_buffer(rdma_buf.buffer);
     }
+
+    LOG(INFO) << "[bench] remain_ddl: " << remain_ddl_m;
+    LOG(INFO) << "[bench] read_nr before lease expire: "
+              << read_nr_before_expire_m;
+
+    LOG_IF(ERROR, fail_to_unbind_m.max() > 0)
+        << "[bench] in some tests, server fails to expire the lease "
+           "immediately. fail_to_unbind_nr: "
+        << fail_to_unbind_m;
+
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;
     client_comm.finish_all_task[coro_id] = true;
