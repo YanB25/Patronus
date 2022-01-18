@@ -73,16 +73,25 @@ Sorry I take one day off. Just too tired to work. Can not focus.
     - could use single thread (per-thread) design, or a thread-safe queue design (let the master to do all the tasks)
 [-] feat: add a TimeSyncer to patronus, which is used to sync the time at the begin of the system.
 [-] DSM::get_rdma_buffer() return Buffer plz!
-- Change the acquire lease API, and add some flags into it. server could react according to the flags.
+[-] Change the acquire lease API, and add some flags into it. server could react according to the flags.
     - so that, Server could know it is a bench_test (not automatically gc), or actual deploy (register gc task to the task manager).
     - so that, we could let server know whether it needs to speculatively binds a longer lease for one-sided extends.
+    - DONE: currently add no-gc flag. Will add hint_extend.
+[-] Before everything: I need a correct_patronus_time to makes it works well.
 - Add the TIME concepts into patronus. Server should intervally see if any expired lease exists, and destroy them!
+    - Do not measure time by one or two calls. use OnePassMonitor to get the average. I think RDMA initially has performance penalty.
+    - The timeout should work well: server will automatically gc the timeouted
+    - Client should refuse close-to-timeout R/W, and possibly do the one-sided extend (flag control)
     - IMPORTANT: what if server speculatively gc the resource, then client requires the gc the resource, i.e. the ABA problem? The resource is currently owns by others.
     - I think, should attach clientID to the on-going resource. If client requires to gc, see if 1) the resource is on-going (if gc-ed, will not do twice), and 2) the clientID matches (if not match, also skip.)
-- Carefully thinks about lock conflict, fairness, client synchronizations at swap area, ...
-- Implemente all the APIs in Patronus. Extend, upgrade would be the most important ones.
+- Pass correctness tests
+- Bench the performance and latency.
+During the 3 days, 0.5 days attracted by surfing (so not working!).
+Does not quite satisfied by my efficiency. But really did a good job in progress of TimeSyncer.
 
 FUTURES:
+- Carefully thinks about lock conflict, fairness, client synchronizations at swap area, ...
+- Implemente all the APIs in Patronus. Extend, upgrade would be the most important ones.
 
 If all the things above finish, I can move on to adopt the uPaxos!
 

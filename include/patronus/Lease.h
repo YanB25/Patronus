@@ -4,6 +4,7 @@
 
 #include <iostream>
 
+#include "patronus/Time.h"
 #include "patronus/Type.h"
 namespace patronus
 {
@@ -53,7 +54,7 @@ public:
     {
         return dir_id_;
     }
-    term_t ddl_term() const
+    time::PatronusTime ddl_term() const
     {
         return cur_ddl_term_;
     }
@@ -114,7 +115,7 @@ private:
     rkey_t rkey_0_{0};
     rkey_t cur_rkey_{0};
     rkey_t header_rkey_{0};
-    term_t cur_ddl_term_{0};
+    time::PatronusTime cur_ddl_term_{0};
 };
 
 std::ostream &operator<<(std::ostream &os, const Lease &lease);

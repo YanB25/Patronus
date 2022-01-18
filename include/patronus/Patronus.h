@@ -102,18 +102,20 @@ public:
                             uint16_t dir_id,
                             id_t key,
                             size_t size,
-                            term_t term,
+                            time::ns_t ns,
                             uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     inline Lease get_wlease(uint16_t node_id,
                             uint16_t dir_id,
                             id_t key,
                             size_t size,
-                            term_t term,
+                            time::ns_t ns,
                             uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     inline Lease upgrade(Lease &lease, CoroContext *ctx = nullptr);
-    inline Lease extend(Lease &lease, term_t term, CoroContext *ctx = nullptr);
+    inline Lease extend(Lease &lease,
+                        time::ns_t ns,
+                        CoroContext *ctx = nullptr);
     inline void relinquish(Lease &lease, CoroContext *ctx = nullptr);
     inline void relinquish_write(Lease &lease, CoroContext *ctx = nullptr);
     inline bool read(Lease &lease,
@@ -130,7 +132,7 @@ public:
                          uint16_t dir_id,
                          id_t key,
                          size_t size,
-                         term_t term,
+                         time::term_t term,
                          CoroContext *ctx = nullptr);
     /**
      * @brief After all the node call this function, @should_exit() will return
@@ -388,7 +390,7 @@ private:
                          uint16_t dir_id,
                          id_t key,
                          size_t size,
-                         term_t term,
+                         time::ns_t ns,
                          RequestType type,
                          uint8_t flag,
                          CoroContext *ctx = nullptr);
@@ -398,6 +400,7 @@ private:
                         size_t offset,
                         bool is_read,
                         CoroContext *ctx = nullptr);
+    inline bool validate_lease(const Lease &lease);
     bool protection_region_rw_impl(Lease &lease,
                                    char *io_buf,
                                    size_t size,
@@ -415,7 +418,7 @@ private:
                          CoroContext *ctx = nullptr);
     Lease lease_modify_impl(Lease &lease,
                             RequestType type,
-                            term_t term,
+                            time::ns_t ns,
                             CoroContext *ctx = nullptr);
     inline void fill_bind_mw_wr(ibv_send_wr &wr,
                                 ibv_send_wr *next_wr,
@@ -463,49 +466,45 @@ Lease Patronus::get_rlease(uint16_t node_id,
                            uint16_t dir_id,
                            id_t key,
                            size_t size,
-                           term_t term,
+                           time::ns_t ns,
                            uint8_t flag,
                            CoroContext *ctx)
 {
-    return get_lease_impl(node_id,
-                          dir_id,
-                          key,
-                          size,
-                          term,
-                          RequestType::kAcquireRLease,
-                          flag,
-                          ctx);
+    return get_lease_impl(
+        node_id, dir_id, key, size, ns, RequestType::kAcquireRLease, flag, ctx);
 }
 Lease Patronus::get_wlease(uint16_t node_id,
                            uint16_t dir_id,
                            id_t key,
                            size_t size,
-                           term_t term,
+                           time::ns_t ns,
                            uint8_t flag,
                            CoroContext *ctx)
 {
-    return get_lease_impl(node_id,
-                          dir_id,
-                          key,
-                          size,
-                          term,
-                          RequestType::kAcquireWLease,
-                          flag,
-                          ctx);
+    return get_lease_impl(
+        node_id, dir_id, key, size, ns, RequestType::kAcquireWLease, flag, ctx);
 }
 
 Lease Patronus::upgrade(Lease &lease, CoroContext *ctx)
 {
     return lease_modify_impl(lease, RequestType::kUpgrade, 0 /* term */, ctx);
 }
-Lease Patronus::extend(Lease &lease, term_t term, CoroContext *ctx)
+Lease Patronus::extend(Lease &lease, time::ns_t ns, CoroContext *ctx)
 {
-    return lease_modify_impl(lease, RequestType::kExtend, term, ctx);
+    return lease_modify_impl(lease, RequestType::kExtend, ns, ctx);
 }
 void Patronus::relinquish(Lease &lease, CoroContext *ctx)
 {
     lease_modify_impl(lease, RequestType::kRelinquish, 0 /* term */, ctx);
 }
+
+bool Patronus::validate_lease([[maybe_unused]] const Lease &lease)
+{
+    // auto lease_patronus_ddl = lease.
+    LOG(WARNING) << "TODO!";
+    return true;
+}
+
 bool Patronus::read(
     Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx)
 {
@@ -525,7 +524,7 @@ bool Patronus::pingpong(uint16_t node_id,
                         uint16_t dir_id,
                         id_t key,
                         size_t size,
-                        term_t term,
+                        time::term_t term,
                         CoroContext *ctx)
 {
     auto lease = get_lease_impl(node_id,

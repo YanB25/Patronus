@@ -48,25 +48,6 @@ inline std::ostream &operator<<(std::ostream &os,
 }
 using namespace define::literals;
 
-/**
- * @brief PatronusTime is the adjusted time by TimeSyncer. Considered the time
- * drift in the cluster.
- *
- */
-class PatronusTime
-{
-public:
-    PatronusTime(uint64_t adjusted_ns) : adjusted_ns_(adjusted_ns)
-    {
-    }
-    uint64_t ns() const
-    {
-        return adjusted_ns_;
-    }
-
-private:
-    uint64_t adjusted_ns_{0};
-};
 class TimeSyncer
 {
     constexpr static size_t kMagic = 0xaabbccdd10103232;
@@ -76,7 +57,6 @@ class TimeSyncer
 
 public:
     using pointer = std::unique_ptr<TimeSyncer>;
-    using ns_t = int64_t;
     TimeSyncer(DSM::pointer dsm,
                GlobalAddress gaddr,
                char *buffer,
@@ -98,14 +78,43 @@ public:
      */
     void sync();
 
+    static std::chrono::time_point<std::chrono::system_clock>
+    ns_to_system_clock(uint64_t ns)
+    {
+        std::chrono::time_point<std::chrono::system_clock> ret{};
+        return ret + std::chrono::nanoseconds(ns);
+    }
+    /**
+     * @brief note this can not be called across nodes without adjustment
+     *
+     * @return std::chrono::time_point<std::chrono::steady_clock>
+     */
+    static std::chrono::time_point<std::chrono::steady_clock>
+    ns_to_steady_clock(uint64_t ns)
+    {
+        std::chrono::time_point<std::chrono::steady_clock> ret{};
+        return ret + std::chrono::nanoseconds(ns);
+    }
+
     template <typename T>
     PatronusTime to_patronus_time(const T &t) const
     {
         DCHECK(ready_);
         auto raw_ns = to_ns(t);
-        auto adjusted_ns =
-            raw_ns + clock_info_.adjustment.load(std::memory_order_relaxed);
-        return PatronusTime(adjusted_ns);
+        return PatronusTime(
+            raw_ns, clock_info_.adjustment.load(std::memory_order_relaxed));
+    }
+    PatronusTime patronus_later(ns_t ns) const
+    {
+        DCHECK(ready_);
+        auto later = chrono_now() + std::chrono::nanoseconds(ns);
+        return to_patronus_time(later);
+    }
+    PatronusTime patronus_now() const
+    {
+        DCHECK(ready_);
+        auto now = chrono_now();
+        return to_patronus_time(now);
     }
     static PatronusTime to_patronus_time(const PatronusTime &t)
     {
@@ -127,9 +136,15 @@ public:
                        .count();
         return raw;
     }
+
     static ns_t to_ns(ns_t ns)
     {
         return ns;
+    }
+    static std::chrono::time_point<std::chrono::system_clock> to_chrono(ns_t ns)
+    {
+        std::chrono::time_point<std::chrono::system_clock> ret{};
+        return ret + std::chrono::nanoseconds(ns);
     }
 
     ns_t epsilon() const
@@ -146,15 +161,15 @@ public:
      */
     bool definitely_lt(PatronusTime lhs, PatronusTime rhs) const
     {
-        return definitely_lt(lhs.ns(), rhs.ns());
+        return definitely_lt(lhs.term(), rhs.term());
     }
     bool definitely_gt(PatronusTime lhs, PatronusTime rhs) const
     {
-        return definitely_gt(lhs.ns(), rhs.ns());
+        return definitely_gt(lhs.term(), rhs.term());
     }
     bool may_eq(PatronusTime lhs, PatronusTime rhs) const
     {
-        return may_eq(lhs.ns(), rhs.ns());
+        return may_eq(lhs.term(), rhs.term());
     }
     template <typename T, typename U>
     bool definitely_lt(const T &lhs, const U &rhs) const

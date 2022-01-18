@@ -76,7 +76,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
                                uint16_t dir_id,
                                id_t key,
                                size_t size,
-                               term_t term,
+                               time::ns_t ns,
                                RequestType type,
                                uint8_t flag,
                                CoroContext *ctx)
@@ -122,7 +122,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     msg->dir_id = dir_id;
     msg->key = key;
     msg->size = size;
-    msg->require_term = term;
+    msg->required_ns = ns;
     msg->trace = trace;
     msg->flag = flag;
 
@@ -312,7 +312,7 @@ bool Patronus::protection_region_rw_impl(Lease &lease,
 
 Lease Patronus::lease_modify_impl(Lease &lease,
                                   RequestType type,
-                                  term_t term,
+                                  time::ns_t ns,
                                   CoroContext *ctx)
 {
     CHECK(type == RequestType::kExtend || type == RequestType::kRelinquish ||
@@ -339,7 +339,7 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     msg->cid.coro_id = ctx ? ctx->coro_id() : kNotACoro;
     msg->cid.rpc_ctx_id = rpc_ctx_id;
     msg->lease_id = lease.id();
-    msg->term = term;
+    msg->ns = ns;
 
     rpc_context->ret_lease = &ret_lease;
     rpc_context->ready = false;
@@ -560,7 +560,7 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
         ret_lease.rkey_0_ = resp->rkey_0;
         ret_lease.header_rkey_ = resp->rkey_header;
         ret_lease.cur_rkey_ = ret_lease.rkey_0_;
-        ret_lease.cur_ddl_term_ = resp->ddl_term;
+        ret_lease.cur_ddl_term_ = time::PatronusTime(resp->ddl_term);
         ret_lease.id_ = resp->lease_id;
         ret_lease.dir_id_ = rpc_context->dir_id;
         if (resp->type == RequestType::kAcquireRLease)
@@ -752,13 +752,18 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         bool no_gc = req->flag & (uint8_t) AcquireRequestFlag::kNoGc;
         if (likely(!no_gc))
         {
-            auto ddl_term = time_syncer_->chrono_later(req->require_term);
-            auto ddl_ns = time_syncer_->to_ns(ddl_term);
-            ddl_manager_.push(ddl_ns, []() {
-                LOG(WARNING) << "TODO: here should be the gc logic for Lease";
-            });
+            auto patronus_ddl = time_syncer_->patronus_later(req->required_ns);
+            ddl_manager_.push(
+                patronus_ddl.term(),
+                []() {
+                    LOG(WARNING)
+                        << "TODO: here should be the gc logic for Lease";
+                });
 
-            resp_msg->ddl_term = ddl_ns;
+            DVLOG(4) << "[debug] get client require ns " << req->required_ns
+                     << ", patronus_ddl: " << patronus_ddl;
+
+            resp_msg->ddl_term = patronus_ddl.term();
         }
         else
         {

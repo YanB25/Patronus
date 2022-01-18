@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Common.h"
+#include "patronus/Type.h"
 
 namespace patronus
 {
@@ -15,14 +16,14 @@ using Task = std::function<void()>;
 class DDLTask
 {
 public:
-    DDLTask(uint64_t ddl, const Task &task) : ddl_(ddl), task_(task)
+    DDLTask(time::term_t ddl, const Task &task) : ddl_(ddl), task_(task)
     {
     }
     bool operator<(const DDLTask &rhs) const
     {
         return ddl_ > rhs.ddl_;
     }
-    uint64_t ddl() const
+    time::term_t ddl() const
     {
         return ddl_;
     }
@@ -36,7 +37,7 @@ public:
     }
 
 private:
-    uint64_t ddl_;
+    time::term_t ddl_;
     Task task_;
 };
 class DDLManager
@@ -48,7 +49,7 @@ public:
     DDLManager(const DDLManager &) = delete;
     DDLManager &operator=(const DDLManager &) = delete;
 
-    void push(uint64_t ddl, const Task &task)
+    void push(time::term_t ddl, const Task &task)
     {
         pqueue_.push(DDLTask(ddl, task));
     }
@@ -64,7 +65,7 @@ public:
         auto ddl = to_ddl(tp);
         return do_task(ddl, limit);
     }
-    size_t do_task(uint64_t until, size_t limit = kLimit)
+    size_t do_task(time::term_t until, size_t limit = kLimit)
     {
         size_t done = 0;
         while (!pqueue_.empty())
@@ -95,7 +96,7 @@ public:
     }
 
 private:
-    uint64_t to_ddl(
+    time::term_t to_ddl(
         const std::chrono::time_point<std::chrono::steady_clock> &tp)
     {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(

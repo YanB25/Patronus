@@ -8,12 +8,12 @@
 #include <iostream>
 
 #include "ReliableMessageConnection.h"
+#include "patronus/Time.h"
 #include "util/Debug.h"
 
 namespace patronus
 {
 using id_t = uint64_t;
-using term_t = int64_t;
 using rkey_t = uint32_t;
 using chrono_time_t = std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -75,7 +75,7 @@ struct AcquireRequest
     ClientID cid;
     id_t key;
     size_t size;
-    term_t require_term;
+    time::ns_t required_ns;
     uint16_t dir_id;
     trace_t trace;
     uint8_t flag;  // should be AcquireRequestFlag
@@ -94,7 +94,7 @@ struct AcquireResponse
     uint32_t rkey_header;
     uint64_t buffer_base;
     uint64_t header_base;
-    term_t ddl_term;
+    time::term_t ddl_term;
     uint16_t lease_id;
     bool success;
     Debug<uint64_t> digest;
@@ -125,7 +125,7 @@ struct LeaseModifyRequest
     enum RequestType type;
     ClientID cid;
     id_t lease_id;
-    term_t term;
+    time::ns_t ns;
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(LeaseModifyRequest) < ReliableConnection::kMessageSize);

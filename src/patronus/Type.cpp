@@ -98,7 +98,7 @@ std::ostream &operator<<(std::ostream &os, const AcquireRequest &req)
 {
     os << "{AcquireRequest type: " << req.type << ", cid: " << req.cid
        << ", key: " << req.key << ", size: " << req.size
-       << ", require_term: " << req.require_term << ", dir_id: " << req.dir_id
+       << ", require_ns: " << req.required_ns << ", dir_id: " << req.dir_id
        << "}";
     return os;
 }
@@ -124,7 +124,7 @@ std::ostream &operator<<(std::ostream &os, const AdminRequest &req)
 std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req)
 {
     os << "{LeaseModifyRequest type: " << req.type << ", cid: " << req.cid
-       << ", lease_id: " << req.lease_id << ", term: " << req.term << " }";
+       << ", lease_id: " << req.lease_id << ", ns: " << req.ns << " }";
     return os;
 }
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &resp)

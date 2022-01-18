@@ -16,7 +16,7 @@ using small_bit_t = uint8_t;
 struct LeaseDescriptor
 {
     uint32_t rkey;
-    term_t term;
+    time::term_t term;
 } __attribute__((packed));
 
 struct ProtectionRegionMeta

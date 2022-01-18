@@ -26,68 +26,81 @@ std::ostream &operator<<(std::ostream &os,
 #include "util/monitor.h"
 
 using namespace define::literals;
+using namespace patronus;
 
 constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kMid = 0;
-constexpr static size_t kTestTime = 10_M;
+constexpr static size_t kTestTime = 1_M;
 
 struct BenchMessage
 {
     uint64_t time;
 };
 
-void client(DSM::pointer dsm)
+void client(Patronus::pointer p)
 {
     OnePassMonitor m;
+    OnePassMonitor send_recv_m;
+    auto dsm = p->get_dsm();
+    auto &syncer = p->time_syncer();
     auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buffer[1024];
     for (size_t i = 0; i < kTestTime; ++i)
     {
         auto &msg = *(BenchMessage *) buf;
-        auto now = std::chrono::system_clock::now();
-        msg.time = patronus::time::to_ns(now);
+        auto patronus_now = syncer.patronus_now();
+        msg.time = patronus_now.term();
+
+        auto before_send_recv = std::chrono::steady_clock::now();
         dsm->reliable_send(buf, sizeof(msg), kServerNodeId, kMid);
         dsm->reliable_recv(kMid, recv_buffer, 1);
+        auto after_send_recv = std::chrono::steady_clock::now();
+        auto send_recv_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                after_send_recv - before_send_recv)
+                .count();
 
         auto &recv_msg = *(BenchMessage *) recv_buffer;
-        auto that_time = patronus::time::ns_to_system_clock(recv_msg.time);
-        now = std::chrono::system_clock::now();
-        // CHECK_LT(that_time, now) << "recv BenchMessage from future";
+        auto that_patronus_time = syncer.to_patronus_time(recv_msg.time);
+        patronus_now = syncer.patronus_now();
+        CHECK_LT(that_patronus_time, patronus_now)
+            << "recv BenchMessage from future";
 
-        auto diff_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                           now - that_time)
-                           .count();
+        auto diff_ns = patronus_now - that_patronus_time;
         m.collect(diff_ns);
+        send_recv_m.collect(send_recv_ns);
     }
 
-    LOG(INFO) << "Network time different: " << m;
+    LOG(INFO) << "Time difference of me and server: " << m
+              << ", send_recv_latency: " << send_recv_m;
     LOG_IF(ERROR, m.min() <= 0)
         << "Time reverse detected. possible time epsilon >= " << m.min() / 1000
         << " us";
 }
-void server(DSM::pointer dsm)
+void server(Patronus::pointer p)
 {
     OnePassMonitor m;
+    auto dsm = p->get_dsm();
+    auto &syncer = p->time_syncer();
     auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buf[1024];
     for (size_t i = 0; i < kTestTime; ++i)
     {
         dsm->reliable_recv(kMid, recv_buf);
         auto &msg = *(BenchMessage *) recv_buf;
-        auto that_time = patronus::time::ns_to_system_clock(msg.time);
-        auto now = std::chrono::system_clock::now();
-        // CHECK_LT(that_time, now) << "Receive a msg from future";
-        auto diff_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                           now - that_time)
-                           .count();
+        auto that_patronus_time = syncer.to_patronus_time(msg.time);
+        auto patronus_now = syncer.patronus_now();
+        CHECK_LT(that_patronus_time, patronus_now)
+            << "Receive a msg from future";
+        auto diff_ns = patronus_now - that_patronus_time;
         m.collect(diff_ns);
 
         auto &send_msg = *(BenchMessage *) buf;
-        now = std::chrono::system_clock::now();
-        send_msg.time = patronus::time::to_ns(now);
+        patronus_now = syncer.patronus_now();
+        send_msg.time = patronus_now.term();
         dsm->reliable_send(buf, sizeof(BenchMessage), kClientNodeId, kMid);
     }
 
@@ -103,22 +116,20 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     rdmaQueryDevice();
 
-    DSMConfig config;
-    config.machineNR = kMachineNr;
+    PatronusConfig config;
+    config.machine_nr = kMachineNr;
 
-    auto dsm = DSM::getInstance(config);
-
-    dsm->registerThread();
+    auto patronus = Patronus::ins(config);
 
     // let client spining
-    auto nid = dsm->getMyNodeID();
+    auto nid = patronus->get_node_id();
     if (nid == kClientNodeId)
     {
-        client(dsm);
+        client(patronus);
     }
     else
     {
-        server(dsm);
+        server(patronus);
     }
 
     LOG(INFO) << "finished. ctrl+C to quit.";
