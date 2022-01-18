@@ -5,9 +5,11 @@
 #include "Timer.h"
 #include "util/monitor.h"
 
+using namespace define::literals;
+
 constexpr static size_t kTestTime = 1 * define::M;
 constexpr static size_t kCoroNr = 16;
-constexpr static size_t kLargeStackSize = 16 * define::MB;
+constexpr static size_t kLargeStackSize = 16_KB;
 
 class Scope
 {

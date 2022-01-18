@@ -23,6 +23,8 @@ constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kTestTime =
     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
 
+using namespace std::chrono_literals;
+
 struct Object
 {
     uint64_t target;
@@ -81,7 +83,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     dir_id,
                                     coro_key /* key */,
                                     sizeof(Object),
-                                    100,
+                                    0ns,
                                     (uint8_t) AcquireRequestFlag::kNoGc,
                                     &ctx);
         if (unlikely(!lease.success()))

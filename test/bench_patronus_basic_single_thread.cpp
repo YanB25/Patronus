@@ -26,6 +26,8 @@ constexpr static size_t kDirID = 0;
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
 constexpr static size_t kTestTime = 1 * define::M;
 
+using namespace std::chrono_literals;
+
 struct Object
 {
     uint64_t target;
@@ -92,7 +94,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     kDirID,
                                     coro_key /* key */,
                                     sizeof(Object),
-                                    100,
+                                    0ns,
                                     (uint8_t) AcquireRequestFlag::kNoGc,
                                     &ctx);
         if (unlikely(!lease.success()))
@@ -302,7 +304,6 @@ int main(int argc, char *argv[])
     PatronusConfig config;
     config.machine_nr = kMachineNr;
     config.key_locator = bench_locator;
-    config.skip_sync_time = true;
 
     auto patronus = Patronus::ins(config);
 

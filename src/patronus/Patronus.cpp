@@ -40,19 +40,16 @@ Patronus::Patronus(const PatronusConfig &conf)
         << "**dsm should provide reserved buffer at least what Patronus "
            "requries";
 
-    if (!conf.skip_sync_time)
-    {
-        auto time_sync_buffer = get_time_sync_buffer();
-        auto time_sync_offset =
-            dsm_->addr_to_dsm_offset(time_sync_buffer.buffer);
-        GlobalAddress gaddr;
-        gaddr.nodeID = conf.time_parent_node_id;
-        gaddr.offset = time_sync_offset;
-        time_syncer_ = time::TimeSyncer::new_instance(
-            dsm_, gaddr, time_sync_buffer.buffer, time_sync_buffer.size);
+    // for time syncer
+    auto time_sync_buffer = get_time_sync_buffer();
+    auto time_sync_offset = dsm_->addr_to_dsm_offset(time_sync_buffer.buffer);
+    GlobalAddress gaddr;
+    gaddr.nodeID = conf.time_parent_node_id;
+    gaddr.offset = time_sync_offset;
+    time_syncer_ = time::TimeSyncer::new_instance(
+        dsm_, gaddr, time_sync_buffer.buffer, time_sync_buffer.size);
 
-        time_syncer_->sync();
-    }
+    time_syncer_->sync();
 
     reg_locator(conf.key_locator);
     explain(conf);
@@ -67,9 +64,6 @@ Patronus::~Patronus()
 
 void Patronus::explain(const PatronusConfig &conf)
 {
-    LOG_IF(WARNING, conf.skip_sync_time)
-        << "[Patronus] skip time syncing across cluster. Lease may not work "
-           "correctly";
     LOG(INFO) << "[patronus] config: " << conf;
 }
 

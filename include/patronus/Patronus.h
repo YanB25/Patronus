@@ -28,14 +28,12 @@ struct PatronusConfig
     size_t buffer_size{kDSMCacheSize};
     KeyLocator key_locator{identity_locator};
     // for sync time
-    bool skip_sync_time{false};
     size_t time_parent_node_id{0};
 };
 inline std::ostream &operator<<(std::ostream &os, const PatronusConfig &conf)
 {
     os << "{PatronusConfig machine_nr: " << conf.machine_nr
-       << ", buffer_size: " << conf.buffer_size
-       << ", skip_sync_time: " << conf.skip_sync_time << "}";
+       << ", buffer_size: " << conf.buffer_size << "}";
     return os;
 }
 
@@ -113,19 +111,19 @@ public:
                             uint16_t dir_id,
                             id_t key,
                             size_t size,
-                            time::ns_t ns,
+                            std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     inline Lease get_wlease(uint16_t node_id,
                             uint16_t dir_id,
                             id_t key,
                             size_t size,
-                            time::ns_t ns,
+                            std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     inline Lease upgrade(Lease &lease, CoroContext *ctx = nullptr);
     inline Lease extend(Lease &lease,
-                        time::ns_t ns,
+                        std::chrono::nanoseconds ns,
                         CoroContext *ctx = nullptr);
     inline void relinquish(Lease &lease, CoroContext *ctx = nullptr);
     inline void relinquish_write(Lease &lease, CoroContext *ctx = nullptr);
@@ -404,7 +402,9 @@ private:
     void handle_request_lease_extend(LeaseModifyRequest *, CoroContext *ctx);
     void handle_request_lease_upgrade(LeaseModifyRequest *, CoroContext *ctx);
 
-    void task_gc_lease(uint64_t lease_id, ClientID cid, CoroContext *ctx = nullptr);
+    void task_gc_lease(uint64_t lease_id,
+                       ClientID cid,
+                       CoroContext *ctx = nullptr);
 
     // server coroutines
     void server_coro_master(CoroYield &yield);
@@ -494,10 +494,12 @@ Lease Patronus::get_rlease(uint16_t node_id,
                            uint16_t dir_id,
                            id_t key,
                            size_t size,
-                           time::ns_t ns,
+                           std::chrono::nanoseconds chrono_ns,
                            uint8_t flag,
                            CoroContext *ctx)
 {
+    auto ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     return get_lease_impl(
         node_id, dir_id, key, size, ns, RequestType::kAcquireRLease, flag, ctx);
 }
@@ -505,10 +507,12 @@ Lease Patronus::get_wlease(uint16_t node_id,
                            uint16_t dir_id,
                            id_t key,
                            size_t size,
-                           time::ns_t ns,
+                           std::chrono::nanoseconds chrono_ns,
                            uint8_t flag,
                            CoroContext *ctx)
 {
+    auto ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     return get_lease_impl(
         node_id, dir_id, key, size, ns, RequestType::kAcquireWLease, flag, ctx);
 }
@@ -517,8 +521,12 @@ Lease Patronus::upgrade(Lease &lease, CoroContext *ctx)
 {
     return lease_modify_impl(lease, RequestType::kUpgrade, 0 /* term */, ctx);
 }
-Lease Patronus::extend(Lease &lease, time::ns_t ns, CoroContext *ctx)
+Lease Patronus::extend(Lease &lease,
+                       std::chrono::nanoseconds chrono_ns,
+                       CoroContext *ctx)
 {
+    auto ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     return lease_modify_impl(lease, RequestType::kExtend, ns, ctx);
 }
 void Patronus::relinquish(Lease &lease, CoroContext *ctx)
@@ -529,7 +537,7 @@ void Patronus::relinquish(Lease &lease, CoroContext *ctx)
 bool Patronus::validate_lease([[maybe_unused]] const Lease &lease)
 {
     auto lease_patronus_ddl = lease.ddl_term();
-    auto patronus_now = time_syncer_->patronus_now();
+    auto patronus_now = DCHECK_NOTNULL(time_syncer_)->patronus_now();
     return time_syncer_->definitely_lt(patronus_now, lease_patronus_ddl);
 }
 

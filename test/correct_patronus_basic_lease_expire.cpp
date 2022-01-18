@@ -31,6 +31,8 @@ constexpr static uint64_t kKey = 0;
 // constexpr static size_t kTestTime =
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
 
+using namespace std::chrono_literals;
+
 struct Object
 {
     uint64_t target;
@@ -76,7 +78,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     dir_id,
                                     key,
                                     sizeof(Object),
-                                    100 * 1000 /* 100 us */,
+                                    100us,
                                     0 /* no flag */,
                                     &ctx);
         auto after_get_rlease = std::chrono::steady_clock::now();

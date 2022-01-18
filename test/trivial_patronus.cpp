@@ -34,7 +34,6 @@ int main(int argc, char *argv[])
 
     PatronusConfig config;
     config.machine_nr = kMachineNr;
-    config.skip_sync_time = true;
 
     auto patronus = Patronus::ins(config);
 
