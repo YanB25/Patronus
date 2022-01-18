@@ -79,7 +79,7 @@ Sorry I take one day off. Just too tired to work. Can not focus.
     - DONE: currently add no-gc flag. Will add hint_extend.
 [-] Before everything: I need a correct_patronus_time to makes it works well.
 [-] handle memory leak. DONE: while (!should_exit() || !queue.empty()). Should test if queue is empty. Don't exit when queue has tasks.
-- Add the TIME concepts into patronus. Server should intervally see if any expired lease exists, and destroy them!
+[-] Add the TIME concepts into patronus. Server should intervally see if any expired lease exists, and destroy them!
     [-] Do not measure time by one or two calls. use OnePassMonitor to get the average. I think RDMA initially has performance penalty.
     [-] also do not measure performance in DEBUG mode. Its performance means nothing.
     [-] The timeout should work well: server will automatically gc the timeouted
@@ -88,6 +88,7 @@ Sorry I take one day off. Just too tired to work. Can not focus.
     [-] I think, should attach clientID to the on-going resource. If client requires to gc, see if 1) the resource is on-going (if gc-ed, will not do twice), and 2) the clientID matches (if not match, also skip.) DONE: now the lease_ctx has @valid and @cid fields. The lease is considered active ONLY when @valid is true AND @cid match.
 [-] Pass correctness tests. DONE: works pretty well and performance makes sense under Release mode.
 - Bench the performance and latency.
+    - Like bench_patronus_basic, but sets the @required_ns to 0. And client will issue relinquish.
 
 During the 3 days, 0.5 days attracted by surfing (so not working!).
 Does not quite satisfied by my efficiency. But really did a good job in progress of TimeSyncer.
