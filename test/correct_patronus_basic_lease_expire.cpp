@@ -168,7 +168,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                  << " start to relinquish lease ";
 
         // make sure this will take no harm.
-        p->relinquish(lease, &ctx);
+        p->relinquish(lease, 0, &ctx);
 
         p->put_rdma_buffer(rdma_buf.buffer);
     }

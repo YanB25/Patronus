@@ -106,13 +106,16 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                             0 /* offset */,
                             0 /* flag */,
                             &ctx);
+        CHECK(succ) << "[bench] client coro " << ctx
+                    << " read FAILED. This should not happen, because we "
+                       "filter out the invalid mws.";
         if (!succ)
         {
             LOG(WARNING) << "[bench] client coro " << ctx
                          << " read FAILED. retry. ";
             p->put_rdma_buffer(rdma_buf.buffer);
             p->relinquish_write(lease, &ctx);
-            p->relinquish(lease, &ctx);
+            p->relinquish(lease, 0, &ctx);
             continue;
         }
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
@@ -126,7 +129,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
         p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, &ctx);
+        p->relinquish(lease, 0, &ctx);
 
         p->put_rdma_buffer(rdma_buf.buffer);
 

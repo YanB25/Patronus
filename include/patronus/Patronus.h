@@ -75,6 +75,13 @@ enum class RWFlag : uint8_t
     kDisableLocalExpireCheck = 1 << 0,
     kReserved = 1 << 1,
 };
+
+enum class LeaseModifyFlag : uint8_t
+{
+    kSkipRelinquishUnbind = 1 << 0,
+    kReserved = 1 << 1,
+};
+
 class Patronus
 {
 public:
@@ -121,11 +128,16 @@ public:
                             std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
-    inline Lease upgrade(Lease &lease, CoroContext *ctx = nullptr);
+    inline Lease upgrade(Lease &lease,
+                         uint8_t flag /*LeaseModificationFlag */,
+                         CoroContext *ctx = nullptr);
     inline Lease extend(Lease &lease,
                         std::chrono::nanoseconds ns,
+                        uint8_t flag /* LeaseModificationFlag */,
                         CoroContext *ctx = nullptr);
-    inline void relinquish(Lease &lease, CoroContext *ctx = nullptr);
+    inline void relinquish(Lease &lease,
+                           uint8_t flag /* LeaseModificationFlag */,
+                           CoroContext *ctx = nullptr);
     inline void relinquish_write(Lease &lease, CoroContext *ctx = nullptr);
     inline bool read(Lease &lease,
                      char *obuf,
@@ -404,6 +416,7 @@ private:
 
     void task_gc_lease(uint64_t lease_id,
                        ClientID cid,
+                       uint8_t flag /* LeaseModificationFlag */,
                        CoroContext *ctx = nullptr);
 
     // server coroutines
@@ -444,6 +457,7 @@ private:
     Lease lease_modify_impl(Lease &lease,
                             RequestType type,
                             time::ns_t ns,
+                            uint8_t flag /* LeaseModificationFlag */,
                             CoroContext *ctx = nullptr);
     inline void fill_bind_mw_wr(ibv_send_wr &wr,
                                 ibv_send_wr *next_wr,
@@ -517,21 +531,24 @@ Lease Patronus::get_wlease(uint16_t node_id,
         node_id, dir_id, key, size, ns, RequestType::kAcquireWLease, flag, ctx);
 }
 
-Lease Patronus::upgrade(Lease &lease, CoroContext *ctx)
+Lease Patronus::upgrade(Lease &lease, uint8_t flag, CoroContext *ctx)
 {
-    return lease_modify_impl(lease, RequestType::kUpgrade, 0 /* term */, ctx);
+    return lease_modify_impl(
+        lease, RequestType::kUpgrade, 0 /* term */, flag, ctx);
 }
 Lease Patronus::extend(Lease &lease,
                        std::chrono::nanoseconds chrono_ns,
+                       uint8_t flag,
                        CoroContext *ctx)
 {
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
-    return lease_modify_impl(lease, RequestType::kExtend, ns, ctx);
+    return lease_modify_impl(lease, RequestType::kExtend, ns, flag, ctx);
 }
-void Patronus::relinquish(Lease &lease, CoroContext *ctx)
+void Patronus::relinquish(Lease &lease, uint8_t flag, CoroContext *ctx)
 {
-    lease_modify_impl(lease, RequestType::kRelinquish, 0 /* term */, ctx);
+    // TODO(Patronus): the term is set to 0 here.
+    lease_modify_impl(lease, RequestType::kRelinquish, 0 /* term */, flag, ctx);
 }
 
 bool Patronus::validate_lease([[maybe_unused]] const Lease &lease)

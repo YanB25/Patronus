@@ -126,6 +126,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             continue;
         }
 
+        CHECK_EQ(lease.ddl_term().term(),
+                 std::numeric_limits<patronus::time::term_t>::max());
+
         if (unlikely(enable_trace))
         {
             ctx.timer().pin("[client] get lease");
@@ -142,7 +145,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                             rdma_buf.buffer,
                             sizeof(Object),
                             0 /* offset */,
-                            0 /*flag */,
+                            0 /* flag */,
                             &ctx);
         if (unlikely(!succ))
         {
@@ -150,7 +153,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                      << " read FAILED. retry. ";
             bench_infos[tid].fail_nr++;
             // p->relinquish_write(lease, &ctx);
-            p->relinquish(lease, &ctx);
+            p->relinquish(lease, 0, &ctx);
             continue;
         }
 
@@ -167,7 +170,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             << ", offset: " << bench_locator(coro_key);
 
         // p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, &ctx);
+        p->relinquish(lease, 0, &ctx);
 
         if (unlikely(enable_trace))
         {

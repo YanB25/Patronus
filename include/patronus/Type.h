@@ -134,6 +134,7 @@ struct LeaseModifyRequest
     ClientID cid;
     id_t lease_id;
     time::ns_t ns;
+    uint8_t flag /* LeaseModifyFlag */;
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(LeaseModifyRequest) < ReliableConnection::kMessageSize);

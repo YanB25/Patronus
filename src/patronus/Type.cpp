@@ -124,7 +124,8 @@ std::ostream &operator<<(std::ostream &os, const AdminRequest &req)
 std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req)
 {
     os << "{LeaseModifyRequest type: " << req.type << ", cid: " << req.cid
-       << ", lease_id: " << req.lease_id << ", ns: " << req.ns << " }";
+       << ", lease_id: " << req.lease_id << ", ns: " << req.ns
+       << ", flag: " << req.flag << " }";
     return os;
 }
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &resp)

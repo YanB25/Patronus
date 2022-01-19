@@ -308,6 +308,7 @@ bool Patronus::protection_region_rw_impl(Lease &lease,
 Lease Patronus::lease_modify_impl(Lease &lease,
                                   RequestType type,
                                   time::ns_t ns,
+                                  uint8_t flag,
                                   CoroContext *ctx)
 {
     CHECK(type == RequestType::kExtend || type == RequestType::kRelinquish ||
@@ -335,6 +336,7 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     msg->cid.rpc_ctx_id = rpc_ctx_id;
     msg->lease_id = lease.id();
     msg->ns = ns;
+    msg->flag = flag;
 
     rpc_context->ret_lease = &ret_lease;
     rpc_context->ready = false;
@@ -750,9 +752,10 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         {
             auto patronus_ddl = time_syncer_->patronus_later(req->required_ns);
             // set the DDL a little bit (@epsilon()) before actual DDL.
-            ddl_manager_.push(patronus_ddl.term(),
-                              [this, lease_id, ctx, cid = req->cid]()
-                              { task_gc_lease(lease_id, cid, ctx); });
+            ddl_manager_.push(
+                patronus_ddl.term(),
+                [this, lease_id, ctx, cid = req->cid]()
+                { task_gc_lease(lease_id, cid, 0 /* flag */, ctx); });
 
             DVLOG(4) << "[debug] get client require ns " << req->required_ns
                      << ", patronus_ddl: " << patronus_ddl
@@ -832,7 +835,7 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
 {
     DCHECK_EQ(req->type, RequestType::kRelinquish);
     auto lease_id = req->lease_id;
-    task_gc_lease(lease_id, req->cid, ctx);
+    task_gc_lease(lease_id, req->cid, req->flag, ctx);
 }
 
 void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
@@ -1518,12 +1521,19 @@ void Patronus::server_coro_master(CoroYield &yield)
     }
 }
 
-void Patronus::task_gc_lease(uint64_t lease_id, ClientID cid, CoroContext *ctx)
+void Patronus::task_gc_lease(uint64_t lease_id,
+                             ClientID cid,
+                             uint8_t flag,
+                             CoroContext *ctx)
 {
     DVLOG(4) << "[patronus][gc_lease] task_gc_lease for lease_id " << lease_id
              << ", expect cid " << cid << ", coro: " << (ctx ? *ctx : nullctx)
              << ", at patronus time: " << time_syncer_->patronus_now();
+    bool reserved = flag & (uint8_t) LeaseModifyFlag::kReserved;
+    DCHECK(!reserved) << "** Reserved flag set detected";
+
     auto *lease_ctx = get_lease_context(lease_id);
+    DCHECK(lease_ctx->valid);
 
     if (unlikely(lease_ctx == nullptr))
     {
@@ -1537,46 +1547,51 @@ void Patronus::task_gc_lease(uint64_t lease_id, ClientID cid, CoroContext *ctx)
             << "[patronus][gc_lease] skip relinquish. cid mismatch: expect: "
             << lease_ctx->client_cid << ", got: " << cid;
     }
-    // should issue unbind here.
-    static thread_local ibv_send_wr wrs[8];
-    auto dir_id = lease_ctx->dir_id;
-    auto *qp = dsm_->get_dir_qp(
-        lease_ctx->client_cid.node_id, lease_ctx->client_cid.thread_id, dir_id);
-    auto *mr = dsm_->get_dir_mr(dir_id);
-    void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
 
-    fill_bind_mw_wr(wrs[0],
-                    &wrs[1],
-                    lease_ctx->header_mw,
-                    mr,
-                    (uint64_t) bind_nulladdr,
-                    0,
-                    IBV_ACCESS_CUSTOM_REMOTE_NORW);
-    fill_bind_mw_wr(wrs[1],
-                    nullptr,
-                    lease_ctx->buffer_mw,
-                    mr,
-                    (uint64_t) bind_nulladdr,
-                    0,
-                    IBV_ACCESS_CUSTOM_REMOTE_NORW);
-    // never signal
-    wrs[0].send_flags = 0;
-    wrs[1].send_flags = 0;
-    // but want to detect failure
-    wrs[0].wr_id = wrs[1].wr_id =
-        WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
-    ibv_send_wr *bad_wr;
-    int ret = ibv_post_send(qp, wrs, &bad_wr);
-    PLOG_IF(WARNING, ret != 0) << "[patronus][gc_lease] failed to "
-                                  "ibv_post_send to unbind memory window. "
-                               << *bad_wr;
-
-    if constexpr (config::kEnableSkipMagicMw)
+    bool skip_unbind = flag & (uint8_t) LeaseModifyFlag::kSkipRelinquishUnbind;
+    if (likely(!skip_unbind))
     {
-        for (size_t time = 0; time < 2; time++)
+        // should issue unbind here.
+        static thread_local ibv_send_wr wrs[8];
+        auto dir_id = lease_ctx->dir_id;
+        auto *qp = dsm_->get_dir_qp(lease_ctx->client_cid.node_id,
+                                    lease_ctx->client_cid.thread_id,
+                                    dir_id);
+        auto *mr = dsm_->get_dir_mr(dir_id);
+        void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
+
+        // NOTE: if size == 0, no matter access set to RO, RW or NORW
+        // and no matter allocated_mw_nr +2/-2/0, it generates corrupted mws.
+        // But if set size to 1 and allocated_mw_nr + 2, it works well.
+        fill_bind_mw_wr(wrs[0],
+                        &wrs[1],
+                        lease_ctx->header_mw,
+                        mr,
+                        (uint64_t) bind_nulladdr,
+                        1,
+                        IBV_ACCESS_CUSTOM_REMOTE_NORW);
+        fill_bind_mw_wr(wrs[1],
+                        nullptr,
+                        lease_ctx->buffer_mw,
+                        mr,
+                        (uint64_t) bind_nulladdr,
+                        1,
+                        IBV_ACCESS_CUSTOM_REMOTE_NORW);
+
+        // never signal
+        wrs[0].send_flags = 0;
+        wrs[1].send_flags = 0;
+        // but want to detect failure
+        wrs[0].wr_id = wrs[1].wr_id =
+            WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
+        ibv_send_wr *bad_wr;
+        int ret = ibv_post_send(qp, wrs, &bad_wr);
+        PLOG_IF(ERROR, ret != 0) << "[patronus][gc_lease] failed to "
+                                    "ibv_post_send to unbind memory window. "
+                                 << *bad_wr;
+        if constexpr (config::kEnableSkipMagicMw)
         {
-            allocated_mw_nr_++;
-            // should not fail, so not consider @force_fail = true;
+            allocated_mw_nr_ += 2;
         }
     }
 

@@ -129,7 +129,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                      << " read FAILED. retry. ";
             bench_info.fail_nr++;
             p->relinquish_write(lease, &ctx);
-            p->relinquish(lease, &ctx);
+            p->relinquish(lease, 0, &ctx);
             continue;
         }
 
@@ -145,7 +145,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             << ", lease.base: " << (void *) lease.base_addr();
 
         p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, &ctx);
+        p->relinquish(lease, 0, &ctx);
 
         if (unlikely(enable_trace))
         {
