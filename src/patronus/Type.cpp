@@ -90,6 +90,42 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
     {
         os << "no-gc, ";
     }
+    if (flag.flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect)
+    {
+        os << "with-lock, ";
+    }
+    bool reserved = flag.flag & (uint8_t) AcquireRequestFlag::kReserved;
+    DCHECK(!reserved);
+    os << "}";
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
+{
+    os << "{RWFlag ";
+    bool no_local_expire_check =
+        flag.flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
+    if (no_local_expire_check)
+    {
+        os << "no-check, ";
+    }
+    bool reserve = flag.flag & (uint8_t) RWFlag::kReserved;
+    DCHECK(!reserve);
+    os << "}";
+    return os;
+}
+std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
+{
+    os << "{LeaseModifyFlag ";
+    bool no_relinquish_unbind =
+        flag.flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    if (no_relinquish_unbind)
+    {
+        os << "no-rel-unbind, ";
+    }
+    bool reserve = flag.flag & (uint8_t) LeaseModifyFlag::kReserved;
+    DCHECK(!reserve);
+
     os << "}";
     return os;
 }

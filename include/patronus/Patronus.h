@@ -70,18 +70,6 @@ struct LeaseContext
     size_t protection_region_id;
 };
 
-enum class RWFlag : uint8_t
-{
-    kNoLocalExpireCheck = 1 << 0,
-    kReserved = 1 << 1,
-};
-
-enum class LeaseModifyFlag : uint8_t
-{
-    kNoRelinquishUnbind = 1 << 0,
-    kReserved = 1 << 1,
-};
-
 class Patronus
 {
 public:

@@ -67,7 +67,8 @@ struct BaseMessage
 enum class AcquireRequestFlag : uint8_t
 {
     kNoGc = 1 << 0,
-    kReserved = 1 << 1,
+    kWithConflictDetect = 1 << 1,
+    kReserved = 1 << 2,
 };
 struct AcquireRequestFlagOut
 {
@@ -151,6 +152,35 @@ struct LeaseModifyResponse
 } __attribute__((packed));
 static_assert(sizeof(LeaseModifyResponse) < ReliableConnection::kMessageSize);
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &req);
+
+enum class RWFlag : uint8_t
+{
+    kNoLocalExpireCheck = 1 << 0,
+    kReserved = 1 << 1,
+};
+
+struct RWFlagOut
+{
+    RWFlagOut(uint8_t flag) : flag(flag)
+    {
+    }
+    uint8_t flag;
+};
+std::ostream &operator<<(std::ostream &os, RWFlagOut flag);
+
+enum class LeaseModifyFlag : uint8_t
+{
+    kNoRelinquishUnbind = 1 << 0,
+    kReserved = 1 << 1,
+};
+struct LeaseModifyFlagOut
+{
+    LeaseModifyFlagOut(uint8_t flag) : flag(flag)
+    {
+    }
+    uint8_t flag;
+};
+std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag);
 
 }  // namespace patronus
 
