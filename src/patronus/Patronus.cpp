@@ -1548,8 +1548,8 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             << lease_ctx->client_cid << ", got: " << cid;
     }
 
-    bool skip_unbind = flag & (uint8_t) LeaseModifyFlag::kSkipRelinquishUnbind;
-    if (likely(!skip_unbind))
+    bool no_unbind = flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    if (likely(!no_unbind))
     {
         // should issue unbind here.
         static thread_local ibv_send_wr wrs[8];

@@ -32,11 +32,10 @@ constexpr static uint8_t kAcquireLeaseFlag =
     (uint8_t) AcquireRequestFlag::kNoGc;
 
 constexpr static uint8_t kRelinquishFlag =
-    (uint8_t) LeaseModifyFlag::kSkipRelinquishUnbind;
+    (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
 // constexpr static uint8_t kRelinquishFlag = 0;
 
-constexpr static uint8_t kReadWriteFlag =
-    (uint8_t) RWFlag::kDisableLocalExpireCheck;
+constexpr static uint8_t kReadWriteFlag = (uint8_t) RWFlag::kNoLocalExpireCheck;
 
 using namespace std::chrono_literals;
 

@@ -148,7 +148,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         // p->relinquish_write(lease, &ctx);
         // p->relinquish(
-        //     lease, (uint8_t) LeaseModifyFlag::kSkipRelinquishUnbind, &ctx);
+        //     lease, (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind, &ctx);
         p->relinquish(lease, 0, &ctx);
 
         if (unlikely(enable_trace))

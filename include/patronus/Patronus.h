@@ -72,13 +72,13 @@ struct LeaseContext
 
 enum class RWFlag : uint8_t
 {
-    kDisableLocalExpireCheck = 1 << 0,
+    kNoLocalExpireCheck = 1 << 0,
     kReserved = 1 << 1,
 };
 
 enum class LeaseModifyFlag : uint8_t
 {
-    kSkipRelinquishUnbind = 1 << 0,
+    kNoRelinquishUnbind = 1 << 0,
     kReserved = 1 << 1,
 };
 
@@ -565,8 +565,8 @@ bool Patronus::read(Lease &lease,
                     uint8_t flag,
                     CoroContext *ctx)
 {
-    bool disable_check = flag & (uint8_t) RWFlag::kDisableLocalExpireCheck;
-    if (likely(!disable_check))
+    bool no_check = flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
+    if (likely(!no_check))
     {
         if (!validate_lease(lease))
         {
@@ -584,8 +584,8 @@ bool Patronus::write(Lease &lease,
                      uint8_t flag,
                      CoroContext *ctx)
 {
-    bool disable_check = flag & (uint8_t) RWFlag::kDisableLocalExpireCheck;
-    if (likely(!disable_check))
+    bool no_check = flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
+    if (likely(!no_check))
     {
         if (!validate_lease(lease))
         {

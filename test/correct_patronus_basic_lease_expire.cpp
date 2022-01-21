@@ -152,7 +152,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                             rdma_buf.buffer,
                             sizeof(Object),
                             0,
-                            (uint8_t) RWFlag::kDisableLocalExpireCheck,
+                            (uint8_t) RWFlag::kNoLocalExpireCheck,
                             &ctx);
 
         if (succ)
