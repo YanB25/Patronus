@@ -25,6 +25,19 @@ constexpr static size_t kThreadNr = 4;
 static_assert(kThreadNr <= MAX_APP_THREAD);
 static_assert(kThreadNr <= RMSG_MULTIPLEXING);
 
+// this script will use the fatest path:
+// server no auto gc, client no lease checking, relinquish no unbind.
+// But still bind both ProtectionRegion and Buffer.
+constexpr static uint8_t kAcquireLeaseFlag =
+    (uint8_t) AcquireRequestFlag::kNoGc;
+
+constexpr static uint8_t kRelinquishFlag =
+    (uint8_t) LeaseModifyFlag::kSkipRelinquishUnbind;
+// constexpr static uint8_t kRelinquishFlag = 0;
+
+constexpr static uint8_t kReadWriteFlag =
+    (uint8_t) RWFlag::kDisableLocalExpireCheck;
+
 using namespace std::chrono_literals;
 
 struct Object
@@ -116,7 +129,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     coro_key /* key */,
                                     sizeof(Object),
                                     0ns,
-                                    (uint8_t) AcquireRequestFlag::kNoGc,
+                                    kAcquireLeaseFlag,
                                     &ctx);
         if (unlikely(!lease.success()))
         {
@@ -126,8 +139,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             continue;
         }
 
-        CHECK_EQ(lease.ddl_term().term(),
-                 std::numeric_limits<patronus::time::term_t>::max());
+        DCHECK_EQ(lease.ddl_term().term(),
+                  std::numeric_limits<patronus::time::term_t>::max());
 
         if (unlikely(enable_trace))
         {
@@ -145,7 +158,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                             rdma_buf.buffer,
                             sizeof(Object),
                             0 /* offset */,
-                            0 /* flag */,
+                            kReadWriteFlag /* flag */,
                             &ctx);
         if (unlikely(!succ))
         {
@@ -153,7 +166,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                      << " read FAILED. retry. ";
             bench_infos[tid].fail_nr++;
             // p->relinquish_write(lease, &ctx);
-            p->relinquish(lease, 0, &ctx);
+            p->relinquish(lease, kRelinquishFlag, &ctx);
             continue;
         }
 
@@ -170,7 +183,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             << ", offset: " << bench_locator(coro_key);
 
         // p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, kRelinquishFlag, &ctx);
 
         if (unlikely(enable_trace))
         {

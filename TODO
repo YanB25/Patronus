@@ -88,7 +88,8 @@ Sorry I take one day off. Just too tired to work. Can not focus.
     [-] I think, should attach clientID to the on-going resource. If client requires to gc, see if 1) the resource is on-going (if gc-ed, will not do twice), and 2) the clientID matches (if not match, also skip.) DONE: now the lease_ctx has @valid and @cid fields. The lease is considered active ONLY when @valid is true AND @cid match.
 [-] Pass correctness tests. DONE: works pretty well and performance makes sense under Release mode.
 - Bench the performance and latency.
-    - Like bench_patronus_basic, but sets the @required_ns to 0. And client will issue relinquish.
+    [-] Like bench_patronus_basic, but sets the @required_ns to 0. And client will issue relinquish.
+    [-] bench the latency tomorrow. DONE: If relinquish needs server to ibv_post_send, the latency seems to double (but various a lot). If do not need server to ibv_post_send, will be not difference.
 
 During the 3 days, 0.5 days attracted by surfing (so not working!).
 Does not quite satisfied by my efficiency. But really did a good job in progress of TimeSyncer.
@@ -98,6 +99,13 @@ Does not quite satisfied by my efficiency. But really did a good job in progress
 FUTURES:
 - Carefully thinks about lock conflict, fairness, client synchronizations at swap area, ...
 - Implemente all the APIs in Patronus. Extend, upgrade would be the most important ones.
+
+3st Three days DDL: 1/20-1/22
+- get_{rlease,wlease} will also have lock semantics: If conflict, will return failure to the client
+- Patronus adds extend API when client asked to do so. client can extend the lease by one-sided read.
+- test the correctness of Patronus write.
+
+NO MORE. That should be easy.
 
 If all the things above finish, I can move on to adopt the uPaxos!
 

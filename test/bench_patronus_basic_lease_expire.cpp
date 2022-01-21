@@ -147,6 +147,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
 
         // p->relinquish_write(lease, &ctx);
+        // p->relinquish(
+        //     lease, (uint8_t) LeaseModifyFlag::kSkipRelinquishUnbind, &ctx);
         p->relinquish(lease, 0, &ctx);
 
         if (unlikely(enable_trace))
