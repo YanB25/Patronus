@@ -30,6 +30,7 @@ int main(int argc, char *argv[])
     VLOG(2) << "It is 2 vlog";
     VLOG(3) << "It is 3 vlog";
     LOG(INFO) << "Support color ? " << getenv("TERM");
+    LOG(INFO) << "Hash of 100 is " << std::hash<int>{}(100);
 
     rdmaQueryDevice();
 

@@ -31,6 +31,15 @@ enum class RequestType : uint8_t
 };
 std::ostream &operator<<(std::ostream &os, const RequestType &t);
 
+enum class AcquireRequestStatus : uint8_t
+{
+    kSuccess,
+    kMagicMwErr,
+    kLockedErr,
+    kBindErr,
+};
+std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status);
+
 struct ClientID
 {
     union {
@@ -105,7 +114,7 @@ struct AcquireResponse
     uint64_t header_base;
     time::term_t ddl_term;
     uint16_t lease_id;
-    bool success;
+    AcquireRequestStatus status;
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(AcquireResponse) < ReliableConnection::kMessageSize);

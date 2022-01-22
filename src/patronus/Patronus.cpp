@@ -547,7 +547,7 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
         << "** unexpected request type received. got: " << (int) resp->type;
 
     auto &ret_lease = *rpc_context->ret_lease;
-    if (likely(resp->success))
+    if (likely(resp->status == AcquireRequestStatus::kSuccess))
     {
         ret_lease.base_addr_ = resp->buffer_base;
         ret_lease.header_addr_ = resp->header_base;
@@ -584,6 +584,8 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
 
 void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 {
+    DCHECK_NE(req->type, RequestType::kAcquireNoLease) << "** Deprecated";
+
     auto dirID = req->dir_id;
     auto *buffer_mw = get_mw(dirID);
     auto *header_mw = get_mw(dirID);
@@ -600,26 +602,49 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         DCHECK_EQ(digest, djb2_digest(req, sizeof(AcquireRequest)))
             << "** digest mismatch for req " << *req;
     }
-    size_t object_buffer_offset = locator_(req->key);
-    uint64_t object_dsm_offset =
-        dsm_->buffer_offset_to_dsm_offset(object_buffer_offset);
-    void *object_addr = dsm_->buffer_offset_to_addr(object_buffer_offset);
+
+    AcquireRequestStatus status = AcquireRequestStatus::kSuccess;
+
+    size_t object_buffer_offset = 0;
+    uint64_t object_dsm_offset = 0;
+    void *object_addr = nullptr;
+    void *header_addr = nullptr;
+    uint64_t header_dsm_offset = 0;
+    bool ctx_success = false;
+    RWContext *rw_ctx = nullptr;
+    uint64_t rw_ctx_id = 0;
+
+    bool with_lock =
+        req->flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+    if (with_lock)
+    {
+        auto hash = key_hash(req->key);
+        auto bucket_id = hash / lock_manager_.bucket_nr();
+        auto slot_id = hash % lock_manager_.slot_nr();
+        if (!lock_manager_.try_lock(bucket_id, slot_id))
+        {
+            status = AcquireRequestStatus::kLockedErr;
+            // err handling
+            goto handle_response;
+        }
+    }
+
+    object_buffer_offset = locator_(req->key);
+    object_dsm_offset = dsm_->buffer_offset_to_dsm_offset(object_buffer_offset);
+    object_addr = dsm_->buffer_offset_to_addr(object_buffer_offset);
     DCHECK_EQ(object_addr, dsm_->dsm_offset_to_addr(object_dsm_offset));
 
-    void *header_addr = protection_region;
-    uint64_t header_dsm_offset = dsm_->addr_to_dsm_offset(header_addr);
+    header_addr = protection_region;
+    header_dsm_offset = dsm_->addr_to_dsm_offset(header_addr);
 
-    bool success = false;
-    bool bind_success = true;
+    ctx_success = false;
 
-    auto *rw_ctx = get_rw_context();
-    auto rw_ctx_id = rw_context_.obj_to_id(rw_ctx);
+    rw_ctx = get_rw_context();
+    rw_ctx_id = rw_context_.obj_to_id(rw_ctx);
     rw_ctx->coro_id = ctx ? ctx->coro_id() : kNotACoro;
     rw_ctx->dir_id = dirID;
     rw_ctx->ready = false;
-    rw_ctx->success = &success;
-
-    bool force_fail = false;
+    rw_ctx->success = &ctx_success;
 
     static thread_local ibv_send_wr wrs[8];
     switch (req->type)
@@ -671,7 +696,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                 size_t id = allocated_mw_nr_++;
                 if (unlikely((id & mask) == magic))
                 {
-                    force_fail = true;
+                    status = AcquireRequestStatus::kMagicMwErr;
                 }
             }
         }
@@ -680,10 +705,11 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         int ret = ibv_post_send(qp, wrs, &bad_wr);
         if (unlikely(ret != 0))
         {
-            PLOG(ERROR)
-                << "[patronus] failed to ibv_post_send for bind_mw. failed wr: "
-                << *bad_wr;
-            bind_success = false;
+            PLOG(ERROR) << "[patronus] failed to ibv_post_send for "
+                           "bind_mw. failed wr: "
+                        << *bad_wr;
+            status = AcquireRequestStatus::kBindErr;
+            goto handle_response;
         }
         if (likely(ctx != nullptr))
         {
@@ -712,16 +738,18 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     }
     else
     {
-        success = bind_success;
+        ctx_success = true;
     }
 
+handle_response:
     auto *resp_buf = get_rdma_message_buffer();
     auto *resp_msg = (AcquireResponse *) resp_buf;
     resp_msg->type = req->type;
     resp_msg->cid = req->cid;
     resp_msg->cid.node_id = get_node_id();
     resp_msg->cid.thread_id = get_thread_id();
-    if (likely(success && !force_fail))
+    resp_msg->status = status;
+    if (likely(status == AcquireRequestStatus::kSuccess))
     {
         auto *lease_ctx = get_lease_context();
         lease_ctx->client_cid = req->cid;
@@ -738,9 +766,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         resp_msg->rkey_header = header_mw->rkey;
         resp_msg->buffer_base = object_dsm_offset;
         resp_msg->header_base = header_dsm_offset;
-
         resp_msg->lease_id = lease_id;
-        resp_msg->success = true;
 
         bool reserved = req->flag & (uint8_t) AcquireRequestFlag::kReserved;
         DCHECK(!reserved)
@@ -773,10 +799,12 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     {
         // gc here for all allocated resources
         resp_msg->lease_id = 0;
-        resp_msg->success = false;
         put_mw(dirID, buffer_mw);
+        buffer_mw = nullptr;
         put_mw(dirID, header_mw);
+        header_mw = nullptr;
         put_protection_region(protection_region);
+        protection_region = nullptr;
     }
 
     if constexpr (debug())
@@ -790,14 +818,10 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         (char *) resp_msg, sizeof(AcquireResponse), req->cid.node_id, from_mid);
 
     put_rdma_message_buffer(resp_buf);
-    put_rw_context(rw_ctx);
-
-    // no lease, so we gc here. see @handle_request_lease_relinquish
-    if (unlikely(req->type == RequestType::kAcquireNoLease))
+    if (rw_ctx)
     {
-        put_mw(dirID, buffer_mw);
-        put_mw(dirID, header_mw);
-        put_protection_region(protection_region);
+        put_rw_context(rw_ctx);
+        rw_ctx = nullptr;
     }
 }
 
@@ -1533,7 +1557,6 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     DCHECK(!reserved) << "** Reserved flag set detected";
 
     auto *lease_ctx = get_lease_context(lease_id);
-    DCHECK(lease_ctx->valid);
 
     if (unlikely(lease_ctx == nullptr))
     {
@@ -1541,6 +1564,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                  << lease_id << " no valid lease context.";
         return;
     }
+    DCHECK(lease_ctx->valid);
     if (unlikely(lease_ctx->client_cid != cid))
     {
         DVLOG(4)

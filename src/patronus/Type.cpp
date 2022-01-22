@@ -52,6 +52,38 @@ std::ostream &operator<<(std::ostream &os, const RequestType &t)
     return os;
 }
 
+std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status)
+{
+    switch (status)
+    {
+    case AcquireRequestStatus::kSuccess:
+    {
+        os << "success";
+        break;
+    }
+    case AcquireRequestStatus::kMagicMwErr:
+    {
+        os << "magic-mw-err";
+        break;
+    }
+    case AcquireRequestStatus::kLockedErr:
+    {
+        os << "locked";
+        break;
+    }
+    case AcquireRequestStatus::kBindErr:
+    {
+        os << "bind-err";
+        break;
+    }
+    default:
+    {
+        CHECK(false);
+    }
+    }
+    return os;
+}
+
 std::ostream &operator<<(std::ostream &os, const AdminFlag &f)
 {
     switch (f)
@@ -145,7 +177,7 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
        << ", lease_id: " << resp.lease_id << ", rkey_0: " << resp.rkey_0
        << ", rkey_header: " << resp.rkey_header << ", buffer_base "
        << resp.buffer_base << "< header_base: " << resp.header_base
-       << ", ddl_term: " << resp.ddl_term << ", success: " << resp.success
+       << ", ddl_term: " << resp.ddl_term << ", status: " << resp.status
        << " }";
     return os;
 }

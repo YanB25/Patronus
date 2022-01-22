@@ -10,6 +10,7 @@
 #include "patronus/Coro.h"
 #include "patronus/DDLManager.h"
 #include "patronus/Lease.h"
+#include "patronus/LockManager.h"
 #include "patronus/ProtectionRegion.h"
 #include "patronus/TimeSyncer.h"
 #include "patronus/Type.h"
@@ -250,6 +251,12 @@ private:
         locator_ = locator;
     }
 
+    static id_t key_hash(id_t key)
+    {
+        // TODO(patronus): should use real hash to distribute the keys.
+        return key;
+    }
+
     ibv_mw *get_mw(size_t dirID)
     {
         auto *ret = mw_pool_[dirID].front();
@@ -460,6 +467,7 @@ private:
     time::TimeSyncer::pointer time_syncer_;
     static thread_local std::unique_ptr<ThreadUnsafeBufferPool<kMessageSize>>
         rdma_message_buffer_pool_;
+    LockManager<MAX_APP_THREAD, 4096 * 8> lock_manager_;
 
     // owned by client threads
     static thread_local ThreadUnsafePool<RpcContext, kMaxCoroNr> rpc_context_;

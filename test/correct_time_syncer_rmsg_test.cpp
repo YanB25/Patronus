@@ -64,7 +64,7 @@ void client(Patronus::pointer p)
                 .count();
 
         auto &recv_msg = *(BenchMessage *) recv_buffer;
-        auto that_patronus_time = syncer.to_patronus_time(recv_msg.time);
+        auto that_patronus_time = time::PatronusTime(recv_msg.time);
         patronus_now = syncer.patronus_now();
         CHECK_LT(that_patronus_time, patronus_now)
             << "recv BenchMessage from future";
@@ -91,7 +91,7 @@ void server(Patronus::pointer p)
     {
         dsm->reliable_recv(kMid, recv_buf);
         auto &msg = *(BenchMessage *) recv_buf;
-        auto that_patronus_time = syncer.to_patronus_time(msg.time);
+        auto that_patronus_time = time::PatronusTime(msg.time);
         auto patronus_now = syncer.patronus_now();
         CHECK_LT(that_patronus_time, patronus_now)
             << "Receive a msg from future";
