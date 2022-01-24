@@ -95,8 +95,8 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     }
 
     // TODO(patronus): see if this tid to mid binding is correct.
-    auto mid = dsm_->get_thread_id() % RMSG_MULTIPLEXING;
-    auto tid = mid;
+    auto tid = get_thread_id();
+    auto mid = dir_id;
 
     char *rdma_buf = get_rdma_message_buffer();
     auto *rpc_context = get_rpc_context();
@@ -315,10 +315,11 @@ Lease Patronus::lease_modify_impl(Lease &lease,
           type == RequestType::kUpgrade)
         << "** invalid type " << (int) type;
 
-    // TODO(patronus): see if this tid to mid binding is correct
-    auto mid = dsm_->get_thread_id() % RMSG_MULTIPLEXING;
-    auto tid = mid;
+    // TODO(patronus): see if this mid to dir_id binding is correct
     auto target_node_id = lease.node_id_;
+    auto dir_id = lease.dir_id();
+    auto mid = dir_id;
+    auto tid = get_thread_id();
 
     char *rdma_buf = get_rdma_message_buffer();
     auto *rpc_context = get_rpc_context();
@@ -613,14 +614,18 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     bool ctx_success = false;
     RWContext *rw_ctx = nullptr;
     uint64_t rw_ctx_id = 0;
+    bool with_conflict_detect = false;
+    uint64_t bucket_id = 0;
+    uint64_t slot_id = 0;
 
     bool with_lock =
         req->flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
     if (with_lock)
     {
-        auto hash = key_hash(req->key);
-        auto bucket_id = hash / lock_manager_.bucket_nr();
-        auto slot_id = hash % lock_manager_.slot_nr();
+        auto [b, s] = locate_key(req->key);
+        with_conflict_detect = true;
+        bucket_id = b;
+        slot_id = s;
         if (!lock_manager_.try_lock(bucket_id, slot_id))
         {
             status = AcquireRequestStatus::kLockedErr;
@@ -759,6 +764,9 @@ handle_response:
         lease_ctx->addr_to_bind = (uint64_t) object_addr;
         lease_ctx->buffer_size = req->size;
         lease_ctx->protection_region_id = protection_region_id;
+        lease_ctx->with_conflict_detect = with_conflict_detect;
+        lease_ctx->key_bucket_id = bucket_id;
+        lease_ctx->key_slot_id = slot_id;
         lease_ctx->valid = true;
         auto lease_id = lease_context_.obj_to_id(lease_ctx);
 
@@ -1617,6 +1625,13 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         {
             allocated_mw_nr_ += 2;
         }
+    }
+    bool with_conflict_detect = lease_ctx->with_conflict_detect;
+    if (with_conflict_detect)
+    {
+        auto bucket_id = lease_ctx->key_bucket_id;
+        auto slot_id = lease_ctx->key_slot_id;
+        lock_manager_.unlock(bucket_id, slot_id);
     }
 
     put_mw(lease_ctx->dir_id, lease_ctx->header_mw);

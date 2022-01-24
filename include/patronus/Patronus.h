@@ -69,6 +69,10 @@ struct LeaseContext
     uint64_t addr_to_bind{0};
     size_t buffer_size{0};
     size_t protection_region_id;
+    // about with_conflict_detect
+    bool with_conflict_detect{false};
+    uint64_t key_bucket_id{0};
+    uint64_t key_slot_id{0};
 };
 
 class Patronus
@@ -229,6 +233,18 @@ public:
         return *time_syncer_;
     }
 
+    using PatronusLockManager = LockManager<NR_DIRECTORY, 4096 * 8>;
+    constexpr std::pair<PatronusLockManager::bucket_t,
+                        PatronusLockManager::slot_t>
+    locate_key(id_t key) const
+    {
+        auto hash = key_hash(key);
+        auto slot_nr = lock_manager_.slot_nr();
+        auto bucket_id = hash / slot_nr;
+        auto slot_id = hash % slot_nr;
+        return {bucket_id, slot_id};
+    }
+
 private:
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
@@ -251,7 +267,7 @@ private:
         locator_ = locator;
     }
 
-    static id_t key_hash(id_t key)
+    constexpr static id_t key_hash(id_t key)
     {
         // TODO(patronus): should use real hash to distribute the keys.
         return key;
@@ -467,7 +483,7 @@ private:
     time::TimeSyncer::pointer time_syncer_;
     static thread_local std::unique_ptr<ThreadUnsafeBufferPool<kMessageSize>>
         rdma_message_buffer_pool_;
-    LockManager<MAX_APP_THREAD, 4096 * 8> lock_manager_;
+    PatronusLockManager lock_manager_;
 
     // owned by client threads
     static thread_local ThreadUnsafePool<RpcContext, kMaxCoroNr> rpc_context_;
