@@ -66,10 +66,13 @@ void client(Patronus::pointer p)
         auto &recv_msg = *(BenchMessage *) recv_buffer;
         auto that_patronus_time = time::PatronusTime(recv_msg.time);
         patronus_now = syncer.patronus_now();
-        CHECK_LT(that_patronus_time, patronus_now)
-            << "recv BenchMessage from future";
 
         auto diff_ns = patronus_now - that_patronus_time;
+        CHECK(!syncer.definitely_gt(that_patronus_time, patronus_now))
+            << "** Receive a msg from future. that: " << that_patronus_time
+            << ", now: " << patronus_now << ", epsilon: " << syncer.epsilon()
+            << ", definitely_gt. diff_ns: " << diff_ns;
+
         m.collect(diff_ns);
         send_recv_m.collect(send_recv_ns);
     }
@@ -93,9 +96,11 @@ void server(Patronus::pointer p)
         auto &msg = *(BenchMessage *) recv_buf;
         auto that_patronus_time = time::PatronusTime(msg.time);
         auto patronus_now = syncer.patronus_now();
-        CHECK_LT(that_patronus_time, patronus_now)
-            << "Receive a msg from future";
         auto diff_ns = patronus_now - that_patronus_time;
+        CHECK(!syncer.definitely_gt(that_patronus_time, patronus_now))
+            << "** Receive a msg from future. that: " << that_patronus_time
+            << ", now: " << patronus_now << ", epsilon: " << syncer.epsilon()
+            << ", definitely_gt. diff_ns: " << diff_ns;
         m.collect(diff_ns);
 
         auto &send_msg = *(BenchMessage *) buf;

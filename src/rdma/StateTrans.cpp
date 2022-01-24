@@ -23,7 +23,7 @@ bool modifyErrQPtoNormal(struct ibv_qp *qp,
     {
         return false;
     }
-    DLOG(INFO) << "Succeed in switch QP: " << qp << " to normal state.";
+    DVLOG(1) << "Succeed in switch QP: " << qp << " to normal state.";
     return true;
 }
 bool modifyQPtoReset(struct ibv_qp *qp)

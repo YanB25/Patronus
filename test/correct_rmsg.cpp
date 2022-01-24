@@ -20,7 +20,7 @@ constexpr uint32_t kMachineNr = 2;
 // constexpr static size_t kMsgSize = 16;
 
 constexpr static size_t kPingpoingCnt = 100 * define::K;
-constexpr static size_t kBurnCnt = 2 * define::M;
+constexpr static size_t kBurnCnt = 1 * define::M;
 
 constexpr static size_t kBenchMessageBufSize = 16;
 struct BenchMessage

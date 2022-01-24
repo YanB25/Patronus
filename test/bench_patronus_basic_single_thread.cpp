@@ -289,7 +289,7 @@ void server(Patronus::pointer p)
                  << " for coro " << i;
     }
 
-    p->server_serve();
+    p->server_serve(tid);
 }
 
 int main(int argc, char *argv[])

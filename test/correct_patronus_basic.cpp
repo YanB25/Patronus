@@ -21,7 +21,7 @@ constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
 
 constexpr static size_t kTestTime =
-    Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
+    Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
 
 using namespace std::chrono_literals;
 
@@ -64,10 +64,13 @@ inline uint64_t gen_magic(size_t thread_id, size_t coro_id)
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
-    size_t dir_id = tid;
+    auto mid = tid;
+    auto dir_id = tid;
     CHECK_LT(dir_id, NR_DIRECTORY);
 
     CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
+
+    LOG(INFO) << "[bench] tid " << tid << ", mid: " << mid << ", coro: " << ctx;
 
     size_t coro_key = gen_coro_key(tid, coro_id);
     size_t coro_magic = gen_magic(tid, coro_id);
@@ -210,10 +213,11 @@ void client(Patronus::pointer p)
 void server(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
+    auto mid = tid;
 
-    LOG(INFO) << "I am server. tid " << tid;
+    LOG(INFO) << "I am server. tid " << tid << " handling mid " << mid;
 
-    p->server_serve();
+    p->server_serve(mid);
 }
 
 int main(int argc, char *argv[])
@@ -229,8 +233,6 @@ int main(int argc, char *argv[])
 
     auto patronus = Patronus::ins(config);
 
-    sleep(1);
-
     std::vector<std::thread> threads;
     // let client spining
     auto nid = patronus->get_node_id();
@@ -238,66 +240,80 @@ int main(int argc, char *argv[])
     boost::barrier bar(kThreadNr);
     if (nid == kClientNodeId)
     {
-        for (size_t i = 0; i < kThreadNr; ++i)
+        auto dsm = patronus->get_dsm();
+        dsm->reliable_recv(0, nullptr, 1);
+
+        for (size_t i = 0; i < kThreadNr - 1; ++i)
         {
-            threads.emplace_back([patronus, &bar, i]() {
-                patronus->registerClientThread();
-                auto tid = patronus->get_thread_id();
-                sleep(2);
-                client(patronus);
-                LOG(INFO) << "[bench] thread " << tid << " finish it work";
-                bar.wait();
-                if (i == 0)
+            threads.emplace_back(
+                [patronus, &bar]()
                 {
-                    LOG(INFO) << "[bench] joined. thread " << tid
-                              << " call p->finished()";
-                    patronus->finished();
-                }
-            });
+                    patronus->registerClientThread();
+                    auto tid = patronus->get_thread_id();
+                    client(patronus);
+                    LOG(INFO) << "[bench] thread " << tid << " finish its work";
+                    bar.wait();
+                });
         }
+        patronus->registerClientThread();
+        auto tid = patronus->get_thread_id();
+        client(patronus);
+        LOG(INFO) << "[bench] thread " << tid << " finish its work";
+        bar.wait();
+        LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
+        patronus->finished();
     }
     else
     {
-        for (size_t i = 0; i < kThreadNr; ++i)
+        for (size_t i = 0; i < kThreadNr - 1; ++i)
         {
-            threads.emplace_back([patronus, i]() {
-                patronus->registerServerThread();
-                if (i == 0)
+            threads.emplace_back(
+                [patronus]()
                 {
-                    patronus->finished();
-                }
+                    patronus->registerServerThread();
 
-                auto internal_buf = patronus->get_server_internal_buffer();
-                for (size_t t = 0; t < kThreadNr; ++t)
-                {
-                    for (size_t i = 0; i < kCoroCnt; ++i)
-                    {
-                        auto thread_id = t + 1;
-                        auto coro_id = i;
-                        auto coro_magic = gen_magic(thread_id, coro_id);
-                        auto coro_key = gen_coro_key(thread_id, coro_id);
-                        auto coro_offset = bench_locator(coro_key);
-
-                        auto *server_internal_buf = internal_buf.buffer;
-                        Object *where =
-                            (Object *) &server_internal_buf[coro_offset];
-                        where->target = coro_magic;
-
-                        DLOG(INFO)
-                            << "[bench] server setting " << coro_magic
-                            << " to offset " << coro_offset
-                            << ". actual addr: " << (void *) &(where->target)
-                            << " for coro " << coro_id << ", thread "
-                            << thread_id;
-                    }
-                }
-
-                server(patronus);
-            });
+                    server(patronus);
+                });
         }
+
+        patronus->registerServerThread();
+
+        auto internal_buf = patronus->get_server_internal_buffer();
+        for (size_t t = 0; t < kThreadNr + 1; ++t)
+        {
+            for (size_t i = 0; i < kCoroCnt; ++i)
+            {
+                auto thread_id = t;
+                auto coro_id = i;
+                auto coro_magic = gen_magic(thread_id, coro_id);
+                auto coro_key = gen_coro_key(thread_id, coro_id);
+                auto coro_offset = bench_locator(coro_key);
+
+                auto *server_internal_buf = internal_buf.buffer;
+                Object *where = (Object *) &server_internal_buf[coro_offset];
+                where->target = coro_magic;
+
+                DLOG(INFO) << "[bench] server setting " << coro_magic
+                           << " to offset " << coro_offset
+                           << ". actual addr: " << (void *) &(where->target)
+                           << " for coro " << coro_id << ", thread "
+                           << thread_id;
+            }
+        }
+
+        auto dsm = patronus->get_dsm();
+        // sync
+        dsm->reliable_send(nullptr, 0, kClientNodeId, 0);
+
+        patronus->finished();
+
+        server(patronus);
     }
 
-    patronus->wait_join(threads);
+    for (auto &t : threads)
+    {
+        t.join();
+    }
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

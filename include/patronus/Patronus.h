@@ -166,7 +166,7 @@ public:
      * @brief give the server thread to Patronus.
      *
      */
-    void server_serve();
+    void server_serve(size_t mid);
 
     /**
      * @brief handling admin messages while joining the threads.
@@ -234,15 +234,21 @@ public:
     }
 
     using PatronusLockManager = LockManager<NR_DIRECTORY, 4096 * 8>;
+
     constexpr std::pair<PatronusLockManager::bucket_t,
                         PatronusLockManager::slot_t>
     locate_key(id_t key) const
     {
         auto hash = key_hash(key);
+        auto bucket_nr = lock_manager_.bucket_nr();
         auto slot_nr = lock_manager_.slot_nr();
-        auto bucket_id = hash / slot_nr;
+        auto bucket_id = (hash / slot_nr) % bucket_nr;
         auto slot_id = hash % slot_nr;
         return {bucket_id, slot_id};
+    }
+    constexpr size_t admin_mid() const
+    {
+        return 0;
     }
 
 private:
@@ -431,7 +437,7 @@ private:
                        CoroContext *ctx = nullptr);
 
     // server coroutines
-    void server_coro_master(CoroYield &yield);
+    void server_coro_master(CoroYield &yield, size_t mid);
     void server_coro_worker(coro_t coro_id, CoroYield &yield);
 
     // helpers, actual impls

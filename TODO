@@ -115,3 +115,20 @@ If all the things above finish, I can move on to adopt the uPaxos!
 - some KVs
 - motivation data
 - micro evaluations
+
+
+==== NOTE ====
+@NR_DIRECTORY == @RMSG_MULTIPLEXING
+
+tid == from_mid == to_mid. 
+tid == from_mid because the clients need to poll the @from_mid for completed requests.
+from_mid == to_mid, because the rmsg is designed so (per-thread).
+
+to_mid(0) is also used to handle admin requests.
+
+A server thread may handle any @key.
+
+[0, @NR_DIRECTORY) dir_id is one-to-one mapped to [0, @RMSG_MULTIPLEXING) to_mid
+
+correct_addr
+correct_time_syncer_rmsg_test

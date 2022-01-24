@@ -53,11 +53,11 @@
 // }
 
 // { dir thread
-#define NR_DIRECTORY (8 + 1)
+#define NR_DIRECTORY (8)
 
 #define DIR_MESSAGE_NR 128
 
-#define RMSG_MULTIPLEXING 12
+#define RMSG_MULTIPLEXING (NR_DIRECTORY)
 // }
 
 /**

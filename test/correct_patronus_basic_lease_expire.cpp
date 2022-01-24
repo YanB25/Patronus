@@ -16,7 +16,7 @@ using namespace define::literals;
 constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
-constexpr static size_t kTestTime = 10_K;
+constexpr static size_t kTestTime = 5_K;
 
 using namespace patronus;
 constexpr static size_t kCoroCnt = 1;
@@ -251,13 +251,16 @@ void client(Patronus::pointer p)
 
 void server(Patronus::pointer p)
 {
+    auto tid = p->get_thread_id();
+    auto mid = tid;
+
     auto internal_buffer = p->get_server_internal_buffer();
     auto *buffer = internal_buffer.buffer;
     auto offset = bench_locator(kKey);
     auto &object = *(Object *) &buffer[offset];
     object.target = kMagic;
 
-    p->server_serve();
+    p->server_serve(mid);
 }
 
 int main(int argc, char *argv[])

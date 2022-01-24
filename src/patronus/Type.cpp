@@ -10,12 +10,12 @@ std::ostream &operator<<(std::ostream &os, const RequestType &t)
     {
     case RequestType::kAcquireRLease:
     {
-        os << "R";
+        os << "AcR";
         break;
     }
     case RequestType::kAcquireWLease:
     {
-        os << "W";
+        os << "AcW";
         break;
     }
     case RequestType::kUpgrade:

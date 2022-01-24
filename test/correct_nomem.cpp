@@ -12,8 +12,8 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-[[maybe_unused]] constexpr static size_t kRpcNr = 200;
-constexpr static size_t kMWNr = 150 * define::K;
+[[maybe_unused]] constexpr static size_t kRpcNr = 100;
+constexpr static size_t kMWNr = 10 * define::K;
 constexpr static size_t kDirectoryNr = 16 * NR_DIRECTORY;
 // constexpr static size_t kRpcNr = 200;
 // constexpr static size_t kMWNr = 1000;

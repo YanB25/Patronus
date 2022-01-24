@@ -1,31 +1,27 @@
 #include <algorithm>
-#include <chrono>
 #include <random>
-#include <thread>
 
 #include "Timer.h"
+#include "boost/thread/barrier.hpp"
 #include "patronus/Patronus.h"
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"
-using namespace std::chrono_literals;
-using namespace define::literals;
 
 // Two nodes
-// one node issues cas operations
-
 constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
-constexpr static size_t kTestTime = 10_K;
 
 using namespace patronus;
-constexpr static size_t kCoroCnt = 1;
-thread_local CoroCall workers[kCoroCnt];
-thread_local CoroCall master;
+constexpr static size_t kThreadNr = 4;
+static_assert(kThreadNr <= RMSG_MULTIPLEXING);
+static_assert(kThreadNr <= MAX_APP_THREAD);
+constexpr static size_t kCoroCnt = 8;
 
-constexpr static uint64_t kMagic = 0xaabbccdd11223344;
-constexpr static uint64_t kKey = 0;
-constexpr static size_t kKeyLimit = 10240;
+constexpr static size_t kKeyLimit = 10;
+
+constexpr static size_t kTestTime =
+    Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
 
 using namespace std::chrono_literals;
 
@@ -37,90 +33,92 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+struct ClientCoro
 {
-    return key * sizeof(Object);
-}
-
+    CoroCall workers[kCoroCnt];
+    CoroCall master;
+};
+thread_local ClientCoro client_coro;
 struct ClientCommunication
 {
     bool still_has_work[kCoroCnt];
     bool finish_cur_task[kCoroCnt];
     bool finish_all_task[kCoroCnt];
-} client_comm;
+};
+thread_local ClientCommunication client_comm;
 
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
+    auto mid = tid;
+    auto dir_id = mid;
 
-    CoroContext ctx(tid, &yield, &master, coro_id);
+    CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
-    client_comm.still_has_work[coro_id] = true;
-    client_comm.finish_cur_task[coro_id] = false;
-    client_comm.finish_all_task[coro_id] = false;
+    OnePassMonitor lease_success_m;
+    size_t lease_success_nr{0};
 
-    OnePassMonitor lock_success_m;
-    size_t lock_success_nr{0};
-
-    for (size_t i = 0; i < kTestTime; ++i)
+    for (size_t time = 0; time < kTestTime; ++time)
     {
-        DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
+        client_comm.still_has_work[coro_id] = true;
+        client_comm.finish_cur_task[coro_id] = false;
+        client_comm.finish_all_task[coro_id] = false;
+
         auto key = rand() % kKeyLimit;
-        auto [bucket_id, slot_id] = p->locate_key(key);
-        auto dir_id = bucket_id;
-        DCHECK_LT(dir_id, NR_DIRECTORY);
+
+        DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         Lease lease =
             p->get_rlease(kServerNodeId,
                           dir_id,
                           key,
                           sizeof(Object),
                           0ns,
-                          (uint8_t) AcquireRequestFlag::kWithConflictDetect |
-                              (uint8_t) AcquireRequestFlag::kNoGc,
+                          (uint8_t) AcquireRequestFlag::kNoGc |
+                              (uint8_t) AcquireRequestFlag::kWithConflictDetect,
                           &ctx);
-        if (lease.success())
+        if (unlikely(!lease.success()))
         {
-            lock_success_m.collect(1);
-            lock_success_nr++;
+            LOG(WARNING) << "[bench] client coro " << ctx
+                         << " get_rlease failed. retry.";
+            lease_success_m.collect(0);
+            continue;
         }
         else
         {
-            lock_success_m.collect(0);
+            lease_success_m.collect(1);
+            lease_success_nr++;
         }
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
-        auto rdma_buf = p->get_rdma_buffer();
-        memset(rdma_buf.buffer, 0, sizeof(Object));
-
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
-
-        // make sure this will take no harm.
         p->relinquish(lease, 0, &ctx);
 
-        p->put_rdma_buffer(rdma_buf.buffer);
+        DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
+        client_comm.still_has_work[coro_id] = true;
+        client_comm.finish_cur_task[coro_id] = true;
+        client_comm.finish_all_task[coro_id] = false;
+        ctx.yield_to_master();
     }
-    LOG(INFO) << "[bench] lock_success_m: " << lock_success_m << " at ctx "
-              << ctx;
-    LOG(INFO) << "[bench] lock_success_nr: " << lock_success_nr;
-
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;
     client_comm.finish_all_task[coro_id] = true;
+    LOG(INFO) << "[bench] coro: " << ctx
+              << ", lease_success_m: " << lease_success_m
+              << ", lease_success_nr: " << lease_success_nr;
 
-    LOG(WARNING) << "worker coro " << (int) coro_id
+    LOG(WARNING) << "worker coro " << (int) coro_id << ", thread " << tid
                  << " finished ALL THE TASK. yield to master.";
 
     ctx.yield_to_master();
 }
-
 void client_master(Patronus::pointer p, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
     auto mid = tid;
 
-    CoroContext mctx(tid, &yield, workers);
+    CoroContext mctx(tid, &yield, client_coro.workers);
     CHECK(mctx.is_master());
 
     for (size_t i = 0; i < kCoroCnt; ++i)
@@ -155,8 +153,8 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
-    LOG(WARNING) << "[bench] all worker finish their work. exiting...";
+    LOG(WARNING) << "[bench] all worker finish their work. at tid " << tid
+                 << " thread exiting...";
 }
 
 void client(Patronus::pointer p)
@@ -165,22 +163,23 @@ void client(Patronus::pointer p)
     LOG(INFO) << "I am client. tid " << tid;
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        workers[i] =
+        client_coro.workers[i] =
             CoroCall([p, i](CoroYield &yield) { client_worker(p, i, yield); });
     }
-    master = CoroCall([p](CoroYield &yield) { client_master(p, yield); });
-    master();
+    client_coro.master =
+        CoroCall([p](CoroYield &yield) { client_master(p, yield); });
+    client_coro.master();
+    LOG(INFO) << "[bench] thread " << tid << " going to leave client()";
 }
 
 void server(Patronus::pointer p)
 {
-    auto internal_buffer = p->get_server_internal_buffer();
-    auto *buffer = internal_buffer.buffer;
-    auto offset = bench_locator(kKey);
-    auto &object = *(Object *) &buffer[offset];
-    object.target = kMagic;
+    auto tid = p->get_thread_id();
+    auto mid = tid;
 
-    p->server_serve();
+    LOG(INFO) << "I am server. tid " << tid;
+
+    p->server_serve(mid);
 }
 
 int main(int argc, char *argv[])
@@ -188,32 +187,61 @@ int main(int argc, char *argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    bindCore(0);
-
     rdmaQueryDevice();
 
     PatronusConfig config;
     config.machine_nr = kMachineNr;
-    config.key_locator = bench_locator;
 
     auto patronus = Patronus::ins(config);
 
     sleep(1);
 
+    std::vector<std::thread> threads;
     // let client spining
     auto nid = patronus->get_node_id();
+
+    boost::barrier bar(kThreadNr);
     if (nid == kClientNodeId)
     {
+        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        {
+            threads.emplace_back(
+                [patronus, &bar]()
+                {
+                    patronus->registerClientThread();
+                    auto tid = patronus->get_thread_id();
+                    client(patronus);
+                    LOG(INFO) << "[bench] thread " << tid << " finish it work";
+                    bar.wait();
+                });
+        }
         patronus->registerClientThread();
-        sleep(2);
+        auto tid = patronus->get_thread_id();
         client(patronus);
+        LOG(INFO) << "[bench] thread " << tid << " finish its work";
+        bar.wait();
+        LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
         patronus->finished();
     }
     else
     {
+        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        {
+            threads.emplace_back(
+                [patronus]()
+                {
+                    patronus->registerServerThread();
+                    server(patronus);
+                });
+        }
         patronus->registerServerThread();
         patronus->finished();
         server(patronus);
+    }
+
+    for (auto &t : threads)
+    {
+        t.join();
     }
 
     LOG(INFO) << "finished. ctrl+C to quit.";
