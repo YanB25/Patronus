@@ -18,7 +18,7 @@ static_assert(kThreadNr <= RMSG_MULTIPLEXING);
 static_assert(kThreadNr <= MAX_APP_THREAD);
 constexpr static size_t kCoroCnt = 8;
 
-constexpr static size_t kKeyLimit = 10;
+constexpr static size_t kKeyLimit = 100;
 
 constexpr static size_t kTestTime =
     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
@@ -243,6 +243,12 @@ int main(int argc, char *argv[])
     {
         t.join();
     }
+
+    double concurrency = kThreadNr * kCoroCnt;
+    double key_nr = kKeyLimit;
+    LOG(INFO) << "[bench] reference: concurrency: " << concurrency
+              << ", key_range: " << key_nr
+              << ", concurrency/key_range = " << 1.0 * concurrency / key_nr;
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
