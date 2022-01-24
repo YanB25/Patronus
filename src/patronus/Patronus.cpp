@@ -1715,47 +1715,4 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
     ctx.yield_to_master();
 }
 
-void Patronus::wait_join(std::vector<std::thread> &threads)
-{
-    CHECK(false) << "** deprecated";
-    auto tid = get_thread_id();
-    auto mid = admin_mid();
-    CHECK_EQ(tid, 0) << "[patronus] should use the master thread, i.e. the "
-                        "thread constructing Patronus, to join";
-
-    constexpr static size_t kAdminBufferNr = MAX_MACHINE;
-    std::vector<char> __buffer;
-    __buffer.resize(ReliableConnection::kMaxRecvBuffer * kAdminBufferNr);
-
-    auto buffer_pool = std::make_unique<
-        ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer>>(
-        __buffer.data(), ReliableConnection::kMaxRecvBuffer * kAdminBufferNr);
-    while (!should_exit())
-    {
-        char *buffer = (char *) CHECK_NOTNULL(buffer_pool->get());
-        size_t nr =
-            reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
-        for (size_t i = 0; i < nr; ++i)
-        {
-            auto *base = (BaseMessage *) (buffer + i * kMessageSize);
-            auto request_type = base->type;
-            CHECK_EQ(request_type, RequestType::kAdmin)
-                << "[patronus] Master thread only handles admin request. got "
-                << request_type;
-            auto *msg = (AdminRequest *) base;
-            auto admin_type = (AdminFlag) msg->flag;
-            CHECK_EQ(admin_type, AdminFlag::kAdminReqExit)
-                << "[patronus] only handles exit admin requests";
-            handle_admin_exit(msg, nullptr);
-        }
-        buffer_pool->put(buffer);
-    }
-    LOG(INFO) << "[patronus] all nodes finishes their work. joining...";
-
-    for (auto &t : threads)
-    {
-        t.join();
-    }
-}
-
 }  // namespace patronus

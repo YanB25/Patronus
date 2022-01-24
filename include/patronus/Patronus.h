@@ -168,13 +168,6 @@ public:
      */
     void server_serve(size_t mid);
 
-    /**
-     * @brief handling admin messages while joining the threads.
-     *
-     * @param threads
-     */
-    void wait_join(std::vector<std::thread> &threads);
-
     size_t try_get_client_continue_coros(size_t mid,
                                          coro_t *coro_buf,
                                          size_t limit);
