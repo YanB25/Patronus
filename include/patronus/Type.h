@@ -115,10 +115,9 @@ struct AcquireResponse
     // about time management of Lease
     time::term_t begin_term;
     uint32_t ns_per_unit;
-
     uint16_t lease_id;
+    uint32_t aba_id;
     AcquireRequestStatus status;
-    Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(AcquireResponse) < ReliableConnection::kMessageSize);
 std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp);
@@ -184,7 +183,8 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag);
 enum class LeaseModifyFlag : uint8_t
 {
     kNoRelinquishUnbind = 1 << 0,
-    kReserved = 1 << 1,
+    kForceUnbind = 1 << 1,
+    kReserved = 1 << 2,
 };
 struct LeaseModifyFlagOut
 {

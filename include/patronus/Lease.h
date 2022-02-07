@@ -91,7 +91,11 @@ public:
     }
     auto cur_unit_nr() const
     {
-        return cur_unit_nr_;
+        return cur_unit_nr_.u32_2;
+    }
+    auto aba_id() const
+    {
+        return cur_unit_nr_.u32_1;
     }
 
 private:
@@ -146,7 +150,7 @@ private:
     time::term_t begin_term_{0};
     time::ns_t ns_per_unit_{0};
     size_t unit_nr_begin_to_ddl_{0};
-    size_t cur_unit_nr_{0};
+    compound_uint64_t cur_unit_nr_{0};
     time::PatronusTime ddl_term_{0};
     bool no_gc_{false};
 };

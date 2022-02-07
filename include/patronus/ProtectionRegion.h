@@ -35,23 +35,28 @@ inline std::ostream &operator<<(std::ostream &os,
     return os;
 }
 
+// NOTE: could not be __attribute__((packed))
+// because the client will try to CAS @cur_unit_nr
+// This field must be 8-byte aligned.
 struct ProtectionRegion
 {
     // the lifecycle of lease
     bool valid{false};
     time::term_t begin_term{0};
     time::ns_t ns_per_unit{0};
-    // client and server cas this field for lease extension.
-    std::atomic<uint32_t> cur_unit_nr{0};
+    // @cur_unit_nr client and server cas this field for lease extension.
+    // The high bits will add one each time to avoid the ABA problem.
+    std::atomic<uint64_t> cur_unit_nr{0};
     // will be modified by clients or servers
     ProtectionRegionMeta meta;
-} __attribute__((packed));
+};
+
 inline std::ostream &operator<<(std::ostream &os, const ProtectionRegion &pr)
 {
     os << "{ProtectionRegion valid: " << pr.valid
        << ", begin_term: " << pr.begin_term
-       << ", ns_per_unit: " << pr.ns_per_unit
-       << ", cur_unit_nr: " << pr.cur_unit_nr << ", meta: " << pr.meta << "}";
+       << ", ns_per_unit: " << pr.ns_per_unit << ", cur_unit_nr "
+       << pr.cur_unit_nr << ", meta: " << pr.meta << "}";
     return os;
 }
 

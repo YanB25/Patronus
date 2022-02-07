@@ -16,7 +16,7 @@ using namespace define::literals;
 constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
-constexpr static size_t kTestTime = 5_K;
+constexpr static size_t kTestTime = 100;
 
 using namespace patronus;
 constexpr static size_t kCoroCnt = 1;
@@ -25,6 +25,8 @@ thread_local CoroCall master;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
+
+constexpr static auto kExpectLeaseAliveTime = 10ms;
 
 using namespace std::chrono_literals;
 
@@ -50,7 +52,6 @@ struct ClientCommunication
 
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
-    CHECK(false) << "TODO:";
     auto tid = p->get_thread_id();
     auto dir_id = tid;
     auto key = kKey;
@@ -62,7 +63,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     client_comm.finish_cur_task[coro_id] = false;
     client_comm.finish_all_task[coro_id] = false;
 
-    OnePassMonitor read_nr_before_expire_m;
+    OnePassMonitor read_loop_nr_m;
+    OnePassMonitor read_loop_ns_m;
 
     for (size_t i = 0; i < kTestTime; ++i)
     {
@@ -72,14 +74,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     dir_id,
                                     key,
                                     sizeof(Object),
-                                    100us,
+                                    1ms,
                                     0 /* no flag */,
                                     &ctx);
         auto after_get_rlease = std::chrono::steady_clock::now();
-        auto get_rlease_ns =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                after_get_rlease - before_get_rlease)
-                .count();
         CHECK(lease.success());
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
@@ -89,53 +87,39 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         VLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
-        // read three times, should both success
-        size_t read_nr = 0;
-        auto now = std::chrono::steady_clock::now();
-        while (now - before_get_rlease < 1ms)
+
+        auto before_read_loop = std::chrono::steady_clock::now();
+        size_t read_loop_succ_cnt = 0;
+        while (true)
         {
             bool succ = p->read(lease,
                                 rdma_buf.buffer,
                                 sizeof(Object),
-                                0 /* offset */,
+                                0 /*offset*/,
                                 (uint8_t) RWFlag::kWithAutoExtend,
                                 &ctx);
-            if (!succ)
+            if (succ)
             {
-                VLOG(2) << "[bench] read fails because of lease expired";
-                break;
+                read_loop_succ_cnt++;
             }
             else
             {
-                read_nr++;
-                DVLOG(2) << "[bench] client coro " << ctx << " read finished";
-                Object magic_object = *(Object *) rdma_buf.buffer;
-                CHECK_EQ(magic_object.target, kMagic)
-                    << "coro_id " << ctx << ", Read at key " << key
-                    << ", lease.base: " << (void *) lease.base_addr();
+                break;
+            }
+            auto now = std::chrono::steady_clock::now();
+            if (now - before_read_loop > kExpectLeaseAliveTime)
+            {
+                // will not let it extend infiniately.
+                break;
             }
         }
-        read_nr_before_expire_m.collect(read_nr);
-
-        CHECK(false) << "TODO: continue from here.";
-        // // to make sure the server really gc the lease
-        // std::this_thread::sleep_for()  // the lease is expired (maybe by
-        //                                // client's decision) // force to send
-        //                                // here if actually issue read, QP
-        //                                should
-        //                                // fails
-        //     VLOG(3)
-        //     << "[bench] before read, patronus_time: " <<
-        //     syncer.patronus_now();
-        bool succ = p->read(lease,
-                            rdma_buf.buffer,
-                            sizeof(Object),
-                            0,
-                            (uint8_t) RWFlag::kNoLocalExpireCheck,
-                            &ctx);
-
-        DVLOG(2) << "[bench] client coro " << ctx
-                 << " start to relinquish lease ";
+        auto after_read_loop = std::chrono::steady_clock::now();
+        auto read_loop_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                after_read_loop - before_read_loop)
+                .count();
+        read_loop_ns_m.collect(read_loop_ns);
+        read_loop_nr_m.collect(read_loop_succ_cnt);
 
         // make sure this will take no harm.
         p->relinquish(lease, 0, &ctx);
@@ -143,8 +127,17 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         p->put_rdma_buffer(rdma_buf.buffer);
     }
 
-    LOG(INFO) << "[bench] read_nr before lease expire: "
-              << read_nr_before_expire_m;
+    LOG(INFO) << "[bench] read_loop_succ_nr: " << read_loop_nr_m
+              << ", read_loop_ns: " << read_loop_ns_m;
+    // average should be very close to @kExpectLeaseAliveTime
+    auto alive_avg = read_loop_ns_m.average();
+    auto expect_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                         kExpectLeaseAliveTime)
+                         .count();
+    double err = 1.0 * abs(expect_ns - alive_avg) / expect_ns;
+    CHECK_LT(err, 0.01) << "** Expect alive " << expect_ns << " ns, actual "
+                        << alive_avg << " ns. err: " << err
+                        << " larger than threshold 0.01";
 
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;
@@ -233,7 +226,6 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     bindCore(0);
-    CHECK(false) << "TODO:";
 
     rdmaQueryDevice();
 

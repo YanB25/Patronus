@@ -685,6 +685,12 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
     wr.wr.atomic.swap = swap;
     wr.wr_id = wrID;
 
+    DCHECK_EQ((uint64_t) dest % 8, 0)
+        << "[Operation] CAS addr should be 8-byte aligned. Actual: " << dest
+        << " for QP: " << qp << ", source: " << source
+        << ", compare: " << compare << ", swap" << swap
+        << ", rkey: " << remoteRKey << ", wr_id: " << wrID;
+
     if (ibv_post_send(qp, &wr, &wrBad))
     {
         LOG(ERROR) << "Send with ATOMIC_CMP_AND_SWP failed.";

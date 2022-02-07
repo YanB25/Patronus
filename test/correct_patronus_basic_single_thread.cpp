@@ -80,11 +80,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             continue;
         }
 
-        DCHECK_EQ(lease.ddl_term().term(),
-                  std::numeric_limits<time::term_t>::max())
-            << "Set no-gc flag. should not be gc, so the valid term should be "
-               "MAX";
-
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
         auto rdma_buf = p->get_rdma_buffer();

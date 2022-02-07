@@ -160,6 +160,11 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
     {
         os << "no-rel-unbind, ";
     }
+    bool force_unbind = flag.flag & (uint8_t) LeaseModifyFlag::kForceUnbind;
+    if (force_unbind)
+    {
+        os << "force-unbind, ";
+    }
     bool reserve = flag.flag & (uint8_t) LeaseModifyFlag::kReserved;
     DCHECK(!reserve);
 
@@ -181,7 +186,7 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
     os << "{AcquireResponse type: " << resp.type << ", cid: " << resp.cid
        << ", lease_id: " << resp.lease_id << ", rkey_0: " << resp.rkey_0
        << ", rkey_header: " << resp.rkey_header << ", buffer_base "
-       << resp.buffer_base << "< header_base: " << resp.header_base
+       << resp.buffer_base << ", header_base: " << resp.header_base
        << ", begin_term: " << resp.begin_term
        << ", ns_per_unit: " << resp.ns_per_unit << ", status: " << resp.status
        << " }";

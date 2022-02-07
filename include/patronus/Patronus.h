@@ -357,14 +357,15 @@ private:
     {
         auto *ret =
             (ProtectionRegion *) DCHECK_NOTNULL(protection_region_pool_->get());
-        ret->valid = true;
         return ret;
     }
     void put_protection_region(ProtectionRegion *p)
     {
-        DCHECK(p->valid) << "** p: " << (void *) p
-                         << ", id: " << protection_region_pool_->buf_to_id(p);
-        p->valid = false;
+        auto cur_unit_nr = p->cur_unit_nr.load(std::memory_order_acq_rel);
+        // to avoid ABA problem, add the 32 bits by one each time.
+        auto val = compound_uint64_t(cur_unit_nr);
+        val.u32_1++;
+        p->cur_unit_nr.store(val.val, std::memory_order_acq_rel);
         protection_region_pool_->put(p);
     }
     ProtectionRegion *get_protection_region(size_t id)
@@ -448,7 +449,7 @@ private:
      */
     void task_gc_lease(uint64_t lease_id,
                        ClientID cid,
-                       size_t expect_unit_nr,
+                       compound_uint64_t expect_unit_nr,
                        uint8_t flag,
                        CoroContext *ctx = nullptr);
 

@@ -104,9 +104,9 @@ FUTURES:
 [-] get_{rlease,wlease} will also have lock semantics: If conflict, will return failure to the client
     - basically okay. need correct_lease_lock.cpp
 - Patronus adds extend API when client asked to do so. client can extend the lease by one-sided write.
-    - if DDLTask finds out the extend bit is 1, will skip gc and add the next ddl task.
-    - p->read/write() add a flag: kWithAutoExtend
-    - add p->extend(lease) to manually extend the lease (one-sided or two-sided version)
+    [-] p->read/write/cas() add a flag: kWithAutoExtend
+    - add p->extend(lease) to manually extend the lease
+    [-] add magic number to the cur_unit_nr field to avoid the ABA problem!! the higher 32 bits will be rolling up each time!
 - test the correctness of Patronus write.
 
 NO MORE. That should be easy.
@@ -117,6 +117,15 @@ If all the things above finish, I can move on to adopt the uPaxos!
 - some KVs
 - motivation data
 - micro evaluations
+
+=== about extension ===
+always use one-sided extension of lease.
+The client tries to CAS the @cur_unit_nr field to make it double.
+If succeeded, the lease extends.
+If failed, especially because
+- @cur_unit_nr lower bits are zero: the server refuses further extending by setting it to 0.
+- @cur_unit_nr upper bits mismatch: ABA problem. The lease expired and the server has already granted the PR to other clients.
+- @cur_unit_nr lower bits mismatch (but upper bits match): BUG.
 
 
 ==== NOTE ====

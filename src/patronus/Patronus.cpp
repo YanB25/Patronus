@@ -436,14 +436,16 @@ bool Patronus::cas_impl(char *iobuf /* old value fill here */,
     {
         DVLOG(4) << "[patronus] CAS success. wr_id: " << wrid
                  << ", coro: " << (ctx ? *ctx : nullctx)
-                 << ", read: " << read_remote << ", compare: " << compare
-                 << ", new: " << swap;
+                 << ", read: " << compound_uint64_t(read_remote)
+                 << ", compare: " << compound_uint64_t(compare)
+                 << ", new: " << compound_uint64_t(swap);
         return true;
     }
     DVLOG(4) << "[patronus] CAS failed. wr_id: " << wrid
              << ", coro: " << (ctx ? *ctx : nullctx)
-             << ", read: " << read_remote << ", compare: " << compare
-             << ", swap: " << swap;
+             << ", actual: " << compound_uint64_t(read_remote)
+             << ", compare: " << compound_uint64_t(compare)
+             << ", swap: " << compound_uint64_t(swap);
 
     return false;
 }
@@ -677,15 +679,6 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     DVLOG(5) << "[debug] getting rpc_context " << (void *) rpc_context
              << " at id " << rpc_ctx_id;
     auto *request = (AcquireRequest *) rpc_context->request;
-    if constexpr (debug())
-    {
-        uint64_t request_digest = request->digest.get();
-        request->digest = 0;
-        uint64_t resp_digest = resp->digest.get();
-        resp->digest = 0;
-        DCHECK_EQ(request_digest, djb2_digest(request, sizeof(AcquireRequest)));
-        DCHECK_EQ(resp_digest, djb2_digest(resp, sizeof(AcquireResponse)));
-    }
 
     DCHECK(resp->type == RequestType::kAcquireRLease ||
            resp->type == RequestType::kAcquireWLease ||
@@ -706,8 +699,8 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
         ret_lease.begin_term_ = resp->begin_term;
         ret_lease.ns_per_unit_ = resp->ns_per_unit;
         // TODO(patronus): without negotiate, @cur_unit_nr set to 1
-        ret_lease.cur_unit_nr_ = 1;
-        ret_lease.unit_nr_begin_to_ddl_ = ret_lease.cur_unit_nr_;
+        ret_lease.cur_unit_nr_ = compound_uint64_t(resp->aba_id, 1);
+        ret_lease.unit_nr_begin_to_ddl_ = 1;
         ret_lease.update_ddl_term();
         ret_lease.id_ = resp->lease_id;
         ret_lease.dir_id_ = rpc_context->dir_id;
@@ -915,6 +908,8 @@ handle_response:
         lease_ctx->addr_to_bind = (uint64_t) object_addr;
         lease_ctx->buffer_size = req->size;
         lease_ctx->protection_region_id = protection_region_id;
+        // set to valid until linked to lease_ctx
+        protection_region->valid = true;
         lease_ctx->with_conflict_detect = with_conflict_detect;
         lease_ctx->key_bucket_id = bucket_id;
         lease_ctx->key_slot_id = slot_id;
@@ -933,19 +928,23 @@ handle_response:
         DCHECK(!reserved)
             << "reserved flag should not be set. Possible corrupted message";
 
+        auto c_cur_unit_nr = compound_uint64_t(protection_region->cur_unit_nr);
+        c_cur_unit_nr.u32_2 = 1;
+        protection_region->cur_unit_nr = c_cur_unit_nr.val;
+
         // success, so register Lease expiring logic here.
         bool no_gc = req->flag & (uint8_t) AcquireRequestFlag::kNoGc;
         if (likely(!no_gc))
         {
             auto patronus_now = time_syncer_->patronus_now();
             auto patronus_ddl_term = patronus_now.term() + ns_per_unit;
-            auto expect_cur_unit_nr = 1;
 
             ddl_manager_.push(
                 patronus_ddl_term,
-                [this, lease_id, ctx, cid = req->cid, expect_cur_unit_nr]() {
+                [this, lease_id, ctx, cid = req->cid, c_cur_unit_nr]() {
+                    DCHECK_GT(c_cur_unit_nr.u32_2, 0);
                     task_gc_lease(
-                        lease_id, cid, expect_cur_unit_nr, 0 /* flag */, ctx);
+                        lease_id, cid, c_cur_unit_nr, 0 /* flag */, ctx);
                 });
 
             DVLOG(4) << "[debug] get client require ns " << req->required_ns
@@ -956,10 +955,11 @@ handle_response:
 
             resp_msg->begin_term = patronus_now.term();
             resp_msg->ns_per_unit = ns_per_unit;
+            resp_msg->aba_id = c_cur_unit_nr.u32_1;
 
             protection_region->begin_term = patronus_now.term();
             protection_region->ns_per_unit = req->required_ns;
-            protection_region->cur_unit_nr = 1;
+            DCHECK_GT(c_cur_unit_nr.u32_2, 0);
             memset(&(protection_region->meta), 0, sizeof(ProtectionRegionMeta));
         }
         else
@@ -967,6 +967,7 @@ handle_response:
             resp_msg->begin_term = 0;
             resp_msg->ns_per_unit =
                 std::numeric_limits<decltype(resp_msg->ns_per_unit)>::max();
+            resp_msg->aba_id = 0;
         }
     }
     else
@@ -981,13 +982,9 @@ handle_response:
         protection_region = nullptr;
     }
 
-    if constexpr (debug())
-    {
-        resp_msg->digest = 0;
-        resp_msg->digest = djb2_digest(resp_msg, sizeof(AcquireResponse));
-    }
-
     auto from_mid = req->cid.mid;
+    DVLOG(4) << "[patronus] Handle request acquire finished. resp: "
+             << *resp_msg;
     dsm_->reliable_send(
         (char *) resp_msg, sizeof(AcquireResponse), req->cid.node_id, from_mid);
 
@@ -1033,9 +1030,12 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
 {
     DCHECK_EQ(req->type, RequestType::kRelinquish);
     auto lease_id = req->lease_id;
-    // set expect_unit_nr = 0, so that force_gc.
-    // Client's request can always be a force_gc
-    task_gc_lease(lease_id, req->cid, 0, req->flag, ctx);
+
+    task_gc_lease(lease_id,
+                  req->cid,
+                  compound_uint64_t(0),
+                  req->flag | (uint8_t) LeaseModifyFlag::kForceUnbind,
+                  ctx);
 }
 
 void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
@@ -1239,7 +1239,7 @@ size_t Patronus::handle_rdma_finishes(
         }
         else
         {
-            DLOG(WARNING) << "[patronus] rdma R/W failed. wr_id: " << wr_id
+            DLOG(WARNING) << "[patronus] rdma R/W/CAS failed. wr_id: " << wr_id
                           << " for node " << node_id << ", dir: " << dir_id
                           << ", coro_id: " << (int) coro_id
                           << ". detail: " << wc;
@@ -1741,7 +1741,7 @@ void Patronus::server_coro_master(CoroYield &yield, size_t mid)
 
 void Patronus::task_gc_lease(uint64_t lease_id,
                              ClientID cid,
-                             size_t expect_unit_nr,
+                             compound_uint64_t c_expect_unit_nr,
                              uint8_t flag,
                              CoroContext *ctx)
 {
@@ -1771,22 +1771,43 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     auto protection_region_id = lease_ctx->protection_region_id;
     auto *protection_region = get_protection_region(protection_region_id);
     DCHECK(protection_region->valid)
-        << "** protection_region_id: " << protection_region_id
-        << "PR: " << *protection_region;
-    auto unit_nr =
-        protection_region->cur_unit_nr.load(std::memory_order_relaxed);
-    DCHECK(unit_nr == 0 || unit_nr >= expect_unit_nr);
+        << "** If lease_ctx is valid, the protection region must also be "
+           "valid. protection_region_id: "
+        << protection_region_id << ", PR: " << *protection_region
+        << ", lease_id: " << lease_id << ", cid: " << cid
+        << ", c_expect_unit_nr: " << c_expect_unit_nr
+        << ", flag: " << LeaseModifyFlagOut(flag)
+        << ", coro: " << (ctx ? *ctx : nullctx);
+    auto c_unit_nr = compound_uint64_t(
+        protection_region->cur_unit_nr.load(std::memory_order_relaxed));
+    auto c_next_expect_unit_nr = c_unit_nr;
+    DCHECK_GT(c_unit_nr.u32_2, 0);
+    auto unit_nr = c_unit_nr.u32_2;
+
+    DCHECK(unit_nr >= c_expect_unit_nr.u32_2);
     // indicate that server will by no means GC the lease
-    bool force_gc = expect_unit_nr == 0;
-    bool client_already_exteded = unit_nr != expect_unit_nr;
+    bool force_gc = flag & (uint8_t) LeaseModifyFlag::kForceUnbind;
+    bool client_already_exteded = unit_nr != c_expect_unit_nr.u32_2;
     DVLOG(4) << "[patronus][gc_lease] determine the behaviour: force_gc: "
              << force_gc
-             << ", client_already_extended: " << client_already_exteded;
+             << ", client_already_extended: " << client_already_exteded
+             << " (pr->unit_nr: " << c_unit_nr
+             << " v.s. expect_unit_nr: " << c_expect_unit_nr;
     auto next_expect_unit_nr = unit_nr * 2;
+
+    if constexpr (debug())
+    {
+        if (!force_gc)
+        {
+            DCHECK_EQ(c_unit_nr.u32_1, c_expect_unit_nr.u32_1)
+                << "** The aba_id should remain the same. actual: " << c_unit_nr
+                << ", expect: " << c_expect_unit_nr;
+        }
+    }
+
     if (unlikely(client_already_exteded && !force_gc))
     {
         DCHECK_GT(unit_nr, 0);
-        protection_region->cur_unit_nr = next_expect_unit_nr;
         auto next_ns = next_expect_unit_nr * protection_region->ns_per_unit;
         auto next_ddl = protection_region->begin_term + next_ns;
         if constexpr (debug())
@@ -1797,10 +1818,10 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                 << "[patronus] tasks' next DDL is now. patronus_ddl: "
                 << patronus_ddl << ", patronus_now: " << patronus_now;
         }
-        auto next_expect_unit_nr = unit_nr * 2;
         ddl_manager_.push(
-            next_ddl, [this, lease_id, cid, flag, next_expect_unit_nr, ctx]() {
-                task_gc_lease(lease_id, cid, next_expect_unit_nr, flag, ctx);
+            next_ddl,
+            [this, lease_id, cid, flag, c_next_expect_unit_nr, ctx]() {
+                task_gc_lease(lease_id, cid, c_next_expect_unit_nr, flag, ctx);
             });
         DVLOG(3) << "[patronus][gc_lease] skip relinquish because client's "
                     "extend. ProtectionRegion: "
@@ -1868,6 +1889,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     put_mw(lease_ctx->dir_id, lease_ctx->header_mw);
     put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
     auto *pr = get_protection_region(lease_ctx->protection_region_id);
+    pr->valid = false;
     // TODO(patronus): not considering any checks here
     // for example, the pr->meta.relinquished bits.
     put_protection_region(pr);
@@ -1944,36 +1966,47 @@ bool Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
         return false;
     }
     // assume one-sided write will not take longer than this
-    auto margin_duration = 20us + std::chrono::nanoseconds(2 * epsilon);
-    auto margin_duration_ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(margin_duration)
+    constexpr static auto kMinMarginDuration = 100us;
+    constexpr static time::ns_t kMinMarginDurationNs =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(kMinMarginDuration)
             .count();
+    time::ns_t ideal_margin_duration_ns =
+        lease.cur_unit_nr() * lease.ns_per_unit_ / 2;
+    auto margin_duration_ns =
+        std::max(ideal_margin_duration_ns, kMinMarginDurationNs);
     if (diff_ns <= margin_duration_ns)
     {
+        DVLOG(4) << "[patronus][maybe-extend] Do extend. lease ddl: "
+                 << patronus_ddl << ", patronus_now: " << patronus_now
+                 << ", diff_ns: " << diff_ns << " < margin_duration_ns("
+                 << margin_duration_ns << "). Before lease: " << lease
+                 << ", coro: " << (ctx ? *ctx : nullctx);
+
         auto offset = offsetof(ProtectionRegion, cur_unit_nr);
         auto rdma_buffer = get_rdma_buffer();
         DCHECK_LT(sizeof(decltype(ProtectionRegion::cur_unit_nr)),
                   rdma_buffer.size);
 
-        auto compare = lease.cur_unit_nr();
-        auto swap = 2 * compare;
-        auto extend_unit_nr = swap - compare;
+        auto c_cur_unit_nr = lease.cur_unit_nr_;
+        auto compare = lease.cur_unit_nr_.val;
+        // equivalent to double: plus the current value
+        auto extend_unit_nr = c_cur_unit_nr.u32_2;
+        c_cur_unit_nr.u32_2 += extend_unit_nr;
+        auto swap = c_cur_unit_nr.val;
 
         bool cas_success = protection_region_cas_impl(
             lease, rdma_buffer.buffer, offset, compare, swap, ctx);
 
         if (likely(cas_success))
         {
-            lease.cur_unit_nr_ = swap;
+            lease.cur_unit_nr_ = c_cur_unit_nr;
             lease.unit_nr_begin_to_ddl_ += extend_unit_nr;
             lease.update_ddl_term();
         }
         put_rdma_buffer(rdma_buffer.buffer);
-        DVLOG(4) << "[patronus][maybe-extend] Do extend. lease ddl: "
-                 << patronus_ddl << ", patronus_now: " << patronus_now
-                 << ", diff_ns: " << diff_ns << " < margin_duration_ns("
-                 << margin_duration_ns << "). coro: " << (ctx ? *ctx : nullctx)
-                 << ". Success: " << cas_success << ". Now lease: " << lease;
+        DVLOG(4) << "[patronus][maybe-extend] Done extend. coro: "
+                 << (ctx ? *ctx : nullctx) << ". Success: " << cas_success
+                 << ". Now lease: " << lease;
         return true;
     }
     DVLOG(4) << "[patronus][maybe-extend] Not reach lease DDL (not extend). "
