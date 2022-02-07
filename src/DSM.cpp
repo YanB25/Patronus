@@ -661,11 +661,52 @@ bool DSM::cas_read_sync(RdmaOpRegion &cas_ror,
     return equal == *(uint64_t *) cas_ror.source;
 }
 
+void DSM::rkey_cas(uint32_t rkey,
+                   char *rdma_buffer,
+                   GlobalAddress gaddr,
+                   size_t dir_id,
+                   uint64_t compare,
+                   uint64_t swap,
+                   bool is_signal,
+                   uint64_t wr_id,
+                   CoroContext *ctx)
+{
+    DCHECK_LT(dir_id, iCon->QPs.size());
+    DCHECK_LT(gaddr.nodeID, iCon->QPs[dir_id].size());
+    if (unlikely(ctx == nullptr))
+    {
+        rdmaCompareAndSwap(iCon->QPs[dir_id][gaddr.nodeID],
+                           (uint64_t) rdma_buffer,
+                           gaddr_to_addr(gaddr),
+                           compare,
+                           swap,
+                           iCon->cacheLKey,
+                           rkey,
+                           is_signal,
+                           wr_id);
+    }
+    else
+    {
+        DCHECK(is_signal) << "** should signal for coroutine";
+        rdmaCompareAndSwap(iCon->QPs[dir_id][gaddr.nodeID],
+                           (uint64_t) rdma_buffer,
+                           gaddr_to_addr(gaddr),
+                           compare,
+                           swap,
+                           iCon->cacheLKey,
+                           rkey,
+                           is_signal,
+                           wr_id);
+        ctx->yield_to_master();
+    }
+}
+
 void DSM::cas(GlobalAddress gaddr,
               uint64_t equal,
               uint64_t val,
               uint64_t *rdma_buffer,
               bool signal,
+              uint64_t wr_id,
               CoroContext *ctx)
 {
     size_t cur_dir = get_cur_dir();
@@ -678,7 +719,8 @@ void DSM::cas(GlobalAddress gaddr,
                            val,
                            iCon->cacheLKey,
                            remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
-                           signal);
+                           signal,
+                           wr_id);
     }
     else
     {
@@ -690,7 +732,7 @@ void DSM::cas(GlobalAddress gaddr,
                            iCon->cacheLKey,
                            remoteInfo[gaddr.nodeID].dsmRKey[cur_dir],
                            true,
-                           ctx->coro_id());
+                           wr_id);
         ctx->yield_to_master();
     }
 }
@@ -701,7 +743,8 @@ bool DSM::cas_sync(GlobalAddress gaddr,
                    uint64_t *rdma_buffer,
                    CoroContext *ctx)
 {
-    cas(gaddr, equal, val, rdma_buffer, true, ctx);
+    auto wr_id = ctx ? ctx->coro_id() : 0;
+    cas(gaddr, equal, val, rdma_buffer, true, wr_id, ctx);
 
     if (ctx == nullptr)
     {

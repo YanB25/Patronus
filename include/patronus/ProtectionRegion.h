@@ -21,23 +21,40 @@ struct LeaseDescriptor
 
 struct ProtectionRegionMeta
 {
-    small_bit_t granted;
-    small_bit_t relinquished;
-    small_bit_t wait;
+    std::atomic<small_bit_t> relinquished;
+    std::atomic<small_bit_t> wait;
 } __attribute__((packed));
-static_assert(sizeof(ProtectionRegionMeta::granted) * 8 >= kSpeculativeLeaseNr);
 static_assert(sizeof(ProtectionRegionMeta::relinquished) * 8 >=
               kSpeculativeLeaseNr);
+inline std::ostream &operator<<(std::ostream &os,
+                                const ProtectionRegionMeta &meta)
+{
+    os << "{PRMeta relinquished: " << (int) meta.relinquished
+       << ", wait: " << (int) meta.wait << "}";
+
+    return os;
+}
 
 struct ProtectionRegion
 {
-    small_size_t lease_nr;
-    // this covers the Meta part
-    LeaseDescriptor ex_lease;
-    // these cover the buffer part
-    LeaseDescriptor spec_leases[kSpeculativeLeaseNr];
+    // the lifecycle of lease
+    bool valid{false};
+    time::term_t begin_term{0};
+    time::ns_t ns_per_unit{0};
+    // client and server cas this field for lease extension.
+    std::atomic<uint32_t> cur_unit_nr{0};
+    // will be modified by clients or servers
     ProtectionRegionMeta meta;
 } __attribute__((packed));
+inline std::ostream &operator<<(std::ostream &os, const ProtectionRegion &pr)
+{
+    os << "{ProtectionRegion valid: " << pr.valid
+       << ", begin_term: " << pr.begin_term
+       << ", ns_per_unit: " << pr.ns_per_unit
+       << ", cur_unit_nr: " << pr.cur_unit_nr << ", meta: " << pr.meta << "}";
+    return os;
+}
+
 }  // namespace patronus
 
 #endif

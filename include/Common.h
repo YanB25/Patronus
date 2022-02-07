@@ -285,6 +285,8 @@ inline std::ostream &operator<<(std::ostream &os, WRID wrid)
 #define WRID_PREFIX_PATRONUS_UNBIND_MW 6
 // PR: ProtectionRegion
 #define WRID_PREFIX_PATRONUS_PR_RW 7
+#define WRID_PREFIX_PATRONUS_CAS 8
+#define WRID_PREFIX_PATRONUS_PR_CAS 9
 
 static inline uint64_t djb2_digest(const void *void_str, size_t size)
 {

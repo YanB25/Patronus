@@ -121,7 +121,9 @@ void send_skew_cas([[maybe_unused]] int node_id, int thread_id)
                  0,
                  100,
                  buffer + gaddr.offset,
-                 (sendCounter & SIGNAL_BATCH) == 0);
+                 (sendCounter & SIGNAL_BATCH) == 0,
+                 0 /* wr_id */,
+                 nullptr);
 
         ++sendCounter;
     }

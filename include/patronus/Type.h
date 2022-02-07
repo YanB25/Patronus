@@ -112,7 +112,10 @@ struct AcquireResponse
     uint32_t rkey_header;
     uint64_t buffer_base;
     uint64_t header_base;
-    time::term_t ddl_term;
+    // about time management of Lease
+    time::term_t begin_term;
+    uint32_t ns_per_unit;
+
     uint16_t lease_id;
     AcquireRequestStatus status;
     Debug<uint64_t> digest;
@@ -165,7 +168,8 @@ std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &req);
 enum class RWFlag : uint8_t
 {
     kNoLocalExpireCheck = 1 << 0,
-    kReserved = 1 << 1,
+    kWithAutoExtend = 1 << 1,
+    kReserved = 1 << 2,
 };
 
 struct RWFlagOut

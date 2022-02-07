@@ -156,6 +156,16 @@ public:
                         uint64_t add_val,
                         CoroContext *ctx = nullptr);
 
+    void rkey_cas(uint32_t rkey,
+                  char *rdma_buffer,
+                  GlobalAddress gaddr,
+                  size_t dir_id,
+                  uint64_t compare,
+                  uint64_t swap,
+                  bool is_signal,
+                  uint64_t wr_id,
+                  CoroContext *ctx = nullptr);
+
     void write_cas(RdmaOpRegion &write_ror,
                    RdmaOpRegion &cas_ror,
                    uint64_t equal,
@@ -175,7 +185,8 @@ public:
              uint64_t equal,
              uint64_t val,
              uint64_t *rdma_buffer,
-             bool signal = true,
+             bool signal,
+             uint64_t wr_id,
              CoroContext *ctx = nullptr);
     bool cas_sync(GlobalAddress gaddr,
                   uint64_t equal,

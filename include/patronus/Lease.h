@@ -56,7 +56,11 @@ public:
     }
     time::PatronusTime ddl_term() const
     {
-        return cur_ddl_term_;
+        return ddl_term_;
+    }
+    auto cur_rkey() const
+    {
+        return cur_rkey_;
     }
 
     void copy_from(const Lease &rhs)
@@ -71,11 +75,23 @@ public:
         rkey_0_ = rhs.rkey_0_;
         cur_rkey_ = rhs.cur_rkey_;
         header_rkey_ = rhs.header_rkey_;
-        cur_ddl_term_ = rhs.cur_ddl_term_;
+        begin_term_ = rhs.begin_term_;
+        ns_per_unit_ = rhs.ns_per_unit_;
+        unit_nr_begin_to_ddl_ = rhs.unit_nr_begin_to_ddl_;
+        cur_unit_nr_ = rhs.cur_unit_nr_;
+        ddl_term_ = rhs.ddl_term_;
 
         success_ = false;
         ready_ = false;
         id_ = 0;
+    }
+    auto begin_term() const
+    {
+        return begin_term_;
+    }
+    auto cur_unit_nr() const
+    {
+        return cur_unit_nr_;
     }
 
 private:
@@ -97,8 +113,18 @@ private:
         id_ = 0;
         cur_rkey_ = 0;
         rkey_0_ = 0;
-        cur_ddl_term_ = 0;
+        ddl_term_ = 0;
     }
+
+    void update_ddl_term()
+    {
+        DCHECK_NE(ns_per_unit_, 0)
+            << "** ns_per_unit_ is zero. lease: " << *this;
+        DCHECK_NE(unit_nr_begin_to_ddl_, 0) << "** invalid. Lease: " << *this;
+        auto ns = ns_per_unit_ * unit_nr_begin_to_ddl_;
+        ddl_term_ = begin_term_ + ns;
+    }
+
     friend class Patronus;
     friend std::ostream &operator<<(std::ostream &, const Lease &);
     bool success_{false};
@@ -115,7 +141,14 @@ private:
     rkey_t rkey_0_{0};
     rkey_t cur_rkey_{0};
     rkey_t header_rkey_{0};
-    time::PatronusTime cur_ddl_term_{0};
+
+    // for the management of Lease life cycle
+    time::term_t begin_term_{0};
+    time::ns_t ns_per_unit_{0};
+    size_t unit_nr_begin_to_ddl_{0};
+    size_t cur_unit_nr_{0};
+    time::PatronusTime ddl_term_{0};
+    bool no_gc_{false};
 };
 
 std::ostream &operator<<(std::ostream &os, const Lease &lease);

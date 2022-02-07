@@ -141,6 +141,11 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
     {
         os << "no-check, ";
     }
+    bool with_auto_extend = flag.flag & (uint8_t) RWFlag::kWithAutoExtend;
+    if (with_auto_extend)
+    {
+        os << "with-extend, ";
+    }
     bool reserve = flag.flag & (uint8_t) RWFlag::kReserved;
     DCHECK(!reserve);
     os << "}";
@@ -177,7 +182,8 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
        << ", lease_id: " << resp.lease_id << ", rkey_0: " << resp.rkey_0
        << ", rkey_header: " << resp.rkey_header << ", buffer_base "
        << resp.buffer_base << "< header_base: " << resp.header_base
-       << ", ddl_term: " << resp.ddl_term << ", status: " << resp.status
+       << ", begin_term: " << resp.begin_term
+       << ", ns_per_unit: " << resp.ns_per_unit << ", status: " << resp.status
        << " }";
     return os;
 }

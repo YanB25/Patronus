@@ -175,7 +175,8 @@ int main()
         timer.begin();
         for (size_t i = 0; i < call_loop; ++i)
         {
-            dsm->cas(gaddr, 1, cur_val + 1, (uint64_t *) buffer);
+            dsm->cas(
+                gaddr, 1, cur_val + 1, (uint64_t *) buffer, true, 0, nullptr);
         }
         timer.end_print(call_loop);
 

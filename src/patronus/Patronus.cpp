@@ -1,6 +1,7 @@
 #include "patronus/Patronus.h"
 
 #include "patronus/IBOut.h"
+#include "patronus/Time.h"
 #include "util/Debug.h"
 
 namespace patronus
@@ -113,6 +114,8 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
 
     Lease ret_lease;
     ret_lease.node_id_ = node_id;
+    bool no_gc = flag & (uint8_t) AcquireRequestFlag::kNoGc;
+    ret_lease.no_gc_ = no_gc;
 
     auto *msg = (AcquireRequest *) rdma_buf;
     msg->type = type;
@@ -310,6 +313,139 @@ bool Patronus::protection_region_rw_impl(Lease &lease,
                            is_read,
                            WRID_PREFIX_PATRONUS_PR_RW,
                            ctx);
+}
+bool Patronus::buffer_cas_impl(Lease &lease,
+                               char *iobuf,
+                               size_t offset,
+                               uint64_t compare,
+                               uint64_t swap,
+                               CoroContext *ctx)
+{
+    CHECK(lease.success());
+    uint32_t rkey = lease.cur_rkey();
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    VLOG(4) << "[patronus] buffer_cas. remote_addr: " << remote_addr
+            << ", rkey: " << rkey << " (base_addr: " << lease.base_addr_
+            << ", remote_addr: " << remote_addr
+            << "). coro: " << (ctx ? *ctx : nullctx);
+    return cas_impl(iobuf,
+                    lease.node_id_,
+                    lease.dir_id_,
+                    rkey,
+                    remote_addr,
+                    compare,
+                    swap,
+                    WRID_PREFIX_PATRONUS_CAS,
+                    ctx);
+}
+bool Patronus::protection_region_cas_impl(Lease &lease,
+                                          char *iobuf,
+                                          size_t offset,
+                                          uint64_t compare,
+                                          uint64_t swap,
+                                          CoroContext *ctx)
+{
+    CHECK(lease.success());
+
+    uint32_t rkey = lease.header_rkey_;
+    uint64_t remote_addr = lease.header_addr_ + offset;
+    VLOG(4) << "[patronus] protection_region_cas. remote_addr: " << remote_addr
+            << ", rkey: " << rkey << " (header_addr: " << lease.header_addr_
+            << "). coro: " << (ctx ? *ctx : nullctx);
+    return cas_impl(iobuf,
+                    lease.node_id_,
+                    lease.dir_id_,
+                    rkey,
+                    remote_addr,
+                    compare,
+                    swap,
+                    WRID_PREFIX_PATRONUS_PR_CAS,
+                    ctx);
+}
+
+bool Patronus::cas_impl(char *iobuf /* old value fill here */,
+                        size_t node_id,
+                        size_t dir_id,
+                        uint32_t rkey,
+                        uint64_t remote_addr,
+                        uint64_t compare,
+                        uint64_t swap,
+                        uint16_t wr_prefix,
+                        CoroContext *ctx)
+{
+    bool ret = false;
+
+    GlobalAddress gaddr;
+    gaddr.nodeID = node_id;
+    DCHECK_NE(gaddr.nodeID, get_node_id())
+        << "make no sense to CAS local buffer with RDMA";
+    gaddr.offset = remote_addr;
+    auto coro_id = ctx ? ctx->coro_id() : kNotACoro;
+    if constexpr (debug())
+    {
+        debug_valid_rdma_buffer(iobuf);
+    }
+    auto *rw_context = get_rw_context();
+    uint16_t rw_ctx_id = get_rw_context_id(rw_context);
+    rw_context->success = &ret;
+    rw_context->ready = false;
+    rw_context->coro_id = coro_id;
+    rw_context->target_node = gaddr.nodeID;
+    rw_context->dir_id = dir_id;
+
+    auto wrid = WRID(wr_prefix, rw_ctx_id);
+    DVLOG(4) << "[patronus] CAS node_id: " << node_id << ", dir_id " << dir_id
+             << ", rkey: " << rkey << ", remote_addr: " << remote_addr
+             << ", compare: " << compare << ", swap: " << swap
+             << ", wr_id: " << wrid << ", coro: " << (ctx ? *ctx : nullctx);
+
+    dsm_->rkey_cas(rkey,
+                   iobuf,
+                   gaddr,
+                   dir_id,
+                   compare,
+                   swap,
+                   true /* is_signal */,
+                   wrid.val,
+                   ctx);
+    if (unlikely(ctx == nullptr))
+    {
+        dsm_->poll_rdma_cq(1);
+        rw_context->ready.store(true);
+    }
+
+    DCHECK(rw_context->ready)
+        << "** Should have been ready when switching back to worker " << ctx
+        << ", rw_ctx_id: " << rw_ctx_id << ", ready at "
+        << (void *) &rw_context->ready;
+    if constexpr (debug())
+    {
+        memset(rw_context, 0, sizeof(RWContext));
+    }
+    put_rw_context(rw_context);
+
+    if (unlikely(!ret))
+    {
+        DVLOG(4) << "[patronus] CAS failed. wr_id: " << wrid
+                 << "coro: " << (ctx ? *ctx : nullctx);
+        return false;
+    }
+    // see if cas can success
+    auto read_remote = *(uint64_t *) iobuf;
+    if (read_remote == compare)
+    {
+        DVLOG(4) << "[patronus] CAS success. wr_id: " << wrid
+                 << ", coro: " << (ctx ? *ctx : nullctx)
+                 << ", read: " << read_remote << ", compare: " << compare
+                 << ", new: " << swap;
+        return true;
+    }
+    DVLOG(4) << "[patronus] CAS failed. wr_id: " << wrid
+             << ", coro: " << (ctx ? *ctx : nullctx)
+             << ", read: " << read_remote << ", compare: " << compare
+             << ", swap: " << swap;
+
+    return false;
 }
 
 Lease Patronus::lease_modify_impl(Lease &lease,
@@ -567,7 +703,12 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
         ret_lease.rkey_0_ = resp->rkey_0;
         ret_lease.header_rkey_ = resp->rkey_header;
         ret_lease.cur_rkey_ = ret_lease.rkey_0_;
-        ret_lease.cur_ddl_term_ = time::PatronusTime(resp->ddl_term);
+        ret_lease.begin_term_ = resp->begin_term;
+        ret_lease.ns_per_unit_ = resp->ns_per_unit;
+        // TODO(patronus): without negotiate, @cur_unit_nr set to 1
+        ret_lease.cur_unit_nr_ = 1;
+        ret_lease.unit_nr_begin_to_ddl_ = ret_lease.cur_unit_nr_;
+        ret_lease.update_ddl_term();
         ret_lease.id_ = resp->lease_id;
         ret_lease.dir_id_ = rpc_context->dir_id;
         if (resp->type == RequestType::kAcquireRLease)
@@ -695,6 +836,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                         mr,
                         (uint64_t) header_addr,
                         sizeof(ProtectionRegion),
+                        // header always grant R/W
                         IBV_ACCESS_CUSTOM_REMOTE_RW);
         DVLOG(4) << "[patronus] Bind mw for header. addr: "
                  << (void *) header_addr
@@ -779,6 +921,8 @@ handle_response:
         lease_ctx->valid = true;
         auto lease_id = lease_context_.obj_to_id(lease_ctx);
 
+        auto ns_per_unit = req->required_ns;
+
         resp_msg->rkey_0 = buffer_mw->rkey;
         resp_msg->rkey_header = header_mw->rkey;
         resp_msg->buffer_base = object_dsm_offset;
@@ -793,23 +937,36 @@ handle_response:
         bool no_gc = req->flag & (uint8_t) AcquireRequestFlag::kNoGc;
         if (likely(!no_gc))
         {
-            auto patronus_ddl = time_syncer_->patronus_later(req->required_ns);
-            // set the DDL a little bit (@epsilon()) before actual DDL.
+            auto patronus_now = time_syncer_->patronus_now();
+            auto patronus_ddl_term = patronus_now.term() + ns_per_unit;
+            auto expect_cur_unit_nr = 1;
+
             ddl_manager_.push(
-                patronus_ddl.term(),
-                [this, lease_id, ctx, cid = req->cid]()
-                { task_gc_lease(lease_id, cid, 0 /* flag */, ctx); });
+                patronus_ddl_term,
+                [this, lease_id, ctx, cid = req->cid, expect_cur_unit_nr]() {
+                    task_gc_lease(
+                        lease_id, cid, expect_cur_unit_nr, 0 /* flag */, ctx);
+                });
 
             DVLOG(4) << "[debug] get client require ns " << req->required_ns
-                     << ", patronus_ddl: " << patronus_ddl
+                     << ", ns_per_unit: " << ns_per_unit
+                     << ", at patronus_now: " << patronus_now
+                     << ", patronus_ddl_term: " << patronus_ddl_term
                      << ", epsilon: " << time_syncer_->epsilon();
 
-            resp_msg->ddl_term = patronus_ddl.term();
+            resp_msg->begin_term = patronus_now.term();
+            resp_msg->ns_per_unit = ns_per_unit;
+
+            protection_region->begin_term = patronus_now.term();
+            protection_region->ns_per_unit = req->required_ns;
+            protection_region->cur_unit_nr = 1;
+            memset(&(protection_region->meta), 0, sizeof(ProtectionRegionMeta));
         }
         else
         {
-            resp_msg->ddl_term =
-                std::numeric_limits<decltype(resp_msg->ddl_term)>::max();
+            resp_msg->begin_term = 0;
+            resp_msg->ns_per_unit =
+                std::numeric_limits<decltype(resp_msg->ns_per_unit)>::max();
         }
     }
     else
@@ -876,7 +1033,9 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
 {
     DCHECK_EQ(req->type, RequestType::kRelinquish);
     auto lease_id = req->lease_id;
-    task_gc_lease(lease_id, req->cid, req->flag, ctx);
+    // set expect_unit_nr = 0, so that force_gc.
+    // Client's request can always be a force_gc
+    task_gc_lease(lease_id, req->cid, 0, req->flag, ctx);
 }
 
 void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
@@ -1059,8 +1218,10 @@ size_t Patronus::handle_rdma_finishes(
         // log_wc_handler(&wc);
         auto wr_id = WRID(wc.wr_id);
         auto id = wr_id.id;
-        CHECK(wr_id.prefix == WRID_PREFIX_PATRONUS_RW ||
-              wr_id.prefix == WRID_PREFIX_PATRONUS_PR_RW)
+        DCHECK(wr_id.prefix == WRID_PREFIX_PATRONUS_RW ||
+               wr_id.prefix == WRID_PREFIX_PATRONUS_PR_RW ||
+               wr_id.prefix == WRID_PREFIX_PATRONUS_CAS ||
+               wr_id.prefix == WRID_PREFIX_PATRONUS_PR_CAS)
             << "** unexpected prefix " << (int) wr_id.prefix;
         auto *rw_context = rw_context_.id_to_obj(id);
         auto node_id = rw_context->target_node;
@@ -1454,11 +1615,11 @@ void Patronus::server_serve(size_t mid)
 
     for (size_t i = 0; i < kServerCoroNr; ++i)
     {
-        server_workers[i] = CoroCall([this, i](CoroYield &yield)
-                                     { server_coro_worker(i, yield); });
+        server_workers[i] = CoroCall(
+            [this, i](CoroYield &yield) { server_coro_worker(i, yield); });
     }
-    server_master = CoroCall([this, mid](CoroYield &yield)
-                             { server_coro_master(yield, mid); });
+    server_master = CoroCall(
+        [this, mid](CoroYield &yield) { server_coro_master(yield, mid); });
 
     server_master();
 }
@@ -1580,6 +1741,7 @@ void Patronus::server_coro_master(CoroYield &yield, size_t mid)
 
 void Patronus::task_gc_lease(uint64_t lease_id,
                              ClientID cid,
+                             size_t expect_unit_nr,
                              uint8_t flag,
                              CoroContext *ctx)
 {
@@ -1603,6 +1765,50 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         DVLOG(4)
             << "[patronus][gc_lease] skip relinquish. cid mismatch: expect: "
             << lease_ctx->client_cid << ", got: " << cid;
+    }
+
+    // test if client issued extends
+    auto protection_region_id = lease_ctx->protection_region_id;
+    auto *protection_region = get_protection_region(protection_region_id);
+    DCHECK(protection_region->valid)
+        << "** protection_region_id: " << protection_region_id
+        << "PR: " << *protection_region;
+    auto unit_nr =
+        protection_region->cur_unit_nr.load(std::memory_order_relaxed);
+    DCHECK(unit_nr == 0 || unit_nr >= expect_unit_nr);
+    // indicate that server will by no means GC the lease
+    bool force_gc = expect_unit_nr == 0;
+    bool client_already_exteded = unit_nr != expect_unit_nr;
+    DVLOG(4) << "[patronus][gc_lease] determine the behaviour: force_gc: "
+             << force_gc
+             << ", client_already_extended: " << client_already_exteded;
+    auto next_expect_unit_nr = unit_nr * 2;
+    if (unlikely(client_already_exteded && !force_gc))
+    {
+        DCHECK_GT(unit_nr, 0);
+        protection_region->cur_unit_nr = next_expect_unit_nr;
+        auto next_ns = next_expect_unit_nr * protection_region->ns_per_unit;
+        auto next_ddl = protection_region->begin_term + next_ns;
+        if constexpr (debug())
+        {
+            auto patronus_ddl = time::PatronusTime(next_ddl);
+            auto patronus_now = time_syncer_->patronus_now();
+            LOG_IF(WARNING, patronus_ddl < patronus_now)
+                << "[patronus] tasks' next DDL is now. patronus_ddl: "
+                << patronus_ddl << ", patronus_now: " << patronus_now;
+        }
+        auto next_expect_unit_nr = unit_nr * 2;
+        ddl_manager_.push(
+            next_ddl, [this, lease_id, cid, flag, next_expect_unit_nr, ctx]() {
+                task_gc_lease(lease_id, cid, next_expect_unit_nr, flag, ctx);
+            });
+        DVLOG(3) << "[patronus][gc_lease] skip relinquish because client's "
+                    "extend. ProtectionRegion: "
+                 << (*protection_region) << ", next_ddl: " << next_ddl
+                 << ", next_ns: " << next_ns
+                 << ", patronus_now: " << time_syncer_->patronus_now()
+                 << ", next_expect_unit_nr: " << next_expect_unit_nr;
+        return;
     }
 
     bool no_unbind = flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
@@ -1713,6 +1919,70 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
 
     DVLOG(3) << "[bench] server coro: " << ctx << " exit.";
     ctx.yield_to_master();
+}
+
+bool Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
+{
+    using namespace std::chrono_literals;
+
+    auto patronus_now = time_syncer_->patronus_now();
+    auto patronus_ddl = lease.ddl_term();
+    auto epsilon = time_syncer_->epsilon();
+    time::ns_t diff_ns = patronus_ddl - patronus_now;
+    constexpr static auto kCommunicationLatencyNs = 2 * 1000;  // 2us
+    bool already_pass_ddl = diff_ns < 0 + epsilon + kCommunicationLatencyNs;
+    if (unlikely(already_pass_ddl))
+    {
+        // already pass DDL, no need to extend.
+        DVLOG(4) << "[patronus][maybe-extend] Assume DDL passed (not extend). "
+                    "lease ddl: "
+                 << patronus_ddl << ", patronus_now: " << patronus_now
+                 << ", diff_ns: " << diff_ns << " < 0 + epsilon(" << epsilon
+                 << ") + CommunicationLatencyNs(" << kCommunicationLatencyNs
+                 << "). coro: " << (ctx ? *ctx : nullctx)
+                 << ". Now lease: " << lease;
+        return false;
+    }
+    // assume one-sided write will not take longer than this
+    auto margin_duration = 20us + std::chrono::nanoseconds(2 * epsilon);
+    auto margin_duration_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(margin_duration)
+            .count();
+    if (diff_ns <= margin_duration_ns)
+    {
+        auto offset = offsetof(ProtectionRegion, cur_unit_nr);
+        auto rdma_buffer = get_rdma_buffer();
+        DCHECK_LT(sizeof(decltype(ProtectionRegion::cur_unit_nr)),
+                  rdma_buffer.size);
+
+        auto compare = lease.cur_unit_nr();
+        auto swap = 2 * compare;
+        auto extend_unit_nr = swap - compare;
+
+        bool cas_success = protection_region_cas_impl(
+            lease, rdma_buffer.buffer, offset, compare, swap, ctx);
+
+        if (likely(cas_success))
+        {
+            lease.cur_unit_nr_ = swap;
+            lease.unit_nr_begin_to_ddl_ += extend_unit_nr;
+            lease.update_ddl_term();
+        }
+        put_rdma_buffer(rdma_buffer.buffer);
+        DVLOG(4) << "[patronus][maybe-extend] Do extend. lease ddl: "
+                 << patronus_ddl << ", patronus_now: " << patronus_now
+                 << ", diff_ns: " << diff_ns << " < margin_duration_ns("
+                 << margin_duration_ns << "). coro: " << (ctx ? *ctx : nullctx)
+                 << ". Success: " << cas_success << ". Now lease: " << lease;
+        return true;
+    }
+    DVLOG(4) << "[patronus][maybe-extend] Not reach lease DDL (not extend). "
+                "lease ddl:"
+             << patronus_ddl << ", patronus_now: " << patronus_now
+             << ", diff_ns: " << diff_ns << ", > margin_duration_ns("
+             << margin_duration_ns << "). coro: " << (ctx ? *ctx : nullctx)
+             << ". Now lease: " << lease;
+    return false;
 }
 
 }  // namespace patronus
