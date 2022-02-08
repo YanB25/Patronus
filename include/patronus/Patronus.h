@@ -94,6 +94,8 @@ public:
     Patronus(const PatronusConfig &conf);
     ~Patronus();
 
+    void barrier(uint64_t key);
+
     /**
      * @brief Get the rlease object
      *
@@ -124,10 +126,14 @@ public:
     inline Lease upgrade(Lease &lease,
                          uint8_t flag /*LeaseModificationFlag */,
                          CoroContext *ctx = nullptr);
-    inline Lease extend(Lease &lease,
-                        std::chrono::nanoseconds ns,
-                        uint8_t flag /* LeaseModificationFlag */,
-                        CoroContext *ctx = nullptr);
+    /**
+     * @brief extend the lifecycle of lease so that it works (at least) for the
+     * following @ns ns.
+     */
+    inline bool extend(Lease &lease,
+                       std::chrono::nanoseconds ns,
+                       uint8_t flag /* LeaseModificationFlag */,
+                       CoroContext *ctx = nullptr);
     inline void relinquish(Lease &lease,
                            uint8_t flag /* LeaseModificationFlag */,
                            CoroContext *ctx = nullptr);
@@ -473,6 +479,7 @@ private:
                         size_t offset,
                         bool is_read,
                         CoroContext *ctx = nullptr);
+    inline bool already_passed_ddl(time::PatronusTime time) const;
     // flag should be RWFlag
     inline bool handle_rwcas_flag(Lease &lease, uint8_t flag, CoroContext *ctx);
     inline bool validate_lease(const Lease &lease);
@@ -503,6 +510,10 @@ private:
                          bool is_read,
                          uint16_t wrid_prefix,
                          CoroContext *ctx = nullptr);
+    inline bool extend_impl(Lease &lease,
+                            size_t extend_unit_nr,
+                            uint8_t flag,
+                            CoroContext *ctx);
     bool cas_impl(char *iobuf,
                   size_t node_id,
                   size_t dir_id,
@@ -564,6 +575,16 @@ private:
     KeyLocator locator_;
 };
 
+bool Patronus::already_passed_ddl(time::PatronusTime patronus_ddl) const
+{
+    auto patronus_now = time_syncer_->patronus_now();
+    auto epsilon = time_syncer_->epsilon();
+    time::ns_t diff_ns = patronus_ddl - patronus_now;
+    bool already_pass_ddl =
+        diff_ns < 0 + epsilon + time::TimeSyncer::kCommunicationLatencyNs;
+    return already_pass_ddl;
+}
+
 Lease Patronus::get_rlease(uint16_t node_id,
                            uint16_t dir_id,
                            id_t key,
@@ -596,14 +617,73 @@ Lease Patronus::upgrade(Lease &lease, uint8_t flag, CoroContext *ctx)
     return lease_modify_impl(
         lease, RequestType::kUpgrade, 0 /* term */, flag, ctx);
 }
-Lease Patronus::extend(Lease &lease,
-                       std::chrono::nanoseconds chrono_ns,
-                       uint8_t flag,
-                       CoroContext *ctx)
+bool Patronus::extend_impl(Lease &lease,
+                           size_t extend_unit_nr,
+                           uint8_t flag,
+                           CoroContext *ctx)
+{
+    DVLOG(4) << "[patronus][extend-impl] trying to extend. extend_unit_nr: "
+             << extend_unit_nr << ", flag:" << LeaseModifyFlagOut(flag)
+             << ", coro:" << (ctx ? *ctx : nullctx)
+             << "original lease: " << lease;
+
+    auto offset = offsetof(ProtectionRegion, aba_unit_nr_to_ddl);
+    auto rdma_buffer = get_rdma_buffer();
+    DCHECK_LT(sizeof(decltype(ProtectionRegion::aba_unit_nr_to_ddl)),
+              rdma_buffer.size);
+
+    auto aba_unit_nr_to_ddl = lease.aba_unit_nr_to_ddl_;
+    auto compare = aba_unit_nr_to_ddl.val;
+    // equivalent to double: plus the current value
+    aba_unit_nr_to_ddl.u32_2 += extend_unit_nr;
+    auto swap = aba_unit_nr_to_ddl.val;
+
+    bool cas_success = protection_region_cas_impl(
+        lease, rdma_buffer.buffer, offset, compare, swap, ctx);
+
+    if (likely(cas_success))
+    {
+        lease.aba_unit_nr_to_ddl_.u32_2 += extend_unit_nr;
+        lease.update_ddl_term();
+    }
+    put_rdma_buffer(rdma_buffer.buffer);
+    DVLOG(4) << "[patronus][extend-impl] Done extend. coro: "
+             << (ctx ? *ctx : nullctx) << ". Success: " << cas_success
+             << ". Now lease: " << lease;
+    return cas_success;
+}
+bool Patronus::extend(Lease &lease,
+                      std::chrono::nanoseconds chrono_ns,
+                      uint8_t flag,
+                      CoroContext *ctx)
 {
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
-    return lease_modify_impl(lease, RequestType::kExtend, ns, flag, ctx);
+    auto ns_per_unit = lease.ns_per_unit_;
+    // round up divide
+    auto extend_unit_nr = (ns + ns_per_unit - 1) / ns_per_unit;
+
+    auto patronus_now = time_syncer_->patronus_now();
+    auto patronus_ddl = lease.ddl_term();
+    auto epsilon = time_syncer_->epsilon();
+    time::ns_t diff_ns = patronus_ddl - patronus_now;
+    bool already_pass_ddl =
+        diff_ns < 0 + epsilon + time::TimeSyncer::kCommunicationLatencyNs;
+    if (unlikely(already_pass_ddl))
+    {
+        // already pass DDL, no need to extend.
+        DVLOG(4) << "[patronus][maybe-extend] Assume DDL passed (not extend). "
+                    "lease ddl: "
+                 << patronus_ddl << ", patronus_now: " << patronus_now
+                 << ", diff_ns: " << diff_ns << " < 0 + epsilon(" << epsilon
+                 << ") + CommunicationLatencyNs("
+                 << time::TimeSyncer::kCommunicationLatencyNs
+                 << "). coro: " << (ctx ? *ctx : nullctx)
+                 << ". Now lease: " << lease;
+        return false;
+    }
+
+    return extend_impl(lease, extend_unit_nr, flag, ctx);
 }
 void Patronus::relinquish(Lease &lease, uint8_t flag, CoroContext *ctx)
 {

@@ -214,6 +214,7 @@ void TimeSyncer::wait_finish()
             break;
         }
     }
+    // TODO(patronus): add 500 ns just to be safe.
     global_epsilon_ = epsilons.max();
     LOG(INFO) << "[TimeSyncer] set g_epsilon to " << global_epsilon_
               << " according to " << epsilons;

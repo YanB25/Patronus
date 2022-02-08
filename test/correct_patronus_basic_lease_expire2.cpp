@@ -19,15 +19,17 @@ constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kTestTime = 100;
 
 using namespace patronus;
-constexpr static size_t kCoroCnt = 8;
+constexpr static size_t kCoroCnt = 1;
 thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
+// constexpr static size_t kCoroStartKey = 1024;
+// constexpr static size_t kDirID = 0;
 
-constexpr static auto kExpectLeaseAliveTime = 10ms;
-constexpr static auto kAllowedErrorRate = 0.05;
+// constexpr static size_t kTestTime =
+//     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
 
 using namespace std::chrono_literals;
 
@@ -55,7 +57,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
     auto dir_id = tid;
-
     auto &syncer = p->time_syncer();
 
     CoroContext ctx(tid, &yield, &master, coro_id);
@@ -64,14 +65,15 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     client_comm.finish_cur_task[coro_id] = false;
     client_comm.finish_all_task[coro_id] = false;
 
-    OnePassMonitor read_loop_nr_m;
-    OnePassMonitor read_loop_ns_m;
-    OnePassMonitor ns_till_ddl_m;
-    OnePassMonitor extend_failed_m;
+    OnePassMonitor fail_to_unbind_m;
+    OnePassMonitor remain_ddl_m;
+    OnePassMonitor extend_fail_m;
+    OnePassMonitor extend_fail_to_work_m;
 
     for (size_t i = 0; i < kTestTime; ++i)
     {
-        auto key = rand() % 100_M;
+        auto key = rand() % 1_G;
+        DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto before_get_rlease = std::chrono::steady_clock::now();
         Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
@@ -80,90 +82,98 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     1ms,
                                     0 /* no flag */,
                                     &ctx);
-        if (unlikely(!lease.success()))
-        {
-            continue;
-        }
-
-        auto rdma_buf = p->get_rdma_buffer();
-        memset(rdma_buf.buffer, 0, sizeof(Object));
-
-        CHECK_LT(sizeof(Object), rdma_buf.size);
-
-        auto patronus_now = syncer.patronus_now();
-        auto patronus_ddl = lease.ddl_term();
-        time::ns_t diff_ns = patronus_ddl - patronus_now;
-        ns_till_ddl_m.collect(diff_ns);
-
         auto after_get_rlease = std::chrono::steady_clock::now();
         auto get_rlease_ns =
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 after_get_rlease - before_get_rlease)
                 .count();
+        CHECK(lease.success());
 
-        bool succ = p->extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
+        auto lease_ddl = lease.ddl_term();
+        auto now = syncer.patronus_now();
+        time::ns_t diff_ns = lease_ddl - now;
+        VLOG(2) << "The term of lease is " << lease_ddl << ", now is " << now
+                << ", DDL remains " << diff_ns
+                << " ns. Latency of get_rlease: " << get_rlease_ns << " ns";
+        CHECK_LT(
+            diff_ns,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(1ms).count())
+            << "** The period of lease is even longer than requested.";
+
+        remain_ddl_m.collect(diff_ns);
+
+        DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
+
+        auto rdma_buf = p->get_rdma_buffer();
+        memset(rdma_buf.buffer, 0, sizeof(Object));
+
+        bool succ = p->extend(lease, 100ms, 0, &ctx);
         if (unlikely(!succ))
         {
-            extend_failed_m.collect(1);
+            LOG(WARNING) << "[bench] extend failed for lease: " << lease;
+            extend_fail_m.collect(1);
             p->relinquish(lease, 0, &ctx);
-            p->put_rdma_buffer(rdma_buf.buffer);
-            DLOG(WARNING) << "[bench] extend failed. retry.";
             continue;
         }
         else
         {
-            extend_failed_m.collect(0);
+            LOG(WARNING) << "[bench] extend but server gc the lease for lease: "
+                         << lease;
+            extend_fail_m.collect(0);
+        }
+        // to make sure that the extend really work!
+        std::this_thread::sleep_for(1ms);
+        succ = p->read(lease, rdma_buf.buffer, sizeof(Object), 0, 0, &ctx);
+        if (unlikely(!succ))
+        {
+            extend_fail_to_work_m.collect(1);
+            p->relinquish(lease, 0, &ctx);
+            continue;
+        }
+        else
+        {
+            extend_fail_to_work_m.collect(0);
         }
 
-        auto before_read_loop = std::chrono::steady_clock::now();
-        size_t read_loop_succ_cnt = 0;
-        while (true)
+        // should be enough for the server to gc the mw
+        std::this_thread::sleep_for(100ms);
+
+        succ = p->read(lease,
+                       rdma_buf.buffer,
+                       sizeof(Object),
+                       0,
+                       (uint8_t) RWFlag::kNoLocalExpireCheck,
+                       &ctx);
+        if (unlikely(succ))
         {
-            bool succ = p->read(lease,
-                                rdma_buf.buffer,
-                                sizeof(Object),
-                                0 /*offset*/,
-                                0 /* flag */,
-                                &ctx);
-            if (succ)
-            {
-                read_loop_succ_cnt++;
-            }
-            else
-            {
-                break;
-            }
+            fail_to_unbind_m.collect(1);
         }
-        auto after_read_loop = std::chrono::steady_clock::now();
-        auto read_loop_ns =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                after_read_loop - before_read_loop)
-                .count();
-        read_loop_ns_m.collect(read_loop_ns);
-        read_loop_nr_m.collect(read_loop_succ_cnt);
+        else
+        {
+            fail_to_unbind_m.collect(0);
+        }
+
+        DVLOG(2) << "[bench] client coro " << ctx
+                 << " start to relinquish lease ";
 
         // make sure this will take no harm.
         p->relinquish(lease, 0, &ctx);
+
         p->put_rdma_buffer(rdma_buf.buffer);
     }
 
-    LOG(INFO) << "[bench] read_loop_succ_nr: " << read_loop_nr_m
-              << ", read_loop_ns: " << read_loop_ns_m;
-    // average should be very close to @kExpectLeaseAliveTime
-    auto alive_avg = read_loop_ns_m.average();
-    auto expect_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                         kExpectLeaseAliveTime)
-                         .count();
-    double err = 1.0 * (expect_ns - alive_avg) / expect_ns;
-    LOG_IF(ERROR, extend_failed_m.max() == 1)
-        << "** extend_failed_m: " << extend_failed_m
-        << ". Expect all the extend call to succeed";
-    CHECK_LT(err, kAllowedErrorRate)
-        << "** Expect alive " << expect_ns << " ns, actual " << alive_avg
-        << " ns. err: " << err << " larger than threshold "
-        << kAllowedErrorRate;
-    LOG(INFO) << "[bench] Error rate: " << err << " less than "
-              << kAllowedErrorRate;
+    LOG(INFO) << "[bench] remain_ddl: " << remain_ddl_m;
+    LOG_IF(ERROR, fail_to_unbind_m.max() > 0)
+        << "[bench] in some tests, server fails to expire the lease "
+           "immediately. fail_to_unbind_nr: "
+        << fail_to_unbind_m;
+    LOG_IF(ERROR, extend_fail_m.max() > 0)
+        << "[bench] p->extend(lease) fails in some cases. extend_fail_m: "
+        << extend_fail_m;
+    LOG_IF(ERROR, extend_fail_to_work_m.max() > 0)
+        << "[bench] p->extend(lease) succeeded but the lease does not live so "
+           "long in some cases. extend_fail_to_work_m: "
+        << extend_fail_to_work_m;
 
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;
@@ -243,6 +253,7 @@ void server(Patronus::pointer p)
     auto &object = *(Object *) &buffer[offset];
     object.target = kMagic;
 
+    LOG(INFO) << "[bench] server starts to serve";
     p->server_serve(mid);
 }
 
@@ -259,23 +270,25 @@ int main(int argc, char *argv[])
     config.machine_nr = kMachineNr;
     config.key_locator = bench_locator;
 
+    LOG(INFO) << "[debug] before ctor patronus";
     auto patronus = Patronus::ins(config);
-
-    sleep(1);
+    LOG(INFO) << "[debug] after ctor patronus";
 
     // let client spining
     auto nid = patronus->get_node_id();
     if (nid == kClientNodeId)
     {
         patronus->registerClientThread();
-        sleep(2);
         client(patronus);
         patronus->finished();
     }
     else
     {
+        LOG(INFO) << "[debug] before register server thread";
         patronus->registerServerThread();
+        LOG(INFO) << "[debug] server before to p->finished()";
         patronus->finished();
+        LOG(INFO) << "[debug] server started to handle!";
         server(patronus);
     }
 

@@ -3,6 +3,7 @@
 #define PATRONUS_TIME_SYNCER_H
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 #include "Common.h"
@@ -56,6 +57,8 @@ class TimeSyncer
     constexpr static uint64_t kMid = 0;
 
 public:
+    constexpr static time::ns_t kCommunicationLatencyNs = 2_K;  // 2us
+
     using pointer = std::unique_ptr<TimeSyncer>;
     TimeSyncer(DSM::pointer dsm,
                GlobalAddress gaddr,
@@ -194,14 +197,24 @@ public:
         return !definitely_lt(lhs, rhs) && !definitely_gt(lhs, rhs);
     }
 
-    static std::chrono::time_point<std::chrono::system_clock> chrono_now()
+    // static std::chrono::time_point<std::chrono::system_clock> chrono_now()
+    // {
+    //     return std::chrono::system_clock::now();
+    // }
+    // static std::chrono::time_point<std::chrono::system_clock> chrono_later(
+    //     uint64_t ns)
+    // {
+    //     return std::chrono::system_clock::now() +
+    //     std::chrono::nanoseconds(ns);
+    // }
+    static std::chrono::time_point<std::chrono::steady_clock> chrono_now()
     {
-        return std::chrono::system_clock::now();
+        return std::chrono::steady_clock::now();
     }
-    static std::chrono::time_point<std::chrono::system_clock> chrono_later(
+    static std::chrono::time_point<std::chrono::steady_clock> chrono_later(
         uint64_t ns)
     {
-        return std::chrono::system_clock::now() + std::chrono::nanoseconds(ns);
+        return std::chrono::steady_clock::now() + std::chrono::nanoseconds(ns);
     }
 
 private:

@@ -19,7 +19,7 @@ constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kTestTime = 100;
 
 using namespace patronus;
-constexpr static size_t kCoroCnt = 8;
+constexpr static size_t kCoroCnt = 1;
 thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
 
@@ -27,7 +27,6 @@ constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
 
 constexpr static auto kExpectLeaseAliveTime = 10ms;
-constexpr static auto kAllowedErrorRate = 0.05;
 
 using namespace std::chrono_literals;
 
@@ -55,8 +54,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
     auto dir_id = tid;
-
-    auto &syncer = p->time_syncer();
+    auto key = kKey;
 
     CoroContext ctx(tid, &yield, &master, coro_id);
 
@@ -66,13 +64,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
     OnePassMonitor read_loop_nr_m;
     OnePassMonitor read_loop_ns_m;
-    OnePassMonitor ns_till_ddl_m;
-    OnePassMonitor extend_failed_m;
 
     for (size_t i = 0; i < kTestTime; ++i)
     {
-        auto key = rand() % 100_M;
-        auto before_get_rlease = std::chrono::steady_clock::now();
+        DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
                                     key,
@@ -80,40 +75,15 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     1ms,
                                     0 /* no flag */,
                                     &ctx);
-        if (unlikely(!lease.success()))
-        {
-            continue;
-        }
+        CHECK(lease.success());
+
+        DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
         auto rdma_buf = p->get_rdma_buffer();
         memset(rdma_buf.buffer, 0, sizeof(Object));
 
+        VLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
-
-        auto patronus_now = syncer.patronus_now();
-        auto patronus_ddl = lease.ddl_term();
-        time::ns_t diff_ns = patronus_ddl - patronus_now;
-        ns_till_ddl_m.collect(diff_ns);
-
-        auto after_get_rlease = std::chrono::steady_clock::now();
-        auto get_rlease_ns =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                after_get_rlease - before_get_rlease)
-                .count();
-
-        bool succ = p->extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
-        if (unlikely(!succ))
-        {
-            extend_failed_m.collect(1);
-            p->relinquish(lease, 0, &ctx);
-            p->put_rdma_buffer(rdma_buf.buffer);
-            DLOG(WARNING) << "[bench] extend failed. retry.";
-            continue;
-        }
-        else
-        {
-            extend_failed_m.collect(0);
-        }
 
         auto before_read_loop = std::chrono::steady_clock::now();
         size_t read_loop_succ_cnt = 0;
@@ -123,7 +93,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                 rdma_buf.buffer,
                                 sizeof(Object),
                                 0 /*offset*/,
-                                0 /* flag */,
+                                (uint8_t) RWFlag::kWithAutoExtend,
                                 &ctx);
             if (succ)
             {
@@ -131,6 +101,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             }
             else
             {
+                break;
+            }
+            auto now = std::chrono::steady_clock::now();
+            if (now - before_read_loop > kExpectLeaseAliveTime)
+            {
+                // will not let it extend infiniately.
                 break;
             }
         }
@@ -144,6 +120,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         // make sure this will take no harm.
         p->relinquish(lease, 0, &ctx);
+
         p->put_rdma_buffer(rdma_buf.buffer);
     }
 
@@ -154,16 +131,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     auto expect_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                          kExpectLeaseAliveTime)
                          .count();
-    double err = 1.0 * (expect_ns - alive_avg) / expect_ns;
-    LOG_IF(ERROR, extend_failed_m.max() == 1)
-        << "** extend_failed_m: " << extend_failed_m
-        << ". Expect all the extend call to succeed";
-    CHECK_LT(err, kAllowedErrorRate)
-        << "** Expect alive " << expect_ns << " ns, actual " << alive_avg
-        << " ns. err: " << err << " larger than threshold "
-        << kAllowedErrorRate;
-    LOG(INFO) << "[bench] Error rate: " << err << " less than "
-              << kAllowedErrorRate;
+    double err = 1.0 * abs(expect_ns - alive_avg) / expect_ns;
+    CHECK_LT(err, 0.01) << "** Expect alive " << expect_ns << " ns, actual "
+                        << alive_avg << " ns. err: " << err
+                        << " larger than threshold 0.01";
 
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;

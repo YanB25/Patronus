@@ -70,5 +70,7 @@
     "C_Cpp.default.compilerArgs": [
         "--std=c++17"
     ],
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "wordWrapColumn",
+    "editor.wordWrapColumn": 160
 }
