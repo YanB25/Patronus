@@ -77,8 +77,7 @@ public:
         header_rkey_ = rhs.header_rkey_;
         begin_term_ = rhs.begin_term_;
         ns_per_unit_ = rhs.ns_per_unit_;
-        unit_nr_begin_to_ddl_ = rhs.unit_nr_begin_to_ddl_;
-        cur_unit_nr_ = rhs.cur_unit_nr_;
+        aba_unit_nr_to_ddl_ = rhs.aba_unit_nr_to_ddl_;
         ddl_term_ = rhs.ddl_term_;
 
         success_ = false;
@@ -89,13 +88,17 @@ public:
     {
         return begin_term_;
     }
-    auto cur_unit_nr() const
+    auto aba() const
     {
-        return cur_unit_nr_.u32_2;
+        return aba_unit_nr_to_ddl_.u32_1;
     }
-    auto aba_id() const
+    // currently use doubling. could use other policy.
+    size_t next_extend_unit_nr()
     {
-        return cur_unit_nr_.u32_1;
+        DCHECK_GT(cur_unit_nr_, 0);
+        auto ret = cur_unit_nr_;
+        cur_unit_nr_ *= 2;
+        return ret;
     }
 
 private:
@@ -124,8 +127,8 @@ private:
     {
         DCHECK_NE(ns_per_unit_, 0)
             << "** ns_per_unit_ is zero. lease: " << *this;
-        DCHECK_NE(unit_nr_begin_to_ddl_, 0) << "** invalid. Lease: " << *this;
-        auto ns = ns_per_unit_ * unit_nr_begin_to_ddl_;
+        DCHECK_NE(aba_unit_nr_to_ddl_, 0) << "** invalid. Lease: " << *this;
+        auto ns = ns_per_unit_ * aba_unit_nr_to_ddl_.u32_2;
         ddl_term_ = begin_term_ + ns;
     }
 
@@ -149,10 +152,13 @@ private:
     // for the management of Lease life cycle
     time::term_t begin_term_{0};
     time::ns_t ns_per_unit_{0};
-    size_t unit_nr_begin_to_ddl_{0};
-    compound_uint64_t cur_unit_nr_{0};
+    // @aba_unit_to_ddl_ .u32_1 is aba, .u32_2 is unit_nr_to_ddl
+    compound_uint64_t aba_unit_nr_to_ddl_{0};
     time::PatronusTime ddl_term_{0};
     bool no_gc_{false};
+
+    // for extend policy
+    size_t cur_unit_nr_{1};
 };
 
 std::ostream &operator<<(std::ostream &os, const Lease &lease);

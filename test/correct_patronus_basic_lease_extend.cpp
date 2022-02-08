@@ -55,7 +55,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     auto tid = p->get_thread_id();
     auto dir_id = tid;
     auto key = kKey;
-    auto &syncer = p->time_syncer();
 
     CoroContext ctx(tid, &yield, &master, coro_id);
 
@@ -69,7 +68,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     for (size_t i = 0; i < kTestTime; ++i)
     {
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
-        auto before_get_rlease = std::chrono::steady_clock::now();
         Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
                                     key,
@@ -77,7 +75,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     1ms,
                                     0 /* no flag */,
                                     &ctx);
-        auto after_get_rlease = std::chrono::steady_clock::now();
         CHECK(lease.success());
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;

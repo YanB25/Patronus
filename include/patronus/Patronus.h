@@ -361,11 +361,12 @@ private:
     }
     void put_protection_region(ProtectionRegion *p)
     {
-        auto cur_unit_nr = p->cur_unit_nr.load(std::memory_order_acq_rel);
+        auto aba_unit_nr_to_ddl =
+            p->aba_unit_nr_to_ddl.load(std::memory_order_acq_rel);
         // to avoid ABA problem, add the 32 bits by one each time.
-        auto val = compound_uint64_t(cur_unit_nr);
-        val.u32_1++;
-        p->cur_unit_nr.store(val.val, std::memory_order_acq_rel);
+        aba_unit_nr_to_ddl.u32_1++;
+        p->aba_unit_nr_to_ddl.store(aba_unit_nr_to_ddl,
+                                    std::memory_order_acq_rel);
         protection_region_pool_->put(p);
     }
     ProtectionRegion *get_protection_region(size_t id)
