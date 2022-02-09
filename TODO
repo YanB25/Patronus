@@ -148,3 +148,17 @@ A server thread may handle any @key.
 
 correct_addr
 correct_time_syncer_rmsg_test
+
+
+===== CRITICAL BUG ======
+FAIL correct_time_syncer_rmsg_test.cpp
+FAIL correct_patronus_basic_lease_expire.cpp
+FAIL correct_patronus_basic_lease_expire2.cpp
+
+I don't know, maybe we can never sync the time of two servers?
+
+1. For lease_expire.cpp and lease_expire2.cpp: why p->extend(lease) will fail? Why we can not extend the lease from p->get_rlease(100us)? When this calling fails, we see a very strange (large? negative? not sure) diff_ns. Is it because of time drift?
+2. for rmsg_test.cpp: why this test even fail? After all these commits, it passes. But today, it fails. I have an insight: when syncing time, will have a +A -A adjustment. So don't adjust the +A and -A, but just skip them.
+3. why not reboot the server?
+
+So strange: the time drift will become longer and longer as time pass. why?
