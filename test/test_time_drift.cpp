@@ -43,9 +43,9 @@ struct BenchMessage
 
 uint64_t get_current_ns()
 {
-    // auto now = std::chrono::system_clock::now();
+    auto now = std::chrono::system_clock::now();
     // auto now = std::chrono::steady_clock::now();
-    auto now = std::chrono::high_resolution_clock::now();
+    // auto now = std::chrono::high_resolution_clock::now();
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                now.time_since_epoch())
         .count();
