@@ -105,6 +105,7 @@ FUTURES:
     - basically okay. need correct_lease_lock.cpp
 - Add p->barrier(std::string)
     - After all these time I finally realize that the ctor of DSM takes seconds (typically ~6s). This may cause unexpected bugs. Don't know. I'd like to fix this before moving on.
+- See if rdtsc is consistent across cores. Modify the correct_rdtsc_stable.cpp tests.
 - Patronus adds extend API when client asked to do so. client can extend the lease by one-sided write.
     [-] p->read/write/cas() add a flag: kWithAutoExtend
     - add p->extend(lease) to manually extend the lease
@@ -154,11 +155,10 @@ correct_time_syncer_rmsg_test
 FAIL correct_time_syncer_rmsg_test.cpp
 FAIL correct_patronus_basic_lease_expire.cpp
 FAIL correct_patronus_basic_lease_expire2.cpp
+FAIL correct_patronus_basic_lease_extend.cpp
+FAIL correct_patronus_basic_lease_auto_extend.cpp
 
-I don't know, maybe we can never sync the time of two servers?
-
-1. For lease_expire.cpp and lease_expire2.cpp: why p->extend(lease) will fail? Why we can not extend the lease from p->get_rlease(100us)? When this calling fails, we see a very strange (large? negative? not sure) diff_ns. Is it because of time drift?
-2. for rmsg_test.cpp: why this test even fail? After all these commits, it passes. But today, it fails. I have an insight: when syncing time, will have a +A -A adjustment. So don't adjust the +A and -A, but just skip them.
-3. why not reboot the server?
-
-So strange: the time drift will become longer and longer as time pass. why?
+std::chrono::system_clock and std::chrono::steady_clock has a drift of 200+us/s.
+It is not acceptable since I want a us-scale synchronization lease impl.
+I'd like to use rdtsc instead, because it is stable.
+Should add some tests.

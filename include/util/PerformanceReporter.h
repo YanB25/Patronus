@@ -38,52 +38,65 @@ private:
     double absolute_avg_{0};
 };
 
-class OnePassMonitor
+template <typename T>
+class OnePassMonitorImpl
 {
 public:
-    OnePassMonitor() = default;
-    void collect(double n)
+    OnePassMonitorImpl() = default;
+    void collect(T n)
     {
         min_ = std::min(min_, n);
         max_ = std::max(max_, n);
         abs_min_ = std::min(abs_min_, abs(n));
         avg_.add(n);
+        data_nr_++;
     }
-    double min() const
+    T min() const
     {
         return min_;
     }
-    double abs_min() const
+    T abs_min() const
     {
         return abs_min_;
     }
-    double max() const
+    T max() const
     {
         return max_;
     }
-    double average() const
+    T average() const
     {
         return avg_.average();
     }
-    double abs_average() const
+    T abs_average() const
     {
         return avg_.abs_average();
     }
+    size_t data_nr() const
+    {
+        return data_nr_;
+    }
 
 private:
-    double min_{std::numeric_limits<double>::max()};
-    double max_{std::numeric_limits<double>::lowest()};
-    double abs_min_{std::numeric_limits<double>::max()};
+    T min_{std::numeric_limits<T>::max()};
+    T max_{std::numeric_limits<T>::lowest()};
+    T abs_min_{std::numeric_limits<T>::max()};
 
     Averager avg_;
+    size_t data_nr_{0};
 };
-inline std::ostream &operator<<(std::ostream &os, const OnePassMonitor &m)
+
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os,
+                                const OnePassMonitorImpl<T> &m)
 {
     os << "{min: " << m.min() << ", max: " << m.max()
        << ", avg: " << m.average() << ", abs_avg: " << m.abs_average()
-       << ", abs_min: " << m.abs_min() << "}";
+       << ", abs_min: " << m.abs_min() << ". collected " << m.data_nr()
+       << " data}";
     return os;
 }
+using OnePassMonitor = OnePassMonitorImpl<double>;
+using OnePassIntegerMonitor = OnePassMonitorImpl<int64_t>;
 
 class PerformanceReporter
 {

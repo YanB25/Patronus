@@ -72,7 +72,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     for (size_t i = 0; i < kTestTime; ++i)
     {
         auto key = rand() % 100_M;
-        auto before_get_rlease = std::chrono::steady_clock::now();
         Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
                                     key,
@@ -94,12 +93,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto patronus_ddl = lease.ddl_term();
         time::ns_t diff_ns = patronus_ddl - patronus_now;
         ns_till_ddl_m.collect(diff_ns);
-
-        auto after_get_rlease = std::chrono::steady_clock::now();
-        auto get_rlease_ns =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                after_get_rlease - before_get_rlease)
-                .count();
 
         bool succ = p->extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
         if (unlikely(!succ))

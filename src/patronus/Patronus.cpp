@@ -74,6 +74,7 @@ void Patronus::explain(const PatronusConfig &conf)
 
 void Patronus::barrier(uint64_t key)
 {
+    CHECK(false) << "TODO: not implemented. key: " << key;
 }
 
 Lease Patronus::get_lease_impl(uint16_t node_id,
