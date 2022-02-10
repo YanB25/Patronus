@@ -26,13 +26,11 @@ thread_local size_t Patronus::allocated_mw_nr_;
 
 Patronus::Patronus(const PatronusConfig &conf)
 {
-    LOG(INFO) << "[debug] before ctor DSM";
     DSMConfig dsm_config;
     dsm_config.machineNR = conf.machine_nr;
     dsm_config.dsmReserveSize = required_dsm_reserve_size();
     dsm_config.dsmSize = conf.buffer_size;
     dsm_ = DSM::getInstance(dsm_config);
-    LOG(INFO) << "[debug] after ctor DSM";
 
     // validate dsm
     auto internal_buf = dsm_->get_server_buffer();
@@ -43,7 +41,6 @@ Patronus::Patronus(const PatronusConfig &conf)
         << "**dsm should provide reserved buffer at least what Patronus "
            "requries";
 
-    LOG(INFO) << "[debug] before ctor time_syncer_";
     // for time syncer
     auto time_sync_buffer = get_time_sync_buffer();
     auto time_sync_offset = dsm_->addr_to_dsm_offset(time_sync_buffer.buffer);
@@ -57,7 +54,6 @@ Patronus::Patronus(const PatronusConfig &conf)
 
     reg_locator(conf.key_locator);
     explain(conf);
-    LOG(INFO) << "[debug] leaving ctor of patronus";
 }
 Patronus::~Patronus()
 {
@@ -195,18 +191,23 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     put_rpc_context(rpc_context);
     put_rdma_message_buffer(rdma_buf);
 
+    if (no_gc)
+    {
+        ret_lease.ddl_term_ = time::PatronusTime::max();
+    }
+
     return ret_lease;
 }
 
-bool Patronus::read_write_impl(char *iobuf,
-                               size_t size,
-                               size_t node_id,
-                               size_t dir_id,
-                               uint32_t rkey,
-                               uint64_t remote_addr,
-                               bool is_read,
-                               uint16_t wrid_prefix,
-                               CoroContext *ctx)
+ErrCode Patronus::read_write_impl(char *iobuf,
+                                  size_t size,
+                                  size_t node_id,
+                                  size_t dir_id,
+                                  uint32_t rkey,
+                                  uint64_t remote_addr,
+                                  bool is_read,
+                                  uint16_t wrid_prefix,
+                                  CoroContext *ctx)
 {
     bool ret = false;
 
@@ -269,15 +270,15 @@ bool Patronus::read_write_impl(char *iobuf,
     }
 
     put_rw_context(rw_context);
-    return ret;
+    return ret ? ErrCode::kSuccess : ErrCode::kOpProtectionErr;
 }
 
-bool Patronus::buffer_rw_impl(Lease &lease,
-                              char *iobuf,
-                              size_t size,
-                              size_t offset,
-                              bool is_read,
-                              CoroContext *ctx)
+ErrCode Patronus::buffer_rw_impl(Lease &lease,
+                                 char *iobuf,
+                                 size_t size,
+                                 size_t offset,
+                                 bool is_read,
+                                 CoroContext *ctx)
 {
     CHECK(lease.success());
     if (is_read)
@@ -302,12 +303,12 @@ bool Patronus::buffer_rw_impl(Lease &lease,
                            ctx);
 }
 
-bool Patronus::protection_region_rw_impl(Lease &lease,
-                                         char *io_buf,
-                                         size_t size,
-                                         size_t offset,
-                                         bool is_read,
-                                         CoroContext *ctx)
+ErrCode Patronus::protection_region_rw_impl(Lease &lease,
+                                            char *io_buf,
+                                            size_t size,
+                                            size_t offset,
+                                            bool is_read,
+                                            CoroContext *ctx)
 {
     CHECK(lease.success());
 
@@ -326,12 +327,12 @@ bool Patronus::protection_region_rw_impl(Lease &lease,
                            WRID_PREFIX_PATRONUS_PR_RW,
                            ctx);
 }
-bool Patronus::buffer_cas_impl(Lease &lease,
-                               char *iobuf,
-                               size_t offset,
-                               uint64_t compare,
-                               uint64_t swap,
-                               CoroContext *ctx)
+ErrCode Patronus::buffer_cas_impl(Lease &lease,
+                                  char *iobuf,
+                                  size_t offset,
+                                  uint64_t compare,
+                                  uint64_t swap,
+                                  CoroContext *ctx)
 {
     CHECK(lease.success());
     uint32_t rkey = lease.cur_rkey();
@@ -350,12 +351,12 @@ bool Patronus::buffer_cas_impl(Lease &lease,
                     WRID_PREFIX_PATRONUS_CAS,
                     ctx);
 }
-bool Patronus::protection_region_cas_impl(Lease &lease,
-                                          char *iobuf,
-                                          size_t offset,
-                                          uint64_t compare,
-                                          uint64_t swap,
-                                          CoroContext *ctx)
+ErrCode Patronus::protection_region_cas_impl(Lease &lease,
+                                             char *iobuf,
+                                             size_t offset,
+                                             uint64_t compare,
+                                             uint64_t swap,
+                                             CoroContext *ctx)
 {
     CHECK(lease.success());
 
@@ -375,15 +376,15 @@ bool Patronus::protection_region_cas_impl(Lease &lease,
                     ctx);
 }
 
-bool Patronus::cas_impl(char *iobuf /* old value fill here */,
-                        size_t node_id,
-                        size_t dir_id,
-                        uint32_t rkey,
-                        uint64_t remote_addr,
-                        uint64_t compare,
-                        uint64_t swap,
-                        uint16_t wr_prefix,
-                        CoroContext *ctx)
+ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
+                           size_t node_id,
+                           size_t dir_id,
+                           uint32_t rkey,
+                           uint64_t remote_addr,
+                           uint64_t compare,
+                           uint64_t swap,
+                           uint16_t wr_prefix,
+                           CoroContext *ctx)
 {
     bool ret = false;
 
@@ -438,9 +439,9 @@ bool Patronus::cas_impl(char *iobuf /* old value fill here */,
 
     if (unlikely(!ret))
     {
-        DVLOG(4) << "[patronus] CAS failed. wr_id: " << wrid
+        DVLOG(4) << "[patronus] CAS failed by protection. wr_id: " << wrid
                  << "coro: " << (ctx ? *ctx : nullctx);
-        return false;
+        return ErrCode::kOpProtectionErr;
     }
     // see if cas can success
     auto read_remote = *(uint64_t *) iobuf;
@@ -451,15 +452,15 @@ bool Patronus::cas_impl(char *iobuf /* old value fill here */,
                  << ", read: " << compound_uint64_t(read_remote)
                  << ", compare: " << compound_uint64_t(compare)
                  << ", new: " << compound_uint64_t(swap);
-        return true;
+        return ErrCode::kSuccess;
     }
-    DVLOG(4) << "[patronus] CAS failed. wr_id: " << wrid
+    DVLOG(4) << "[patronus] CAS failed by mismatch @compare. wr_id: " << wrid
              << ", coro: " << (ctx ? *ctx : nullctx)
              << ", actual: " << compound_uint64_t(read_remote)
              << ", compare: " << compound_uint64_t(compare)
              << ", swap: " << compound_uint64_t(swap);
 
-    return false;
+    return ErrCode::kOpExecutionErr;
 }
 
 Lease Patronus::lease_modify_impl(Lease &lease,
@@ -542,7 +543,8 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     }
     else
     {
-        ret_lease.set_error();  // actually no return. so never use me
+        // actually no return. so never use me
+        ret_lease.set_error(AcquireRequestStatus::kReserved);
     }
 
     if constexpr (debug())
@@ -691,8 +693,8 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
 {
     auto rpc_ctx_id = resp->cid.rpc_ctx_id;
     auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
-    DVLOG(5) << "[debug] getting rpc_context " << (void *) rpc_context
-             << " at id " << rpc_ctx_id;
+    // DVLOG(5) << "[debug] getting rpc_context " << (void *) rpc_context
+    //          << " at id " << rpc_ctx_id;
     auto *request = (AcquireRequest *) rpc_context->request;
 
     DCHECK(resp->type == RequestType::kAcquireRLease ||
@@ -734,7 +736,7 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     }
     else
     {
-        ret_lease.set_error();
+        ret_lease.set_error(resp->status);
     }
 
     rpc_context->ready.store(true, std::memory_order_release);
@@ -792,6 +794,11 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     }
 
     object_buffer_offset = locator_(req->key);
+    if (unlikely(!dsm_->valid_buffer_offset(object_buffer_offset)))
+    {
+        status = AcquireRequestStatus::kAddressOutOfRangeErr;
+        goto handle_response;
+    }
     object_dsm_offset = dsm_->buffer_offset_to_dsm_offset(object_buffer_offset);
     object_addr = dsm_->buffer_offset_to_addr(object_buffer_offset);
     DCHECK_EQ(object_addr, dsm_->dsm_offset_to_addr(object_dsm_offset));
@@ -930,6 +937,9 @@ handle_response:
         lease_ctx->key_slot_id = slot_id;
         lease_ctx->valid = true;
         auto lease_id = lease_context_.obj_to_id(lease_ctx);
+        DCHECK_LT(
+            lease_id,
+            std::numeric_limits<decltype(AcquireResponse::lease_id)>::max());
 
         auto ns_per_unit = req->required_ns;
 
@@ -997,6 +1007,7 @@ handle_response:
         put_mw(dirID, header_mw);
         header_mw = nullptr;
         put_protection_region(protection_region);
+
         protection_region = nullptr;
     }
 
@@ -1422,10 +1433,24 @@ void Patronus::registerServerThread()
             }
         }
     }
+
+    CHECK_LT(get_thread_id(), NR_DIRECTORY)
+        << "** make no sense to have more threads than NR_DIRECTORY. One "
+           "thread can manipulate multiple DIR, but should not share the same "
+           "DIR accross different threads. Especially, we need to know the "
+           "MAX_SERVER_THREAD_NR to share the protection_region (which, I "
+           "assume, is NR_DIRECTORY)";
+
+    constexpr static size_t kMaxServerThreadNr = NR_DIRECTORY;
+
     auto protection_region_buffer = get_protection_region_buffer();
+    auto pr_total_size = protection_region_buffer.size;
+    auto pr_size_per_thread = pr_total_size / kMaxServerThreadNr;
+    auto pr_buffer_self = protection_region_buffer.buffer +
+                          (pr_size_per_thread * get_thread_id());
     protection_region_pool_ =
         std::make_unique<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>(
-            protection_region_buffer.buffer, protection_region_buffer.size);
+            pr_buffer_self, pr_size_per_thread);
 }
 
 void Patronus::registerClientThread()
@@ -1559,6 +1584,7 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
 
 void Patronus::handle_response_lease_extend(LeaseModifyResponse *resp)
 {
+    CHECK(false) << "** Deprecated";
     auto rpc_ctx_id = resp->cid.rpc_ctx_id;
     auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
     auto *request = (LeaseModifyRequest *) rpc_context->request;
@@ -1593,7 +1619,8 @@ void Patronus::handle_response_lease_extend(LeaseModifyResponse *resp)
     }
     else
     {
-        lease.set_error();
+        // TODO(patronus): deprecated, so don't care about the err code
+        lease.set_error(AcquireRequestStatus::kReserved);
     }
 
     rpc_context->ready.store(true, std::memory_order_release);
@@ -1611,6 +1638,7 @@ void Patronus::handle_response_lease_modify(LeaseModifyResponse *resp)
     }
     case RequestType::kExtend:
     {
+        CHECK(false) << "** Deprecated.";
         handle_response_lease_extend(resp);
         break;
     }
@@ -1797,7 +1825,9 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         << ", lease_id: " << lease_id << ", cid: " << cid
         << ", expect_aba_unit_nr_to_ddl: " << expect_aba_unit_nr_to_ddl
         << ", flag: " << LeaseModifyFlagOut(flag)
-        << ", coro: " << (ctx ? *ctx : nullctx);
+        << ", coro: " << (ctx ? *ctx : nullctx) << ", protection_region at "
+        << (void *) protection_region << ", lease_ctx at " << (void *) lease_ctx
+        << ", handled by server tid " << get_thread_id();
     auto aba_unit_nr_to_ddl =
         protection_region->aba_unit_nr_to_ddl.load(std::memory_order_relaxed);
     auto next_expect_aba_unit_nr_to_ddl = aba_unit_nr_to_ddl;
@@ -1850,14 +1880,29 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                     lease_id, cid, next_expect_aba_unit_nr_to_ddl, flag, ctx);
             });
         DVLOG(3) << "[patronus][gc_lease] skip relinquish because client's "
-                    "extend. ProtectionRegion: "
-                 << (*protection_region) << ", next_ddl: " << next_ddl
-                 << ", next_ns: " << next_ns
+                    "extend. lease_id: "
+                 << lease_id << "ProtectionRegion: " << (*protection_region)
+                 << ", next_ddl: " << next_ddl << ", next_ns: " << next_ns
                  << ", patronus_now: " << time_syncer_->patronus_now()
                  << ", next_expect_aba_unit_nr_to_ddl: "
                  << next_expect_aba_unit_nr_to_ddl;
         return;
     }
+    else
+    {
+        DVLOG(3) << "[patronus][gc_lease] relinquish from "
+                    "decision(client_already_extended: "
+                 << client_already_exteded << ", force_gc: " << force_gc
+                 << "). lease_id: " << lease_id
+                 << "ProtectionRegion: " << (*protection_region)
+                 << ", patronus_now: " << time_syncer_->patronus_now();
+    }
+
+    // add @aba by 1, so that client cas will fail
+    auto next_aba_unit_nr_to_ddl =
+        protection_region->aba_unit_nr_to_ddl.load(std::memory_order_relaxed);
+    next_aba_unit_nr_to_ddl.u32_1++;
+    protection_region->aba_unit_nr_to_ddl.store(next_aba_unit_nr_to_ddl);
 
     bool no_unbind = flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
     if (likely(!no_unbind))
@@ -1915,11 +1960,10 @@ void Patronus::task_gc_lease(uint64_t lease_id,
 
     put_mw(lease_ctx->dir_id, lease_ctx->header_mw);
     put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
-    auto *pr = get_protection_region(lease_ctx->protection_region_id);
-    pr->valid = false;
     // TODO(patronus): not considering any checks here
     // for example, the pr->meta.relinquished bits.
-    put_protection_region(pr);
+
+    put_protection_region(protection_region);
     put_lease_context(lease_ctx);
 }
 
@@ -1970,7 +2014,7 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
     ctx.yield_to_master();
 }
 
-bool Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
+ErrCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
 {
     using namespace std::chrono_literals;
 
@@ -1991,7 +2035,7 @@ bool Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
                  << time::TimeSyncer::kCommunicationLatencyNs
                  << "). coro: " << (ctx ? *ctx : nullctx)
                  << ". Now lease: " << lease;
-        return false;
+        return ErrCode::kLeaseLocalExpiredErr;
     }
     // assume one-sided write will not take longer than this
     constexpr static auto kMinMarginDuration = 100us;
@@ -2013,7 +2057,7 @@ bool Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
              << ", diff_ns: " << diff_ns << ", > margin_duration_ns("
              << margin_duration_ns << "). coro: " << (ctx ? *ctx : nullctx)
              << ". Now lease: " << lease;
-    return false;
+    return ErrCode::kSuccess;
 }
 
 }  // namespace patronus

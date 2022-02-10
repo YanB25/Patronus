@@ -38,6 +38,45 @@ inline std::ostream &operator<<(std::ostream &os, const PatronusConfig &conf)
     return os;
 }
 
+enum class ErrCode
+{
+    kSuccess,
+    kLeaseLocalExpiredErr,
+    kOpProtectionErr,  // failed by remote protection err
+    kOpExecutionErr,   // cas failed
+};
+inline std::ostream &operator<<(std::ostream &os, ErrCode ec)
+{
+    switch (ec)
+    {
+    case ErrCode::kSuccess:
+    {
+        os << "kSuccess";
+        break;
+    }
+    case ErrCode::kLeaseLocalExpiredErr:
+    {
+        os << "kLeaseLocalExpiredErr";
+        break;
+    }
+    case ErrCode::kOpExecutionErr:
+    {
+        os << "kOpExecutionErr";
+        break;
+    }
+    case ErrCode::kOpProtectionErr:
+    {
+        os << "kOpProtectionErr";
+        break;
+    }
+    default:
+    {
+        CHECK(false) << "** Unknown err code: " << (int) ec;
+    }
+    }
+    return os;
+}
+
 struct RpcContext
 {
     Lease *ret_lease{nullptr};
@@ -101,9 +140,9 @@ public:
      *
      * @param node_id the id of target node
      * @param dir_id  the dir_id.
-     * @param key the unique key to identify the object / address you want to
-     * access. Call @reg_locator to tell Patronus how to map the key to the
-     * address
+     * @param key the unique key to identify the object / address you want
+     * to access. Call @reg_locator to tell Patronus how to map the key to
+     * the address
      * @param size the length of the object / address
      * @param term the length of term requesting for protection
      * @param ctx sync call if ctx is nullptr. Otherwise coroutine context.
@@ -127,45 +166,38 @@ public:
                          uint8_t flag /*LeaseModificationFlag */,
                          CoroContext *ctx = nullptr);
     /**
-     * @brief extend the lifecycle of lease so that it works (at least) for the
-     * following @ns ns.
+     * @brief extend the lifecycle of lease for another more ns.
      */
-    inline bool extend(Lease &lease,
-                       std::chrono::nanoseconds ns,
-                       uint8_t flag /* LeaseModificationFlag */,
-                       CoroContext *ctx = nullptr);
+    inline ErrCode extend(Lease &lease,
+                          std::chrono::nanoseconds ns,
+                          uint8_t flag /* LeaseModificationFlag */,
+                          CoroContext *ctx = nullptr);
     inline void relinquish(Lease &lease,
                            uint8_t flag /* LeaseModificationFlag */,
                            CoroContext *ctx = nullptr);
     inline void relinquish_write(Lease &lease, CoroContext *ctx = nullptr);
-    inline bool read(Lease &lease,
-                     char *obuf,
-                     size_t size,
-                     size_t offset,
-                     uint8_t flag /* RWFlag */,
-                     CoroContext *ctx = nullptr);
-    inline bool write(Lease &lease,
-                      const char *ibuf,
-                      size_t size,
-                      size_t offset,
-                      uint8_t flag /* RWFlag */,
-                      CoroContext *ctx = nullptr);
-    inline bool cas(Lease &lease,
-                    char *iobuf,
-                    size_t offset,
-                    uint64_t compare,
-                    uint64_t swap,
-                    uint8_t flag /* RWFlag */,
-                    CoroContext *ctx = nullptr);
-    inline bool pingpong(uint16_t node_id,
-                         uint16_t dir_id,
-                         id_t key,
+    inline ErrCode read(Lease &lease,
+                        char *obuf,
+                        size_t size,
+                        size_t offset,
+                        uint8_t flag /* RWFlag */,
+                        CoroContext *ctx = nullptr);
+    inline ErrCode write(Lease &lease,
+                         const char *ibuf,
                          size_t size,
-                         time::term_t term,
+                         size_t offset,
+                         uint8_t flag /* RWFlag */,
                          CoroContext *ctx = nullptr);
+    inline ErrCode cas(Lease &lease,
+                       char *iobuf,
+                       size_t offset,
+                       uint64_t compare,
+                       uint64_t swap,
+                       uint8_t flag /* RWFlag */,
+                       CoroContext *ctx = nullptr);
     /**
-     * @brief After all the node call this function, @should_exit() will return
-     * true
+     * @brief After all the node call this function, @should_exit() will
+     * return true
      *
      * @param ctx
      */
@@ -186,8 +218,8 @@ public:
                                          size_t limit);
 
     /**
-     * @brief Any thread should call this function before calling any function
-     * of Patronus
+     * @brief Any thread should call this function before calling any
+     * function of Patronus
      *
      */
     void registerServerThread();
@@ -341,6 +373,9 @@ private:
         auto *ret = DCHECK_NOTNULL(lease_context_.get());
         DCHECK(!ret->valid)
             << "** A newly allocated context should not be valid.";
+        // set protection_region_id to an invalid value.
+        ret->protection_region_id =
+            std::numeric_limits<decltype(ret->protection_region_id)>::max();
         return ret;
     }
     LeaseContext *get_lease_context(uint16_t id)
@@ -356,6 +391,8 @@ private:
     }
     void put_lease_context(LeaseContext *ctx)
     {
+        ctx->protection_region_id =
+            std::numeric_limits<decltype(ctx->protection_region_id)>::max();
         ctx->valid = false;
         lease_context_.put(ctx);
     }
@@ -373,6 +410,7 @@ private:
         aba_unit_nr_to_ddl.u32_1++;
         p->aba_unit_nr_to_ddl.store(aba_unit_nr_to_ddl,
                                     std::memory_order_acq_rel);
+        p->valid = false;
         protection_region_pool_->put(p);
     }
     ProtectionRegion *get_protection_region(size_t id)
@@ -448,9 +486,9 @@ private:
      * @param lease_id the id of LeaseContext
      * @param cid the client id. Will use to detect GC-ed lease (when cid
      * mismatch)
-     * @param expect_unit_nr the expected unit numbers for this lease period. If
-     * this field changed, it means the client extended the lease by one-sided
-     * CAS. Server should sustain the GC till the next period.
+     * @param expect_unit_nr the expected unit numbers for this lease
+     * period. If this field changed, it means the client extended the lease
+     * by one-sided CAS. Server should sustain the GC till the next period.
      * @param flag LeaseModificationFlag
      * @param ctx
      */
@@ -473,56 +511,58 @@ private:
                          RequestType type,
                          uint8_t flag,
                          CoroContext *ctx = nullptr);
-    bool buffer_rw_impl(Lease &lease,
-                        char *iobuf,
-                        size_t size,
-                        size_t offset,
-                        bool is_read,
-                        CoroContext *ctx = nullptr);
+    ErrCode buffer_rw_impl(Lease &lease,
+                           char *iobuf,
+                           size_t size,
+                           size_t offset,
+                           bool is_read,
+                           CoroContext *ctx = nullptr);
     inline bool already_passed_ddl(time::PatronusTime time) const;
     // flag should be RWFlag
-    inline bool handle_rwcas_flag(Lease &lease, uint8_t flag, CoroContext *ctx);
-    inline bool validate_lease(const Lease &lease);
-    bool protection_region_rw_impl(Lease &lease,
-                                   char *io_buf,
-                                   size_t size,
-                                   size_t offset,
-                                   bool is_read,
-                                   CoroContext *ctx = nullptr);
-    bool protection_region_cas_impl(Lease &lease,
-                                    char *iobuf,
-                                    size_t offset,
-                                    uint64_t compare,
-                                    uint64_t swap,
-                                    CoroContext *ctx = nullptr);
-    bool buffer_cas_impl(Lease &lease,
-                         char *iobuf,
-                         size_t offset,
-                         uint64_t compare,
-                         uint64_t swap,
-                         CoroContext *ctx);
-    bool read_write_impl(char *iobuf,
-                         size_t size,
-                         size_t node_id,
-                         size_t dir_id,
-                         uint32_t rkey,
-                         size_t remote_addr,
-                         bool is_read,
-                         uint16_t wrid_prefix,
-                         CoroContext *ctx = nullptr);
-    inline bool extend_impl(Lease &lease,
-                            size_t extend_unit_nr,
-                            uint8_t flag,
+    inline ErrCode handle_rwcas_flag(Lease &lease,
+                                     uint8_t flag,
+                                     CoroContext *ctx);
+    inline ErrCode validate_lease(const Lease &lease);
+    ErrCode protection_region_rw_impl(Lease &lease,
+                                      char *io_buf,
+                                      size_t size,
+                                      size_t offset,
+                                      bool is_read,
+                                      CoroContext *ctx = nullptr);
+    ErrCode protection_region_cas_impl(Lease &lease,
+                                       char *iobuf,
+                                       size_t offset,
+                                       uint64_t compare,
+                                       uint64_t swap,
+                                       CoroContext *ctx = nullptr);
+    ErrCode buffer_cas_impl(Lease &lease,
+                            char *iobuf,
+                            size_t offset,
+                            uint64_t compare,
+                            uint64_t swap,
                             CoroContext *ctx);
-    bool cas_impl(char *iobuf,
-                  size_t node_id,
-                  size_t dir_id,
-                  uint32_t rkey,
-                  uint64_t remote_addr,
-                  uint64_t compare,
-                  uint64_t swap,
-                  uint16_t wr_prefix,
-                  CoroContext *ctx = nullptr);
+    ErrCode read_write_impl(char *iobuf,
+                            size_t size,
+                            size_t node_id,
+                            size_t dir_id,
+                            uint32_t rkey,
+                            size_t remote_addr,
+                            bool is_read,
+                            uint16_t wrid_prefix,
+                            CoroContext *ctx = nullptr);
+    inline ErrCode extend_impl(Lease &lease,
+                               size_t extend_unit_nr,
+                               uint8_t flag,
+                               CoroContext *ctx);
+    ErrCode cas_impl(char *iobuf,
+                     size_t node_id,
+                     size_t dir_id,
+                     uint32_t rkey,
+                     uint64_t remote_addr,
+                     uint64_t compare,
+                     uint64_t swap,
+                     uint16_t wr_prefix,
+                     CoroContext *ctx = nullptr);
     Lease lease_modify_impl(Lease &lease,
                             RequestType type,
                             time::ns_t ns,
@@ -535,7 +575,7 @@ private:
                                 uint64_t addr,
                                 size_t length,
                                 int access_flag);
-    bool maybe_auto_extend(Lease &lease, CoroContext *ctx = nullptr);
+    ErrCode maybe_auto_extend(Lease &lease, CoroContext *ctx = nullptr);
 
     // owned by both
     DSM::pointer dsm_;
@@ -617,10 +657,10 @@ Lease Patronus::upgrade(Lease &lease, uint8_t flag, CoroContext *ctx)
     return lease_modify_impl(
         lease, RequestType::kUpgrade, 0 /* term */, flag, ctx);
 }
-bool Patronus::extend_impl(Lease &lease,
-                           size_t extend_unit_nr,
-                           uint8_t flag,
-                           CoroContext *ctx)
+ErrCode Patronus::extend_impl(Lease &lease,
+                              size_t extend_unit_nr,
+                              uint8_t flag,
+                              CoroContext *ctx)
 {
     DVLOG(4) << "[patronus][extend-impl] trying to extend. extend_unit_nr: "
              << extend_unit_nr << ", flag:" << LeaseModifyFlagOut(flag)
@@ -638,24 +678,24 @@ bool Patronus::extend_impl(Lease &lease,
     aba_unit_nr_to_ddl.u32_2 += extend_unit_nr;
     auto swap = aba_unit_nr_to_ddl.val;
 
-    bool cas_success = protection_region_cas_impl(
+    auto cas_ec = protection_region_cas_impl(
         lease, rdma_buffer.buffer, offset, compare, swap, ctx);
 
-    if (likely(cas_success))
+    if (likely(cas_ec == ErrCode::kSuccess))
     {
         lease.aba_unit_nr_to_ddl_.u32_2 += extend_unit_nr;
         lease.update_ddl_term();
     }
     put_rdma_buffer(rdma_buffer.buffer);
     DVLOG(4) << "[patronus][extend-impl] Done extend. coro: "
-             << (ctx ? *ctx : nullctx) << ". Success: " << cas_success
+             << (ctx ? *ctx : nullctx) << ". cas_ec: " << cas_ec
              << ". Now lease: " << lease;
-    return cas_success;
+    return cas_ec;
 }
-bool Patronus::extend(Lease &lease,
-                      std::chrono::nanoseconds chrono_ns,
-                      uint8_t flag,
-                      CoroContext *ctx)
+ErrCode Patronus::extend(Lease &lease,
+                         std::chrono::nanoseconds chrono_ns,
+                         uint8_t flag,
+                         CoroContext *ctx)
 {
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
@@ -680,7 +720,7 @@ bool Patronus::extend(Lease &lease,
                  << time::TimeSyncer::kCommunicationLatencyNs
                  << "). coro: " << (ctx ? *ctx : nullctx)
                  << ". Now lease: " << lease;
-        return false;
+        return ErrCode::kLeaseLocalExpiredErr;
     }
 
     return extend_impl(lease, extend_unit_nr, flag, ctx);
@@ -691,15 +731,24 @@ void Patronus::relinquish(Lease &lease, uint8_t flag, CoroContext *ctx)
     lease_modify_impl(lease, RequestType::kRelinquish, 0 /* term */, flag, ctx);
 }
 
-bool Patronus::validate_lease([[maybe_unused]] const Lease &lease)
+ErrCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)
 {
     auto lease_patronus_ddl = lease.ddl_term();
     auto patronus_now = DCHECK_NOTNULL(time_syncer_)->patronus_now();
-    return time_syncer_->definitely_lt(patronus_now, lease_patronus_ddl);
+    auto ret = time_syncer_->definitely_lt(patronus_now, lease_patronus_ddl)
+                   ? ErrCode::kSuccess
+                   : ErrCode::kLeaseLocalExpiredErr;
+    DVLOG(5) << "[patronus][validate_lease] patronus_now: " << patronus_now
+             << ", ddl: " << lease_patronus_ddl << ", ret: " << ret;
+    return ret;
 }
 
-bool Patronus::handle_rwcas_flag(Lease &lease, uint8_t flag, CoroContext *ctx)
+ErrCode Patronus::handle_rwcas_flag(Lease &lease,
+                                    uint8_t flag,
+                                    CoroContext *ctx)
 {
+    ErrCode ec = ErrCode::kSuccess;
+
     bool no_check;
     if (lease.no_gc_)
     {
@@ -710,11 +759,12 @@ bool Patronus::handle_rwcas_flag(Lease &lease, uint8_t flag, CoroContext *ctx)
     {
         no_check = flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
     }
+
     if (likely(!no_check))
     {
-        if (!validate_lease(lease))
+        if ((ec = validate_lease(lease)) != ErrCode::kSuccess)
         {
-            return false;
+            return ec;
         }
     }
     bool with_auto_extend = flag & (uint8_t) RWFlag::kWithAutoExtend;
@@ -724,68 +774,54 @@ bool Patronus::handle_rwcas_flag(Lease &lease, uint8_t flag, CoroContext *ctx)
     }
     bool reserved = flag & (uint8_t) RWFlag::kReserved;
     DCHECK(!reserved);
-    return true;
+    return ErrCode::kSuccess;
 }
 
-bool Patronus::read(Lease &lease,
-                    char *obuf,
-                    size_t size,
-                    size_t offset,
-                    uint8_t flag,
-                    CoroContext *ctx)
+ErrCode Patronus::read(Lease &lease,
+                       char *obuf,
+                       size_t size,
+                       size_t offset,
+                       uint8_t flag,
+                       CoroContext *ctx)
 {
-    if (unlikely(!handle_rwcas_flag(lease, flag, ctx)))
+    ErrCode ec = ErrCode::kSuccess;
+    if ((ec = handle_rwcas_flag(lease, flag, ctx)) != ErrCode::kSuccess)
     {
-        return false;
+        return ec;
     }
+
     return buffer_rw_impl(lease, obuf, size, offset, true /* is_read */, ctx);
 }
-bool Patronus::write(Lease &lease,
-                     const char *ibuf,
-                     size_t size,
-                     size_t offset,
-                     uint8_t flag,
-                     CoroContext *ctx)
+ErrCode Patronus::write(Lease &lease,
+                        const char *ibuf,
+                        size_t size,
+                        size_t offset,
+                        uint8_t flag,
+                        CoroContext *ctx)
 {
-    if (unlikely(!handle_rwcas_flag(lease, flag, ctx)))
+    auto ec = handle_rwcas_flag(lease, flag, ctx);
+    if (unlikely(ec != ErrCode::kSuccess))
     {
-        return false;
+        return ec;
     }
     return buffer_rw_impl(
         lease, (char *) ibuf, size, offset, false /* is_read */, ctx);
 }
 
-bool Patronus::cas(Lease &lease,
-                   char *iobuf,
-                   size_t offset,
-                   uint64_t compare,
-                   uint64_t swap,
-                   uint8_t flag,
-                   CoroContext *ctx)
+ErrCode Patronus::cas(Lease &lease,
+                      char *iobuf,
+                      size_t offset,
+                      uint64_t compare,
+                      uint64_t swap,
+                      uint8_t flag,
+                      CoroContext *ctx)
 {
-    if (unlikely(!handle_rwcas_flag(lease, flag, ctx)))
+    auto ec = handle_rwcas_flag(lease, flag, ctx);
+    if (unlikely(ec != ErrCode::kSuccess))
     {
-        return false;
+        return ec;
     }
     return buffer_cas_impl(lease, iobuf, offset, compare, swap, ctx);
-}
-
-bool Patronus::pingpong(uint16_t node_id,
-                        uint16_t dir_id,
-                        id_t key,
-                        size_t size,
-                        time::term_t term,
-                        CoroContext *ctx)
-{
-    auto lease = get_lease_impl(node_id,
-                                dir_id,
-                                key,
-                                size,
-                                term,
-                                RequestType::kAcquireNoLease,
-                                (uint8_t) AcquireRequestFlag::kNoGc,
-                                ctx);
-    return lease.success();
 }
 
 void Patronus::fill_bind_mw_wr(ibv_send_wr &wr,

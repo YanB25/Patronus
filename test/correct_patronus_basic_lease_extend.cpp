@@ -16,10 +16,11 @@ using namespace define::literals;
 constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
-constexpr static size_t kTestTime = 100;
+constexpr static size_t kTestTime = 1_K;
 
 using namespace patronus;
-constexpr static size_t kCoroCnt = 8;
+// should be one, because one coroutine fails will affect the others
+constexpr static size_t kCoroCnt = 1;
 thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
 
@@ -69,9 +70,11 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     OnePassMonitor ns_till_ddl_m;
     OnePassMonitor extend_failed_m;
 
+    auto dsm = p->get_dsm();
+    auto max_key = dsm->buffer_size() / sizeof(Object);
     for (size_t i = 0; i < kTestTime; ++i)
     {
-        auto key = rand() % 100_M;
+        auto key = rand() % max_key;
         Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
                                     key,
@@ -94,8 +97,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         time::ns_t diff_ns = patronus_ddl - patronus_now;
         ns_till_ddl_m.collect(diff_ns);
 
-        bool succ = p->extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
-        if (unlikely(!succ))
+        auto ec = p->extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
+        if (unlikely(ec != ErrCode::kSuccess))
         {
             extend_failed_m.collect(1);
             p->relinquish(lease, 0, &ctx);
@@ -112,18 +115,20 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         size_t read_loop_succ_cnt = 0;
         while (true)
         {
-            bool succ = p->read(lease,
-                                rdma_buf.buffer,
-                                sizeof(Object),
-                                0 /*offset*/,
-                                0 /* flag */,
-                                &ctx);
-            if (succ)
+            auto ec = p->read(lease,
+                              rdma_buf.buffer,
+                              sizeof(Object),
+                              0 /*offset*/,
+                              0 /* flag */,
+                              &ctx);
+            if (ec == ErrCode::kSuccess)
             {
                 read_loop_succ_cnt++;
             }
             else
             {
+                DVLOG(3) << "[bench] p->read() failed. ec: " << ec
+                         << ", coro: " << ctx;
                 break;
             }
         }

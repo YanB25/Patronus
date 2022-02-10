@@ -89,13 +89,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         size_t read_loop_succ_cnt = 0;
         while (true)
         {
-            bool succ = p->read(lease,
-                                rdma_buf.buffer,
-                                sizeof(Object),
-                                0 /*offset*/,
-                                (uint8_t) RWFlag::kWithAutoExtend,
-                                &ctx);
-            if (succ)
+            auto ec = p->read(lease,
+                              rdma_buf.buffer,
+                              sizeof(Object),
+                              0 /*offset*/,
+                              (uint8_t) RWFlag::kWithAutoExtend,
+                              &ctx);
+            if (ec == ErrCode::kSuccess)
             {
                 read_loop_succ_cnt++;
             }

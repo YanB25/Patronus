@@ -105,12 +105,13 @@ FUTURES:
     - basically okay. need correct_lease_lock.cpp
 - Add p->barrier(std::string)
     - After all these time I finally realize that the ctor of DSM takes seconds (typically ~6s). This may cause unexpected bugs. Don't know. I'd like to fix this before moving on.
-- See if rdtsc is consistent across cores. Modify the correct_rdtsc_stable.cpp tests.
-- Patronus adds extend API when client asked to do so. client can extend the lease by one-sided write.
+[-] See if rdtsc is consistent across cores. Modify the correct_rdtsc_stable.cpp tests.
+[-] Patronus adds extend API when client asked to do so. client can extend the lease by one-sided write.
     [-] p->read/write/cas() add a flag: kWithAutoExtend
     - add p->extend(lease) to manually extend the lease
     [-] add magic number to the cur_unit_nr field to avoid the ABA problem!! the higher 32 bits will be rolling up each time!
 - test the correctness of Patronus write.
+- refactor TimeSyncer to use rdtsc instead of std::chrono.
 
 NO MORE. That should be easy.
 
@@ -153,12 +154,23 @@ correct_time_syncer_rmsg_test
 
 ===== CRITICAL BUG ======
 FAIL correct_time_syncer_rmsg_test.cpp
-FAIL correct_patronus_basic_lease_expire.cpp
-FAIL correct_patronus_basic_lease_expire2.cpp
-FAIL correct_patronus_basic_lease_extend.cpp
-FAIL correct_patronus_basic_lease_auto_extend.cpp
+[-] currently allow 50us abs_average drift and pass.
+- LATER: use rdtsc to re-impl the TimeSyncer. After that, time drift should not occur.
 
-std::chrono::system_clock and std::chrono::steady_clock has a drift of 200+us/s.
+[FAIL] correct_patronus_basic_lease_expire.cpp
+- FIXED
+
+[FAIL] correct_patronus_basic_lease_expire2.cpp
+- FIXED. If key out of dsm range, the server should response failure.
+
+FAIL correct_patronus_basic_lease_extend.cpp
+- LATER: because of time drift, client can not be protected from protection error. Witness 200 us drifts. See to it after finishing p->barrier()
+
+[FAIL] correct_patronus_lease_cas.cpp
+- protection_region->valid is false.
+- protection_region is not per-thread. Not per-thread at initialization.
+
+std::chrono::system_clock and std::chrono::steady_clock and std::high_resolution_clock has a drift of 200+us/s (20us/s at best).
 It is not acceptable since I want a us-scale synchronization lease impl.
 I'd like to use rdtsc instead, because it is stable.
 Should add some tests.

@@ -76,6 +76,11 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status)
         os << "bind-err";
         break;
     }
+    case AcquireRequestStatus::kAddressOutOfRangeErr:
+    {
+        os << "addr-out-of-range-err";
+        break;
+    }
     default:
     {
         CHECK(false);

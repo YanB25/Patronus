@@ -103,17 +103,17 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         VLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
-        // read three times, should both success
+
         size_t read_nr = 0;
         for (size_t t = 0; t < 100; ++t)
         {
-            bool succ = p->read(lease,
-                                rdma_buf.buffer,
-                                sizeof(Object),
-                                0 /* offset */,
-                                0 /* flag */,
-                                &ctx);
-            if (!succ)
+            auto ec = p->read(lease,
+                              rdma_buf.buffer,
+                              sizeof(Object),
+                              0 /* offset */,
+                              0 /* flag */,
+                              &ctx);
+            if (ec != ErrCode::kSuccess)
             {
                 auto patronus_now = syncer.patronus_now();
                 time::ns_t ns_diff = lease.ddl_term() - patronus_now;
@@ -123,9 +123,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                 }
                 else
                 {
-                    CHECK(succ) << "[bench] " << i << "-th, read " << t
-                                << "-th failed. lease until DDL: " << ns_diff
-                                << ", patronus_now: " << patronus_now;
+                    CHECK_EQ(ec, ErrCode::kSuccess)
+                        << "[bench] " << i << "-th, read " << t
+                        << "-th failed. lease until DDL: " << ns_diff
+                        << ", patronus_now: " << patronus_now;
                 }
             }
             else
@@ -148,14 +149,14 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         // if actually issue read, QP should fails
         VLOG(3) << "[bench] before read, patronus_time: "
                 << syncer.patronus_now();
-        bool succ = p->read(lease,
-                            rdma_buf.buffer,
-                            sizeof(Object),
-                            0,
-                            (uint8_t) RWFlag::kNoLocalExpireCheck,
-                            &ctx);
+        auto ec = p->read(lease,
+                          rdma_buf.buffer,
+                          sizeof(Object),
+                          0,
+                          (uint8_t) RWFlag::kNoLocalExpireCheck,
+                          &ctx);
 
-        if (succ)
+        if (ec == ErrCode::kSuccess)
         {
             fail_to_unbind_m.collect(1);
         }

@@ -35,6 +35,10 @@ public:
     {
         return term() - rhs.term();
     }
+    static PatronusTime max()
+    {
+        return PatronusTime(std::numeric_limits<decltype(ns_)>::max(), 0);
+    }
 
 private:
     friend std::ostream &operator<<(std::ostream &, const PatronusTime &);

@@ -87,24 +87,17 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
-        bool succ = p->read(lease,
-                            rdma_buf.buffer,
-                            sizeof(Object),
-                            0 /* offset */,
-                            0 /* flag */,
-                            &ctx);
-        CHECK(succ) << "[bench] client coro " << ctx
-                    << " read FAILED. This should not happen, because we "
-                       "filter out the invalid mws.";
-        if (!succ)
-        {
-            LOG(WARNING) << "[bench] client coro " << ctx
-                         << " read FAILED. retry. ";
-            p->put_rdma_buffer(rdma_buf.buffer);
-            p->relinquish_write(lease, &ctx);
-            p->relinquish(lease, 0, &ctx);
-            continue;
-        }
+        auto ec = p->read(lease,
+                          rdma_buf.buffer,
+                          sizeof(Object),
+                          0 /* offset */,
+                          0 /* flag */,
+                          &ctx);
+        CHECK_EQ(ec, ErrCode::kSuccess)
+            << "[bench] client coro " << ctx
+            << " read FAILED. This should not happen, because we "
+               "filter out the invalid mws.";
+
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
         Object magic_object = *(Object *) rdma_buf.buffer;
         CHECK_EQ(magic_object.target, coro_magic)

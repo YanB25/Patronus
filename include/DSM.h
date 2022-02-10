@@ -387,30 +387,47 @@ public:
     {
         return (char *) dsm_base() + dsm_reserve_size() + offset;
     }
-    uint64_t addr_to_dsm_offset(void *addr)
+    uint64_t addr_to_dsm_offset(void *addr) const
     {
         auto exposed_base = baseAddr + dsm_reserve_size();
         CHECK_GE((void *) addr, (void *) exposed_base) << "** addr underflow";
         return (uint64_t) addr - exposed_base;
     }
-    void *buffer_offset_to_addr(uint64_t offset)
+    void *buffer_offset_to_addr(uint64_t offset) const
     {
         return (char *) dsm_base() + offset + total_reserve_size();
     }
-    uint64_t addr_to_buffer_offset(void *addr)
+    uint64_t addr_to_buffer_offset(void *addr) const
     {
         void *base = (char *) dsm_base() + total_reserve_size();
         CHECK_GE(addr, base);
         return (char *) addr - (char *) base;
     }
-    uint64_t buffer_offset_to_dsm_offset(uint64_t buf_offset)
+    uint64_t buffer_offset_to_dsm_offset(uint64_t buf_offset) const
     {
         return buf_offset + user_reserve_size();
     }
-    uint64_t dsm_offset_to_buffer_offset(uint64_t dsm_offset)
+    uint64_t dsm_offset_to_buffer_offset(uint64_t dsm_offset) const
     {
         CHECK_GE(dsm_offset, user_reserve_size());
         return dsm_offset - user_reserve_size();
+    }
+
+    bool valid_buffer_offset(uint64_t buffer_offset) const
+    {
+        return buffer_offset < buffer_size();
+    }
+    bool valid_buffer_addr(void *addr) const
+    {
+        return valid_buffer_offset(addr_to_buffer_offset(addr));
+    }
+    bool valid_dsm_offset(uint64_t dsm_offset) const
+    {
+        return dsm_offset < user_reserve_size() + buffer_size();
+    }
+    bool valid_dsm_addr(void *addr) const
+    {
+        return valid_dsm_offset(addr_to_dsm_offset(addr));
     }
 
     ExchangeMeta &getExchangeMetaBootstrap(size_t node_id) const;
@@ -735,8 +752,6 @@ bool DSM::write_sync(const char *buffer,
 {
     size_t dirID = get_cur_dir();
     uint32_t rkey = remoteInfo[gaddr.nodeID].dsmRKey[dirID];
-    DLOG(INFO) << "[debug] write_sync for rkey: " << std::hex << rkey
-               << ", dirID: " << dirID;
     return rkey_write_sync(
         rkey, buffer, gaddr, size, dirID, ctx, wc_id, handler);
 }

@@ -27,7 +27,7 @@ public:
     }
     bool success() const
     {
-        return success_;
+        return status_ == AcquireRequestStatus::kSuccess;
     }
     bool ready() const
     {
@@ -35,7 +35,7 @@ public:
     }
     bool error() const
     {
-        return !success_;
+        return !success();
     }
     bool is_readable() const
     {
@@ -45,6 +45,10 @@ public:
     bool is_writable() const
     {
         return lease_type_ == LeaseType::kWriteLease;
+    }
+    AcquireRequestStatus ec() const
+    {
+        return status_;
     }
     id_t id() const
     {
@@ -80,7 +84,7 @@ public:
         aba_unit_nr_to_ddl_ = rhs.aba_unit_nr_to_ddl_;
         ddl_term_ = rhs.ddl_term_;
 
-        success_ = false;
+        status_ = AcquireRequestStatus::kReserved;
         ready_ = false;
         id_ = 0;
     }
@@ -105,18 +109,18 @@ private:
     void set_finish()
     {
         ready_ = true;
-        success_ = true;
+        status_ = AcquireRequestStatus::kSuccess;
     }
-    void set_error()
+    void set_error(AcquireRequestStatus status)
     {
         ready_ = true;
-        success_ = false;
+        status_ = status;
     }
     void set_invalid()
     {
         DCHECK(ready_) << "Why setting a not-ready lease to invalid?";
         ready_ = false;
-        success_ = false;
+        status_ = AcquireRequestStatus::kReserved;
         id_ = 0;
         cur_rkey_ = 0;
         rkey_0_ = 0;
@@ -125,16 +129,23 @@ private:
 
     void update_ddl_term()
     {
-        DCHECK_NE(ns_per_unit_, 0)
-            << "** ns_per_unit_ is zero. lease: " << *this;
-        DCHECK_NE(aba_unit_nr_to_ddl_, 0) << "** invalid. Lease: " << *this;
-        auto ns = ns_per_unit_ * aba_unit_nr_to_ddl_.u32_2;
-        ddl_term_ = begin_term_ + ns;
+        if (no_gc_)
+        {
+            ddl_term_ = time::PatronusTime::max();
+        }
+        else
+        {
+            DCHECK_NE(ns_per_unit_, 0)
+                << "** ns_per_unit_ is zero. lease: " << *this;
+            DCHECK_NE(aba_unit_nr_to_ddl_, 0) << "** invalid. Lease: " << *this;
+            auto ns = ns_per_unit_ * aba_unit_nr_to_ddl_.u32_2;
+            ddl_term_ = begin_term_ + ns;
+        }
     }
 
     friend class Patronus;
     friend std::ostream &operator<<(std::ostream &, const Lease &);
-    bool success_{false};
+    AcquireRequestStatus status_{AcquireRequestStatus::kReserved};
     bool ready_{false};
     // basical information
     id_t id_{0};

@@ -37,6 +37,8 @@ enum class AcquireRequestStatus : uint8_t
     kMagicMwErr,
     kLockedErr,
     kBindErr,
+    kAddressOutOfRangeErr,
+    kReserved,
 };
 std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status);
 
