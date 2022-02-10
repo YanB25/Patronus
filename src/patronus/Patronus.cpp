@@ -41,6 +41,9 @@ Patronus::Patronus(const PatronusConfig &conf)
         << "**dsm should provide reserved buffer at least what Patronus "
            "requries";
 
+    internal_barrier();
+    DVLOG(1) << "[patronus] Barrier: ctor of DSM";
+
     // for time syncer
     auto time_sync_buffer = get_time_sync_buffer();
     auto time_sync_offset = dsm_->addr_to_dsm_offset(time_sync_buffer.buffer);
@@ -51,12 +54,20 @@ Patronus::Patronus(const PatronusConfig &conf)
         dsm_, gaddr, time_sync_buffer.buffer, time_sync_buffer.size);
 
     time_syncer_->sync();
+    finish_time_sync_now_ = std::chrono::steady_clock::now();
 
     reg_locator(conf.key_locator);
     explain(conf);
 }
 Patronus::~Patronus()
 {
+    auto now = std::chrono::steady_clock::now();
+    auto elaps_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - finish_time_sync_now_)
+                        .count();
+    DLOG(INFO) << "[patronus] Elaps " << 1.0 * elaps_ms << " ms, or "
+               << 1.0 * elaps_ms / 1000 << " s";
+
     for (ibv_mw *mw : allocated_mws_)
     {
         dsm_->free_mw(mw);
@@ -70,7 +81,79 @@ void Patronus::explain(const PatronusConfig &conf)
 
 void Patronus::barrier(uint64_t key)
 {
-    CHECK(false) << "TODO: not implemented. key: " << key;
+    auto tid = get_thread_id();
+    auto from_mid = tid;
+    auto to_mid = admin_mid();
+
+    char *rdma_buf = get_rdma_message_buffer();
+    auto *msg = (AdminRequest *) rdma_buf;
+    msg->type = RequestType::kAdmin;
+    msg->flag = (uint8_t) AdminFlag::kAdminBarrier;
+    msg->cid.node_id = get_node_id();
+    msg->cid.thread_id = tid;
+    msg->cid.mid = from_mid;
+    msg->data = key;
+    msg->cid.coro_id = kNotACoro;
+
+    if constexpr (debug())
+    {
+        msg->digest = 0;
+        msg->digest = djb2_digest(msg, sizeof(AdminRequest));
+    }
+
+    for (size_t i = 0; i < dsm_->getClusterSize(); ++i)
+    {
+        if (i == dsm_->get_node_id())
+        {
+            continue;
+        }
+        dsm_->reliable_send(rdma_buf, sizeof(AdminRequest), i, to_mid);
+    }
+
+    // TODO(patronus): this may have problem
+    // if the buffer is reused when NIC is DMA-ing
+    put_rdma_message_buffer(rdma_buf);
+
+    {
+        std::lock_guard<std::mutex> lk(barrier_mu_);
+        barrier_[key].insert(get_node_id());
+    }
+
+    // wait for finish
+    while (true)
+    {
+        {
+            std::lock_guard<std::mutex> lk(barrier_mu_);
+            const auto &vec = barrier_[key];
+            if (vec.size() == dsm_->getClusterSize())
+            {
+                return;
+            }
+        }
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(10us);
+    }
+}
+
+void Patronus::internal_barrier()
+{
+    auto mid = admin_mid();
+    for (size_t i = 0; i < dsm_->getClusterSize(); ++i)
+    {
+        if (i == dsm_->get_node_id())
+        {
+            continue;
+        }
+        dsm_->reliable_send(nullptr, 0, i, mid);
+    }
+    for (size_t i = 0; i < dsm_->getClusterSize(); ++i)
+    {
+        if (i == dsm_->get_node_id())
+        {
+            continue;
+        }
+        dsm_->reliable_recv(mid, nullptr, 1);
+    }
 }
 
 Lease Patronus::get_lease_impl(uint16_t node_id,
@@ -673,6 +756,10 @@ void Patronus::handle_request_messages(const char *msg_buf,
             else if (admin_type == AdminFlag::kAdminReqRecovery)
             {
                 handle_admin_recover(msg, nullptr);
+            }
+            else if (admin_type == AdminFlag::kAdminBarrier)
+            {
+                handle_admin_barrier(msg, nullptr);
             }
             else
             {
@@ -1322,6 +1409,23 @@ void Patronus::finished(CoroContext *ctx)
     // TODO(patronus): this may have problem
     // if the buffer is reused when NIC is DMA-ing
     put_rdma_message_buffer(rdma_buf);
+}
+void Patronus::handle_admin_barrier(AdminRequest *req,
+                                    [[maybe_unused]] CoroContext *ctx)
+{
+    if constexpr (debug())
+    {
+        uint64_t digest = req->digest.get();
+        req->digest = 0;
+        DCHECK_EQ(digest, djb2_digest(req, sizeof(AdminRequest)));
+    }
+
+    auto from_node = req->cid.node_id;
+
+    {
+        std::lock_guard<std::mutex> lk(barrier_mu_);
+        barrier_[req->data].insert(from_node);
+    }
 }
 
 void Patronus::handle_admin_recover(AdminRequest *req,

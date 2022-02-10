@@ -103,8 +103,9 @@ FUTURES:
 3st Three days DDL: 1/20-1/22 (failed. Not feel great at home. Take off these days.)
 [-] get_{rlease,wlease} will also have lock semantics: If conflict, will return failure to the client
     - basically okay. need correct_lease_lock.cpp
-- Add p->barrier(std::string)
+[-] Add p->barrier(std::string)
     - After all these time I finally realize that the ctor of DSM takes seconds (typically ~6s). This may cause unexpected bugs. Don't know. I'd like to fix this before moving on.
+    - WON'T FIX: Patronus can not support regular p->barrier, because when the thread is blocked and waiting in p->barrier(), no one can poll and recv the message from other node. Instead, implemented a internal_barrier(), which should be used only in the ctor of Patronus (use with care!)
 [-] See if rdtsc is consistent across cores. Modify the correct_rdtsc_stable.cpp tests.
 [-] Patronus adds extend API when client asked to do so. client can extend the lease by one-sided write.
     [-] p->read/write/cas() add a flag: kWithAutoExtend

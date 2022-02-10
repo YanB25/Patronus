@@ -128,6 +128,7 @@ enum class AdminFlag : uint8_t
 {
     kAdminReqExit = 0,
     kAdminReqRecovery = 1,
+    kAdminBarrier = 2,
 };
 std::ostream &operator<<(std::ostream &os, const AdminFlag &f);
 
@@ -138,6 +139,7 @@ struct AdminRequest
     uint8_t flag;  // enum AdminFlag
     Debug<uint64_t> digest;
     uint16_t dir_id;
+    uint64_t data;  // used by p->barrier()
 } __attribute__((packed));
 static_assert(sizeof(AdminRequest) < ReliableConnection::kMessageSize);
 std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);

@@ -477,6 +477,7 @@ private:
     void handle_response_lease_modify(LeaseModifyResponse *);
     void handle_admin_exit(AdminRequest *req, CoroContext *ctx);
     void handle_admin_recover(AdminRequest *req, CoroContext *ctx);
+    void handle_admin_barrier(AdminRequest *req, CoroContext *ctx);
     void handle_request_lease_relinquish(LeaseModifyRequest *,
                                          CoroContext *ctx);
     void handle_request_lease_extend(LeaseModifyRequest *, CoroContext *ctx);
@@ -577,6 +578,12 @@ private:
                                 int access_flag);
     ErrCode maybe_auto_extend(Lease &lease, CoroContext *ctx = nullptr);
 
+    /**
+     * @brief call me only if u know what u are doing.
+     * Do not call out of ctor of Patronus
+     */
+    void internal_barrier();
+
     // owned by both
     DSM::pointer dsm_;
     time::TimeSyncer::pointer time_syncer_;
@@ -613,6 +620,12 @@ private:
 
     // for user interfaces
     KeyLocator locator_;
+
+    // for barrier
+    std::unordered_map<uint64_t, std::set<uint64_t>> barrier_;
+    std::mutex barrier_mu_;
+
+    std::chrono::time_point<std::chrono::steady_clock> finish_time_sync_now_;
 };
 
 bool Patronus::already_passed_ddl(time::PatronusTime patronus_ddl) const

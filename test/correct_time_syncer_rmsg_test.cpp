@@ -43,6 +43,7 @@ struct BenchMessage
 
 void client(Patronus::pointer p)
 {
+    LOG(INFO) << "Client begin test";
     OnePassMonitor m;
     OnePassMonitor send_recv_m;
     auto dsm = p->get_dsm();
@@ -89,6 +90,7 @@ void client(Patronus::pointer p)
 }
 void server(Patronus::pointer p)
 {
+    LOG(INFO) << "Server begin test";
     OnePassMonitor m;
     auto dsm = p->get_dsm();
     auto &syncer = p->time_syncer();

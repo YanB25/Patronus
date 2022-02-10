@@ -103,6 +103,11 @@ std::ostream &operator<<(std::ostream &os, const AdminFlag &f)
         os << "Recov";
         break;
     }
+    case AdminFlag::kAdminBarrier:
+    {
+        os << "Barrier";
+        break;
+    }
     default:
     {
         os << "Unknown(" << (int) f << ")";
