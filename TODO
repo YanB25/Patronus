@@ -170,6 +170,9 @@ FAIL correct_patronus_basic_lease_extend.cpp
 - protection_region->valid is false.
 - protection_region is not per-thread. Not per-thread at initialization.
 
+FAIL correct_patronus_basic_lease_expire.cpp
+- can not recover QP: invalid argument [22]
+
 std::chrono::system_clock and std::chrono::steady_clock and std::high_resolution_clock has a drift of 200+us/s (20us/s at best).
 It is not acceptable since I want a us-scale synchronization lease impl.
 I'd like to use rdtsc instead, because it is stable.
