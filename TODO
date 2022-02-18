@@ -98,7 +98,7 @@ Does not quite satisfied by my efficiency. But really did a good job in progress
 
 FUTURES:
 - Carefully thinks about lock conflict, fairness, client synchronizations at swap area, ...
-- Implemente all the APIs in Patronus. Extend, upgrade would be the most important ones.
+[-] Implemente all the APIs in Patronus. Extend, upgrade would be the most important ones.
 
 3st Three days DDL: 1/20-1/22 (failed. Not feel great at home. Take off these days.)
 [-] get_{rlease,wlease} will also have lock semantics: If conflict, will return failure to the client
@@ -111,13 +111,16 @@ FUTURES:
     [-] p->read/write/cas() add a flag: kWithAutoExtend
     - add p->extend(lease) to manually extend the lease
     [-] add magic number to the cur_unit_nr field to avoid the ABA problem!! the higher 32 bits will be rolling up each time!
-- test the correctness of Patronus write.
+[-] test the correctness of Patronus write.
 - refactor TimeSyncer to use rdtsc instead of std::chrono.
 
 NO MORE. That should be easy.
 
-2/9-2/10 I think two days may be enough and safe.
+2/18-2/19 I think two days may be enough and safe.
 - read papers that @WQ has send to me.
+
+2/20 Talk to @WQ and starts to write the paper
+2/21-2/23 Write the basic story, time-sync and impls of the paper.
 
 If all the things above finish, I can move on to adopt the uPaxos!
 
