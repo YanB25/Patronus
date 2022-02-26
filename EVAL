@@ -1,0 +1,49 @@
+# Motivation
+- The latency of each permission modification algorithms
+    - QP recreate, MR rereg, MW
+- The overhead of QP recovery.
+
+# Microbench
+- Latency and throughput of get_[rw]lease
+- The scalability of lease (# of active leases)
+- the overhead of QP recovery and the backup QP in reaction to the recovery (time graph)
+- Sensitivity analysis 
+    - of lease term: should be okay even lower to us-scale.
+- The overhead of unbind (a comparison)
+- Performance boost with registering MR each time. Register one time as the theoretical performance bound.
+- The overhead of tree-liked time-sync algorithm. See how fast it converges.
+- [may] Report the "lease unexpected expire" times.
+- [may] The converge of Tree based time sync?
+- [may] Report the data path latency. KRCore can report its datapath latency (which is trivial), so do I. 
+
+# Macrobench
+- workload for remote memory I. Showing that Patronus will not lower down perofrmance
+    - Workload of graph-analytics, inception, quicksort, in-memory-analytics, kmeans, xsbench
+    - The performance ratio of Patronus and register MR. The performance of Patronus v.s. FastSwap
+    - Varing local memory ratio
+    - ArXiv hardware-assisted trusted memory disaggregation for secure far memory. Figure 18.
+- Compare with Candidates. Showing that Patronus will not lower down performance
+    - AIFM (explicite API and unmodified Linux) v.s. AIFM-Patronus
+        - AIFM reports a 0.3 Mops for its syncthetic workload. Should be far enough for Patronus
+    - FastSwap (implicite API and modifed Linux swap subsystem): don't want to adopt this. Modified Linux and need QEMU.
+    - Use my own workloads (like how AIFM tried to compare with FastSwap)
+- The performance of KV (So... what's the purpose of this experiment?)
+    - The index is accessible by anyone (because too fine-granularity for Patronus to offer high performance), or the privilige index thread (delegated)
+    - The actual KV pairs are accessed by worker threads, guarded by Patronus.
+- The shrinking problem of Pengfei Zuo's hash table.
+    - Original hash table does not support memory isolation. Thus shrinking may cause serious problem.
+    - The stupid way: reregister MR, or separate each block into one MR (which slow downs expanding).
+    - Patronus way: lease (amortize the overhead of querying) + backup QP (hide the QP recovery overhead) + MW (quick permission change)
+    - So cool. Maintain last two MWs, one for the first half, and the second for the whole. Always use the "most specific" lease for accessing.
+- [may] Compare with FaRM. Does it make sense to compare FaRM?
+    - Not open-sourced, should emulate it.
+
+# TODO
+[-] Find any serverless or container frameworks based on DM and C++: All the serverless platform is based on GoLang, which can not link with C++.
+- Is FastSwap, Infiniswap, AIFM crash tolerance?
+[-] HOW CoRM compares to FaRM: FaRM is not open-sourced, so CoRW emulated FaRM (including its cacheline consistency check) following the publicly available information.
+    - CoRM use the same consistency checking algorithm (per-cacheline version), so it compares to FaRM.
+
+# Some Results
+Register MR: 50us for 4KB from KRCore
+QP memory overhead: 292 sq, 257 comp_queue entries, sq entry takes 448B, cq takes 4 B. Each RCQP takes 159KB.

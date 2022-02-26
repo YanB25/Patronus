@@ -113,6 +113,16 @@ FUTURES:
     [-] add magic number to the cur_unit_nr field to avoid the ABA problem!! the higher 32 bits will be rolling up each time!
 [-] test the correctness of Patronus write.
 - refactor TimeSyncer to use rdtsc instead of std::chrono.
+- Support scope-based & lease-based gc. e.g., let p->relinquish(lease) be called automatically when out of scope.
+- Support cache. Will be critically important during evaluation.
+- lease->valid() for checking if time within valid term.
+- The support of lease transfering within the same node
+- The support of sync/async get_[rw]lease API, which supports fairness (request queuing)
+- The support of memory allocation. Better be interesting and relate to other guidelines/designs.
+- Bench: the time of registering S GB MR totally, with V each time.
+- Checking: What about the rdtsc of ARM core? Is it constant? Is it stable across core?
+- Is `Lease` thread-safe? Can I make it thread-safe?
+- Port RapidCSV or Dataframe into this proj.
 
 2/11-2/16 go to Sanya. 2/17 write dairy and sync my photos. Not working.
 
