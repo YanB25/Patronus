@@ -22,12 +22,15 @@
     - Original hash table does not support memory isolation. Thus shrinking may cause serious problem. The gap between read and CAS can always corrupt the memory.
     - Patronus way: lease (amortize the overhead of querying) + backup QP (hide the QP recovery overhead) + MW (quick permission change)
     - Not open-sourced. Should impl it on my own.
+    - The extender (or shrinker) acquires for a lease, instead of locking with CAS. Then, if the CN thread failed, other threads can help.
+    - The permission to the KV pool could also use lease.
     - Report:
         - a) close all the RDMA connections case
         - b) rereg MR works, but will not report, because the motivation already rules out this.
         - c) Do nothing: the theoretical performance bound
         - d) Patronus management subtable allocations and deallocation.
         - report the 1) regular performance, 2) shrink will not lower performance 3) expending is on the critical path, so report the expending latency!
+- Or CoRM, because it is open-sourced
 - From AIFM to AIFM-Patronus
     - AIFM reports a 0.3 Mops for its syncthetic workload. Should be far enough for Patronus
     - remoteable SPSC dynamic queue 
