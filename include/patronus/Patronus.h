@@ -803,6 +803,16 @@ ErrCode Patronus::read(Lease &lease,
         return ec;
     }
 
+    bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+    if (with_cache)
+    {
+        if (lease.cache_query(offset, size, obuf))
+        {
+            // cache hit
+            return ErrCode::kSuccess;
+        }
+    }
+
     return buffer_rw_impl(lease, obuf, size, offset, true /* is_read */, ctx);
 }
 ErrCode Patronus::write(Lease &lease,
@@ -817,8 +827,15 @@ ErrCode Patronus::write(Lease &lease,
     {
         return ec;
     }
-    return buffer_rw_impl(
+    ec = buffer_rw_impl(
         lease, (char *) ibuf, size, offset, false /* is_read */, ctx);
+
+    bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+    if (ec == ErrCode::kSuccess && with_cache)
+    {
+        lease.cache_insert(offset, size, ibuf);
+    }
+    return ec;
 }
 
 ErrCode Patronus::cas(Lease &lease,
@@ -834,7 +851,14 @@ ErrCode Patronus::cas(Lease &lease,
     {
         return ec;
     }
-    return buffer_cas_impl(lease, iobuf, offset, compare, swap, ctx);
+    ec = buffer_cas_impl(lease, iobuf, offset, compare, swap, ctx);
+    bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+    if (ec == ErrCode::kSuccess && with_cache)
+    {
+        DCHECK_GE(sizeof(swap), 8);
+        lease.cache_insert(offset, 8 /* size */, (const char *) swap);
+    }
+    return ec;
 }
 
 void Patronus::fill_bind_mw_wr(ibv_send_wr &wr,

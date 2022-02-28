@@ -293,6 +293,9 @@ constexpr static bool kEnableValidityMutex = false;
 constexpr static bool kEnableTrace = false;
 constexpr static uint64_t kTraceRate =
     100000;  // (1.0 / kTraceRate) possibility
+
+// other settings
+constexpr static size_t kLeaseCacheItemLimitNr = 3;
 }  // namespace config
 
 #define likely(x) __builtin_expect((x), 1)

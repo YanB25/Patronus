@@ -4,6 +4,7 @@
 
 #include <iostream>
 
+#include "patronus/LeaseCache.h"
 #include "patronus/Time.h"
 #include "patronus/Type.h"
 namespace patronus
@@ -105,6 +106,16 @@ public:
         return ret;
     }
 
+    // about lease cache
+    bool cache_query(uint64_t addr, size_t len, char *obuf)
+    {
+        return cache_.query(addr, len, obuf);
+    }
+    void cache_insert(uint64_t addr, size_t len, const char *ibuf)
+    {
+        cache_.insert(addr, len, ibuf);
+    }
+
 private:
     void set_finish()
     {
@@ -170,6 +181,8 @@ private:
 
     // for extend policy
     size_t cur_unit_nr_{1};
+
+    LeaseCache<config::kLeaseCacheItemLimitNr> cache_;
 };
 
 std::ostream &operator<<(std::ostream &os, const Lease &lease);

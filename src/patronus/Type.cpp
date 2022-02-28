@@ -156,11 +156,17 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
     {
         os << "with-extend, ";
     }
+    bool with_cache = flag.flag & (uint8_t) RWFlag::kWithCache;
+    if (with_cache)
+    {
+        os << "with-cache, ";
+    }
     bool reserve = flag.flag & (uint8_t) RWFlag::kReserved;
     DCHECK(!reserve);
     os << "}";
     return os;
 }
+
 std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
 {
     os << "{LeaseModifyFlag ";
