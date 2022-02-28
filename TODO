@@ -123,6 +123,7 @@ FUTURES:
 - Checking: What about the rdtsc of ARM core? Is it constant? Is it stable across core?
 - Is `Lease` thread-safe? Can I make it thread-safe?
 - Port RapidCSV or Dataframe into this proj.
+- What is the extreme throughput of bind_mw? What is the bottleneck? Is it really scalable according to CPU core? Should figure it out. Most important: The max throughput one machine can provide. I *think* the bottleneck should be on the NIC.
 
 2/11-2/16 go to Sanya. 2/17 write dairy and sync my photos. Not working.
 

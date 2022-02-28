@@ -12,29 +12,39 @@
 - The overhead of unbind (a comparison)
 - Performance boost with registering MR each time. Register one time as the theoretical performance bound.
 - The overhead of tree-liked time-sync algorithm. See how fast it converges.
+- Allocation with MR .v.s allocation with MW.
 - [may] Report the "lease unexpected expire" times.
 - [may] The converge of Tree based time sync?
 - [may] Report the data path latency. KRCore can report its datapath latency (which is trivial), so do I. 
 
 # Macrobench
+- The shrinking problem of RACE hashing.
+    - Original hash table does not support memory isolation. Thus shrinking may cause serious problem. The gap between read and CAS can always corrupt the memory.
+    - Patronus way: lease (amortize the overhead of querying) + backup QP (hide the QP recovery overhead) + MW (quick permission change)
+    - Not open-sourced. Should impl it on my own.
+    - Report:
+        - a) close all the RDMA connections case
+        - b) rereg MR works, but will not report, because the motivation already rules out this.
+        - c) Do nothing: the theoretical performance bound
+        - d) Patronus management subtable allocations and deallocation.
+        - report the 1) regular performance, 2) shrink will not lower performance 3) expending is on the critical path, so report the expending latency!
+- From AIFM to AIFM-Patronus
+    - AIFM reports a 0.3 Mops for its syncthetic workload. Should be far enough for Patronus
+    - remoteable SPSC dynamic queue 
+        - Argue that AIFM does not and can not consider the multiple CN situations. Because when the queue expends the producer will access invalid memory.
+        - We impl a simple SPSC queue, which support expanding: use Patronus to revoke the access permission on the old small memory.
+    - AIFM's vector expending and shrinking, should be a good case.
 - workload for remote memory I. Showing that Patronus will not lower down perofrmance
     - Workload of graph-analytics, inception, quicksort, in-memory-analytics, kmeans, xsbench
     - The performance ratio of Patronus and register MR. The performance of Patronus v.s. FastSwap
     - Varing local memory ratio
     - ArXiv hardware-assisted trusted memory disaggregation for secure far memory. Figure 18.
-- Compare with Candidates. Showing that Patronus will not lower down performance
-    - AIFM (explicite API and unmodified Linux) v.s. AIFM-Patronus
-        - AIFM reports a 0.3 Mops for its syncthetic workload. Should be far enough for Patronus
-    - FastSwap (implicite API and modifed Linux swap subsystem): don't want to adopt this. Modified Linux and need QEMU.
-    - Use my own workloads (like how AIFM tried to compare with FastSwap)
-- The performance of KV (So... what's the purpose of this experiment?)
+- [may] The performance of KV (So... what's the purpose of this experiment?)
     - The index is accessible by anyone (because too fine-granularity for Patronus to offer high performance), or the privilige index thread (delegated)
     - The actual KV pairs are accessed by worker threads, guarded by Patronus.
-- The shrinking problem of Pengfei Zuo's hash table.
-    - Original hash table does not support memory isolation. Thus shrinking may cause serious problem.
-    - The stupid way: reregister MR, or separate each block into one MR (which slow downs expanding).
-    - Patronus way: lease (amortize the overhead of querying) + backup QP (hide the QP recovery overhead) + MW (quick permission change)
-    - So cool. Maintain last two MWs, one for the first half, and the second for the whole. Always use the "most specific" lease for accessing.
+    - Maybe a hand-writing one, maybe the passive KV on disaggregated memory.
+        - for Passive KV, the 4CN+4DN/8threads setting with YCSB A(50/50 R/W) gets only 5Mops. I think Patronus is able to reach that.
+    - So I can compare in this way. a) MN do the index searching + write, b) client do indexing searching, grant lease then write. c) totally one-sided.
 - [may] Compare with FaRM. Does it make sense to compare FaRM?
     - Not open-sourced, should emulate it.
 
