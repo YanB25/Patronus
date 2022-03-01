@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <memory>
 
-#include "Common.h"
 #include "Pool.h"
 #include "allocator.h"
 
