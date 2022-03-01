@@ -236,4 +236,25 @@ private:
     bool enabled_;
 };
 
+class ChronoTimer
+{
+public:
+    ChronoTimer() : now_(std::chrono::steady_clock::now())
+    {
+    }
+
+    uint64_t pin()
+    {
+        auto now = std::chrono::steady_clock::now();
+        auto diff = now - now_;
+        auto ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count();
+        now_ = now;
+        return ns;
+    }
+
+private:
+    std::chrono::time_point<std::chrono::steady_clock> now_;
+};
+
 #endif  // _TIMER_H_
