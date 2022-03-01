@@ -4,6 +4,7 @@
 #include "HugePageAlloc.h"
 #include "Timer.h"
 #include "patronus/Patronus.h"
+#include "patronus/memory/slab_allocator.h"
 #include "thirdparty/memory/nginx/ngx_palloc.h"
 #include "util/monitor.h"
 
@@ -39,11 +40,11 @@ void test_use_large_buffer_pool(void *addr)
 
 void test_use_allocator(void *addr)
 {
-    BlockAllocatorConfig conf;
+    SlabAllocatorConfig conf;
     conf.block_class = {1_GB};
     conf.block_ratio = {1};
     auto allocator =
-        std::make_shared<BlockAllocator>(addr, kMemoryPoolSize, conf);
+        std::make_shared<SlabAllocator>(addr, kMemoryPoolSize, conf);
 
     LOG(INFO) << "[bench] allocator: " << *allocator;
 

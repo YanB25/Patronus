@@ -11,7 +11,7 @@
 
 #include "ngx_config.h"
 #include "ngx_core.h"
-#include "patronus/memory/block_allocator.h"
+#include "patronus/memory/allocator.h"
 
 /*
  * NGX_MAX_ALLOC_FROM_POOL should be (ngx_pagesize - 1), i.e. 4095 on x86.
@@ -65,7 +65,7 @@ struct ngx_pool_s
     ngx_pool_large_t *large;
     ngx_pool_cleanup_t *cleanup;
 
-    std::shared_ptr<patronus::mem::BlockAllocator> internal_allocator;
+    std::shared_ptr<patronus::mem::IAllocator> internal_allocator;
 };
 
 typedef struct
@@ -76,7 +76,7 @@ typedef struct
 
 ngx_pool_t *ngx_create_pool(void *addr,
                             size_t size,
-                            std::shared_ptr<patronus::mem::BlockAllocator>);
+                            std::shared_ptr<patronus::mem::IAllocator>);
 void ngx_destroy_pool(ngx_pool_t *pool);
 void ngx_reset_pool(ngx_pool_t *pool);
 

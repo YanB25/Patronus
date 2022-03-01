@@ -29,7 +29,7 @@ static void *ngx_palloc_large(ngx_pool_t *pool, size_t size);
 ngx_pool_t *ngx_create_pool(
     void *addr,
     size_t size,
-    std::shared_ptr<patronus::mem::BlockAllocator> allocator)
+    std::shared_ptr<patronus::mem::IAllocator> allocator)
 {
     ngx_pool_t *p;
 

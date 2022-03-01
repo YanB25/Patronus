@@ -8,31 +8,13 @@
 
 #include "Common.h"
 #include "Pool.h"
+#include "allocator.h"
 
 namespace patronus::mem
 {
-inline std::pair<void *, size_t> align_address(void *addr,
-                                               size_t size,
-                                               size_t align)
-{
-    auto diff = ((uint64_t) addr) % align;
-    if (diff == 0)
-    {
-        return {addr, size};
-    }
-    auto adjust = align - diff;
-    auto aligned_addr = (void *) ((uint64_t) addr + adjust);
-    if (size < adjust)
-    {
-        return {nullptr, 0};
-    }
-    auto aligned_size = size - adjust;
-    return {aligned_addr, aligned_size};
-}
-
 using namespace define::literals;
 
-struct BlockAllocatorConfig
+struct SlabAllocatorConfig
 {
     std::vector<size_t> block_class;
     std::vector<double> block_ratio;
@@ -179,10 +161,10 @@ inline std::ostream &operator<<(std::ostream &os, const ClassInformation &info)
     return os;
 }
 
-class BlockAllocator
+class SlabAllocator : public IAllocator
 {
 public:
-    BlockAllocator(void *addr, size_t len, BlockAllocatorConfig config)
+    SlabAllocator(void *addr, size_t len, SlabAllocatorConfig config)
     {
         auto [aligned_addr, aligned_len] = align_address(addr, len, 4_KB);
         pool_start_addr_ = aligned_addr;
@@ -219,7 +201,7 @@ public:
         }
     }
 
-    void *alloc(size_t size)
+    void *alloc(size_t size) override
     {
         auto it = blocks_.lower_bound(size);
         if (it == blocks_.end())
@@ -239,7 +221,7 @@ public:
         }
         return ret;
     }
-    void free(void *addr)
+    void free(void *addr) override
     {
         CHECK_GE(addr, pool_start_addr_);
         auto it = end_addr_to_class_.upper_bound(addr);
@@ -277,7 +259,7 @@ public:
         return debug_allocated_bytes() - debug_allocated_bytes();
     }
     friend std::ostream &operator<<(std::ostream &os,
-                                    const BlockAllocator &allocator);
+                                    const SlabAllocator &allocator);
 
 private:
     void *pool_start_addr_{nullptr};
@@ -292,9 +274,9 @@ private:
 };
 
 inline std::ostream &operator<<(std::ostream &os,
-                                const BlockAllocator &allocator)
+                                const SlabAllocator &allocator)
 {
-    os << "{BlockAllocator: ";
+    os << "{SlabAllocator: ";
     for (auto [cls, info] : allocator.class_info_)
     {
         os << "[" << cls << ", " << info << "]; ";

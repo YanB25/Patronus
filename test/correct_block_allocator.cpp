@@ -4,12 +4,12 @@
 #include "HugePageAlloc.h"
 #include "Timer.h"
 #include "patronus/Patronus.h"
-#include "patronus/memory/block_allocator.h"
+#include "patronus/memory/slab_allocator.h"
 #include "util/monitor.h"
 
 using namespace patronus::mem;
 
-void test_4kb_2mb(BlockAllocator &allocator)
+void test_4kb_2mb(SlabAllocator &allocator)
 {
     std::set<void *> addr_4kb;
     std::set<void *> addr_2mb;
@@ -55,7 +55,7 @@ void test_4kb_2mb(BlockAllocator &allocator)
     }
 }
 
-void test_burn(BlockAllocator &allocator)
+void test_burn(SlabAllocator &allocator)
 {
     std::set<void *> s;
     for (size_t i = 0; i < 5_M; ++i)
@@ -86,7 +86,7 @@ void test_burn(BlockAllocator &allocator)
     }
 }
 
-void test_complex(BlockAllocator &allocator)
+void test_complex(SlabAllocator &allocator)
 {
     std::set<void *> s;
     size_t set_max_size = 0;
@@ -155,10 +155,10 @@ int main(int argc, char *argv[])
 
     auto *addr = hugePageAlloc(16_GB);
 
-    BlockAllocatorConfig conf;
+    SlabAllocatorConfig conf;
     conf.block_class = {4_KB, 2_MB};
     conf.block_ratio = {0.5, 0.5};
-    BlockAllocator allocator(addr, 16_GB, conf);
+    SlabAllocator allocator(addr, 16_GB, conf);
 
     LOG(INFO) << "[bench] allocator: " << allocator;
 
@@ -167,10 +167,10 @@ int main(int argc, char *argv[])
     test_burn(allocator);
 
     LOG(INFO) << "Pass burning, start complex test";
-    BlockAllocatorConfig complex_conf;
+    SlabAllocatorConfig complex_conf;
     complex_conf.block_class = {4_KB, 2_MB, 512_MB, 1_GB};
     complex_conf.block_ratio = {1.0 / 8, 1.0 / 8, 1.0 / 8, 3.0 / 8};
-    BlockAllocator complex_alloc(addr, 16_GB, complex_conf);
+    SlabAllocator complex_alloc(addr, 16_GB, complex_conf);
     LOG(INFO) << "[bench] complex allocator: " << complex_alloc;
     test_complex(complex_alloc);
 

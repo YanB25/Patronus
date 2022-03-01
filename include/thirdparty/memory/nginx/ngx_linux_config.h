@@ -49,8 +49,6 @@
 #include <time.h> /* tzset() */
 #include <unistd.h>
 
-#include "ngx_auto_config.h"
-
 #if (NGX_HAVE_POSIX_SEM)
 #include <semaphore.h>
 #endif
