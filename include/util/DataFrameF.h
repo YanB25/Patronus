@@ -61,6 +61,14 @@ auto gen_F_sub()
     return gen_F<A, B, R>([](A a, B b) { return (R)(a + b); });
 }
 
+// A is the type of operation_nr
+// B is the type of nanoseconds
+template <typename A, typename B, typename R>
+auto gen_F_ops()
+{
+    return gen_F<A, B, R>([](A a, B b) { return (R)(1e9 * a / b); });
+}
+
 }  // namespace hmdf
 
 #endif

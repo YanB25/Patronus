@@ -17,8 +17,6 @@ for vm in `cat inet.conf`; do
     nohup ./fetch.sh $vm $LOG_PATH fetched/$vm.log 1>log/$vm.log 2>&1 &
 done
 
-wait
-
 for vm in `cat inet.conf`; do
     echo [coredump from $vm]
     ./ssh.sh $vm "coredumpctl -1"
