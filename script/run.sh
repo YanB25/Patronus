@@ -21,9 +21,7 @@ GLOG_FLAGS="--logtostderr=true --colorlogtostderr=true"
 # hint to `date` and current git commit hash
 # so that the binary knows who he is.
 commit_hash=$(git rev-parse HEAD)
-echo $commit_hash
 commit_hash=${commit_hash:0:8}
-echo $commit_hash
 date=$(date +'%Y-%m-%d.%H:%M:%S')
 exec_meta="${date}.${commit_hash}"
 EXEC_META_FLAGS="--exec_meta=${exec_meta}"

@@ -10,4 +10,5 @@ wait
 ./run.sh $@
 wait
 ./fetch_log.sh
+./fetch_result.sh
 # ./for_each.sh ./cleanup.sh
