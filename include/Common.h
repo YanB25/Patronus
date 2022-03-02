@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 
 #include "HugePageAlloc.h"
@@ -300,5 +301,13 @@ constexpr static size_t kLeaseCacheItemLimitNr = 3;
 
 #define likely(x) __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
+
+inline std::string binary_to_csv_filename(const std::string &bench_path,
+                                          const std::string &exec_meta)
+{
+    std::string root = "../result/";
+    auto filename = std::filesystem::path(bench_path).filename().string();
+    return root + filename + "." + exec_meta + ".csv";
+}
 
 #endif /* __COMMON_H__ */

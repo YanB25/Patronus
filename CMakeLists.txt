@@ -16,6 +16,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -W")
 # set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg ")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg ")
 
+add_subdirectory(thirdparty/DataFrame)
+
 # disable boost warning
 add_definitions(-DBOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
@@ -39,7 +41,7 @@ find_package(gflags REQUIRED)
 # link_libraries(benchmark::benchmark)
 
 # Link Options
-set(LINKS_FLAGS "-lpthread -libverbs -lmemcached -rdynamic")
+set(LINKS_FLAGS "-lpthread -libverbs -lmemcached -rdynamic -lstdc++fs")
 find_library(CITYHASH_LIB NAMES libcityhash.a REQUIRED)
 
 link_libraries(${CITYHASH_LIB})
@@ -76,7 +78,7 @@ if (${BUILD_BENCH})
     foreach (BENCHMARK ${BENCHMARK_SRC})
         get_filename_component(BENCHMARK_NAME ${BENCHMARK} NAME_WE)
         add_executable(${BENCHMARK_NAME} ${BENCHMARK})
-        target_link_libraries(${BENCHMARK_NAME} PRIVATE ${LINKS_FLAGS} ${Boost_LIBRARIES} sherman)
+        target_link_libraries(${BENCHMARK_NAME} PRIVATE ${LINKS_FLAGS} ${Boost_LIBRARIES} sherman DataFrame::DataFrame)
         target_include_directories(${BENCHMARK_NAME} PRIVATE ${Boost_INCLUDE_DIRS})
     endforeach()
 endif()
@@ -87,7 +89,7 @@ if (${BUILD_TEST})
     foreach (TEST ${TEST_SRC})
         get_filename_component(TEST_NAME ${TEST} NAME_WE)
         add_executable(${TEST_NAME} ${TEST})
-        target_link_libraries(${TEST_NAME} PRIVATE ${LINKS_FLAGS} ${Boost_LIBRARIES} sherman)
+        target_link_libraries(${TEST_NAME} PRIVATE ${LINKS_FLAGS} ${Boost_LIBRARIES} sherman DataFrame::DataFrame)
         target_include_directories(${TEST_NAME} PRIVATE ${Boost_INCLUDE_DIRS})
     endforeach()
 endif()
