@@ -75,6 +75,7 @@
     "editor.wordWrap": "wordWrapColumn",
     "editor.wordWrapColumn": 160,
     "C_Cpp.default.includePath": [
-        "${workspaceFolder}/thirdparty/DataFrame/include"
+        "${workspaceFolder}/thirdparty/DataFrame/include",
+        "${workspaceFolder}/include"
     ]
 }

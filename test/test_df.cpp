@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <filesystem>
 #include <random>
+#include <vector>
 
 #include "Common.h"
 #include "DataFrame/DataFrame.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
+#include "util/DataFrameF.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -25,9 +27,13 @@ int main(int argc, char *argv[])
         0.01, 0.02, 0.03, 0.03, 0.05, 0.06, 0.03, 0.08, 0.09, 0.03};
 
     StrDataFrame ul_df1;
+    auto f = gen_F_mul<int, double, double>();
+
     ul_df1.load_index(std::move(idx_col1));
     ul_df1.load_column<double>("dbl_col", std::move(dbl_col1));
     ul_df1.load_column<int>("integers", std::move(int_col1));
+    ul_df1.consolidate<int, double, double>(
+        "integers", "dbl_col", "multiple", f, false);
 
     ul_df1.write<std::ostream, std::string, double, int>(std::cout,
                                                          io_format::csv2);

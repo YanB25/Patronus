@@ -8,6 +8,12 @@
 
 using namespace define::literals;
 
+std::vector<size_t> col_alloc_nr;
+std::vector<size_t> col_alloc_ns;
+std::vector<size_t> col_free_ns;
+std::vector<double> col_alloc_avg_ns;
+std::vector<double> col_avg_ns;
+
 void bench_alloc(size_t total_size, size_t alloc_size)
 {
     std::vector<void *> addrs;
