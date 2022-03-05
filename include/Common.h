@@ -249,6 +249,8 @@ struct Data
 #define WRID_PREFIX_PATRONUS_CAS 8
 #define WRID_PREFIX_PATRONUS_PR_CAS 9
 #define WRID_PREFIX_RESERVED 10
+// The outer-most benchmark only prefix
+#define WRID_PREFIX_BENCHMARK_ONLY 11
 
 static inline uint64_t djb2_digest(const void *void_str, size_t size)
 {

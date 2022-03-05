@@ -14,6 +14,8 @@ constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t dirID = 0;
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
 {
     LOG(INFO) << "client: TODO";

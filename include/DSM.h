@@ -178,6 +178,7 @@ public:
                         uint64_t val,
                         CoroContext *ctx = nullptr);
     inline ibv_qp *get_dir_qp(int node_id, int thread_id, size_t dirID);
+    inline ibv_cq *get_dir_cq(size_t dirID);
     inline ibv_qp *get_th_qp(int node_id, size_t dirID);
     inline ibv_mr *get_dir_mr(size_t dirID);
 
@@ -694,6 +695,11 @@ ibv_qp *DSM::get_dir_qp(int node_id, int thread_id, size_t dirID)
 {
     DCHECK_LT(dirID, dirCon.size());
     return dirCon[dirID]->QPs[thread_id][node_id];
+}
+ibv_cq *DSM::get_dir_cq(size_t dirID)
+{
+    DCHECK_LT(dirID, dirCon.size());
+    return dirCon[dirID]->cq;
 }
 ibv_qp *DSM::get_th_qp(int node_id, size_t dirID)
 {

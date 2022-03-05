@@ -235,6 +235,11 @@ public:
             debug_class_freed_nr_[ptr_class]++;
         }
     }
+    void free(void *addr, [[maybe_unused]] size_t size) override
+    {
+        // TODO(patronus): when debug is ON, try to validate the size
+        return free(addr);
+    }
     size_t debug_allocated_bytes() const
     {
         size_t ret = 0;

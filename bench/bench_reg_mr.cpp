@@ -269,7 +269,7 @@ void bench_reg_mr(size_t test_times,
                     if (op == 0)
                     {
                         auto *free_mr = mrs.front();
-                        destroyMemoryRegion(free_mr);
+                        CHECK(destroyMemoryRegion(free_mr));
                         mrs.pop();
                     }
                     else
@@ -288,7 +288,7 @@ void bench_reg_mr(size_t test_times,
             while (!mrs.empty())
             {
                 auto *free_mr = mrs.front();
-                destroyMemoryRegion(free_mr);
+                CHECK(destroyMemoryRegion(free_mr));
                 mrs.pop();
             }
         });
@@ -313,6 +313,13 @@ int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+    LOG(INFO)
+        << "This benchmark test against three cases: 1) bench_alloc: the "
+           "performance of malloc() (for small allocation) and mmap() "
+           "(for huge page allocation). 2) reg_mr: the performance of "
+           "registering memory region to RNIC, and 3) alloc_reg_mr: the "
+           "combination of 1) and 2).\nThe throughput and latency is reported";
 
     for (size_t thread_nr : {1, 2, 4, 8, 16})
     {

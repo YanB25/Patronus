@@ -1,19 +1,19 @@
 #pragma once
-#ifndef MEMORY_NGINX_H
-#define MEMORY_NGINX_H
+#ifndef MEMORY_NGX_ALLOCATOR_H_
+#define MEMORY_NGX_ALLOCATOR_H_
 
 #include "thirdparty/memory/nginx/ngx_palloc.h"
 
 namespace patronus::mem
 {
-class NginxMemoryPool : public IAllocator
+class NginxAllocator : public IAllocator
 {
 public:
     /**
      * @brief Construct a new Nginx Memory Pool object
      * The pool will only use the provided memory, i.e., @addr and @size
      */
-    NginxMemoryPool(void *addr, size_t size)
+    NginxAllocator(void *addr, size_t size)
     {
         pool_ = CHECK_NOTNULL(ngx_create_pool(addr, size, nullptr));
     }
@@ -22,8 +22,8 @@ public:
      * The pool will rely on the @allocator for memory allocation/freed.
      * Typically at the granularity of @size.
      */
-    NginxMemoryPool(size_t size,
-                    std::shared_ptr<patronus::mem::IAllocator> allocator)
+    NginxAllocator(size_t size,
+                   std::shared_ptr<patronus::mem::IAllocator> allocator)
     {
         pool_ = CHECK_NOTNULL(
             ngx_create_pool(nullptr, size, CHECK_NOTNULL(allocator)));
@@ -33,9 +33,9 @@ public:
      * Make sure @addr is free-able by @allocator. That is
      * allocator->free(addr) should be well-defined.
      */
-    NginxMemoryPool(void *addr,
-                    size_t size,
-                    std::shared_ptr<patronus::mem::IAllocator> allocator)
+    NginxAllocator(void *addr,
+                   size_t size,
+                   std::shared_ptr<patronus::mem::IAllocator> allocator)
     {
         pool_ = CHECK_NOTNULL(ngx_create_pool(
             CHECK_NOTNULL(addr), size, CHECK_NOTNULL(allocator)));

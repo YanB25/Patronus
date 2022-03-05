@@ -31,6 +31,7 @@ class IAllocator
 public:
     virtual ~IAllocator() = default;
     virtual void *alloc(size_t size) = 0;
+    virtual void free(void *addr, size_t size) = 0;
     virtual void free(void *addr) = 0;
 };
 }  // namespace patronus::mem

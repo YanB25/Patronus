@@ -191,7 +191,7 @@ bool DSM::recoverThreadQP(int node_id, size_t dirID)
     auto tid = get_thread_id();
     ibv_qp *qp = get_th_qp(node_id, dirID);
     DVLOG(1) << "Recovering th qp: " << qp << ". node_id: " << node_id
-               << ", thread_id: " << tid;
+             << ", thread_id: " << tid;
     const auto &ex = getExchangeMetaBootstrap(node_id);
 
     if (!modifyErrQPtoNormal(qp,
