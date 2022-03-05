@@ -124,11 +124,16 @@ void ngx_destroy_pool(ngx_pool_t *pool)
         }
     }
 
+    // must copy this out
+    // because freeing the page will immeidately make pool->internal_allocator
+    // invalid.
+    auto a = pool->internal_allocator;
+
     for (p = pool, n = pool->d.next; /* void */; p = n, n = n->d.next)
     {
-        if (pool->internal_allocator)
+        if (a)
         {
-            pool->internal_allocator->free(p);
+            a->free(p);
         }
 
         if (n == NULL)

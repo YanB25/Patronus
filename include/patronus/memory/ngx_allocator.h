@@ -50,6 +50,12 @@ public:
             << "[ngx][alloc] declined memory deallocation at addr " << addr
             << ", for pool: " << (void *) pool_;
     }
+    void free(void *addr, [[maybe_unused]] size_t size) override
+    {
+        CHECK_EQ(ngx_pfree(pool_, addr), NGX_OK)
+            << "[ngx][alloc] declined memory deallocation at addr " << addr
+            << " for pool: " << (void *) pool_;
+    }
 
 private:
     ngx_pool_t *pool_{nullptr};
