@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "patronus/DDLManager.h"
+#include "util/Rand.h"
 
 using namespace define::literals;
 
@@ -64,11 +65,11 @@ void burn(size_t max_size)
     t.begin();
     for (size_t i = 0; i < max_size / 2; ++i)
     {
-        m.push(rand(), []() {});
+        m.push(fast_pseudo_rand_int(), []() {});
     }
     for (size_t i = 0; i < 10_M; ++i)
     {
-        bool insert = rand() % 2 == 0;
+        bool insert = fast_pseudo_bool_with_nth(2);
         if (unlikely(m.empty()))
         {
             insert = true;
@@ -79,12 +80,12 @@ void burn(size_t max_size)
         }
         if (insert)
         {
-            m.push(rand(), []() {});
+            m.push(fast_pseudo_rand_int(), []() {});
             op++;
         }
         else
         {
-            DCHECK_LE(m.do_task(rand(), 1), 1);
+            DCHECK_LE(m.do_task(fast_pseudo_rand_int(), 1), 1);
         }
     }
     auto ns = t.end();

@@ -4,6 +4,8 @@
 
 #include <cassert>
 
+#include "util/Rand.h"
+
 RawMessageConnection::RawMessageConnection(RdmaContext &ctx,
                                            ibv_cq *cq,
                                            uint32_t messageNR)
@@ -29,7 +31,7 @@ void RawMessageConnection::syncSendRawMessage(RawMessage *m,
                                               uint32_t remoteQPN,
                                               ibv_ah *ah)
 {
-    uint64_t magic_wr_id = rand();
+    uint64_t magic_wr_id = fast_pseudo_rand_int();
     rdmaSend(message,
              (uint64_t) m - sendPadding,
              sizeof(RawMessage) + sendPadding,

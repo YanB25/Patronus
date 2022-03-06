@@ -5,6 +5,7 @@
 #include "Timer.h"
 #include "boost/thread/barrier.hpp"
 #include "patronus/Patronus.h"
+#include "util/Rand.h"
 #include "util/monitor.h"
 
 // Two nodes
@@ -92,12 +93,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         bool enable_trace = false;
         if constexpr (config::kEnableTrace)
         {
-            enable_trace = (rand() % config::kTraceRate) == 0;
+            enable_trace = fast_pseudo_bool_with_nth(config::kTraceRate);
+
             if (unlikely(enable_trace))
             {
                 while (trace == 0)
                 {
-                    trace = rand();
+                    trace = fast_pseudo_rand_int();
                 }
                 auto &timer = ctx.timer();
                 timer.init(std::to_string(trace));
@@ -243,30 +245,28 @@ void client(Patronus::pointer p)
     LOG(INFO) << "I am client. tid " << tid;
 
     std::atomic<bool> finish{false};
-    std::thread monitor_thread(
-        [&finish]()
+    std::thread monitor_thread([&finish]() {
+        while (!finish.load(std::memory_order_relaxed))
         {
-            while (!finish.load(std::memory_order_relaxed))
-            {
-                auto [cur_success, cur_fail] = get_success_fair_nr();
-                auto now = std::chrono::steady_clock::now();
-                usleep(1000 * 1000);
-                auto [then_success, then_fail] = get_success_fair_nr();
-                auto then = std::chrono::steady_clock::now();
-                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                              then - now)
-                              .count();
+            auto [cur_success, cur_fail] = get_success_fair_nr();
+            auto now = std::chrono::steady_clock::now();
+            usleep(1000 * 1000);
+            auto [then_success, then_fail] = get_success_fair_nr();
+            auto then = std::chrono::steady_clock::now();
+            auto ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(then - now)
+                    .count();
 
-                auto success_op = then_success - cur_success;
-                auto fail_op = then_fail - cur_fail;
-                double ops = 1.0 * 1e9 * success_op / ns;
-                double ops_thread = ops / kThreadNr;
-                LOG_IF(INFO, cur_success > 0)
-                    << "[bench] Op: " << success_op << ", fail Op: " << fail_op
-                    << " for " << ns << " ns. OPS: " << ops
-                    << ", OPS/thread: " << ops_thread;
-            }
-        });
+            auto success_op = then_success - cur_success;
+            auto fail_op = then_fail - cur_fail;
+            double ops = 1.0 * 1e9 * success_op / ns;
+            double ops_thread = ops / kThreadNr;
+            LOG_IF(INFO, cur_success > 0)
+                << "[bench] Op: " << success_op << ", fail Op: " << fail_op
+                << " for " << ns << " ns. OPS: " << ops
+                << ", OPS/thread: " << ops_thread;
+        }
+    });
 
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
@@ -315,15 +315,13 @@ int main(int argc, char *argv[])
 
         for (size_t i = 0; i < kThreadNr - 1; ++i)
         {
-            threads.emplace_back(
-                [patronus, &bar]()
-                {
-                    patronus->registerClientThread();
-                    auto tid = patronus->get_thread_id();
-                    client(patronus);
-                    DLOG(INFO) << "[bench] thread " << tid << " finish it work";
-                    bar.wait();
-                });
+            threads.emplace_back([patronus, &bar]() {
+                patronus->registerClientThread();
+                auto tid = patronus->get_thread_id();
+                client(patronus);
+                DLOG(INFO) << "[bench] thread " << tid << " finish it work";
+                bar.wait();
+            });
         }
         patronus->registerClientThread();
         auto tid = patronus->get_thread_id();
@@ -336,13 +334,11 @@ int main(int argc, char *argv[])
     {
         for (size_t i = 0; i < kThreadNr - 1; ++i)
         {
-            threads.emplace_back(
-                [patronus]()
-                {
-                    patronus->registerServerThread();
+            threads.emplace_back([patronus]() {
+                patronus->registerServerThread();
 
-                    server(patronus);
-                });
+                server(patronus);
+            });
         }
         patronus->registerServerThread();
         auto internal_buf = patronus->get_server_internal_buffer();

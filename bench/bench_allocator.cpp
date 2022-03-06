@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <iostream>
 #include <queue>
-#include <random>
 #include <set>
 
 #include "Common.h"
@@ -14,6 +13,7 @@
 #include "patronus/memory/mr_allocator.h"
 #include "patronus/memory/mw_allocator.h"
 #include "util/DataFrameF.h"
+#include "util/Rand.h"
 
 using namespace define::literals;
 using namespace patronus;
@@ -55,7 +55,7 @@ void bench_alloc_thread(size_t tid,
             }
             else
             {
-                op = rand() % 2;
+                op = fast_pseudo_rand_int(0, 1);
             }
             if (op == 0)
             {
@@ -117,7 +117,7 @@ void bench_alloc_mw_thread(size_t tid,
             }
             else
             {
-                op = rand() % 2;
+                op = fast_pseudo_rand_int(0, 1);
             }
 
             if (op == 0)

@@ -3,6 +3,7 @@
 
 #include "Timer.h"
 #include "patronus/Patronus.h"
+#include "util/Rand.h"
 #include "util/monitor.h"
 
 // Two nodes
@@ -72,12 +73,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         bool enable_trace = false;
         if constexpr (config::kEnableTrace)
         {
-            enable_trace = (rand() % config::kTraceRate) == 0;
+            enable_trace = fast_pseudo_bool_with_nth(config::kTraceRate);
+
             if (unlikely(enable_trace))
             {
                 while (trace == 0)
                 {
-                    trace = rand();
+                    trace = fast_pseudo_rand_int();
                 }
                 auto &timer = ctx.timer();
                 timer.init(std::to_string(trace));

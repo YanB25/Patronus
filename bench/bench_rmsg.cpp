@@ -6,6 +6,7 @@
 #include "DSM.h"
 #include "PerThread.h"
 #include "Timer.h"
+#include "util/Rand.h"
 #include "util/monitor.h"
 
 // Two nodes
@@ -40,7 +41,7 @@ void client_pingpong_correct(std::shared_ptr<DSM> dsm)
     char recv_buf[1024];
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
-        uint64_t magic = rand();
+        uint64_t magic = fast_pseudo_rand_int();
         *(uint64_t *) buf = magic;
         dsm->reliable_send(buf, sizeof(uint64_t), kServerNodeId, 0);
 

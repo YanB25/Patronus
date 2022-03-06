@@ -10,6 +10,7 @@
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "util/DataFrameF.h"
+#include "util/Rand.h"
 
 using namespace define::literals;
 
@@ -79,7 +80,7 @@ void bench_alloc(size_t test_times,
                     }
                     else
                     {
-                        op = rand() % 2;
+                        op = fast_pseudo_rand_int(0, 1);
                     }
                     if (op == 0)
                     {
@@ -160,7 +161,7 @@ void bench_alloc_reg_mr(size_t test_times,
                     }
                     else
                     {
-                        op = rand() % 2;
+                        op = fast_pseudo_rand_int(0, 1);
                     }
                     if (op == 0)
                     {
@@ -264,7 +265,7 @@ void bench_reg_mr(size_t test_times,
                     }
                     else
                     {
-                        op = rand() % 2;
+                        op = fast_pseudo_rand_int(0, 1);
                     }
                     if (op == 0)
                     {
@@ -274,7 +275,7 @@ void bench_reg_mr(size_t test_times,
                     }
                     else
                     {
-                        auto block_id = rand() % block_nr;
+                        auto block_id = fast_pseudo_rand_int(0, block_nr - 1);
                         auto *alloc_addr =
                             ((char *) global_addr + block_id * alloc_size);
                         mrs.push(CHECK_NOTNULL(createMemoryRegion(

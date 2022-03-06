@@ -4,6 +4,7 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "boost/thread/barrier.hpp"
+#include "util/Rand.h"
 #include "util/monitor.h"
 
 // Two nodes
@@ -56,27 +57,6 @@ void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
         LOG(ERROR) << "buf " << lhs_buf << " != expect\n";
     }
     printf("buf %p == expect!\n", lhs_buf);
-}
-
-// Notice: TLS object is created only once for each combination of type and
-// thread. Only use this when you prefer multiple callers share the same
-// instance.
-template <class T, class... Args>
-inline T &TLS(Args &&... args)
-{
-    thread_local T _tls_item(std::forward<Args>(args)...);
-    return _tls_item;
-}
-inline std::mt19937 &rand_generator()
-{
-    return TLS<std::mt19937>();
-}
-
-// [min, max]
-uint64_t rand_int(uint64_t min, uint64_t max)
-{
-    std::uniform_int_distribution<uint64_t> dist(min, max);
-    return dist(rand_generator());
 }
 
 std::vector<uint32_t> recv_rkeys(std::shared_ptr<DSM> dsm, size_t size)
@@ -196,7 +176,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
     size_t rkey_idx = 0;
     for (size_t i = 0; i < test_times; i++)
     {
-        size_t io_block_nth = rand_int(0, io_rng - 1);
+        size_t io_block_nth = fast_pseudo_rand_int(0, io_rng - 1);
         DCHECK(io_block_nth >= 0);
         gaddr.offset = io_block_nth * io_size;
         DCHECK(gaddr.offset + io_size < size);
@@ -206,7 +186,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
         }
         else
         {
-            rkey_idx = rand_int(0, rkeys.size() - 1);
+            rkey_idx = fast_pseudo_rand_int(0, rkeys.size() - 1);
         }
         DCHECK(rkey_idx < rkeys.size());
         uint32_t rkey = rkeys[rkey_idx];

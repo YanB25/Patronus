@@ -4,6 +4,7 @@
 
 #include "DSM.h"
 #include "Timer.h"
+#include "util/Rand.h"
 #include "util/monitor.h"
 
 // Two nodes
@@ -42,7 +43,7 @@ int main(int argc, char *argv[])
             }
             else
             {
-                get = rand() % 2 == 0;
+                get = fast_pseudo_bool_with_nth(2);
             }
             if (get)
             {
@@ -86,7 +87,7 @@ int main(int argc, char *argv[])
             }
             else
             {
-                get = rand() % 2 == 0;
+                get = fast_pseudo_bool_with_nth(2);
             }
             if (get)
             {
