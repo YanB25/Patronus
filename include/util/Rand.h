@@ -54,8 +54,11 @@ inline std::random_device &random_device_generator()
 // [min, max]
 inline uint64_t fast_pseudo_rand_int(uint64_t min, uint64_t max)
 {
+    // TODO: in the current CPU or implementation
+    // the mt19937 generates turns out to be faster.
     std::uniform_int_distribution<uint64_t> dist(min, max);
-    return dist(ranlux48_base_generator());
+    // return dist(ranlux48_base_generator());
+    return dist(mt19937_generator());
 }
 inline uint64_t accurate_pseudo_rand_int(uint64_t min, uint64_t max)
 {
