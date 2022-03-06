@@ -12,6 +12,8 @@
 #include "patronus/memory/direct_allocator.h"
 #include "patronus/memory/mr_allocator.h"
 #include "patronus/memory/mw_allocator.h"
+#include "patronus/memory/ngx_allocator.h"
+#include "patronus/memory/nothing_allocator.h"
 #include "util/DataFrameF.h"
 #include "util/Rand.h"
 
@@ -19,6 +21,7 @@ using namespace define::literals;
 using namespace patronus;
 
 constexpr uint32_t kMachineNr = 2;
+constexpr static size_t kMwPoolTotalSize = 8192;
 
 std::vector<std::string> col_idx;
 std::vector<size_t> col_x_alloc_size;
@@ -32,20 +35,26 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 void bench_alloc_thread(size_t tid,
                         size_t alloc_size,
-                        size_t alloc_limit,
+                        size_t alloc_limit_thread,
                         std::shared_ptr<mem::IAllocator> allocator,
+                        size_t test_times,
                         std::atomic<ssize_t> &work_nr)
 {
+    bindCore(tid + 1);
+
     std::queue<void *> addrs;
     ssize_t remain = work_nr.load(std::memory_order_relaxed);
-    bindCore(tid + 1);
+
+    ssize_t task_per_sync = test_times / 100;
+    task_per_sync = std::max(task_per_sync, ssize_t(1));  // at least 1
+
     while (remain > 0)
     {
-        size_t task_nr = std::min(remain, (ssize_t) 50);
+        size_t task_nr = std::min(remain, task_per_sync);
         for (size_t i = 0; i < task_nr; ++i)
         {
             int op = 0;
-            if (addrs.size() >= alloc_limit)
+            if (addrs.size() + 1 > alloc_limit_thread)
             {
                 op = 0;
             }
@@ -59,16 +68,20 @@ void bench_alloc_thread(size_t tid,
             }
             if (op == 0)
             {
-                allocator->free(addrs.front(), alloc_size);
+                auto *addr = addrs.front();
+                DVLOG(1) << "free " << (void *) addr << " from tid " << tid;
+                allocator->free(addr, alloc_size);
                 addrs.pop();
             }
             else
             {
-                addrs.push(CHECK_NOTNULL(allocator->alloc(alloc_size)));
+                auto *addr = CHECK_NOTNULL(allocator->alloc(alloc_size));
+                DVLOG(1) << "allocating " << (void *) addr << " from tid "
+                         << tid;
+                addrs.push(addr);
             }
         }
-        work_nr.fetch_sub(task_nr);
-        remain = work_nr.load(std::memory_order_relaxed);
+        remain = work_nr.fetch_sub(task_nr) - task_nr;
     }
     while (!addrs.empty())
     {
@@ -79,7 +92,7 @@ void bench_alloc_thread(size_t tid,
 
 void bench_alloc_mw_thread(size_t tid,
                            size_t alloc_size,
-                           size_t alloc_limit,
+                           size_t alloc_limit_thread,
                            std::shared_ptr<mem::IAllocator> allocator,
                            std::shared_ptr<mem::MWPool> mw_pool,
                            std::atomic<ssize_t> &work_nr,
@@ -107,7 +120,7 @@ void bench_alloc_mw_thread(size_t tid,
         for (size_t batch_id = 0; batch_id < batch_nr; ++batch_id)
         {
             int op = 0;
-            if (addrs.size() + kCqPollBatch >= alloc_limit)
+            if (addrs.size() + kCqPollBatch > alloc_limit_thread)
             {
                 op = 0;
             }
@@ -224,9 +237,10 @@ void bench_alloc_mw_thread(size_t tid,
 void bench_template(const std::string &bench_name,
                     size_t test_times,
                     size_t alloc_size,
-                    size_t memory_limit,
+                    size_t alloc_limit_thread,
                     size_t thread_nr,
-                    std::vector<std::shared_ptr<mem::IAllocator>> allocators)
+                    std::vector<std::shared_ptr<mem::IAllocator>> allocators,
+                    bool report)
 {
     CHECK_EQ(allocators.size(), thread_nr);
     std::vector<std::thread> threads;
@@ -234,14 +248,21 @@ void bench_template(const std::string &bench_name,
     std::atomic<ssize_t> work_nr{ssize_t(test_times)};
 
     ChronoTimer timer;
-    size_t alloc_limit = memory_limit / thread_nr / alloc_size;
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [i, alloc_size, alloc_limit, allocators, &work_nr]() {
-                bench_alloc_thread(
-                    i, alloc_size, alloc_limit, allocators[i], work_nr);
-            });
+        threads.emplace_back([i,
+                              alloc_size,
+                              alloc_limit_thread,
+                              allocators,
+                              test_times,
+                              &work_nr]() {
+            bench_alloc_thread(i,
+                               alloc_size,
+                               alloc_limit_thread,
+                               allocators[i],
+                               test_times,
+                               work_nr);
+        });
     }
     for (auto &t : threads)
     {
@@ -249,37 +270,180 @@ void bench_template(const std::string &bench_name,
     }
     auto total_ns = timer.pin();
 
-    col_idx.push_back(bench_name);
-    col_x_alloc_size.push_back(alloc_size);
-    col_x_thread_nr.push_back(thread_nr);
-    col_alloc_nr.push_back(test_times);
-    col_alloc_ns.push_back(total_ns);
+    if (report)
+    {
+        col_idx.push_back(bench_name);
+        col_x_alloc_size.push_back(alloc_size);
+        col_x_thread_nr.push_back(thread_nr);
+        col_alloc_nr.push_back(test_times);
+        col_alloc_ns.push_back(total_ns);
+    }
 }
 void bench_alloc(size_t test_times,
                  size_t alloc_size,
                  size_t memory_limit,
-                 size_t thread_nr)
+                 size_t thread_nr,
+                 bool report)
 {
     std::vector<std::shared_ptr<mem::IAllocator>> allocators;
     for (size_t i = 0; i < thread_nr; ++i)
     {
         allocators.push_back(std::make_shared<mem::RawAllocator>());
     }
-    return bench_template("alloc(syscall)",
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+    return bench_template("alloc (syscall)",
                           test_times,
                           alloc_size,
-                          memory_limit,
+                          alloc_limit_thread,
                           thread_nr,
-                          allocators);
+                          allocators,
+                          report);
 }
+
+void bench_ngx_alloc(size_t test_times,
+                     size_t alloc_size,
+                     size_t memory_limit,
+                     size_t thread_nr,
+                     bool report)
+{
+    CHECK(false) << "bench_ngx_alloc is unable to run, because ngxin's memory "
+                    "pool does not NGX_DECLINED free-ing small objects";
+    std::vector<std::shared_ptr<mem::IAllocator>> allocators;
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        auto raw_allocator = std::make_shared<mem::RawAllocator>();
+        allocators.push_back(
+            std::make_shared<mem::NginxAllocator>(1_GB, raw_allocator));
+    }
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+
+    return bench_template("alloc (nginx)",
+                          test_times,
+                          alloc_size,
+                          alloc_limit_thread,
+                          thread_nr,
+                          allocators,
+                          report);
+}
+
+void bench_nothing_alloc(size_t test_times,
+                         size_t alloc_size,
+                         size_t memory_limit,
+                         size_t thread_nr,
+                         bool report)
+{
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+
+    std::vector<std::shared_ptr<mem::IAllocator>> allocators;
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        allocators.push_back(std::make_shared<mem::NothingAllocator>());
+    }
+    bench_template("alloc (nothing)",
+                   test_times,
+                   alloc_size,
+                   alloc_limit_thread,
+                   thread_nr,
+                   allocators,
+                   report);
+}
+
+void bench_slab_alloc(size_t test_times,
+                      size_t alloc_size,
+                      size_t memory_limit,
+                      size_t thread_nr,
+                      bool report)
+{
+    void *global_addr = hugePageAlloc(memory_limit);
+    size_t memory_limit_thread = memory_limit / thread_nr;
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+
+    std::vector<std::shared_ptr<mem::IAllocator>> allocators;
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        void *start_addr_thread =
+            (char *) global_addr + i * memory_limit_thread;
+        mem::SlabAllocatorConfig conf;
+        conf.block_class = {alloc_size};
+        conf.block_ratio = {1};
+        allocators.push_back(std::make_shared<mem::SlabAllocator>(
+            start_addr_thread, memory_limit_thread, conf));
+    }
+    bench_template("alloc (slab)",
+                   test_times,
+                   alloc_size,
+                   alloc_limit_thread,
+                   thread_nr,
+                   allocators,
+                   report);
+
+    CHECK(hugePageFree(global_addr, memory_limit));
+}
+
+void bench_slab_alloc_reg_mr(size_t test_times,
+                             size_t alloc_size,
+                             size_t memory_limit,
+                             size_t thread_nr,
+                             bool report)
+{
+    void *global_addr = hugePageAlloc(memory_limit);
+    size_t memory_limit_thread = memory_limit / thread_nr;
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+
+    std::vector<std::shared_ptr<mem::IAllocator>> allocators;
+    std::vector<RdmaContext> rdma_contexts;
+    rdma_contexts.resize(thread_nr);
+
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        mem::SlabAllocatorConfig slab_conf;
+        slab_conf.block_class = {alloc_size};
+        slab_conf.block_ratio = {1};
+        void *start_addr_thread =
+            (char *) global_addr + memory_limit_thread * i;
+        auto slab_allocator = std::make_shared<mem::SlabAllocator>(
+            start_addr_thread, memory_limit_thread, slab_conf);
+
+        CHECK(createContext(&rdma_contexts[i]));
+        mem::MRAllocatorConfig mr_conf;
+        mr_conf.rdma_context = &rdma_contexts[i];
+
+        mr_conf.allocator = slab_allocator;
+        allocators.push_back(std::make_shared<mem::MRAllocator>(mr_conf));
+    }
+    bench_template("alloc (slab) + MR",
+                   test_times,
+                   alloc_size,
+                   alloc_limit_thread,
+                   thread_nr,
+                   allocators,
+                   report);
+
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        CHECK(destroyContext(&rdma_contexts[i]));
+    }
+
+    CHECK(hugePageFree(global_addr, memory_limit));
+}
+
 void bench_alloc_reg_mr(size_t test_times,
                         size_t alloc_size,
                         size_t memory_limit,
-                        size_t thread_nr)
+                        size_t thread_nr,
+                        bool report)
 {
     std::vector<std::shared_ptr<mem::IAllocator>> allocators;
     std::vector<RdmaContext> rdma_contexts;
     rdma_contexts.resize(thread_nr);
+
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
 
     for (size_t i = 0; i < thread_nr; ++i)
     {
@@ -289,27 +453,84 @@ void bench_alloc_reg_mr(size_t test_times,
         conf.allocator = std::make_shared<mem::RawAllocator>();
         allocators.push_back(std::make_shared<mem::MRAllocator>(conf));
     }
-    bench_template("alloc + MR",
+    bench_template("alloc (syscall) + MR",
                    test_times,
                    alloc_size,
-                   memory_limit,
+                   alloc_limit_thread,
                    thread_nr,
-                   allocators);
+                   allocators,
+                   report);
 
     for (size_t i = 0; i < thread_nr; ++i)
     {
         CHECK(destroyContext(&rdma_contexts[i]));
     }
 }
+
+void bench_slab_alloc_reg_mw(size_t test_times,
+                             size_t alloc_size,
+                             size_t memory_limit,
+                             size_t thread_nr,
+                             DSM::pointer dsm,
+                             bool report)
+{
+    void *global_addr = hugePageAlloc(memory_limit);
+    size_t mw_pool_size_thread = kMwPoolTotalSize / thread_nr;
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+    alloc_limit_thread = std::min(alloc_limit_thread, mw_pool_size_thread);
+    size_t memory_limit_thread = memory_limit / thread_nr;
+
+    std::vector<std::shared_ptr<mem::IAllocator>> allocators;
+    std::vector<RdmaContext> rdma_contexts;
+    rdma_contexts.resize(thread_nr);
+
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        void *start_addr = (char *) global_addr + memory_limit_thread * i;
+        mem::SlabAllocatorConfig slab_conf;
+        slab_conf.block_class = {alloc_size};
+        slab_conf.block_ratio = {1};
+
+        CHECK(createContext(&rdma_contexts[i]));
+        mem::MWAllocatorConfig conf;
+        conf.allocator = std::make_shared<mem::SlabAllocator>(
+            start_addr, memory_limit_thread, slab_conf);
+        conf.dir_id = i % NR_DIRECTORY;
+        conf.dsm = dsm;
+        conf.node_id = 0;
+        conf.thread_id = i;
+        conf.mw_pool = std::make_shared<mem::MWPool>(
+            dsm, conf.dir_id, mw_pool_size_thread);
+        allocators.push_back(std::make_shared<mem::MWAllocator>(conf));
+    }
+    bench_template("alloc (slab) + MW (allocator without MR)",
+                   test_times,
+                   alloc_size,
+                   alloc_limit_thread,
+                   thread_nr,
+                   allocators,
+                   report);
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        CHECK(destroyContext(&rdma_contexts[i]));
+    }
+
+    CHECK(hugePageFree(global_addr, memory_limit));
+}
+
 void bench_alloc_reg_mw_with_mw_allocator(size_t test_times,
                                           size_t alloc_size,
                                           size_t memory_limit,
                                           size_t thread_nr,
-                                          DSM::pointer dsm)
+                                          DSM::pointer dsm,
+                                          bool report)
 {
     std::vector<std::shared_ptr<mem::IAllocator>> allocators;
     std::vector<RdmaContext> rdma_contexts;
     rdma_contexts.resize(thread_nr);
+
+    size_t mw_pool_thread = kMwPoolTotalSize / thread_nr;
 
     for (size_t i = 0; i < thread_nr; ++i)
     {
@@ -320,15 +541,22 @@ void bench_alloc_reg_mw_with_mw_allocator(size_t test_times,
         conf.dsm = dsm;
         conf.node_id = 0;
         conf.thread_id = i;
-        conf.mw_pool = std::make_shared<mem::MWPool>(dsm, conf.dir_id, 1024);
+        conf.mw_pool =
+            std::make_shared<mem::MWPool>(dsm, conf.dir_id, mw_pool_thread);
         allocators.push_back(std::make_shared<mem::MWAllocator>(conf));
     }
-    bench_template("alloc + MW(allocator without MR)",
+
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+    alloc_limit_thread = std::min(alloc_limit_thread, mw_pool_thread);
+
+    bench_template("alloc (syscall) + MW (allocator without MR)",
                    test_times,
                    alloc_size,
-                   memory_limit,
+                   alloc_limit_thread,
                    thread_nr,
-                   allocators);
+                   allocators,
+                   report);
     for (size_t i = 0; i < thread_nr; ++i)
     {
         CHECK(destroyContext(&rdma_contexts[i]));
@@ -338,16 +566,20 @@ void bench_alloc_reg_mw_signal_batching(size_t test_times,
                                         size_t alloc_size,
                                         size_t memory_limit,
                                         size_t thread_nr,
-                                        DSM::pointer dsm)
+                                        DSM::pointer dsm,
+                                        bool report)
 {
     std::vector<std::shared_ptr<mem::IAllocator>> allocators;
     std::vector<std::shared_ptr<mem::MWPool>> mw_pools;
+
+    size_t mw_pool_size_thread = kMwPoolTotalSize / thread_nr;
 
     for (size_t i = 0; i < thread_nr; ++i)
     {
         auto dir_id = i % NR_DIRECTORY;
         allocators.push_back(std::make_shared<mem::RawAllocator>());
-        mw_pools.push_back(std::make_shared<mem::MWPool>(dsm, dir_id, 1024));
+        mw_pools.push_back(
+            std::make_shared<mem::MWPool>(dsm, dir_id, mw_pool_size_thread));
     }
 
     CHECK_EQ(allocators.size(), thread_nr);
@@ -355,8 +587,11 @@ void bench_alloc_reg_mw_signal_batching(size_t test_times,
 
     std::atomic<ssize_t> work_nr{ssize_t(test_times)};
 
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+    alloc_limit_thread = std::min(alloc_limit_thread, mw_pool_size_thread);
+
     ChronoTimer timer;
-    size_t alloc_limit = memory_limit / thread_nr / alloc_size;
     for (size_t i = 0; i < thread_nr; ++i)
     {
         mem::MWAllocatorConfig conf;
@@ -367,13 +602,18 @@ void bench_alloc_reg_mw_signal_batching(size_t test_times,
         conf.thread_id = i;
         threads.emplace_back([i,
                               alloc_size,
-                              alloc_limit,
+                              alloc_limit_thread,
                               &allocator = allocators[i],
                               &mw_pool = mw_pools[i],
                               &work_nr,
                               conf]() {
-            bench_alloc_mw_thread(
-                i, alloc_size, alloc_limit, allocator, mw_pool, work_nr, conf);
+            bench_alloc_mw_thread(i,
+                                  alloc_size,
+                                  alloc_limit_thread,
+                                  allocator,
+                                  mw_pool,
+                                  work_nr,
+                                  conf);
         });
     }
     for (auto &t : threads)
@@ -382,11 +622,14 @@ void bench_alloc_reg_mw_signal_batching(size_t test_times,
     }
     auto total_ns = timer.pin();
 
-    col_idx.push_back("alloc + MW (without MR)");
-    col_x_alloc_size.push_back(alloc_size);
-    col_x_thread_nr.push_back(thread_nr);
-    col_alloc_nr.push_back(test_times);
-    col_alloc_ns.push_back(total_ns);
+    if (report)
+    {
+        col_idx.push_back("alloc (syscall) + MW (batching without MR)");
+        col_x_alloc_size.push_back(alloc_size);
+        col_x_thread_nr.push_back(thread_nr);
+        col_alloc_nr.push_back(test_times);
+        col_alloc_ns.push_back(total_ns);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -403,43 +646,71 @@ int main(int argc, char *argv[])
     sleep(1);
     dsm->registerThread();
 
+    bindCore(0);
+
     LOG(INFO) << "This executable is a comprehensive performance comparison "
                  "between each memory allocator";
-    LOG(INFO) << "alloc: use hugePageAlloc & malloc";
-    LOG(INFO) << "alloc + MR: also bind memory region";
+    LOG(INFO) << "alloc (@type) + @pem (@detail)";
+    LOG(INFO) << "@type syscall: using hugePageAlloc() or malloc()";
+    LOG(INFO) << "@type slab: using slab allocator";
+    LOG(INFO) << "@type ngx: using Nginx memory pool";
+    LOG(INFO) << "@pem MR: registering memory region";
+    LOG(INFO) << "@pem MW: registering memory window";
     LOG(INFO)
-        << "alloc + MW (batching without MR): Register MW with raw code so "
-           "that we can enable signal batching. The MW is not over MR. ";
-    LOG(INFO) << "alloc + MW (allocator without MR): Register MW with "
-                 "mw_allocator, and signal batching is not enabled."
-                 " The MW is not over MR.";
+        << "@detail allocator: using MWAllocator, which does not batch signal";
+    LOG(INFO) << "@detail batch: enabling batch signal";
+    LOG(INFO)
+        << "@detail without MR: the memory window is not deployed over MR";
 
     // for (size_t thread_nr : {1, 2, 4, 8})
-    for (size_t thread_nr : {8})
+    for (size_t thread_nr : {1, 2, 4, 8, 16})
     {
         // for (size_t block_size : {2_MB, 128_MB})
         for (size_t block_size : {2_MB})
         {
-            LOG(INFO) << "[bench] benching thread " << thread_nr
-                      << ", block_size: " << block_size << " for bench_alloc ";
-            bench_alloc(1_M, block_size, 16_GB, thread_nr);
+            LOG(INFO) << "thread_nr: " << thread_nr
+                      << ", block_size: " << block_size;
+            // LOG(INFO) << "[bench] bench_alloc()";
+            // bench_alloc(1_M, block_size, 16_GB, thread_nr);
 
-            LOG(INFO) << "[bench] benching thread " << thread_nr
-                      << ", block_size: " << block_size
-                      << " for bench_alloc_reg_mw";
-            bench_alloc_reg_mw_signal_batching(
-                1_M / 20, block_size, 16_GB, thread_nr, dsm);
+            // LOG(INFO) << "[bench] bench_alloc_reg_mw_signal_batching()";
+            // bench_alloc_reg_mw_signal_batching(
+            //     1_M / 20, block_size, 16_GB, thread_nr, dsm);
 
-            LOG(INFO) << "[bench] benching thread " << thread_nr
-                      << ", block_size: " << block_size
-                      << " for bench_alloc_reg_mw_with_mw_allocator";
-            bench_alloc_reg_mw_with_mw_allocator(
-                1_M / 20, block_size, 16_GB, thread_nr, dsm);
+            // LOG(INFO) << "[bench] bench_alloc_reg_mw_with_mw_allocator()";
+            // bench_alloc_reg_mw_with_mw_allocator(
+            //     1_M, block_size, 16_GB, thread_nr, dsm);
 
-            LOG(INFO) << "[bench] benching thread " << thread_nr
-                      << ", block_size: " << block_size
-                      << " for bench_alloc_reg_mr";
-            bench_alloc_reg_mr(1_K, block_size, 16_GB, thread_nr);
+            // LOG(INFO) << "[bench] bench_alloc_reg_mr()";
+            // bench_alloc_reg_mr(1_K, block_size, 16_GB, thread_nr);
+
+            // LOG(INFO) << "[bench] skipping bench_ngx_allocator()";
+            // // bench_ngx_alloc(1_M, block_size, 16_GB, thread_nr);
+
+            LOG(INFO) << "[bench] bench slab_allocator()";
+            bench_slab_alloc(
+                10_M * thread_nr, block_size, 16_GB, thread_nr, false);
+
+            bench_slab_alloc(
+                10_M * thread_nr, block_size, 16_GB, thread_nr, true);
+
+            LOG(INFO) << "[bench] bench_alloc_slab_reg_mr()";
+            bench_slab_alloc_reg_mr(
+                1_M / 100, block_size, 16_GB, thread_nr, false);
+            bench_slab_alloc_reg_mr(
+                1_M / 100, block_size, 16_GB, thread_nr, true);
+
+            LOG(INFO) << "[bench] bench_alloc_slab_reg_mw()";
+            bench_slab_alloc_reg_mw(
+                1_M, block_size, 16_GB, thread_nr, dsm, false);
+            bench_slab_alloc_reg_mw(
+                1_M, block_size, 16_GB, thread_nr, dsm, true);
+
+            LOG(INFO) << "[bench] bench nothing_allocator()";
+            bench_nothing_alloc(
+                1_M * thread_nr, block_size, 16_GB, thread_nr, false);
+            bench_nothing_alloc(
+                1_M * thread_nr, block_size, 16_GB, thread_nr, true);
         }
     }
 

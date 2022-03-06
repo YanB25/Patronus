@@ -18,8 +18,11 @@ void *hugePageAlloc(size_t size)
                      0);
     if (res == MAP_FAILED)
     {
-        PLOG(FATAL) << getIP() << " mmap failed for size " << size;
-        exit(-1);
+        if constexpr (debug())
+        {
+            PLOG(WARNING) << getIP() << " mmap failed for size " << size;
+        }
+        return nullptr;
     }
 
     return res;

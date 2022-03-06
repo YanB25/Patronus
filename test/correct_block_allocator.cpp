@@ -153,7 +153,7 @@ int main(int argc, char *argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    auto *addr = hugePageAlloc(16_GB);
+    auto *addr = CHECK_NOTNULL(hugePageAlloc(16_GB));
 
     SlabAllocatorConfig conf;
     conf.block_class = {4_KB, 2_MB};

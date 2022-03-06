@@ -24,6 +24,12 @@ public:
         {
             addr_to_size_[ret] = size;
         }
+        if constexpr (debug())
+        {
+            allocated_ += size;
+        }
+        DVLOG(10) << "[direct-alloc] allocating size " << size << ", ret "
+                  << (void *) ret;
         return ret;
     }
     void free(void *addr) override
@@ -43,6 +49,7 @@ public:
             ::free(addr);
         }
         addr_to_size_.erase(it);
+        DVLOG(10) << "[direct-alloc] freeing " << (void *) addr;
     }
     void free(void *addr, size_t size) override
     {
@@ -63,10 +70,18 @@ public:
             ::free(addr);
         }
         addr_to_size_.erase(it);
+        DVLOG(10) << "[direct-alloc] freeing " << (void *) addr << " with size "
+                  << size;
+    }
+
+    size_t debug_allocated_bytes() const
+    {
+        return allocated_;
     }
 
 private:
     std::unordered_map<void *, size_t> addr_to_size_;
+    size_t allocated_{0};
 };
 
 /**

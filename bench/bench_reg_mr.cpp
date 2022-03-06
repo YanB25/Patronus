@@ -89,7 +89,7 @@ void bench_alloc(size_t test_times,
                     }
                     else
                     {
-                        addrs.push(alloc(alloc_size));
+                        addrs.push(CHECK_NOTNULL(alloc(alloc_size)));
                     }
                 }
                 work_nr.fetch_sub(task_nr);
@@ -174,7 +174,7 @@ void bench_alloc_reg_mr(size_t test_times,
                     }
                     else
                     {
-                        auto *alloc_addr = alloc(alloc_size);
+                        auto *alloc_addr = CHECK_NOTNULL(alloc(alloc_size));
                         addrs.push(alloc_addr);
                         mrs.push(CHECK_NOTNULL(createMemoryRegion(
                             (uint64_t) alloc_addr, alloc_size, &ctx)));
@@ -231,7 +231,7 @@ void bench_reg_mr(size_t test_times,
     std::vector<std::thread> threads;
     ChronoTimer timer;
 
-    auto *global_addr = alloc(memory_limit);
+    auto *global_addr = CHECK_NOTNULL(alloc(memory_limit));
 
     for (size_t i = 0; i < thread_nr; ++i)
     {

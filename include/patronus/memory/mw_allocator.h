@@ -20,9 +20,13 @@ public:
     }
     ibv_mw *alloc()
     {
+        if (unlikely(mw_pool_.empty()))
+        {
+            return nullptr;
+        }
         auto *ret = mw_pool_.front();
         mw_pool_.pop();
-        return CHECK_NOTNULL(ret);
+        return DCHECK_NOTNULL(ret);
     }
     void free(ibv_mw *mw)
     {
@@ -48,7 +52,7 @@ private:
         DVLOG(1) << "[mw_pool] block alloc " << cache_size_;
         for (size_t i = 0; i < cache_size_; ++i)
         {
-            mw_pool_.push(dsm_->alloc_mw(dir_id_));
+            mw_pool_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
         }
         allocated_ += cache_size_;
     }

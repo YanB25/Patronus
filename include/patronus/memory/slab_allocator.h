@@ -214,10 +214,10 @@ public:
             if (ret)
             {
                 debug_class_allocated_nr_[it->first]++;
-                DVLOG(4) << "[alloc] allocating size " << size << " from class "
-                         << it->first;
             }
         }
+        DVLOG(20) << "[slab-alloc] allocating size " << size << " from class "
+                  << it->first << ". ret: " << ret;
         return ret;
     }
     void free(void *addr) override
@@ -234,10 +234,12 @@ public:
         {
             debug_class_freed_nr_[ptr_class]++;
         }
+        DVLOG(20) << "[slab-alloc] freeing " << addr;
     }
     void free(void *addr, [[maybe_unused]] size_t size) override
     {
         // TODO(patronus): when debug is ON, try to validate the size
+        DVLOG(20) << "[slab-alloc] freeing " << addr << " with size " << size;
         return free(addr);
     }
     size_t debug_allocated_bytes() const

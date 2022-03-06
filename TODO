@@ -197,3 +197,8 @@ std::chrono::system_clock and std::chrono::steady_clock and std::high_resolution
 It is not acceptable since I want a us-scale synchronization lease impl.
 I'd like to use rdtsc instead, because it is stable.
 Should add some tests.
+
+==== TODO of bench_allocator.cpp ===
+- use MW over MR and see if its different
+- bring coroutine into reg_mw cases
+- rerun bench_patronus_basic to see if it's 10 Mops
