@@ -122,10 +122,10 @@ FUTURES:
         - respect to lease.dir_id_. Any modify/query/ops hit to the original dir_id_.
 - The support of sync/async get_[rw]lease API, which supports fairness (request queuing)
 - The support of memory allocation. Better be interesting and relate to other guidelines/designs.
-- Bench: the time of registering S GB MR totally, with V each time.
+[-] Bench: the time of registering S GB MR totally, with V each time.
 - Checking: What about the rdtsc of ARM core? Is it constant? Is it stable across core?
 - Is `Lease` thread-safe? Can I make it thread-safe?
-- Port RapidCSV or Dataframe into this proj.
+[-] Port RapidCSV or Dataframe into this proj.
 - What is the extreme throughput of bind_mw? What is the bottleneck? Is it really scalable according to CPU core? Should figure it out. Most important: The max throughput one machine can provide. I *think* the bottleneck should be on the NIC.
 
 2/11-2/16 go to Sanya. 2/17 write dairy and sync my photos. Not working.
@@ -199,6 +199,7 @@ I'd like to use rdtsc instead, because it is stable.
 Should add some tests.
 
 ==== TODO of bench_allocator.cpp ===
-- use MW over MR and see if its different
-- bring coroutine into reg_mw cases
-- rerun bench_patronus_basic to see if it's 10 Mops
+[-] use MW over MR and see if its different
+    - no difference
+[-] bring coroutine into reg_mw cases
+    - got x2 performance
