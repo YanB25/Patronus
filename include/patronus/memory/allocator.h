@@ -3,6 +3,7 @@
 #define PATRONUS_MEMORY_ALLOCATOR_H_
 
 #include "Common.h"
+#include "CoroContext.h"
 
 namespace patronus::mem
 {
@@ -30,9 +31,9 @@ class IAllocator
 {
 public:
     virtual ~IAllocator() = default;
-    virtual void *alloc(size_t size) = 0;
-    virtual void free(void *addr, size_t size) = 0;
-    virtual void free(void *addr) = 0;
+    virtual void *alloc(size_t size, CoroContext *ctx = nullptr) = 0;
+    virtual void free(void *addr, size_t size, CoroContext *ctx = nullptr) = 0;
+    virtual void free(void *addr, CoroContext *ctx = nullptr) = 0;
 };
 }  // namespace patronus::mem
 

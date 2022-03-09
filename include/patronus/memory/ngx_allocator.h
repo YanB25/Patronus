@@ -40,17 +40,20 @@ public:
         pool_ = CHECK_NOTNULL(ngx_create_pool(
             CHECK_NOTNULL(addr), size, CHECK_NOTNULL(allocator)));
     }
-    void *alloc(size_t size) override
+    void *alloc(size_t size,
+                [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         return ngx_palloc(pool_, size);
     }
-    void free(void *addr) override
+    void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         CHECK_EQ(ngx_pfree(pool_, addr), NGX_OK)
             << "[ngx][alloc] declined memory deallocation at addr " << addr
             << ", for pool: " << (void *) pool_;
     }
-    void free(void *addr, [[maybe_unused]] size_t size) override
+    void free(void *addr,
+              [[maybe_unused]] size_t size,
+              [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         CHECK_EQ(ngx_pfree(pool_, addr), NGX_OK)
             << "[ngx][alloc] declined memory deallocation at addr " << addr

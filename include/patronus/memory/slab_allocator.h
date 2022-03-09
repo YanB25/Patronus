@@ -200,7 +200,8 @@ public:
         }
     }
 
-    void *alloc(size_t size) override
+    void *alloc(size_t size,
+                [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         auto it = blocks_.lower_bound(size);
         if (it == blocks_.end())
@@ -220,7 +221,7 @@ public:
                   << it->first << ". ret: " << ret;
         return ret;
     }
-    void free(void *addr) override
+    void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         CHECK_GE(addr, pool_start_addr_);
         auto it = end_addr_to_class_.upper_bound(addr);
@@ -236,7 +237,9 @@ public:
         }
         DVLOG(20) << "[slab-alloc] freeing " << addr;
     }
-    void free(void *addr, [[maybe_unused]] size_t size) override
+    void free(void *addr,
+              [[maybe_unused]] size_t size,
+              [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         // TODO(patronus): when debug is ON, try to validate the size
         DVLOG(20) << "[slab-alloc] freeing " << addr << " with size " << size;

@@ -93,29 +93,40 @@ public:
         }
     }
 
-    void *alloc(size_t size) override
+    void *alloc(size_t size,
+                [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         auto *ret = conf_.allocator->alloc(size);
         if (ret != nullptr)
         {
-            bind_mw(ret, size, nullptr);
+            bind_mw(ctx, ret, size, nullptr);
         }
+        DVLOG(10) << "[mw-alloc][allocation] allocate for size " << size
+                  << ", ret: " << (void *) ret
+                  << ". coro: " << (ctx == nullptr ? nullctx : *ctx);
         return ret;
     }
-    void free(void *addr) override
+    void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         if (addr != nullptr)
         {
-            unbind_mw(addr);
+            unbind_mw(ctx, addr);
         }
+        DVLOG(10) << "[mw-alloc][allocation] free " << (void *) addr
+                  << ". coro: " << (ctx == nullptr ? nullctx : *ctx);
         conf_.allocator->free(addr);
     }
-    void free(void *addr, size_t size) override
+    void free(void *addr,
+              size_t size,
+              [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         if (addr != nullptr)
         {
-            unbind_mw(addr);
+            unbind_mw(ctx, addr);
         }
+        DVLOG(10) << "[mw-alloc][allocation] free " << (void *) addr
+                  << " for size " << size
+                  << ". coro: " << (ctx == nullptr ? nullctx : *ctx);
         conf_.allocator->free(addr, size);
     }
     std::shared_ptr<IAllocator> get_internal_allocator()
@@ -124,7 +135,7 @@ public:
     }
 
 private:
-    void bind_mw(void *addr, size_t size, ibv_mw *mw)
+    void bind_mw(CoroContext *ctx, void *addr, size_t size, ibv_mw *mw)
     {
         auto dir_id = conf_.dir_id;
         if (mw == nullptr)
@@ -134,19 +145,28 @@ private:
         ibv_qp *qp =
             conf_.dsm->get_dir_qp(conf_.node_id, conf_.thread_id, dir_id);
         auto *dsm_mr = conf_.dsm->get_dir_mr(dir_id);
-        auto wr_id = WRID(WRID_PREFIX_BENCHMARK_ONLY, 0);
+        size_t coro_id = ctx == nullptr ? kNotACoro : ctx->coro_id();
+        auto wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, coro_id);
 
         uint32_t rkey = rdmaAsyncBindMemoryWindow(
             qp, mw, dsm_mr, (uint64_t) addr, size, true, wr_id.val);
         CHECK_NE(rkey, 0);
 
-        struct ibv_wc wc;
-        int ret = pollWithCQ(conf_.dsm->get_dir_cq(dir_id), 1, &wc);
-        CHECK_GE(ret, 0);
+        if (ctx != nullptr)
+        {
+            DVLOG(8) << "[mw-alloc] yield to master from " << *ctx;
+            ctx->yield_to_master();
+        }
+        else
+        {
+            struct ibv_wc wc;
+            int ret = pollWithCQ(conf_.dsm->get_dir_cq(dir_id), 1, &wc);
+            CHECK_GE(ret, 0);
+        }
 
         addr_to_mw_[addr] = mw;
     }
-    void unbind_mw(void *addr)
+    void unbind_mw(CoroContext *ctx, void *addr)
     {
         auto it = addr_to_mw_.find(addr);
         if (it == addr_to_mw_.end())
@@ -154,7 +174,7 @@ private:
             LOG(FATAL) << "[mw-alloc] failed to free addr " << addr
                        << ", not allocated by me.";
         }
-        bind_mw(addr, 1, it->second);
+        bind_mw(ctx, addr, 1, it->second);
         conf_.mw_pool->free(it->second);
         addr_to_mw_.erase(it);
     }

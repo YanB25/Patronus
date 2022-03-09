@@ -21,7 +21,8 @@ public:
     {
     }
 
-    void *alloc(size_t size) override
+    void *alloc(size_t size,
+                [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         auto *ret = conf_.allocator->alloc(size);
         if (ret != nullptr)
@@ -30,7 +31,7 @@ public:
         }
         return ret;
     }
-    void free(void *addr) override
+    void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         if (addr != nullptr)
         {
@@ -38,7 +39,9 @@ public:
         }
         conf_.allocator->free(addr);
     }
-    void free(void *addr, size_t size) override
+    void free(void *addr,
+              size_t size,
+              [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         if (addr != nullptr)
         {
@@ -67,7 +70,7 @@ private:
                 << "[mr-alloc] failed to find addr: not allocated by me.";
         }
         ibv_mr *free_mr = it->second;
-        destroyMemoryRegion(free_mr);
+        CHECK(destroyMemoryRegion(free_mr));
 
         addr_to_mr_.erase(it);
     }

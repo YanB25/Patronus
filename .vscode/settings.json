@@ -80,5 +80,6 @@
         "${workspaceFolder}/thirdparty/DataFrame/include",
         "${workspaceFolder}/include"
     ],
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+    "cmake.configureOnOpen": true
 }

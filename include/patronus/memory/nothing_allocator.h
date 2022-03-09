@@ -9,15 +9,18 @@ namespace patronus::mem
 class NothingAllocator : public IAllocator
 {
 public:
-    void *alloc([[maybe_unused]] size_t size) override
+    void *alloc([[maybe_unused]] size_t size,
+                [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         return &addr_;
     }
-    void free(void *addr) override
+    void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         DCHECK_EQ(addr, &addr_);
     }
-    void free(void *addr, [[maybe_unused]] size_t size) override
+    void free(void *addr,
+              [[maybe_unused]] size_t size,
+              [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         DCHECK_EQ(addr, &addr_);
     }

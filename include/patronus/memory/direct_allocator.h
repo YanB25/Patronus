@@ -9,7 +9,8 @@ namespace patronus::mem
 class DirectAllocator : public IAllocator
 {
 public:
-    void *alloc(size_t size) override
+    void *alloc(size_t size,
+                [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         void *ret = nullptr;
         if (size >= 2_MB)
@@ -32,7 +33,7 @@ public:
                   << (void *) ret;
         return ret;
     }
-    void free(void *addr) override
+    void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         auto it = addr_to_size_.find(addr);
         if (it == addr_to_size_.end())
@@ -51,7 +52,9 @@ public:
         addr_to_size_.erase(it);
         DVLOG(10) << "[direct-alloc] freeing " << (void *) addr;
     }
-    void free(void *addr, size_t size) override
+    void free(void *addr,
+              size_t size,
+              [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         auto it = addr_to_size_.find(addr);
         if (it == addr_to_size_.end())
@@ -90,7 +93,8 @@ private:
 class RawAllocator : public IAllocator
 {
 public:
-    void *alloc(size_t size) override
+    void *alloc(size_t size,
+                [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         void *ret = nullptr;
         if (size >= 2_MB)
@@ -103,13 +107,15 @@ public:
         }
         return ret;
     }
-    void free(void *addr) override
+    void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         LOG(FATAL) << "[raw-alloc] raw allocator requires user to keep tracks "
                       "of the allocated memory size. addr: "
                    << addr;
     }
-    void free(void *addr, size_t size) override
+    void free(void *addr,
+              size_t size,
+              [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
         if (size >= 2_MB)
         {
