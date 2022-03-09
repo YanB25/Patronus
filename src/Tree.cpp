@@ -20,14 +20,14 @@ SimpleHT mapping;
 #endif
 
 HotBuffer hot_buf;
-uint64_t cache_miss[MAX_APP_THREAD][8];
-uint64_t cache_hit[MAX_APP_THREAD][8];
-uint64_t lock_fail[MAX_APP_THREAD][8];
-uint64_t pattern[MAX_APP_THREAD][8];
-uint64_t hierarchy_lock[MAX_APP_THREAD][8];
-uint64_t handover_count[MAX_APP_THREAD][8];
-uint64_t hot_filter_count[MAX_APP_THREAD][8];
-uint64_t latency[MAX_APP_THREAD][LATENCY_WINDOWS];
+uint64_t cache_miss[kMaxAppThread][8];
+uint64_t cache_hit[kMaxAppThread][8];
+uint64_t lock_fail[kMaxAppThread][8];
+uint64_t pattern[kMaxAppThread][8];
+uint64_t hierarchy_lock[kMaxAppThread][8];
+uint64_t handover_count[kMaxAppThread][8];
+uint64_t hot_filter_count[kMaxAppThread][8];
+uint64_t latency[kMaxAppThread][LATENCY_WINDOWS];
 volatile bool need_stop = false;
 
 thread_local CoroCall Tree::worker[define::kMaxCoroNr];
@@ -1711,7 +1711,7 @@ void Tree::index_cache_statistics()
 
 void Tree::clear_statistics()
 {
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    for (int i = 0; i < kMaxAppThread; ++i)
     {
         cache_hit[i][0] = 0;
         cache_miss[i][0] = 0;

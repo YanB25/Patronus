@@ -19,7 +19,7 @@ void ReliableSendMessageConnection::send(size_t threadID,
                                          size_t targetID)
 {
     DCHECK_LT(targetID, RMSG_MULTIPLEXING);
-    DCHECK_LT(threadID, MAX_APP_THREAD);
+    DCHECK_LT(threadID, kMaxAppThread);
     DCHECK_LE(size, kMessageSize) << "[rmsg] message size exceed limits";
 
     static thread_local bool thread_second_{false};

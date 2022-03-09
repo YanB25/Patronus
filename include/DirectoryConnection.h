@@ -28,7 +28,7 @@ struct DirectoryConnection
     std::shared_ptr<RawMessageConnection> message;
 
     /**
-     * @brief maintain QPs[MAX_APP_THREAD][machineNR]
+     * @brief maintain QPs[kMaxAppThread][machineNR]
      */
     std::vector<std::vector<ibv_qp *>> QPs;
 

@@ -46,7 +46,7 @@ struct ExchangeMeta
     /**
      * ThreadConnection exchange data used by DirectoryConnection
      */
-    ExPerThread appTh[MAX_APP_THREAD];
+    ExPerThread appTh[kMaxAppThread];
     /***
      * DirectoryConnection exchange data used by ThreadConnection
      */
@@ -56,7 +56,7 @@ struct ExchangeMeta
      * @brief Unreliable Datagram QPN used in raw message transmission.
      * app QPN is used by @see DirectoryConnection
      */
-    uint32_t appUdQpn[MAX_APP_THREAD];
+    uint32_t appUdQpn[kMaxAppThread];
     /**
      * @brief Unreliable Datagram QPN used in raw message transmission.
      * dir QPN is used by @see ThreadConnection
@@ -67,13 +67,13 @@ struct ExchangeMeta
      * @brief Reliable Connection QPN used for each local ThreadConnection to
      * remote DirectoryConnetion
      */
-    uint32_t appRcQpn2dir[MAX_APP_THREAD][NR_DIRECTORY];
+    uint32_t appRcQpn2dir[kMaxAppThread][NR_DIRECTORY];
 
     /**
      * @brief Reliable Connection QPN used for each local DirectoryConnection to
      * remote ThreadConnetion
      */
-    uint32_t dirRcQpn2app[NR_DIRECTORY][MAX_APP_THREAD];
+    uint32_t dirRcQpn2app[NR_DIRECTORY][kMaxAppThread];
 
     ExReliable ex_reliable;
 

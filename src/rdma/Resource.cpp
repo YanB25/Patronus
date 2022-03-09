@@ -14,7 +14,7 @@ bool createContext(RdmaContext *context,
     ibv_context *ctx = nullptr;
     ibv_pd *pd = nullptr;
     ibv_port_attr portAttr;
-    ibv_exp_res_domain *res_doms[MAX_APP_THREAD] = {};
+    ibv_exp_res_domain *res_doms[kMaxAppThread] = {};
 
     // get device names in the system
     int devicesNum;
@@ -116,7 +116,7 @@ bool createContext(RdmaContext *context,
             res_dom_attr.comp_mask |= IBV_EXP_RES_DOMAIN_MSG_MODEL;
             res_dom_attr.msg_model = msg_model.value();
         }
-        for (size_t i = 0; i < MAX_APP_THREAD; ++i)
+        for (size_t i = 0; i < kMaxAppThread; ++i)
         {
             res_doms[i] = ibv_exp_create_res_domain(ctx, &res_dom_attr);
             if (!res_doms[i])
@@ -162,7 +162,7 @@ bool createContext(RdmaContext *context,
 /* Error encountered, cleanup */
 CreateResourcesExit:
     LOG(ERROR) << "Error Encountered at createContext. Cleanup ...";
-    for (size_t i = 0; i < MAX_APP_THREAD; ++i)
+    for (size_t i = 0; i < kMaxAppThread; ++i)
     {
         if (res_doms[i])
         {
@@ -197,7 +197,7 @@ CreateResourcesExit:
 bool destroyContext(RdmaContext *context)
 {
     bool rc = true;
-    for (size_t i = 0; i < MAX_APP_THREAD; ++i)
+    for (size_t i = 0; i < kMaxAppThread; ++i)
     {
         if (context->res_doms[i])
         {

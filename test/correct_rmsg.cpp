@@ -276,8 +276,8 @@ void client_wait(std::shared_ptr<DSM> dsm)
 // constexpr static size_t kMultiThreadNr = 16;
 constexpr static size_t kClientThreadNr = RMSG_MULTIPLEXING - 1;
 constexpr static size_t kServerThreadNr = RMSG_MULTIPLEXING - 1;
-static_assert(kClientThreadNr < MAX_APP_THREAD);
-static_assert(kServerThreadNr < MAX_APP_THREAD);
+static_assert(kClientThreadNr < kMaxAppThread);
+static_assert(kServerThreadNr < kMaxAppThread);
 
 void client(std::shared_ptr<DSM> dsm)
 {

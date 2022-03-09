@@ -176,7 +176,7 @@ public:
         ThreadID, std::atomic<size_t> &, std::atomic<bool> &)>;
     void bench_task(size_t thread_nr, const BenchTask task)
     {
-        CHECK_LE(thread_nr, MAX_APP_THREAD);
+        CHECK_LE(thread_nr, kMaxAppThread);
         for (size_t i = 0; i < thread_nr; ++i)
         {
             bench_threads_.emplace_back(

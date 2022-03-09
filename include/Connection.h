@@ -21,7 +21,7 @@ struct RemoteConnection
     // [NR_DIRECTORY]
     uint32_t dsmRKey[NR_DIRECTORY];
     uint32_t dirMessageQPN[NR_DIRECTORY];
-    ibv_ah *appToDirAh[MAX_APP_THREAD][NR_DIRECTORY];
+    ibv_ah *appToDirAh[kMaxAppThread][NR_DIRECTORY];
 
     // cache
     uint64_t cacheBase;
@@ -31,14 +31,14 @@ struct RemoteConnection
     uint32_t dmRKey[NR_DIRECTORY];
 
     // app thread
-    uint32_t appRKey[MAX_APP_THREAD];
-    uint32_t appMessageQPN[MAX_APP_THREAD];
-    ibv_ah *dirToAppAh[NR_DIRECTORY][MAX_APP_THREAD];
+    uint32_t appRKey[kMaxAppThread];
+    uint32_t appMessageQPN[kMaxAppThread];
+    ibv_ah *dirToAppAh[NR_DIRECTORY][kMaxAppThread];
     void destroy()
     {
         for (size_t i = 0; i < NR_DIRECTORY; ++i)
         {
-            for (size_t j = 0; j < MAX_APP_THREAD; ++j)
+            for (size_t j = 0; j < kMaxAppThread; ++j)
             {
                 if (dirToAppAh[i][j])
                 {

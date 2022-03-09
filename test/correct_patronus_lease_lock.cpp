@@ -15,7 +15,7 @@ constexpr uint32_t kMachineNr = 2;
 using namespace patronus;
 constexpr static size_t kThreadNr = 4;
 static_assert(kThreadNr <= RMSG_MULTIPLEXING);
-static_assert(kThreadNr <= MAX_APP_THREAD);
+static_assert(kThreadNr <= kMaxAppThread);
 constexpr static size_t kCoroCnt = 8;
 
 constexpr static size_t kKeyLimit = 100;

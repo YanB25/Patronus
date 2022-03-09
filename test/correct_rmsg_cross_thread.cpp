@@ -320,8 +320,8 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
 // constexpr static size_t kMultiThreadNr = 16;
 constexpr static size_t kClientThreadNr = RMSG_MULTIPLEXING - 3;
 constexpr static size_t kServerThreadNr = RMSG_MULTIPLEXING - 3;
-static_assert(kClientThreadNr < MAX_APP_THREAD);
-static_assert(kServerThreadNr < MAX_APP_THREAD);
+static_assert(kClientThreadNr < kMaxAppThread);
+static_assert(kServerThreadNr < kMaxAppThread);
 static_assert(RMSG_MULTIPLEXING > 3);
 
 void client(std::shared_ptr<DSM> dsm)

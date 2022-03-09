@@ -60,3 +60,12 @@
 # Some Results
 Register MR: 50us for 4KB from KRCore
 QP memory overhead: 292 sq, 257 comp_queue entries, sq entry takes 448B, cq takes 4 B. Each RCQP takes 159KB.
+
+## bench_allocator
+Memory Window binding:
+* Every request signal (no batching): 
+1.18 Mops per thread
+up to 19 Mops with 31 threads
+* Every request signal (no batching, 8 coroutines):
+2.56 Mops per thread
+up to 26 Mops with 16 threads (I think RNIC bounded)

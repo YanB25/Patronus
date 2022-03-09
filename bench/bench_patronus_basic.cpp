@@ -23,7 +23,7 @@ constexpr static size_t kCoroStartKey = 1024;
 
 constexpr static size_t kTestTime = 1 * define::M;
 constexpr static size_t kThreadNr = 4;
-static_assert(kThreadNr <= MAX_APP_THREAD);
+static_assert(kThreadNr <= kMaxAppThread);
 static_assert(kThreadNr <= RMSG_MULTIPLEXING);
 
 // this script will use the fatest path:
@@ -260,7 +260,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
 std::pair<uint64_t, uint64_t> get_success_fair_nr()
 {
     std::pair<uint64_t, uint64_t> ret;
-    for (size_t i = 0; i < std::min(int(kThreadNr + 1), MAX_APP_THREAD); ++i)
+    for (size_t i = 0; i < std::min(ssize_t(kThreadNr + 1), kMaxAppThread); ++i)
     {
         ret.first += bench_infos[i].success_nr;
         ret.second += bench_infos[i].fail_nr;

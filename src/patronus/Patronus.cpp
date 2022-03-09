@@ -192,7 +192,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     DCHECK_LT(from_mid, RMSG_MULTIPLEXING);
     DCHECK_LT(to_mid, RMSG_MULTIPLEXING);
     DCHECK_LT(dir_id, NR_DIRECTORY);
-    DCHECK_LT(tid, MAX_APP_THREAD);
+    DCHECK_LT(tid, kMaxAppThread);
 
     char *rdma_buf = get_rdma_message_buffer();
     auto *rpc_context = get_rpc_context();
@@ -1483,7 +1483,7 @@ void Patronus::signal_server_to_recover_qp(size_t node_id, size_t dir_id)
     auto to_mid = from_mid;
     DCHECK_LT(to_mid, RMSG_MULTIPLEXING);
     DCHECK_LT(from_mid, RMSG_MULTIPLEXING);
-    DCHECK_LT(tid, MAX_APP_THREAD);
+    DCHECK_LT(tid, kMaxAppThread);
 
     char *rdma_buf = get_rdma_message_buffer();
 

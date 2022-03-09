@@ -141,7 +141,7 @@ bool DSM::reinitializeDir(size_t dirID)
         syncMetadataBootstrap(ex, remoteID);
         auto connect_dir_ex = getExchangeMetaBootstrap(remoteID);
 
-        for (size_t appID = 0; appID < MAX_APP_THREAD; ++appID)
+        for (size_t appID = 0; appID < kMaxAppThread; ++appID)
         {
             keeper->connectDir(*dirCon[dirID], remoteID, appID, connect_dir_ex);
         }
@@ -159,7 +159,7 @@ bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
     LOG(INFO) << "[DSM] reconnect ThreadConnection for node " << node_id
               << ", dir " << dirID;
 
-    for (size_t i = 0; i < MAX_APP_THREAD; ++i)
+    for (size_t i = 0; i < kMaxAppThread; ++i)
     {
         if (!thCon[i]->resetQP(node_id, dirID))
         {
@@ -268,12 +268,12 @@ void DSM::initRDMAConnection()
 
     remoteInfo.resize(conf.machineNR);
 
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    for (int i = 0; i < kMaxAppThread; ++i)
     {
         thCon.emplace_back(std::make_unique<ThreadConnection>(
             i, (void *) cache.data, cache.size, conf.machineNR, remoteInfo));
     }
-    timer.pin("thCons " + std::to_string(MAX_APP_THREAD));
+    timer.pin("thCons " + std::to_string(kMaxAppThread));
 
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {

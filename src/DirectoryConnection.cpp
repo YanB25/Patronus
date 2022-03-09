@@ -56,7 +56,7 @@ DirectoryConnection::DirectoryConnection(
     }
 
     // app, RC
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    for (int i = 0; i < kMaxAppThread; ++i)
     {
         QPs.emplace_back(machineNR);
         for (size_t k = 0; k < machineNR; ++k)
@@ -109,7 +109,7 @@ DirectoryConnection::~DirectoryConnection()
     timer.pin("destroy cqs");
     // must free AH before freeing PD, otherwise it crashes when trying to free
     // AH.
-    for (size_t i = 0; i < MAX_APP_THREAD; ++i)
+    for (size_t i = 0; i < kMaxAppThread; ++i)
     {
         CHECK_NE(node_id_, size_t(-1));
         ibv_ah *pah = (*remoteInfo)[node_id_].dirToAppAh[dirID][i];

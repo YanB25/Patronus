@@ -89,7 +89,7 @@ void bench_alloc_thread_coro_master(size_t tid,
         }
 
         static thread_local struct ibv_wc wc_buffer[kCoroCnt];
-        
+
         auto ret = ibv_poll_cq(coro_comm.cq, kCoroCnt, wc_buffer);
         CHECK_GE(ret, 0);
         for (ssize_t i = 0; i < ret; ++i)
@@ -1045,8 +1045,9 @@ int main(int argc, char *argv[])
     LOG(INFO) << "@detail w/o MR: the memory window is not deployed over MR";
 
     // for (size_t thread_nr : {1, 8})
-    // for (size_t thread_nr : {1})
-    for (size_t thread_nr : {1, 2, 4, 8})
+    // for (size_t thread_nr : {8, 16})
+    for (size_t thread_nr : {1, 8, 16, 24, 31})
+    // for (size_t thread_nr : {1, 2, 4, 8})
     {
         // for (size_t block_size : {2_MB, 128_MB})
         for (size_t block_size : {2_MB})

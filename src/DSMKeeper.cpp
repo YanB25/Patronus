@@ -147,7 +147,7 @@ ExchangeMeta DSMKeeper::updateDirMetadata(const DirectoryConnection &dir,
            16 * sizeof(uint8_t));
     meta.dirUdQpn[dirID] = dir.message->getQPN();
 
-    for (int k = 0; k < MAX_APP_THREAD; ++k)
+    for (int k = 0; k < kMaxAppThread; ++k)
     {
         meta.dirRcQpn2app[dirID][k] = dir.QPs[k][remoteID]->qp_num;
     }
@@ -188,7 +188,7 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
     {
         const auto &c = dirCon[i];
 
-        for (int k = 0; k < MAX_APP_THREAD; ++k)
+        for (int k = 0; k < kMaxAppThread; ++k)
         {
             exchangeMeta.dirRcQpn2app[i][k] = c->QPs[k][remoteID]->qp_num;
         }
@@ -204,7 +204,7 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
         }
     }
 
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    for (int i = 0; i < kMaxAppThread; ++i)
     {
         const auto &c = thCon[i];
         for (int k = 0; k < NR_DIRECTORY; ++k)
@@ -275,7 +275,7 @@ void DSMKeeper::updateRemoteConnectionForDir(RemoteConnection &remote,
     remote.dmRKey[dirID] = meta.dirTh[dirID].dm_rkey;
     remote.dirMessageQPN[dirID] = meta.dirUdQpn[dirID];
 
-    for (int k = 0; k < MAX_APP_THREAD; ++k)
+    for (int k = 0; k < kMaxAppThread; ++k)
     {
         struct ibv_ah_attr ahAttr;
         fillAhAttr(&ahAttr,
@@ -321,7 +321,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
     {
         auto &dirC = *dirCon[i];
         CHECK_EQ(dirC.dirID, i);
-        for (size_t appID = 0; appID < MAX_APP_THREAD; ++appID)
+        for (size_t appID = 0; appID < kMaxAppThread; ++appID)
         {
             connectDir(dirC, remoteID, appID, exMeta);
         }
@@ -355,7 +355,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
         remote.dmRKey[i] = exMeta.dirTh[i].dm_rkey;
         remote.dirMessageQPN[i] = exMeta.dirUdQpn[i];
 
-        for (int k = 0; k < MAX_APP_THREAD; ++k)
+        for (int k = 0; k < kMaxAppThread; ++k)
         {
             struct ibv_ah_attr ahAttr;
             fillAhAttr(&ahAttr,
@@ -368,7 +368,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
         }
     }
 
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    for (int i = 0; i < kMaxAppThread; ++i)
     {
         remote.appRKey[i] = exMeta.appTh[i].rKey;
         remote.appMessageQPN[i] = exMeta.appUdQpn[i];

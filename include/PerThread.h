@@ -90,6 +90,6 @@ public:
 private:
     constexpr static size_t kCachelineSize = 64;
     using aligned_t = Aligned<T, kCachelineSize>;
-    std::array<aligned_t, MAX_APP_THREAD> per_thread_;
+    std::array<aligned_t, kMaxAppThread> per_thread_;
 };
 #endif

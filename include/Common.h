@@ -47,20 +47,22 @@
 
 #define RAW_RECV_CQ_COUNT 128
 
-// { app thread
-#define MAX_APP_THREAD 26
 
 #define APP_MESSAGE_NR 96
 
 // }
 
 // { dir thread
-#define NR_DIRECTORY (8)
+#define NR_DIRECTORY (16)
 
 #define DIR_MESSAGE_NR 128
 
 #define RMSG_MULTIPLEXING (NR_DIRECTORY)
 // }
+
+// { app thread
+// #define kMaxAppThread 26
+constexpr static ssize_t kMaxAppThread = std::max(26, NR_DIRECTORY);
 
 /**
  * Equivalent to c++14 [[maybe_unused]]

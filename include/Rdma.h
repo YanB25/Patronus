@@ -58,7 +58,7 @@ struct RdmaContext
 
     ibv_exp_dm *dm{nullptr};
 
-    ibv_exp_res_domain *res_doms[MAX_APP_THREAD] = {};
+    ibv_exp_res_domain *res_doms[kMaxAppThread] = {};
 
     // default to use type 1, because it is always supported
     // will query and change to TYPE_2 if supported.

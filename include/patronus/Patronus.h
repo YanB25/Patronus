@@ -303,7 +303,7 @@ private:
     constexpr static size_t kProtectionRegionPerThreadNr =
         NR_DIRECTORY * kMaxCoroNr * kGuessActiveLeasePerCoro;
     constexpr static size_t kTotalProtectionRegionNr =
-        kProtectionRegionPerThreadNr * MAX_APP_THREAD;
+        kProtectionRegionPerThreadNr * kMaxAppThread;
 
     void explain(const PatronusConfig &);
     void reg_locator(const KeyLocator &locator = identity_locator)
