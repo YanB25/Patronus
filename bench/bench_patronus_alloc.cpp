@@ -25,20 +25,6 @@ constexpr uint16_t kServerNodeId = 0;
 constexpr static size_t kThreadNr = 16;
 static_assert(kThreadNr <= kMaxAppThread);
 
-// this script will use the fatest path:
-// server no auto gc, client no lease checking, relinquish no unbind.
-// But still bind both ProtectionRegion and Buffer.
-// constexpr static uint8_t kAcquireLeaseFlag =
-//     (uint8_t) AcquireRequestFlag::kNoGc | (uint8_t)
-//     AcquireRequestFlag::kDebugNoBindAny;
-constexpr static uint8_t kAcquireLeaseFlag =
-    (uint8_t) AcquireRequestFlag::kNoGc;
-// constexpr static uint8_t kAcquireLeaseFlag =
-//     (uint8_t) AcquireRequestFlag::kNoGc |
-//     (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
-constexpr static uint8_t kRelinquishFlag =
-    (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
-
 std::vector<std::string> col_idx;
 std::vector<size_t> col_x_alloc_size;
 std::vector<size_t> col_x_thread_nr;
@@ -58,6 +44,21 @@ struct CoroCommunication
     ssize_t thread_remain_task;
     std::vector<bool> finish_all;
 };
+
+void reg_result(const std::string &name,
+                size_t test_times,
+                size_t total_ns,
+                size_t block_size,
+                size_t thread_nr,
+                size_t coro_nr)
+{
+    col_idx.push_back(name);
+    col_x_alloc_size.push_back(block_size);
+    col_x_thread_nr.push_back(thread_nr);
+    col_x_coro_nr.push_back(coro_nr);
+    col_alloc_nr.push_back(test_times);
+    col_alloc_ns.push_back(total_ns);
+}
 
 void bench_alloc_thread_coro_master(Patronus::pointer patronus,
                                     CoroYield &yield,
@@ -158,7 +159,9 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     size_t coro_id,
                                     CoroYield &yield,
                                     CoroCommunication &coro_comm,
-                                    size_t alloc_size)
+                                    size_t alloc_size,
+                                    uint8_t acquire_flag,
+                                    uint8_t relinquish_flag)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid;
@@ -175,14 +178,14 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         bool succ = true;
         VLOG(4) << "[coro] tid " << tid << " get_rlease. coro: " << ctx;
         auto lease = patronus->get_rlease(
-            kServerNodeId, dir_id, 0, alloc_size, 0ns, kAcquireLeaseFlag, &ctx);
+            kServerNodeId, dir_id, 0, alloc_size, 0ns, acquire_flag, &ctx);
         succ = lease.success();
 
         if (succ)
         {
             succ_nr++;
             VLOG(4) << "[coro] tid " << tid << " relinquish. coro: " << ctx;
-            patronus->relinquish(lease, kRelinquishFlag, &ctx);
+            patronus->relinquish(lease, relinquish_flag, &ctx);
             coro_comm.thread_remain_task--;
         }
         else
@@ -207,7 +210,9 @@ void bench_alloc_thread_coro(Patronus::pointer patronus,
                              size_t alloc_size,
                              size_t test_times,
                              std::atomic<ssize_t> &work_nr,
-                             size_t coro_nr)
+                             size_t coro_nr,
+                             uint8_t acquire_flag,
+                             uint8_t relinquish_flag)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid;
@@ -219,11 +224,20 @@ void bench_alloc_thread_coro(Patronus::pointer patronus,
 
     for (size_t i = 0; i < coro_nr; ++i)
     {
-        coro_comm.workers[i] = CoroCall(
-            [patronus, coro_id = i, &coro_comm, alloc_size](CoroYield &yield) {
-                bench_alloc_thread_coro_worker(
-                    patronus, coro_id, yield, coro_comm, alloc_size);
-            });
+        coro_comm.workers[i] = CoroCall([patronus,
+                                         coro_id = i,
+                                         &coro_comm,
+                                         alloc_size,
+                                         acquire_flag,
+                                         relinquish_flag](CoroYield &yield) {
+            bench_alloc_thread_coro_worker(patronus,
+                                           coro_id,
+                                           yield,
+                                           coro_comm,
+                                           alloc_size,
+                                           acquire_flag,
+                                           relinquish_flag);
+        });
     }
 
     coro_comm.master =
@@ -240,7 +254,9 @@ void bench_template_coro(Patronus::pointer patronus,
                          size_t test_times,
                          size_t alloc_size,
                          size_t coro_nr,
-                         std::atomic<ssize_t> &work_nr)
+                         std::atomic<ssize_t> &work_nr,
+                         uint8_t acquire_flag,
+                         uint8_t relinquish_flag)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid;
@@ -248,16 +264,40 @@ void bench_template_coro(Patronus::pointer patronus,
         << "Failed to run this case. Two threads should not share the same "
            "directory, otherwise the one thread will poll CQE from other "
            "threads.";
-    bench_alloc_thread_coro(patronus, alloc_size, test_times, work_nr, coro_nr);
+    bench_alloc_thread_coro(patronus,
+                            alloc_size,
+                            test_times,
+                            work_nr,
+                            coro_nr,
+                            acquire_flag,
+                            relinquish_flag);
 }
 
-void bench_patronus_alloc(Patronus::pointer patronus,
-                          std::atomic<ssize_t> &work_nr,
-                          size_t test_times,
-                          size_t alloc_size,
-                          size_t thread_nr,
-                          size_t coro_nr)
+void bench_template(const std::string &name,
+                    Patronus::pointer patronus,
+                    boost::barrier &bar,
+                    std::atomic<ssize_t> &work_nr,
+                    size_t test_times,
+                    size_t alloc_size,
+                    size_t thread_nr,
+                    size_t coro_nr,
+                    bool is_master,
+                    bool warm_up,
+                    uint8_t acquire_flag,
+                    uint8_t relinquish_flag)
+
 {
+    if (is_master)
+    {
+        work_nr = test_times;
+        LOG(INFO) << "[bench] BENCH: " << name << ", thread_nr: " << thread_nr
+                  << ", alloc_size: " << alloc_size << ", coro_nr: " << coro_nr
+                  << ", warm_up: " << warm_up;
+    }
+
+    bar.wait();
+    ChronoTimer timer;
+
     auto tid = patronus->get_thread_id();
     auto dir_id = tid;
 
@@ -266,12 +306,156 @@ void bench_patronus_alloc(Patronus::pointer patronus,
            "directory, otherwise the one thread will poll CQE from other "
            "threads.";
 
-    if (tid >= thread_nr)
+    if (tid < thread_nr)
     {
-        return;
+        bench_alloc_thread_coro(patronus,
+                                alloc_size,
+                                test_times,
+                                work_nr,
+                                coro_nr,
+                                acquire_flag,
+                                relinquish_flag);
     }
 
-    bench_alloc_thread_coro(patronus, alloc_size, test_times, work_nr, coro_nr);
+    bar.wait();
+    auto total_ns = timer.pin();
+    if (is_master && !warm_up)
+    {
+        reg_result(name, test_times, total_ns, alloc_size, thread_nr, coro_nr);
+    }
+    bar.wait();
+}
+
+void bench_patronus_get_rlease_nothing(Patronus::pointer patronus,
+                                       boost::barrier &bar,
+                                       std::atomic<ssize_t> &work_nr,
+                                       size_t test_times,
+                                       size_t alloc_size,
+                                       size_t thread_nr,
+                                       size_t coro_nr,
+                                       bool is_master,
+                                       bool warm_up)
+{
+    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc |
+                           (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
+    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    return bench_template("get_rlease w/o(*)",
+                          patronus,
+                          bar,
+                          work_nr,
+                          test_times,
+                          alloc_size,
+                          thread_nr,
+                          coro_nr,
+                          is_master,
+                          warm_up,
+                          acquire_flag,
+                          relinquish_flag);
+}
+
+void bench_patronus_get_rlease_one_bind(Patronus::pointer patronus,
+                                        boost::barrier &bar,
+                                        std::atomic<ssize_t> &work_nr,
+                                        size_t test_times,
+                                        size_t alloc_size,
+                                        size_t thread_nr,
+                                        size_t coro_nr,
+                                        bool is_master,
+                                        bool warm_up)
+{
+    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc |
+                           (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
+    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    return bench_template("get_rlease w(buf) w/o(pr unbind gc)",
+                          patronus,
+                          bar,
+                          work_nr,
+                          test_times,
+                          alloc_size,
+                          thread_nr,
+                          coro_nr,
+                          is_master,
+                          warm_up,
+                          acquire_flag,
+                          relinquish_flag);
+}
+
+void bench_patronus_get_rlease_no_unbind(Patronus::pointer patronus,
+                                         boost::barrier &bar,
+                                         std::atomic<ssize_t> &work_nr,
+                                         size_t test_times,
+                                         size_t alloc_size,
+                                         size_t thread_nr,
+                                         size_t coro_nr,
+                                         bool is_master,
+                                         bool warm_up)
+{
+    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    return bench_template("get_rlease w(pr buf) w/o(unbind gc)",
+                          patronus,
+                          bar,
+                          work_nr,
+                          test_times,
+                          alloc_size,
+                          thread_nr,
+                          coro_nr,
+                          is_master,
+                          warm_up,
+                          acquire_flag,
+                          relinquish_flag);
+}
+
+void bench_patronus_get_rlease_full(Patronus::pointer patronus,
+                                    boost::barrier &bar,
+                                    std::atomic<ssize_t> &work_nr,
+                                    size_t test_times,
+                                    size_t alloc_size,
+                                    size_t thread_nr,
+                                    size_t coro_nr,
+                                    bool is_master,
+                                    bool warm_up)
+{
+    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+    uint8_t relinquish_flag = 0;
+    return bench_template("get_rlease w(pr buf unbind) w/o(gc)",
+                          patronus,
+                          bar,
+                          work_nr,
+                          test_times,
+                          alloc_size,
+                          thread_nr,
+                          coro_nr,
+                          is_master,
+                          warm_up,
+                          acquire_flag,
+                          relinquish_flag);
+}
+
+void bench_patronus_get_rlease_full_auto_gc(Patronus::pointer patronus,
+                                            boost::barrier &bar,
+                                            std::atomic<ssize_t> &work_nr,
+                                            size_t test_times,
+                                            size_t alloc_size,
+                                            size_t thread_nr,
+                                            size_t coro_nr,
+                                            bool is_master,
+                                            bool warm_up)
+{
+    uint8_t acquire_flag = 0;
+    uint8_t relinquish_flag = 0;
+    return bench_template("get_rlease w(pr buf unbind gc)",
+                          patronus,
+                          bar,
+                          work_nr,
+                          test_times,
+                          alloc_size,
+                          thread_nr,
+                          coro_nr,
+                          is_master,
+                          warm_up,
+                          acquire_flag,
+                          relinquish_flag);
 }
 
 void server(Patronus::pointer patronus, bool is_master)
@@ -289,28 +473,12 @@ void server(Patronus::pointer patronus, bool is_master)
     patronus->server_serve(mid);
 }
 
-void reg_result(const std::string &name,
-                size_t test_times,
-                size_t total_ns,
-                size_t block_size,
-                size_t thread_nr,
-                size_t coro_nr)
-{
-    col_idx.push_back(name);
-    col_x_alloc_size.push_back(block_size);
-    col_x_thread_nr.push_back(thread_nr);
-    col_x_coro_nr.push_back(coro_nr);
-    col_alloc_nr.push_back(test_times);
-    col_alloc_ns.push_back(total_ns);
-}
-
 void client(Patronus::pointer patronus,
             boost::barrier &bar,
             std::atomic<ssize_t> &task_nr,
             bool is_master)
 {
     patronus->registerClientThread();
-    auto tid = patronus->get_thread_id();
 
     bar.wait();
 
@@ -319,7 +487,7 @@ void client(Patronus::pointer patronus,
     {
         CHECK_LE(thread_nr, kThreadNr);
         // for (size_t block_size : {64ul, 2_MB, 128_MB})
-        for (size_t block_size : {64ul, 2_MB, 128_MB})
+        for (size_t block_size : {64ul})
         {
             for (size_t coro_nr : {16})
             {
@@ -327,37 +495,52 @@ void client(Patronus::pointer patronus,
                 {
                     auto test_times = 1_M;
                     auto total_test_times = test_times * thread_nr;
-                    if (is_master)
-                    {
-                        LOG(INFO) << "[bench] client tid: " << tid
-                                  << " thread_nr: " << thread_nr
-                                  << ", block_size: " << block_size
-                                  << " bench_patronus_alloc()";
-                        task_nr = total_test_times;
-                    }
 
-                    bar.wait();
-                    ChronoTimer timer;
-                    bench_patronus_alloc(patronus,
-                                         task_nr,
-                                         total_test_times,
-                                         block_size,
-                                         thread_nr,
-                                         coro_nr);
-                    bar.wait();
-                    auto total_ns = timer.pin();
-
-                    if (is_master && !warm_up)
-                    {
-                        reg_result("patronus alloc",
-                                   total_test_times,
-                                   total_ns,
-                                   block_size,
-                                   thread_nr,
-                                   coro_nr);
-                    }
-
-                    bar.wait();
+                    bench_patronus_get_rlease_nothing(patronus,
+                                                      bar,
+                                                      task_nr,
+                                                      total_test_times,
+                                                      block_size,
+                                                      thread_nr,
+                                                      coro_nr,
+                                                      is_master,
+                                                      warm_up);
+                    bench_patronus_get_rlease_one_bind(patronus,
+                                                       bar,
+                                                       task_nr,
+                                                       total_test_times,
+                                                       block_size,
+                                                       thread_nr,
+                                                       coro_nr,
+                                                       is_master,
+                                                       warm_up);
+                    bench_patronus_get_rlease_no_unbind(patronus,
+                                                        bar,
+                                                        task_nr,
+                                                        total_test_times,
+                                                        block_size,
+                                                        thread_nr,
+                                                        coro_nr,
+                                                        is_master,
+                                                        warm_up);
+                    bench_patronus_get_rlease_full(patronus,
+                                                   bar,
+                                                   task_nr,
+                                                   total_test_times,
+                                                   block_size,
+                                                   thread_nr,
+                                                   coro_nr,
+                                                   is_master,
+                                                   warm_up);
+                    bench_patronus_get_rlease_full_auto_gc(patronus,
+                                                           bar,
+                                                           task_nr,
+                                                           total_test_times,
+                                                           block_size,
+                                                           thread_nr,
+                                                           coro_nr,
+                                                           is_master,
+                                                           warm_up);
                 }
             }
         }

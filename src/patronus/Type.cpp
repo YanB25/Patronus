@@ -81,6 +81,11 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status)
         os << "addr-out-of-range-err";
         break;
     }
+    case AcquireRequestStatus::kNoMem:
+    {
+        os << "no-mem";
+        break;
+    }
     default:
     {
         CHECK(false);
@@ -128,21 +133,38 @@ std::ostream &operator<<(std::ostream &os, const ClientID &cid)
 std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
 {
     os << "{AcquireRequestFlag ";
-    if (flag.flag & (uint8_t) AcquireRequestFlag::kNoGc)
+    bool no_gc = flag.flag & (uint8_t) AcquireRequestFlag::kNoGc;
+    if (no_gc)
     {
         os << "no-gc, ";
     }
-    if (flag.flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect)
+    bool with_conflict_detect =
+        flag.flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+    if (with_conflict_detect)
     {
         os << "with-lock, ";
     }
-    if (flag.flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR)
+    bool debug_no_bind_pr =
+        flag.flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
+    if (debug_no_bind_pr)
     {
         os << "no-pr, ";
     }
-    if (flag.flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny)
+    bool debug_no_bind_any =
+        flag.flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
+    if (debug_no_bind_any)
     {
         os << "no-any, ";
+    }
+    bool type_alloc = flag.flag & (uint8_t) AcquireRequestFlag::kTypeAllocation;
+    if (type_alloc)
+    {
+        os << "alloc, ";
+        DCHECK(no_gc) << "Set no-gc for allocation semantics.";
+        DCHECK(!with_conflict_detect)
+            << "Allocation semantics will not detect conflict";
+        DCHECK(!debug_no_bind_any) << "Allocation semantics will not bind any";
+        DCHECK(!debug_no_bind_pr) << "Allocation semantics will not bind pr";
     }
     bool reserved = flag.flag & (uint8_t) AcquireRequestFlag::kReserved;
     DCHECK(!reserved);

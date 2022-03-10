@@ -38,6 +38,7 @@ enum class AcquireRequestStatus : uint8_t
     kLockedErr,
     kBindErr,
     kAddressOutOfRangeErr,
+    kNoMem,
     kReserved,
 };
 std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status);
@@ -81,7 +82,8 @@ enum class AcquireRequestFlag : uint8_t
     kWithConflictDetect = 1 << 1,
     kDebugNoBindPR = 1 << 2,
     kDebugNoBindAny = 1 << 3,
-    kReserved = 1 << 4,
+    kTypeAllocation = 1 << 4,
+    kReserved = 1 << 5,
 };
 struct AcquireRequestFlagOut
 {

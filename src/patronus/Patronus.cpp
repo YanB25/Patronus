@@ -24,18 +24,28 @@ thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
 thread_local DDLManager Patronus::ddl_manager_;
 thread_local size_t Patronus::allocated_mw_nr_;
 
-Patronus::Patronus(const PatronusConfig &conf)
+// clang-format off
+/**
+ * The layout of dsm_->get_server_buffer():
+ * [conf_.lease_buffer_size] [conf_.alloc_buffer_size]
+ * 
+ * The layout of dsm_->get_server_reserved_buffer():
+ * @see required_dsm_reserve_size()
+ * 
+ */
+// clang-format on
+Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
 {
     DSMConfig dsm_config;
     dsm_config.machineNR = conf.machine_nr;
     dsm_config.dsmReserveSize = required_dsm_reserve_size();
-    dsm_config.dsmSize = conf.buffer_size;
+    dsm_config.dsmSize = conf.total_buffer_size();
     dsm_ = DSM::getInstance(dsm_config);
 
     // validate dsm
     auto internal_buf = dsm_->get_server_buffer();
     auto reserve_buf = dsm_->get_server_reserved_buffer();
-    CHECK_GE(internal_buf.size, conf.buffer_size)
+    CHECK_GE(internal_buf.size, conf.total_buffer_size())
         << "** dsm should allocate DSM buffer at least what Patronus requires";
     CHECK_GE(reserve_buf.size, required_dsm_reserve_size())
         << "**dsm should provide reserved buffer at least what Patronus "
@@ -43,6 +53,15 @@ Patronus::Patronus(const PatronusConfig &conf)
 
     internal_barrier();
     DVLOG(1) << "[patronus] Barrier: ctor of DSM";
+
+    // for initial of allocator
+    mem::SlabAllocatorConfig slab_alloc_conf;
+    void *allocator_buf_addr = internal_buf.buffer + conf.lease_buffer_size;
+    size_t allocator_buf_size = conf.alloc_buffer_size;
+    slab_alloc_conf.block_class = conf.block_class;
+    slab_alloc_conf.block_ratio = conf.block_ratio;
+    allocator_ = std::make_shared<mem::SlabAllocator>(
+        allocator_buf_addr, allocator_buf_size, slab_alloc_conf);
 
     // for time syncer
     auto time_sync_buffer = get_time_sync_buffer();
@@ -180,6 +199,20 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
                 enable_trace = true;
                 trace = ctx->trace();
             }
+        }
+    }
+
+    if constexpr (debug())
+    {
+        // validate flag
+        bool type_alloc = flag & (uint8_t) AcquireRequestFlag::kTypeAllocation;
+        bool no_gc = flag & (uint8_t) AcquireRequestFlag::kNoGc;
+        bool with_lock =
+            flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+        if (type_alloc)
+        {
+            DCHECK(no_gc) << "allocation should disable gc";
+            DCHECK(!with_lock) << "allocation should not enable lock semantics";
         }
     }
 
@@ -865,10 +898,13 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     uint64_t slot_id = 0;
 
     // will not actually bind memory window.
+    // TODO(patronus): even with no_bind_pr, the PR is also allocated
+    // We can optimize this.
     bool debug_no_bind_pr =
         req->flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
     bool debug_no_bind_any =
         req->flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
+    bool type_alloc = req->flag & (uint8_t) AcquireRequestFlag::kTypeAllocation;
 
     bool with_lock =
         req->flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
@@ -886,15 +922,33 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         }
     }
 
-    object_buffer_offset = locator_(req->key);
-    if (unlikely(!dsm_->valid_buffer_offset(object_buffer_offset)))
+    if (type_alloc)
     {
-        status = AcquireRequestStatus::kAddressOutOfRangeErr;
-        goto handle_response;
+        // allocation
+        object_addr = patronus_alloc(req->size);
+        if (unlikely(object_addr == nullptr))
+        {
+            status = AcquireRequestStatus::kNoMem;
+            goto handle_response;
+        }
+        object_dsm_offset = dsm_->addr_to_dsm_offset(object_addr);
+        DCHECK_EQ(object_addr, dsm_->dsm_offset_to_addr(object_dsm_offset));
+        object_buffer_offset = 0;  // not used
     }
-    object_dsm_offset = dsm_->buffer_offset_to_dsm_offset(object_buffer_offset);
-    object_addr = dsm_->buffer_offset_to_addr(object_buffer_offset);
-    DCHECK_EQ(object_addr, dsm_->dsm_offset_to_addr(object_dsm_offset));
+    else
+    {
+        // acquire permission from existing memory
+        object_buffer_offset = locator_(req->key);
+        if (unlikely(!valid_lease_buffer_offset(object_buffer_offset)))
+        {
+            status = AcquireRequestStatus::kAddressOutOfRangeErr;
+            goto handle_response;
+        }
+        object_dsm_offset =
+            dsm_->buffer_offset_to_dsm_offset(object_buffer_offset);
+        object_addr = dsm_->buffer_offset_to_addr(object_buffer_offset);
+        DCHECK_EQ(object_addr, dsm_->dsm_offset_to_addr(object_dsm_offset));
+    }
 
     header_addr = protection_region;
     header_dsm_offset = dsm_->addr_to_dsm_offset(header_addr);
@@ -940,7 +994,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                 << "[patronus] Bind mw for buffer (debug_no_bind_pr). addr "
                 << (void *) object_addr << "(dsm_offset: " << object_dsm_offset
                 << "), size: " << req->size << " with access flag "
-                << (int) access_flag;
+                << (int) access_flag
+                << ". Acquire flag: " << AcquireRequestFlagOut(req->flag);
             wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, rw_ctx_id).val;
         }
         else
@@ -960,7 +1015,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                      << (void *) object_addr
                      << "(dsm_offset: " << object_dsm_offset
                      << "), size: " << req->size << " with access flag "
-                     << (int) access_flag;
+                     << (int) access_flag
+                     << ". Acquire flag: " << AcquireRequestFlagOut(req->flag);
             // for header
             fill_bind_mw_wr(wrs[1],
                             nullptr,
@@ -974,7 +1030,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                      << (void *) header_addr
                      << " (dsm_offset: " << header_dsm_offset << ")"
                      << ", size: " << sizeof(ProtectionRegion)
-                     << " with R/W access";
+                     << " with R/W access. Acquire flag: "
+                     << AcquireRequestFlagOut(req->flag);
             wrs[1].send_flags = IBV_SEND_SIGNALED;
             wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, 0).val;
             wrs[1].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
@@ -1062,6 +1119,7 @@ handle_response:
         lease_ctx->key_bucket_id = bucket_id;
         lease_ctx->key_slot_id = slot_id;
         lease_ctx->valid = true;
+        lease_ctx->type_alloc = type_alloc;
         auto lease_id = lease_context_.obj_to_id(lease_ctx);
         DCHECK_LT(
             lease_id,
@@ -2099,6 +2157,11 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         auto bucket_id = lease_ctx->key_bucket_id;
         auto slot_id = lease_ctx->key_slot_id;
         lock_manager_.unlock(bucket_id, slot_id);
+    }
+    bool type_alloc = lease_ctx->type_alloc;
+    if (type_alloc)
+    {
+        patronus_free((void *) lease_ctx->addr_to_bind, lease_ctx->buffer_size);
     }
 
     put_mw(lease_ctx->dir_id, lease_ctx->header_mw);

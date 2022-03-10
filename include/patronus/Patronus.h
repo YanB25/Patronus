@@ -5,6 +5,7 @@
 #include <set>
 #include <unordered_set>
 
+#include "Common.h"
 #include "DSM.h"
 #include "Result.h"
 #include "patronus/Coro.h"
@@ -14,10 +15,13 @@
 #include "patronus/ProtectionRegion.h"
 #include "patronus/TimeSyncer.h"
 #include "patronus/Type.h"
+#include "patronus/memory/allocator.h"
+#include "patronus/memory/slab_allocator.h"
 #include "util/Debug.h"
 
 namespace patronus
 {
+using namespace define::literals;
 class Patronus;
 using KeyLocator = std::function<uint64_t(key_t)>;
 static KeyLocator identity_locator = [](key_t key) -> uint64_t {
@@ -26,15 +30,25 @@ static KeyLocator identity_locator = [](key_t key) -> uint64_t {
 struct PatronusConfig
 {
     size_t machine_nr{0};
-    size_t buffer_size{kDSMCacheSize};
+    size_t lease_buffer_size{kDSMCacheSize / 2};
+    size_t alloc_buffer_size{kDSMCacheSize / 2};
     KeyLocator key_locator{identity_locator};
     // for sync time
     size_t time_parent_node_id{0};
+    // for allocator
+    std::vector<size_t> block_class{2_MB};
+    std::vector<double> block_ratio{1};
+
+    size_t total_buffer_size() const
+    {
+        return lease_buffer_size + alloc_buffer_size;
+    }
 };
 inline std::ostream &operator<<(std::ostream &os, const PatronusConfig &conf)
 {
     os << "{PatronusConfig machine_nr: " << conf.machine_nr
-       << ", buffer_size: " << conf.buffer_size << "}";
+       << ", lease_buffer_size: " << conf.lease_buffer_size
+       << ", alloc_buffer_size: " << conf.alloc_buffer_size << "}";
     return os;
 }
 
@@ -110,6 +124,7 @@ struct LeaseContext
     size_t protection_region_id;
     // about with_conflict_detect
     bool with_conflict_detect{false};
+    bool type_alloc{false};
     uint64_t key_bucket_id{0};
     uint64_t key_slot_id{0};
 };
@@ -290,6 +305,8 @@ public:
     }
 
 private:
+    PatronusConfig conf_;
+    std::shared_ptr<mem::SlabAllocator> allocator_;
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
     constexpr static size_t kGuessActiveLeasePerCoro = 16;
@@ -490,7 +507,7 @@ private:
      * @param expect_unit_nr the expected unit numbers for this lease
      * period. If this field changed, it means the client extended the lease
      * by one-sided CAS. Server should sustain the GC till the next period.
-     * @param flag LeaseModificationFlag
+     * @param flag LeaseModifyFlag
      * @param ctx
      */
     void task_gc_lease(uint64_t lease_id,
@@ -577,6 +594,12 @@ private:
                                 size_t length,
                                 int access_flag);
     ErrCode maybe_auto_extend(Lease &lease, CoroContext *ctx = nullptr);
+
+    inline void *patronus_alloc(size_t size);
+    inline void patronus_free(void *addr, size_t size);
+
+    inline bool valid_lease_buffer_offset(size_t buffer_offset) const;
+    inline bool valid_total_buffer_offset(size_t buffer_offset) const;
 
     /**
      * @brief call me only if u know what u are doing.
@@ -904,6 +927,25 @@ void Patronus::relinquish_write(Lease &lease, CoroContext *ctx)
                               ctx);
 
     put_rdma_buffer(rdma_buffer.buffer);
+}
+void *Patronus::patronus_alloc(size_t size)
+{
+    return allocator_->alloc(size);
+}
+void Patronus::patronus_free(void *addr, size_t size)
+{
+    return allocator_->free(addr, size);
+}
+
+bool Patronus::valid_lease_buffer_offset(size_t buffer_offset) const
+{
+    // normally, conf valid implies dsm valid, but just test it.
+    return (buffer_offset < conf_.lease_buffer_size) &&
+           valid_total_buffer_offset(buffer_offset);
+}
+bool Patronus::valid_total_buffer_offset(size_t offset) const
+{
+    return dsm_->valid_buffer_offset(offset);
 }
 
 }  // namespace patronus
