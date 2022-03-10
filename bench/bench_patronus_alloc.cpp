@@ -314,12 +314,12 @@ void client(Patronus::pointer patronus,
 
     bar.wait();
 
-    for (size_t thread_nr : {1, 2, 4, 8, 10, 12, 14, 16})
+    for (size_t thread_nr : {1, 2, 4, 8, 16})
     // for (size_t thread_nr : {1, 2})
     {
         CHECK_LE(thread_nr, kThreadNr);
         // for (size_t block_size : {64ul, 2_MB, 128_MB})
-        for (size_t block_size : {64ul})
+        for (size_t block_size : {64ul, 2_MB, 128_MB})
         {
             for (size_t coro_nr : {16})
             {
