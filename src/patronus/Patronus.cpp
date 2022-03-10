@@ -864,6 +864,12 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     uint64_t bucket_id = 0;
     uint64_t slot_id = 0;
 
+    // will not actually bind memory window.
+    bool debug_no_bind_pr =
+        req->flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
+    bool debug_no_bind_any =
+        req->flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
+
     bool with_lock =
         req->flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
     if (with_lock)
@@ -917,39 +923,65 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         int access_flag = req->type == RequestType::kAcquireRLease
                               ? IBV_ACCESS_CUSTOM_REMOTE_RO
                               : IBV_ACCESS_CUSTOM_REMOTE_RW;
-        // for buffer
-        fill_bind_mw_wr(wrs[0],
-                        &wrs[1],
-                        buffer_mw,
-                        mr,
-                        (uint64_t) object_addr,
-                        req->size,
-                        access_flag);
-        wrs[0].send_flags = 0;
-        DVLOG(4) << "[patronus] Bind mw for buffer. addr "
-                 << (void *) object_addr << "(dsm_offset: " << object_dsm_offset
-                 << "), size: " << req->size << " with access flag "
-                 << (int) access_flag;
-        // for header
-        fill_bind_mw_wr(wrs[1],
-                        nullptr,
-                        header_mw,
-                        mr,
-                        (uint64_t) header_addr,
-                        sizeof(ProtectionRegion),
-                        // header always grant R/W
-                        IBV_ACCESS_CUSTOM_REMOTE_RW);
-        DVLOG(4) << "[patronus] Bind mw for header. addr: "
-                 << (void *) header_addr
-                 << " (dsm_offset: " << header_dsm_offset << ")"
-                 << ", size: " << sizeof(ProtectionRegion)
-                 << " with R/W access";
-        wrs[1].send_flags = IBV_SEND_SIGNALED;
-        wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, 0).val;
-        wrs[1].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
+        size_t bind_req_nr = 0;
+        if (debug_no_bind_pr)
+        {
+            // only binding buffer. not to bind ProtectionRegion
+            bind_req_nr = 1;
+            fill_bind_mw_wr(wrs[0],
+                            nullptr,
+                            buffer_mw,
+                            mr,
+                            (uint64_t) object_addr,
+                            req->size,
+                            access_flag);
+            wrs[0].send_flags = IBV_SEND_SIGNALED;
+            DVLOG(4)
+                << "[patronus] Bind mw for buffer (debug_no_bind_pr). addr "
+                << (void *) object_addr << "(dsm_offset: " << object_dsm_offset
+                << "), size: " << req->size << " with access flag "
+                << (int) access_flag;
+            wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, rw_ctx_id).val;
+        }
+        else
+        {
+            // bind buffer & ProtectionRegion
+            // for buffer
+            bind_req_nr = 2;
+            fill_bind_mw_wr(wrs[0],
+                            &wrs[1],
+                            buffer_mw,
+                            mr,
+                            (uint64_t) object_addr,
+                            req->size,
+                            access_flag);
+            wrs[0].send_flags = 0;
+            DVLOG(4) << "[patronus] Bind mw for buffer. addr "
+                     << (void *) object_addr
+                     << "(dsm_offset: " << object_dsm_offset
+                     << "), size: " << req->size << " with access flag "
+                     << (int) access_flag;
+            // for header
+            fill_bind_mw_wr(wrs[1],
+                            nullptr,
+                            header_mw,
+                            mr,
+                            (uint64_t) header_addr,
+                            sizeof(ProtectionRegion),
+                            // header always grant R/W
+                            IBV_ACCESS_CUSTOM_REMOTE_RW);
+            DVLOG(4) << "[patronus] Bind mw for header. addr: "
+                     << (void *) header_addr
+                     << " (dsm_offset: " << header_dsm_offset << ")"
+                     << ", size: " << sizeof(ProtectionRegion)
+                     << " with R/W access";
+            wrs[1].send_flags = IBV_SEND_SIGNALED;
+            wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, 0).val;
+            wrs[1].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
+        }
         if constexpr (config::kEnableSkipMagicMw)
         {
-            for (size_t time = 0; time < 2; time++)
+            for (size_t time = 0; time < bind_req_nr; time++)
             {
                 size_t id = allocated_mw_nr_++;
                 if (unlikely((id & mask) == magic))
@@ -958,20 +990,27 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                 }
             }
         }
-
-        ibv_send_wr *bad_wr;
-        int ret = ibv_post_send(qp, wrs, &bad_wr);
-        if (unlikely(ret != 0))
+        if (likely(!debug_no_bind_any))
         {
-            PLOG(ERROR) << "[patronus] failed to ibv_post_send for "
-                           "bind_mw. failed wr: "
-                        << *bad_wr;
-            status = AcquireRequestStatus::kBindErr;
-            goto handle_response;
+            ibv_send_wr *bad_wr;
+            int ret = ibv_post_send(qp, wrs, &bad_wr);
+            if (unlikely(ret != 0))
+            {
+                PLOG(ERROR) << "[patronus] failed to ibv_post_send for "
+                               "bind_mw. failed wr: "
+                            << *bad_wr;
+                status = AcquireRequestStatus::kBindErr;
+                goto handle_response;
+            }
+            if (likely(ctx != nullptr))
+            {
+                ctx->yield_to_master();
+            }
         }
-        if (likely(ctx != nullptr))
+        else
         {
-            ctx->yield_to_master();
+            // skip all the actual binding, and set result to true
+            *rw_ctx->success = true;
         }
         break;
     }

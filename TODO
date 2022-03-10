@@ -203,3 +203,6 @@ Should add some tests.
     - no difference
 [-] bring coroutine into reg_mw cases
     - got x2 performance
+
+if you do not know what to do:
+Start to mock the Race Hashing now!

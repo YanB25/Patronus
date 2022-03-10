@@ -11,4 +11,4 @@ wait
 wait
 ./fetch_log.sh
 ./fetch_result.sh
-# ./for_each.sh ./cleanup.sh
+./for_each.sh ./cleanup.sh

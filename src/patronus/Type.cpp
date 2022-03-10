@@ -136,6 +136,14 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
     {
         os << "with-lock, ";
     }
+    if (flag.flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR)
+    {
+        os << "no-pr, ";
+    }
+    if (flag.flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny)
+    {
+        os << "no-any, ";
+    }
     bool reserved = flag.flag & (uint8_t) AcquireRequestFlag::kReserved;
     DCHECK(!reserved);
     os << "}";

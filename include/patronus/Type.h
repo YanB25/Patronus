@@ -79,7 +79,9 @@ enum class AcquireRequestFlag : uint8_t
 {
     kNoGc = 1 << 0,
     kWithConflictDetect = 1 << 1,
-    kReserved = 1 << 2,
+    kDebugNoBindPR = 1 << 2,
+    kDebugNoBindAny = 1 << 3,
+    kReserved = 1 << 4,
 };
 struct AcquireRequestFlagOut
 {

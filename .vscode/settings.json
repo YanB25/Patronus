@@ -81,5 +81,6 @@
         "${workspaceFolder}/include"
     ],
     "editor.formatOnSave": true,
-    "cmake.configureOnOpen": true
+    "cmake.configureOnOpen": true,
+    "C_Cpp.clang_format_path": "/usr/bin/clang-format"
 }

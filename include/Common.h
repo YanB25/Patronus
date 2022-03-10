@@ -47,7 +47,6 @@
 
 #define RAW_RECV_CQ_COUNT 128
 
-
 #define APP_MESSAGE_NR 96
 
 // }

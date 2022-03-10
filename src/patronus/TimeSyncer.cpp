@@ -114,7 +114,7 @@ void TimeSyncer::do_sync()
         auto actual_parent_time = parent_time + (read_sync_ns / 2);
         if (unlikely(parent_clock_info.magic == 0))
         {
-            DVLOG(4) << "[TimeSyncer] magic == 0. node " << target_gaddr_.nodeID
+            DVLOG(5) << "[TimeSyncer] magic == 0. node " << target_gaddr_.nodeID
                      << " not ready. ";
             std::this_thread::sleep_for(1ms);
             continue;
@@ -128,7 +128,7 @@ void TimeSyncer::do_sync()
 
         auto after_client_time =
             to_ns(now) + clock_info_.adjustment.load(std::memory_order_relaxed);
-        DVLOG(4) << "[TimeSyncer] adjust " << this_adjustment
+        DVLOG(5) << "[TimeSyncer] adjust " << this_adjustment
                  << ", total_adjustment: " << clock_info_.adjustment
                  << ", parent_time: " << parent_time
                  << ", estimated actual parent_time: " << actual_parent_time

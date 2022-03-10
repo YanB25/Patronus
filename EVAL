@@ -69,3 +69,23 @@ up to 19 Mops with 31 threads
 * Every request signal (no batching, 8 coroutines):
 2.56 Mops per thread
 up to 26 Mops with 16 threads (I think RNIC bounded)
+
+## bench_patronus_alloc
+One patronus->get_rlease() requires two binding: one for PR and one for buffer.
+
+* patronus->get_rlease(kDebugNoBindAny):
+2.13 Mops per thread with 16 coroutines
+up to 25.5 Mops with 16 threads
+
+* patronus->get_rlease(kDebugNoBindPr):
+1.42 Mops per thread with 16 coroutines
+up to 17.8 Mops with 16 threads
+
+* patronus->get_rlease():
+1.32 Mops per thread with 16 coroutines
+up to 9.1 Mops with 8 threads
+
+I guess it is switching to rmsg bounded now. 
+TODO: Still not perfect results.
+- Expect: patronus->get_rlease(kDebugNoBindPr) can be close to bench_allocator reports (i.e. 26 Mops)
+- Expect: patronus->get_rlease() can be half of bench_allocator reports (i.e. 13 Mops)
