@@ -50,8 +50,14 @@ public:
     }
     void debug_validity_get(void *addr)
     {
-        DCHECK(outer_.get().insert(addr).second);
-        DCHECK_EQ(inner_.get().erase(addr), 1);
+        if constexpr (debug())
+        {
+            DCHECK(outer_.get().insert(addr).second)
+                << "Inserting addr: " << (void *) addr;
+            auto ret = inner_.get().erase(addr);
+            DCHECK_EQ(ret, 1)
+                << "erasing " << (void *) addr << " should hit and succeed ";
+        }
     }
     void debug_validity_put(void *addr)
     {

@@ -85,6 +85,16 @@ up to 17.8 Mops with 16 threads
 1.32 Mops per thread with 16 coroutines
 up to 9.1 Mops with 8 threads
 
+* patronus->get_rlease(kTypeAlloc)
+1.2 Mops per thread with 16 coroutines 
+up to 14.9 Mops with 16 threads
+
+* patronus->get_rlease(kTypeAlloc | kRelinquishNoUnbind)
+1.5 Mops per thread with 16 coroutines
+up to 17. Mops with 16 threads
+
+# patronus->get_rlease(kTypeAlloc)
+
 I guess it is switching to rmsg bounded now. 
 TODO: Still not perfect results.
 - Expect: patronus->get_rlease(kDebugNoBindPr) can be close to bench_allocator reports (i.e. 26 Mops)

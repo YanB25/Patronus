@@ -23,6 +23,7 @@ thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
     Patronus::protection_region_pool_;
 thread_local DDLManager Patronus::ddl_manager_;
 thread_local size_t Patronus::allocated_mw_nr_;
+thread_local std::shared_ptr<mem::SlabAllocator> Patronus::allocator_;
 
 // clang-format off
 /**
@@ -55,13 +56,9 @@ Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
     DVLOG(1) << "[patronus] Barrier: ctor of DSM";
 
     // for initial of allocator
-    mem::SlabAllocatorConfig slab_alloc_conf;
-    void *allocator_buf_addr = internal_buf.buffer + conf.lease_buffer_size;
-    size_t allocator_buf_size = conf.alloc_buffer_size;
-    slab_alloc_conf.block_class = conf.block_class;
-    slab_alloc_conf.block_ratio = conf.block_ratio;
-    allocator_ = std::make_shared<mem::SlabAllocator>(
-        allocator_buf_addr, allocator_buf_size, slab_alloc_conf);
+    // the actual initialization will be postponed to registerServerThread
+    allocator_buf_addr_ = internal_buf.buffer + conf.lease_buffer_size;
+    allocator_buf_size_ = conf.alloc_buffer_size;
 
     // for time syncer
     auto time_sync_buffer = get_time_sync_buffer();
@@ -206,12 +203,10 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     {
         // validate flag
         bool type_alloc = flag & (uint8_t) AcquireRequestFlag::kTypeAllocation;
-        bool no_gc = flag & (uint8_t) AcquireRequestFlag::kNoGc;
         bool with_lock =
             flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
         if (type_alloc)
         {
-            DCHECK(no_gc) << "allocation should disable gc";
             DCHECK(!with_lock) << "allocation should not enable lock semantics";
         }
     }
@@ -871,10 +866,6 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     auto *header_mw = get_mw(dirID);
 
     // auto internal = dsm_->get_server_buffer();
-    auto *protection_region = get_protection_region();
-    auto protection_region_id =
-        protection_region_pool_->buf_to_id(protection_region);
-
     if constexpr (debug())
     {
         uint64_t digest = req->digest.get();
@@ -896,6 +887,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     bool with_conflict_detect = false;
     uint64_t bucket_id = 0;
     uint64_t slot_id = 0;
+    ProtectionRegion *protection_region = nullptr;
+    uint64_t protection_region_id = 0;
 
     // will not actually bind memory window.
     // TODO(patronus): even with no_bind_pr, the PR is also allocated
@@ -908,6 +901,23 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 
     bool with_lock =
         req->flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+
+    bool with_buf = true;
+    bool with_pr = true;
+    if (debug_no_bind_any)
+    {
+        with_buf = false;
+        with_pr = false;
+    }
+    if (debug_no_bind_pr)
+    {
+        with_pr = false;
+    }
+    if (type_alloc)
+    {
+        with_pr = false;
+    }
+
     if (with_lock)
     {
         auto [b, s] = locate_key(req->key);
@@ -950,8 +960,14 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         DCHECK_EQ(object_addr, dsm_->dsm_offset_to_addr(object_dsm_offset));
     }
 
-    header_addr = protection_region;
-    header_dsm_offset = dsm_->addr_to_dsm_offset(header_addr);
+    if (likely(with_pr))
+    {
+        protection_region = get_protection_region();
+        protection_region_id =
+            protection_region_pool_->buf_to_id(protection_region);
+        header_addr = protection_region;
+        header_dsm_offset = dsm_->addr_to_dsm_offset(header_addr);
+    }
 
     ctx_success = false;
 
@@ -977,8 +993,9 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         int access_flag = req->type == RequestType::kAcquireRLease
                               ? IBV_ACCESS_CUSTOM_REMOTE_RO
                               : IBV_ACCESS_CUSTOM_REMOTE_RW;
+
         size_t bind_req_nr = 0;
-        if (debug_no_bind_pr)
+        if (with_buf && !with_pr)
         {
             // only binding buffer. not to bind ProtectionRegion
             bind_req_nr = 1;
@@ -986,19 +1003,20 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                             nullptr,
                             buffer_mw,
                             mr,
-                            (uint64_t) object_addr,
+                            (uint64_t) DCHECK_NOTNULL(object_addr),
                             req->size,
                             access_flag);
+            DVLOG(4) << "[patronus] Bind mw for buffer (debug_no_bind_pr or "
+                        "type_alloc). addr "
+                     << (void *) object_addr
+                     << "(dsm_offset: " << object_dsm_offset
+                     << "), size: " << req->size << " with access flag "
+                     << (int) access_flag
+                     << ". Acquire flag: " << AcquireRequestFlagOut(req->flag);
             wrs[0].send_flags = IBV_SEND_SIGNALED;
-            DVLOG(4)
-                << "[patronus] Bind mw for buffer (debug_no_bind_pr). addr "
-                << (void *) object_addr << "(dsm_offset: " << object_dsm_offset
-                << "), size: " << req->size << " with access flag "
-                << (int) access_flag
-                << ". Acquire flag: " << AcquireRequestFlagOut(req->flag);
-            wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, rw_ctx_id).val;
+            wrs[0].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
         }
-        else
+        else if (with_buf && with_pr)
         {
             // bind buffer & ProtectionRegion
             // for buffer
@@ -1007,10 +1025,9 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                             &wrs[1],
                             buffer_mw,
                             mr,
-                            (uint64_t) object_addr,
+                            (uint64_t) DCHECK_NOTNULL(object_addr),
                             req->size,
                             access_flag);
-            wrs[0].send_flags = 0;
             DVLOG(4) << "[patronus] Bind mw for buffer. addr "
                      << (void *) object_addr
                      << "(dsm_offset: " << object_dsm_offset
@@ -1032,9 +1049,16 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                      << ", size: " << sizeof(ProtectionRegion)
                      << " with R/W access. Acquire flag: "
                      << AcquireRequestFlagOut(req->flag);
+            wrs[0].send_flags = 0;
             wrs[1].send_flags = IBV_SEND_SIGNALED;
             wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, 0).val;
             wrs[1].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
+        }
+        else
+        {
+            CHECK(!with_pr && !with_buf)
+                << "invalid configuration. with_pr: " << with_pr
+                << ", with_buf: " << with_buf;
         }
         if constexpr (config::kEnableSkipMagicMw)
         {
@@ -1047,7 +1071,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                 }
             }
         }
-        if (likely(!debug_no_bind_any))
+        if (likely(with_pr || with_buf))
         {
             ibv_send_wr *bad_wr;
             int ret = ibv_post_send(qp, wrs, &bad_wr);
@@ -1112,14 +1136,25 @@ handle_response:
         lease_ctx->dir_id = dirID;
         lease_ctx->addr_to_bind = (uint64_t) object_addr;
         lease_ctx->buffer_size = req->size;
-        lease_ctx->protection_region_id = protection_region_id;
-        // set to valid until linked to lease_ctx
-        protection_region->valid = true;
+        lease_ctx->with_pr = with_pr;
+        lease_ctx->with_buf = with_buf;
+        lease_ctx->type_alloc = type_alloc;
+
+        if (likely(with_pr))
+        {
+            lease_ctx->protection_region_id = protection_region_id;
+            // set to valid until linked to lease_ctx
+            protection_region->valid = true;
+        }
+        else
+        {
+            lease_ctx->protection_region_id = 0;
+        }
         lease_ctx->with_conflict_detect = with_conflict_detect;
         lease_ctx->key_bucket_id = bucket_id;
         lease_ctx->key_slot_id = slot_id;
         lease_ctx->valid = true;
-        lease_ctx->type_alloc = type_alloc;
+
         auto lease_id = lease_context_.obj_to_id(lease_ctx);
         DCHECK_LT(
             lease_id,
@@ -1137,15 +1172,28 @@ handle_response:
         DCHECK(!reserved)
             << "reserved flag should not be set. Possible corrupted message";
 
-        auto aba_unit_to_ddl = protection_region->aba_unit_nr_to_ddl.load(
-            std::memory_order_acq_rel);
-        aba_unit_to_ddl.u32_2 = 1;
-        protection_region->aba_unit_nr_to_ddl.store(aba_unit_to_ddl,
-                                                    std::memory_order_acq_rel);
+        compound_uint64_t aba_unit_to_ddl(0);
+        if (likely(with_pr))
+        {
+            aba_unit_to_ddl = protection_region->aba_unit_nr_to_ddl.load(
+                std::memory_order_acq_rel);
+            aba_unit_to_ddl.u32_2 = 1;
+            protection_region->aba_unit_nr_to_ddl.store(
+                aba_unit_to_ddl, std::memory_order_acq_rel);
+        }
 
         // success, so register Lease expiring logic here.
         bool no_gc = req->flag & (uint8_t) AcquireRequestFlag::kNoGc;
-        if (likely(!no_gc))
+
+        // can not enable gc while disable pr.
+        bool invalid = !no_gc && !with_pr;
+        DCHECK(!invalid) << "Invalid flag: if enable auto-gc (no_gc: " << no_gc
+                         << "), could not disable pr (with_pr: " << with_pr
+                         << "). debug_no_bind_pr: " << debug_no_bind_pr
+                         << ", debug_no_bind_any: " << debug_no_bind_any
+                         << ", type_alloc: " << type_alloc;
+
+        if (likely(!no_gc && with_pr))
         {
             auto patronus_now = time_syncer_->patronus_now();
             auto patronus_ddl_term = patronus_now.term() + ns_per_unit;
@@ -1193,6 +1241,11 @@ handle_response:
         put_protection_region(protection_region);
 
         protection_region = nullptr;
+        if (type_alloc)
+        {
+            // freeing nullptr is always well-defined
+            patronus_free(object_addr, req->size);
+        }
     }
 
     auto from_mid = req->cid.mid;
@@ -1635,7 +1688,8 @@ void Patronus::registerServerThread()
         }
     }
 
-    CHECK_LT(get_thread_id(), NR_DIRECTORY)
+    auto tid = get_thread_id();
+    CHECK_LT(tid, NR_DIRECTORY)
         << "** make no sense to have more threads than NR_DIRECTORY. One "
            "thread can manipulate multiple DIR, but should not share the same "
            "DIR accross different threads. Especially, we need to know the "
@@ -1652,6 +1706,16 @@ void Patronus::registerServerThread()
     protection_region_pool_ =
         std::make_unique<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>(
             pr_buffer_self, pr_size_per_thread);
+
+    // allocator
+    mem::SlabAllocatorConfig slab_alloc_conf;
+    slab_alloc_conf.block_class = conf_.block_class;
+    slab_alloc_conf.block_ratio = conf_.block_ratio;
+    size_t allocator_buf_size_thread = allocator_buf_size_ / NR_DIRECTORY;
+    void *allocator_buf_addr_thread =
+        (char *) allocator_buf_addr_ + allocator_buf_size_thread * tid;
+    allocator_ = std::make_shared<mem::SlabAllocator>(
+        allocator_buf_addr_thread, allocator_buf_size_thread, slab_alloc_conf);
 }
 
 void Patronus::registerClientThread()
@@ -2016,94 +2080,113 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             << lease_ctx->client_cid << ", got: " << cid;
     }
 
-    // test if client issued extends
-    auto protection_region_id = lease_ctx->protection_region_id;
-    auto *protection_region = get_protection_region(protection_region_id);
-    DCHECK(protection_region->valid)
-        << "** If lease_ctx is valid, the protection region must also be "
-           "valid. protection_region_id: "
-        << protection_region_id << ", PR: " << *protection_region
-        << ", lease_id: " << lease_id << ", cid: " << cid
-        << ", expect_aba_unit_nr_to_ddl: " << expect_aba_unit_nr_to_ddl
-        << ", flag: " << LeaseModifyFlagOut(flag)
-        << ", coro: " << (ctx ? *ctx : nullctx) << ", protection_region at "
-        << (void *) protection_region << ", lease_ctx at " << (void *) lease_ctx
-        << ", handled by server tid " << get_thread_id();
-    auto aba_unit_nr_to_ddl =
-        protection_region->aba_unit_nr_to_ddl.load(std::memory_order_relaxed);
-    auto next_expect_aba_unit_nr_to_ddl = aba_unit_nr_to_ddl;
-    DCHECK_GT(aba_unit_nr_to_ddl.u32_2, 0);
-    auto aba = aba_unit_nr_to_ddl.u32_1;
-    auto expect_aba = expect_aba_unit_nr_to_ddl.u32_1;
-    auto unit_nr_to_ddl = aba_unit_nr_to_ddl.u32_2;
-    auto expect_unit_nr_to_ddl = expect_aba_unit_nr_to_ddl.u32_2;
+    bool with_pr = lease_ctx->with_pr;
+    bool with_buf = lease_ctx->with_buf;
+    bool type_alloc = lease_ctx->type_alloc;
 
-    DCHECK_GE(unit_nr_to_ddl, expect_unit_nr_to_ddl)
-        << "** The period will not go back: client only extend them";
-    // indicate that server will by no means GC the lease
-    bool force_gc = flag & (uint8_t) LeaseModifyFlag::kForceUnbind;
-    bool client_already_exteded = unit_nr_to_ddl != expect_unit_nr_to_ddl;
-    DVLOG(4) << "[patronus][gc_lease] determine the behaviour: force_gc: "
-             << force_gc
-             << ", client_already_extended: " << client_already_exteded
-             << " (pr->aba_unit_nr_to_ddl: " << aba_unit_nr_to_ddl
-             << " v.s. expect_aba_unit_nr_to_ddl: "
-             << expect_aba_unit_nr_to_ddl;
+    uint64_t protection_region_id = 0;
+    ProtectionRegion *protection_region = nullptr;
 
-    if constexpr (debug())
+    if (likely(with_pr))
     {
-        if (!force_gc)
-        {
-            DCHECK_EQ(aba, expect_aba)
-                << "** The aba_id should remain the same. actual: "
-                << aba_unit_nr_to_ddl
-                << ", expect: " << expect_aba_unit_nr_to_ddl;
-        }
-    }
+        // test if client issued extends
+        protection_region_id = lease_ctx->protection_region_id;
+        protection_region = get_protection_region(protection_region_id);
+        DCHECK(protection_region->valid)
+            << "** If lease_ctx is valid, the protection region must also be "
+               "valid. protection_region_id: "
+            << protection_region_id << ", PR: " << *protection_region
+            << ", lease_id: " << lease_id << ", cid: " << cid
+            << ", expect_aba_unit_nr_to_ddl: " << expect_aba_unit_nr_to_ddl
+            << ", flag: " << LeaseModifyFlagOut(flag)
+            << ", coro: " << (ctx ? *ctx : nullctx) << ", protection_region at "
+            << (void *) protection_region << ", lease_ctx at "
+            << (void *) lease_ctx << ", handled by server tid "
+            << get_thread_id();
+        auto aba_unit_nr_to_ddl = protection_region->aba_unit_nr_to_ddl.load(
+            std::memory_order_relaxed);
+        auto next_expect_aba_unit_nr_to_ddl = aba_unit_nr_to_ddl;
+        DCHECK_GT(aba_unit_nr_to_ddl.u32_2, 0);
+        auto aba = aba_unit_nr_to_ddl.u32_1;
+        auto expect_aba = expect_aba_unit_nr_to_ddl.u32_1;
+        auto unit_nr_to_ddl = aba_unit_nr_to_ddl.u32_2;
+        auto expect_unit_nr_to_ddl = expect_aba_unit_nr_to_ddl.u32_2;
 
-    if (unlikely(client_already_exteded && !force_gc))
-    {
-        DCHECK_GT(unit_nr_to_ddl, 0);
-        auto next_ns = unit_nr_to_ddl * protection_region->ns_per_unit;
-        auto next_ddl = protection_region->begin_term + next_ns;
+        DCHECK_GE(unit_nr_to_ddl, expect_unit_nr_to_ddl)
+            << "** The period will not go back: client only extend them";
+        // indicate that server will by no means GC the lease
+        bool force_gc = flag & (uint8_t) LeaseModifyFlag::kForceUnbind;
+        bool client_already_exteded = unit_nr_to_ddl != expect_unit_nr_to_ddl;
+        DVLOG(4) << "[patronus][gc_lease] determine the behaviour: force_gc: "
+                 << force_gc
+                 << ", client_already_extended: " << client_already_exteded
+                 << " (pr->aba_unit_nr_to_ddl: " << aba_unit_nr_to_ddl
+                 << " v.s. expect_aba_unit_nr_to_ddl: "
+                 << expect_aba_unit_nr_to_ddl;
+
         if constexpr (debug())
         {
-            auto patronus_ddl = time::PatronusTime(next_ddl);
-            auto patronus_now = time_syncer_->patronus_now();
-            LOG_IF(WARNING, patronus_ddl < patronus_now)
-                << "[patronus] tasks' next DDL < now. patronus_ddl: "
-                << patronus_ddl << ", patronus_now: " << patronus_now;
+            if (!force_gc)
+            {
+                DCHECK_EQ(aba, expect_aba)
+                    << "** The aba_id should remain the same. actual: "
+                    << aba_unit_nr_to_ddl
+                    << ", expect: " << expect_aba_unit_nr_to_ddl;
+            }
         }
-        ddl_manager_.push(
-            next_ddl,
-            [this, lease_id, cid, flag, next_expect_aba_unit_nr_to_ddl, ctx]() {
-                task_gc_lease(
-                    lease_id, cid, next_expect_aba_unit_nr_to_ddl, flag, ctx);
-            });
-        DVLOG(3) << "[patronus][gc_lease] skip relinquish because client's "
-                    "extend. lease_id: "
-                 << lease_id << "ProtectionRegion: " << (*protection_region)
-                 << ", next_ddl: " << next_ddl << ", next_ns: " << next_ns
-                 << ", patronus_now: " << time_syncer_->patronus_now()
-                 << ", next_expect_aba_unit_nr_to_ddl: "
-                 << next_expect_aba_unit_nr_to_ddl;
-        return;
-    }
-    else
-    {
-        DVLOG(3) << "[patronus][gc_lease] relinquish from "
-                    "decision(client_already_extended: "
-                 << client_already_exteded << ", force_gc: " << force_gc
-                 << "). lease_id: " << lease_id
-                 << "ProtectionRegion: " << (*protection_region)
-                 << ", patronus_now: " << time_syncer_->patronus_now();
-    }
 
-    // add @aba by 1, so that client cas will fail
-    auto next_aba_unit_nr_to_ddl =
-        protection_region->aba_unit_nr_to_ddl.load(std::memory_order_relaxed);
-    next_aba_unit_nr_to_ddl.u32_1++;
-    protection_region->aba_unit_nr_to_ddl.store(next_aba_unit_nr_to_ddl);
+        if (unlikely(client_already_exteded && !force_gc))
+        {
+            DCHECK_GT(unit_nr_to_ddl, 0);
+            auto next_ns = unit_nr_to_ddl * protection_region->ns_per_unit;
+            auto next_ddl = protection_region->begin_term + next_ns;
+            if constexpr (debug())
+            {
+                auto patronus_ddl = time::PatronusTime(next_ddl);
+                auto patronus_now = time_syncer_->patronus_now();
+                LOG_IF(WARNING, patronus_ddl < patronus_now)
+                    << "[patronus] tasks' next DDL < now. patronus_ddl: "
+                    << patronus_ddl << ", patronus_now: " << patronus_now;
+            }
+            ddl_manager_.push(next_ddl,
+                              [this,
+                               lease_id,
+                               cid,
+                               flag,
+                               next_expect_aba_unit_nr_to_ddl,
+                               ctx]() {
+                                  task_gc_lease(lease_id,
+                                                cid,
+                                                next_expect_aba_unit_nr_to_ddl,
+                                                flag,
+                                                ctx);
+                              });
+            DVLOG(3) << "[patronus][gc_lease] skip relinquish because client's "
+                        "extend. lease_id: "
+                     << lease_id << "ProtectionRegion: " << (*protection_region)
+                     << ", next_ddl: " << next_ddl << ", next_ns: " << next_ns
+                     << ", patronus_now: " << time_syncer_->patronus_now()
+                     << ", next_expect_aba_unit_nr_to_ddl: "
+                     << next_expect_aba_unit_nr_to_ddl;
+            return;
+        }
+        else
+        {
+            DVLOG(3) << "[patronus][gc_lease] relinquish from "
+                        "decision(client_already_extended: "
+                     << client_already_exteded << ", force_gc: " << force_gc
+                     << "). lease_id: " << lease_id
+                     << "ProtectionRegion: " << (*protection_region)
+                     << ", patronus_now: " << time_syncer_->patronus_now();
+        }
+
+        // add @aba by 1, so that client cas will fail
+        auto next_aba_unit_nr_to_ddl =
+            protection_region->aba_unit_nr_to_ddl.load(
+                std::memory_order_relaxed);
+        next_aba_unit_nr_to_ddl.u32_1++;
+        protection_region->aba_unit_nr_to_ddl.store(next_aba_unit_nr_to_ddl);
+    }
 
     bool no_unbind = flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
     if (likely(!no_unbind))
@@ -2120,35 +2203,69 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         // NOTE: if size == 0, no matter access set to RO, RW or NORW
         // and no matter allocated_mw_nr +2/-2/0, it generates corrupted mws.
         // But if set size to 1 and allocated_mw_nr + 2, it works well.
-        fill_bind_mw_wr(wrs[0],
-                        &wrs[1],
-                        lease_ctx->header_mw,
-                        mr,
-                        (uint64_t) bind_nulladdr,
-                        1,
-                        IBV_ACCESS_CUSTOM_REMOTE_NORW);
-        fill_bind_mw_wr(wrs[1],
-                        nullptr,
-                        lease_ctx->buffer_mw,
-                        mr,
-                        (uint64_t) bind_nulladdr,
-                        1,
-                        IBV_ACCESS_CUSTOM_REMOTE_NORW);
+        size_t bind_nr = 0;
+        if (with_buf && !with_pr)
+        {
+            // only buffer
+            bind_nr = 1;
+            fill_bind_mw_wr(wrs[0],
+                            nullptr,
+                            lease_ctx->buffer_mw,
+                            mr,
+                            (uint64_t) bind_nulladdr,
+                            1,
+                            IBV_ACCESS_CUSTOM_REMOTE_NORW);
 
-        // never signal
-        wrs[0].send_flags = 0;
-        wrs[1].send_flags = 0;
-        // but want to detect failure
-        wrs[0].wr_id = wrs[1].wr_id =
-            WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
-        ibv_send_wr *bad_wr;
-        int ret = ibv_post_send(qp, wrs, &bad_wr);
-        PLOG_IF(ERROR, ret != 0) << "[patronus][gc_lease] failed to "
-                                    "ibv_post_send to unbind memory window. "
-                                 << *bad_wr;
+            // never signal
+            wrs[0].send_flags = 0;
+            // but want to detect failure
+            wrs[0].wr_id = wrs[1].wr_id =
+                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
+        }
+        else if (with_buf && with_pr)
+        {
+            // pr and buffer
+            bind_nr = 2;
+            fill_bind_mw_wr(wrs[0],
+                            &wrs[1],
+                            lease_ctx->header_mw,
+                            mr,
+                            (uint64_t) bind_nulladdr,
+                            1,
+                            IBV_ACCESS_CUSTOM_REMOTE_NORW);
+            fill_bind_mw_wr(wrs[1],
+                            nullptr,
+                            lease_ctx->buffer_mw,
+                            mr,
+                            (uint64_t) bind_nulladdr,
+                            1,
+                            IBV_ACCESS_CUSTOM_REMOTE_NORW);
+
+            // never signal
+            wrs[0].send_flags = 0;
+            wrs[1].send_flags = 0;
+            // but want to detect failure
+            wrs[0].wr_id = wrs[1].wr_id =
+                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
+        }
+        else
+        {
+            CHECK(!with_buf && !with_pr)
+                << "invalid configuration. with_buf: " << with_buf
+                << ", with_pr: " << with_pr;
+        }
+        if (with_buf || with_pr)
+        {
+            ibv_send_wr *bad_wr;
+            int ret = ibv_post_send(qp, wrs, &bad_wr);
+            PLOG_IF(ERROR, ret != 0)
+                << "[patronus][gc_lease] failed to "
+                   "ibv_post_send to unbind memory window. "
+                << *bad_wr;
+        }
         if constexpr (config::kEnableSkipMagicMw)
         {
-            allocated_mw_nr_ += 2;
+            allocated_mw_nr_ += bind_nr;
         }
     }
     bool with_conflict_detect = lease_ctx->with_conflict_detect;
@@ -2158,7 +2275,6 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         auto slot_id = lease_ctx->key_slot_id;
         lock_manager_.unlock(bucket_id, slot_id);
     }
-    bool type_alloc = lease_ctx->type_alloc;
     if (type_alloc)
     {
         patronus_free((void *) lease_ctx->addr_to_bind, lease_ctx->buffer_size);
@@ -2169,7 +2285,10 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     // TODO(patronus): not considering any checks here
     // for example, the pr->meta.relinquished bits.
 
-    put_protection_region(protection_region);
+    if (with_pr)
+    {
+        put_protection_region(protection_region);
+    }
     put_lease_context(lease_ctx);
 }
 

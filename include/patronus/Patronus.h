@@ -125,6 +125,8 @@ struct LeaseContext
     // about with_conflict_detect
     bool with_conflict_detect{false};
     bool type_alloc{false};
+    bool with_pr{true};
+    bool with_buf{true};
     uint64_t key_bucket_id{0};
     uint64_t key_slot_id{0};
 };
@@ -273,7 +275,10 @@ public:
     }
     void put_rdma_buffer(void *buf)
     {
-        rdma_client_buffer_->put(buf);
+        if (buf != nullptr)
+        {
+            rdma_client_buffer_->put(buf);
+        }
     }
 
     DSM::pointer get_dsm()
@@ -306,7 +311,9 @@ public:
 
 private:
     PatronusConfig conf_;
-    std::shared_ptr<mem::SlabAllocator> allocator_;
+    static thread_local std::shared_ptr<mem::SlabAllocator> allocator_;
+    void *allocator_buf_addr_{nullptr};
+    size_t allocator_buf_size_{0};
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
     constexpr static size_t kGuessActiveLeasePerCoro = 16;
@@ -342,7 +349,10 @@ private:
     }
     void put_mw(size_t dirID, ibv_mw *mw)
     {
-        mw_pool_[dirID].push(mw);
+        if (mw != nullptr)
+        {
+            mw_pool_[dirID].push(mw);
+        }
     }
     char *get_rdma_message_buffer()
     {
@@ -354,7 +364,10 @@ private:
     }
     void put_rdma_message_buffer(char *buf)
     {
-        rdma_message_buffer_pool_->put(buf);
+        if (buf != nullptr)
+        {
+            rdma_message_buffer_pool_->put(buf);
+        }
     }
     RpcContext *get_rpc_context()
     {
@@ -362,7 +375,10 @@ private:
     }
     void put_rpc_context(RpcContext *ctx)
     {
-        rpc_context_.put(ctx);
+        if (ctx != nullptr)
+        {
+            rpc_context_.put(ctx);
+        }
     }
     uint16_t get_rpc_context_id(RpcContext *ctx)
     {
@@ -376,7 +392,10 @@ private:
     }
     void put_rw_context(RWContext *ctx)
     {
-        rw_context_.put(ctx);
+        if (ctx != nullptr)
+        {
+            rw_context_.put(ctx);
+        }
     }
     uint16_t get_rw_context_id(RWContext *ctx)
     {
@@ -408,10 +427,13 @@ private:
     }
     void put_lease_context(LeaseContext *ctx)
     {
-        ctx->protection_region_id =
-            std::numeric_limits<decltype(ctx->protection_region_id)>::max();
-        ctx->valid = false;
-        lease_context_.put(ctx);
+        if (ctx != nullptr)
+        {
+            ctx->protection_region_id =
+                std::numeric_limits<decltype(ctx->protection_region_id)>::max();
+            ctx->valid = false;
+            lease_context_.put(ctx);
+        }
     }
     ProtectionRegion *get_protection_region()
     {
@@ -421,14 +443,17 @@ private:
     }
     void put_protection_region(ProtectionRegion *p)
     {
-        auto aba_unit_nr_to_ddl =
-            p->aba_unit_nr_to_ddl.load(std::memory_order_acq_rel);
-        // to avoid ABA problem, add the 32 bits by one each time.
-        aba_unit_nr_to_ddl.u32_1++;
-        p->aba_unit_nr_to_ddl.store(aba_unit_nr_to_ddl,
-                                    std::memory_order_acq_rel);
-        p->valid = false;
-        protection_region_pool_->put(p);
+        if (p != nullptr)
+        {
+            auto aba_unit_nr_to_ddl =
+                p->aba_unit_nr_to_ddl.load(std::memory_order_acq_rel);
+            // to avoid ABA problem, add the 32 bits by one each time.
+            aba_unit_nr_to_ddl.u32_1++;
+            p->aba_unit_nr_to_ddl.store(aba_unit_nr_to_ddl,
+                                        std::memory_order_acq_rel);
+            p->valid = false;
+            protection_region_pool_->put(p);
+        }
     }
     ProtectionRegion *get_protection_region(size_t id)
     {
@@ -934,7 +959,10 @@ void *Patronus::patronus_alloc(size_t size)
 }
 void Patronus::patronus_free(void *addr, size_t size)
 {
-    return allocator_->free(addr, size);
+    if (addr != nullptr)
+    {
+        allocator_->free(addr, size);
+    }
 }
 
 bool Patronus::valid_lease_buffer_offset(size_t buffer_offset) const

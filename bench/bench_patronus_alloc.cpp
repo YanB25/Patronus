@@ -457,6 +457,58 @@ void bench_patronus_get_rlease_full_auto_gc(Patronus::pointer patronus,
                           acquire_flag,
                           relinquish_flag);
 }
+void bench_patronus_alloc(Patronus::pointer patronus,
+                          boost::barrier &bar,
+                          std::atomic<ssize_t> &work_nr,
+                          size_t test_times,
+                          size_t alloc_size,
+                          size_t thread_nr,
+                          size_t coro_nr,
+                          bool is_master,
+                          bool warm_up)
+{
+    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kTypeAllocation |
+                           (uint8_t) AcquireRequestFlag::kNoGc;
+    uint8_t relinquish_flag = 0;
+    return bench_template("alloc w(unbind)",
+                          patronus,
+                          bar,
+                          work_nr,
+                          test_times,
+                          alloc_size,
+                          thread_nr,
+                          coro_nr,
+                          is_master,
+                          warm_up,
+                          acquire_flag,
+                          relinquish_flag);
+}
+void bench_patronus_alloc_no_unbind(Patronus::pointer patronus,
+                                    boost::barrier &bar,
+                                    std::atomic<ssize_t> &work_nr,
+                                    size_t test_times,
+                                    size_t alloc_size,
+                                    size_t thread_nr,
+                                    size_t coro_nr,
+                                    bool is_master,
+                                    bool warm_up)
+{
+    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kTypeAllocation |
+                           (uint8_t) AcquireRequestFlag::kNoGc;
+    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    return bench_template("alloc w/o(unbind)",
+                          patronus,
+                          bar,
+                          work_nr,
+                          test_times,
+                          alloc_size,
+                          thread_nr,
+                          coro_nr,
+                          is_master,
+                          warm_up,
+                          acquire_flag,
+                          relinquish_flag);
+}
 
 void server(Patronus::pointer patronus, bool is_master)
 {
@@ -496,34 +548,61 @@ void client(Patronus::pointer patronus,
                     auto test_times = 1_M;
                     auto total_test_times = test_times * thread_nr;
 
-                    bench_patronus_get_rlease_nothing(patronus,
-                                                      bar,
-                                                      task_nr,
-                                                      total_test_times,
-                                                      block_size,
-                                                      thread_nr,
-                                                      coro_nr,
-                                                      is_master,
-                                                      warm_up);
-                    bench_patronus_get_rlease_one_bind(patronus,
-                                                       bar,
-                                                       task_nr,
-                                                       total_test_times,
-                                                       block_size,
-                                                       thread_nr,
-                                                       coro_nr,
-                                                       is_master,
-                                                       warm_up);
-                    bench_patronus_get_rlease_no_unbind(patronus,
-                                                        bar,
-                                                        task_nr,
-                                                        total_test_times,
-                                                        block_size,
-                                                        thread_nr,
-                                                        coro_nr,
-                                                        is_master,
-                                                        warm_up);
-                    bench_patronus_get_rlease_full(patronus,
+                    // bench_patronus_get_rlease_nothing(patronus,
+                    //                                   bar,
+                    //                                   task_nr,
+                    //                                   total_test_times,
+                    //                                   block_size,
+                    //                                   thread_nr,
+                    //                                   coro_nr,
+                    //                                   is_master,
+                    //                                   warm_up);
+                    // bench_patronus_get_rlease_one_bind(patronus,
+                    //                                    bar,
+                    //                                    task_nr,
+                    //                                    total_test_times,
+                    //                                    block_size,
+                    //                                    thread_nr,
+                    //                                    coro_nr,
+                    //                                    is_master,
+                    //                                    warm_up);
+                    // bench_patronus_get_rlease_no_unbind(patronus,
+                    //                                     bar,
+                    //                                     task_nr,
+                    //                                     total_test_times,
+                    //                                     block_size,
+                    //                                     thread_nr,
+                    //                                     coro_nr,
+                    //                                     is_master,
+                    //                                     warm_up);
+                    // bench_patronus_get_rlease_full(patronus,
+                    //                                bar,
+                    //                                task_nr,
+                    //                                total_test_times,
+                    //                                block_size,
+                    //                                thread_nr,
+                    //                                coro_nr,
+                    //                                is_master,
+                    //                                warm_up);
+                    // bench_patronus_get_rlease_full_auto_gc(patronus,
+                    //                                        bar,
+                    //                                        task_nr,
+                    //                                        total_test_times,
+                    //                                        block_size,
+                    //                                        thread_nr,
+                    //                                        coro_nr,
+                    //                                        is_master,
+                    //                                        warm_up);
+                    bench_patronus_alloc(patronus,
+                                         bar,
+                                         task_nr,
+                                         total_test_times,
+                                         block_size,
+                                         thread_nr,
+                                         coro_nr,
+                                         is_master,
+                                         warm_up);
+                    bench_patronus_alloc_no_unbind(patronus,
                                                    bar,
                                                    task_nr,
                                                    total_test_times,
@@ -532,15 +611,6 @@ void client(Patronus::pointer patronus,
                                                    coro_nr,
                                                    is_master,
                                                    warm_up);
-                    bench_patronus_get_rlease_full_auto_gc(patronus,
-                                                           bar,
-                                                           task_nr,
-                                                           total_test_times,
-                                                           block_size,
-                                                           thread_nr,
-                                                           coro_nr,
-                                                           is_master,
-                                                           warm_up);
                 }
             }
         }
@@ -556,6 +626,8 @@ int main(int argc, char *argv[])
 
     PatronusConfig config;
     config.machine_nr = kMachineNr;
+    config.block_class = {2_MB};
+    config.block_ratio = {1};
 
     auto patronus = Patronus::ins(config);
 
