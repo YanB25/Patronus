@@ -150,4 +150,18 @@ inline bool fast_pseudo_bool_with_prob(double prob)
     return fast_pseudo_rand_dbl(0, 1) < prob;
 }
 
+inline void fast_pseudo_fill_buf(char *s, size_t len)
+{
+    static const char alphanum[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
+
+    constexpr size_t size_of_alpha = sizeof(alphanum) / sizeof(char);
+    for (size_t i = 0; i < len; ++i)
+    {
+        s[i] = alphanum[fast_pseudo_rand_int(0, size_of_alpha - 1)];
+    }
+}
+
 #endif

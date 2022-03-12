@@ -206,3 +206,12 @@ Should add some tests.
 
 if you do not know what to do:
 Start to mock the Race Hashing now!
+
+When you come back:
+[-] Rewrite the API of hash table: in a *Remote-able* object way!
+[-] Add more logs for your debugging.
+[-] make sure it works well! See the load factor.
+- make sure it behaves good under multiple threads!
+[-] Wont (REALLY DON'T WANT TO DO). see if extension is easy (like <= 1h I can do it)
+
+Then, do the shrink task!

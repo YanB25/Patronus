@@ -69,7 +69,8 @@
         "*.ipp": "cpp",
         "any": "cpp",
         "codecvt": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "*.def": "cpp"
     },
     "C_Cpp.default.compilerArgs": [
         "--std=c++17"
