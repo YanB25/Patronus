@@ -91,6 +91,10 @@ public:
     {
         return !empty() && fp() == _fp;
     }
+    void clear()
+    {
+        ptr_.set_val(0);
+    }
     friend std::ostream &operator<<(std::ostream &, const Slot &);
 
 private:
@@ -232,9 +236,9 @@ public:
                 full_nr++;
             }
         }
-        DVLOG(1) << "[slot] utilization: full_nr: " << full_nr
-                 << ", total: " << kSlotNr
-                 << ", util: " << 1.0 * full_nr / kDataSlotNr;
+        // DVLOG(1) << "[slot] utilization: full_nr: " << full_nr
+        //          << ", total: " << kDataSlotNr
+        //          << ", util: " << 1.0 * full_nr / kDataSlotNr;
         return 1.0 * full_nr / kDataSlotNr;
     }
 
@@ -263,12 +267,17 @@ public:
     {
         // NOTE:
         // fetch from main bucket first
-        auto ret = main_.fetch_empty(limit);
-        if (ret.size() > 0)
+        // this is done in local memory, should be very fast.
+        auto main_ret = main_.fetch_empty(limit);
+        if (main_ret.size() >= limit)
         {
-            return ret;
+            return main_ret;
         }
-        return overflow_.fetch_empty(limit);
+        auto overflow_ret = overflow_.fetch_empty(limit - main_ret.size());
+        main_ret.insert(main_ret.end(),
+                        std::make_move_iterator(overflow_ret.begin()),
+                        std::make_move_iterator(overflow_ret.end()));
+        return main_ret;
     }
     std::vector<Slot *> locate(uint8_t fp)
     {
@@ -497,11 +506,59 @@ public:
     }
     RetCode del(const Key &key, uint64_t hash)
     {
-        CHECK(false) << "TODO:" << key << ", " << hash;
+        auto h1 = hash_1(hash);
+        auto h2 = hash_2(hash);
+        auto fp = hash_fp(hash);
+        DVLOG(4) << "[race][subtable] DEL hash: " << std::hex << hash
+                 << " got h1: " << h1 << ", h2: " << h2
+                 << ", fp: " << pre_fp(fp);
+
+        // RDMA: read the whole combined_bucket
+        // Batch together.
+        // TODO(RDMA): should check header here
+        auto cb1 = combined_bucket(h1);
+        auto cb2 = combined_bucket(h2);
+        // RDMA: do the local search for any slot *may* match the key
+        auto slots_1 = cb1.locate(fp);
+        for (auto *slot : slots_1)
+        {
+            // RDMA: read here
+            auto *kv_block = (KVBlock *) slot->ptr();
+            auto rc = do_del_if_real_match(slot, kv_block, key);
+            if (rc == kOk)
+            {
+                return kOk;
+            }
+            DCHECK_EQ(rc, kNotFound);
+        }
+        auto slots_2 = cb2.locate(fp);
+        for (auto *slot : slots_2)
+        {
+            // RDMA: read here
+            auto *kv_block = (KVBlock *) slot->ptr();
+            auto rc = do_del_if_real_match(slot, kv_block, key);
+            if (rc == kOk)
+            {
+                return kOk;
+            }
+            DCHECK_EQ(rc, kNotFound);
+        }
+        return kNotFound;
     }
     static constexpr size_t max_capacity()
     {
         return kTotalBucketNr * Bucket<kSlotNr>::max_capacity();
+    }
+
+    double utilization() const
+    {
+        OnePassMonitor m;
+        for (size_t i = 0; i < kBucketGroupNr; ++i)
+        {
+            double util = bucket_group(i).utilization();
+            m.collect(util);
+        }
+        return m.average();
     }
 
 private:
@@ -568,6 +625,8 @@ private:
                                     uint64_t h2,
                                     uint8_t fp)
     {
+        DVLOG(4) << "[race][subtable] reread: " << pre(key)
+                 << " to detect any duplicated ones";
         // RDMA: do the read again here
         auto cb1 = combined_bucket(h1);
         auto cb2 = combined_bucket(h2);
@@ -583,6 +642,8 @@ private:
             {
                 if (slot != chosen_slot)
                 {
+                    DVLOG(4) << "[race][subtable] reread: " << pre(key)
+                             << " remove duplicated slot " << (void *) slot;
                     auto rc = do_remove(slot);
                     CHECK(rc == kOk || rc == kRetry);
                 }
@@ -592,8 +653,18 @@ private:
     }
     RetCode do_remove(Slot *slot)
     {
-        CHECK(false) << "TODO: slot: " << (void *) slot;
-        return kInvalid;
+        auto expect_slot = *slot;
+        auto desired_slot = expect_slot;
+        desired_slot.clear();
+        if (slot->cas(expect_slot, desired_slot))
+        {
+            free(expect_slot.ptr());
+            return kOk;
+        }
+        else
+        {
+            return kRetry;
+        }
     }
     std::vector<Slot *> get_real_match_slots(const Key &key,
                                              const std::vector<Slot *> slot_1,
@@ -671,7 +742,8 @@ private:
             CHECK(rc == kRetry || rc == kNotFound);
         }
         DVLOG(4) << "[race][subtable] both bucket failed to insert slot "
-                 << new_slot << " at empty";
+                 << new_slot << " to any empty ones. Tried " << empty_1.size()
+                 << " and " << empty_2.size() << " empty slots each.";
         return kNoMem;
     }
     RetCode do_update_if_real_match(Slot *slot, const Key &key, Slot &new_slot)
@@ -722,17 +794,19 @@ private:
     {
         if (kv_block->key_len != key.size())
         {
-            DVLOG(4) << "[race][subtable] slot_real_match FAILED: GET key "
+            DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
                      << pre(key) << " miss: key len mismatch";
 
             return false;
         }
         if (memcmp(key.data(), kv_block->buf, key.size()) != 0)
         {
-            DVLOG(4) << "[race][subtable] slot_real_match FAILED: GET key "
+            DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
                      << pre(key) << " miss: key content mismatch";
             return false;
         }
+        DVLOG(4) << "[race][subtable] slot_real_match SUCCEED: key "
+                 << pre(key);
         return true;
     }
     RetCode do_get(KVBlock *kv_block, Value &value)
@@ -742,6 +816,14 @@ private:
                kv_block->buf + kv_block->key_len,
                kv_block->value_len);
         return kOk;
+    }
+    RetCode do_del_if_real_match(Slot *slot, KVBlock *kv_block, const Key &key)
+    {
+        if (!slot_real_match(kv_block, key))
+        {
+            return kNotFound;
+        }
+        return do_remove(slot);
     }
 
     RetCode do_get_if_real_match(KVBlock *kv_block,
@@ -777,7 +859,10 @@ template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
 class RaceHashing
 {
 public:
+    using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
+
     static_assert(is_power_of_two(kDEntryNr));
+
     RaceHashing(std::shared_ptr<patronus::mem::IAllocator> allocator,
                 size_t initial_subtable_nr = 1,
                 uint64_t seed = 5381)
@@ -806,10 +891,24 @@ public:
             entries_[i] = new SubTableT(ld, alloc_mem, alloc_size);
         }
     }
+    SubTableT &subtable(size_t idx)
+    {
+        DCHECK_LT(idx, subtable_nr_may_stale());
+        return *entries_[idx];
+    }
+    const SubTableT &subtable(size_t idx) const
+    {
+        DCHECK_LT(idx, subtable_nr_may_stale());
+        return *entries_[idx];
+    }
+    size_t subtable_nr_may_stale() const
+    {
+        return pow(2, gd());
+    }
 
     ~RaceHashing()
     {
-        for (size_t i = 0; i < pow(2, gd()); ++i)
+        for (size_t i = 0; i < subtable_nr_may_stale(); ++i)
         {
             // the address space is from allocator
             auto alloc_size = SubTableT::size_bytes();
@@ -859,6 +958,15 @@ public:
         constexpr size_t kMaxSubTableNr = kDEntryNr;
         return kMaxSubTableNr * SubTableT::max_capacity();
     }
+    double utilization() const
+    {
+        OnePassMonitor m;
+        for (size_t i = 0; i < subtable_nr_may_stale(); ++i)
+        {
+            m.collect(subtable(i).utilization());
+        }
+        return m.average();
+    }
 
     template <size_t A, size_t B, size_t C>
     friend std::ostream &operator<<(std::ostream &os,
@@ -874,7 +982,6 @@ private:
         return gd_.load(std::memory_order_relaxed);
     }
 
-    using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
     std::shared_ptr<patronus::mem::IAllocator> allocator_;
     SubTableT **entries_{nullptr};
     std::atomic<size_t> gd_{0};
@@ -886,8 +993,8 @@ inline std::ostream &operator<<(
     std::ostream &os, const RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr> &rh)
 {
     os << "RaceHashTable with " << kDEntryNr << " dir entries, "
-       << kBucketGroupNr << " bucket groups, " << kSlotNr << " slots each"
-       << std::endl;
+       << kBucketGroupNr << " bucket groups, " << kSlotNr
+       << " slots each. Util: " << rh.utilization() << std::endl;
     for (size_t i = 0; i < pow(2, rh.gd()); ++i)
     {
         auto *sub_table = rh.entries_[i];

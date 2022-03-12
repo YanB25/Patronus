@@ -157,10 +157,12 @@ inline void fast_pseudo_fill_buf(char *s, size_t len)
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "abcdefghijklmnopqrstuvwxyz";
 
-    constexpr size_t size_of_alpha = sizeof(alphanum) / sizeof(char);
+    constexpr size_t size_of_alpha = (sizeof(alphanum) - 1) / sizeof(char);
     for (size_t i = 0; i < len; ++i)
     {
         s[i] = alphanum[fast_pseudo_rand_int(0, size_of_alpha - 1)];
+        DCHECK(isalnum(s[i])) << " sizeof alpha: " << size_of_alpha
+                              << ", size: " << sizeof(alphanum);
     }
 }
 
