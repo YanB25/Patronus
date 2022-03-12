@@ -47,7 +47,8 @@ void test_capacity(size_t initial_subtable)
     std::map<std::string, std::string> inserted;
     size_t succ_nr = 0;
     size_t fail_nr = 0;
-    for (size_t i = 0; i < 2 * rh.max_capacity(); ++i)
+    bool first_fail = true;
+    for (size_t i = 0; i < rh.max_capacity(); ++i)
     {
         fast_pseudo_fill_buf(key.data(), key.size());
         fast_pseudo_fill_buf(value.data(), value.size());
@@ -59,6 +60,11 @@ void test_capacity(size_t initial_subtable)
         }
         else if (rc == kNoMem)
         {
+            if (first_fail)
+            {
+                LOG(INFO) << "First insert fail. " << rh;
+                first_fail = false;
+            }
             fail_nr++;
         }
         else
@@ -78,6 +84,7 @@ void test_capacity(size_t initial_subtable)
         CHECK_EQ(rh.get(key, get_val), kOk);
         CHECK_EQ(get_val, expect_value);
     }
+    LOG(INFO) << rh;
 }
 
 int main(int argc, char *argv[])

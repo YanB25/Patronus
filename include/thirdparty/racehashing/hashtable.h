@@ -6,6 +6,7 @@
 
 #include "./utils.h"
 #include "patronus/memory/allocator.h"
+#include "util/PerformanceReporter.h"
 #include "util/Rand.h"
 
 namespace patronus::hash
@@ -219,7 +220,22 @@ public:
     }
     static constexpr size_t max_capacity()
     {
-        return kSlotNr;
+        return kDataSlotNr;
+    }
+    double utilization() const
+    {
+        size_t full_nr = 0;
+        for (size_t i = 0; i < kSlotNr; ++i)
+        {
+            if (!slot(i).empty())
+            {
+                full_nr++;
+            }
+        }
+        DVLOG(1) << "[slot] utilization: full_nr: " << full_nr
+                 << ", total: " << kSlotNr
+                 << ", util: " << 1.0 * full_nr / kDataSlotNr;
+        return 1.0 * full_nr / kDataSlotNr;
     }
 
 private:
@@ -334,6 +350,13 @@ public:
     {
         return Bucket<kSlotNr>::size_bytes() * 3;
     }
+    double utilization() const
+    {
+        double sum = main_bucket_0().utilization() +
+                     main_bucket_1().utilization() +
+                     overflow_bucket().utilization();
+        return sum / 3;
+    }
 
 private:
     constexpr static size_t kItemSize = Bucket<kSlotNr>::size_bytes();
@@ -368,7 +391,7 @@ public:
         memset(addr_, 0, size_bytes());
     }
 
-    BucketGroup<kSlotNr> bucket_group(size_t idx)
+    BucketGroup<kSlotNr> bucket_group(size_t idx) const
     {
         DCHECK_LT(idx, kBucketGroupNr);
         return BucketGroup<kSlotNr>((char *) addr_ + idx * kItemSize);
@@ -736,6 +759,20 @@ private:
     BucketGroup<kSlotNr> *addr_{nullptr};
 };
 
+template <size_t kBucketGroupNr, size_t kSlotNr>
+inline std::ostream &operator<<(std::ostream &os,
+                                const SubTable<kBucketGroupNr, kSlotNr> &st)
+{
+    OnePassMonitorImpl<double> m;
+    for (size_t i = 0; i < kBucketGroupNr; ++i)
+    {
+        double util = st.bucket_group(i).utilization();
+        m.collect(util);
+    }
+    os << m;
+    return os;
+}
+
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
 class RaceHashing
 {
@@ -823,6 +860,10 @@ public:
         return kMaxSubTableNr * SubTableT::max_capacity();
     }
 
+    template <size_t A, size_t B, size_t C>
+    friend std::ostream &operator<<(std::ostream &os,
+                                    const RaceHashing<A, B, C> &rh);
+
 private:
     uint32_t round_hash_to_depth(uint32_t h)
     {
@@ -839,6 +880,22 @@ private:
     std::atomic<size_t> gd_{0};
     uint64_t seed_;
 };
+
+template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
+inline std::ostream &operator<<(
+    std::ostream &os, const RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr> &rh)
+{
+    os << "RaceHashTable with " << kDEntryNr << " dir entries, "
+       << kBucketGroupNr << " bucket groups, " << kSlotNr << " slots each"
+       << std::endl;
+    for (size_t i = 0; i < pow(2, rh.gd()); ++i)
+    {
+        auto *sub_table = rh.entries_[i];
+        os << "sub-table[" << i << "]: " << *sub_table << std::endl;
+    }
+
+    return os;
+}
 
 }  // namespace patronus::hash
 
