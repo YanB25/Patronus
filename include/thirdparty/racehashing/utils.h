@@ -5,9 +5,13 @@
 #ifndef PATRONUS_RACEHASHING_UTILS_H_
 #define PATRONUS_RACEHASHING_UTILS_H_
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+
+#include "Common.h"
+#include "util/Debug.h"
 
 namespace patronus::hash
 {
@@ -23,7 +27,7 @@ enum RetCode
     kRetry,
     kInvalid,
 };
-uint64_t round_up_to_next_power_of_2(uint64_t x)
+inline uint64_t round_up_to_next_power_of_2(uint64_t x)
 {
     return pow(2, ceil(log(x) / log(2)));
 }
@@ -171,7 +175,7 @@ static_assert((64 - M - FP) % 2 == 0);
 
 constexpr static size_t kLenUnit = 64;
 
-uint64_t hash_impl(const char *buf, size_t size, uint64_t seed)
+inline uint64_t hash_impl(const char *buf, size_t size, uint64_t seed)
 {
     uint64_t hash = seed;
     for (size_t i = 0; i < size; ++i)
@@ -219,7 +223,7 @@ constexpr bool is_power_of_two(uint64_t x)
     return x != 0 && (x & (x - 1)) == 0;
 }
 
-Key pre(Key key)
+inline Key pre(Key key)
 {
     if (key.size() > 4)
     {
@@ -246,6 +250,42 @@ inline std::ostream &operator<<(std::ostream &os, const pre_fp &fp)
 }
 
 using TaggedPtr = TaggedPtrImpl<void>;
+
+inline void hash_table_free([[maybe_unused]] void *addr)
+{
+    LOG_FIRST_N(WARNING, 1) << "Not actually freeing. Implement rcu here.";
+}
+
+struct HashContext
+{
+    HashContext(size_t tid,
+                const std::string &key,
+                const std::string &value,
+                bool enabled = true)
+        : tid(tid), key(key), value(value), enabled(enabled)
+    {
+    }
+    size_t tid;
+    std::string key;
+    std::string value;
+    bool enabled{true};
+    std::string op;
+};
+
+static HashContext nulldctx(0, "", "", false);
+
+inline std::ostream &operator<<(std::ostream &os, const HashContext &dctx)
+{
+    if constexpr (debug())
+    {
+        if (dctx.enabled)
+        {
+            os << "{dctx tid: " << dctx.tid << ", key: `" << dctx.key
+               << "`, value: `" << dctx.value << "`} by op: " << dctx.op;
+        }
+    }
+    return os;
+}
 
 };  // namespace patronus::hash
 

@@ -29,75 +29,40 @@ struct KVBlock
     }
 } __attribute__((packed));
 
+class SlotView;
+class SlotWithView;
 class Slot
 {
 public:
-    // so you have to catch the reference.
-    Slot(uint8_t fp, uint8_t len, void *ptr)
-    {
-        set_ptr(ptr);
-        set_fp(fp);
-        set_len(len);
-    }
+    explicit Slot(uint8_t fp, uint8_t len, void *ptr);
 
-    uint8_t fp() const
-    {
-        return ptr_.u8_h();
-    }
-    void set_fp(uint8_t fp)
-    {
-        ptr_.set_u8_h(fp);
-    }
-    uint8_t len() const
-    {
-        return ptr_.u8_l();
-    }
-    void set_len(uint8_t len)
-    {
-        ptr_.set_u8_l(len);
-    }
-    void *ptr() const
-    {
-        return ptr_.ptr();
-    }
-    void *addr() const
-    {
-        return (void *) &ptr_;
-    }
-    void set_ptr(void *_ptr)
-    {
-        ptr_.set_ptr(_ptr);
-    }
     constexpr static size_t size_bytes()
     {
         return 8;
     }
-    uint64_t val() const
-    {
-        return ptr_.val();
-    }
 
-    bool empty() const
-    {
-        return ptr_.ptr() == nullptr;
-    }
-
-    bool cas(Slot &expected, const Slot &desired)
-    {
-        return ptr_.cas(expected.ptr_, desired.ptr_);
-    }
-
-    bool match(uint8_t _fp) const
-    {
-        return !empty() && fp() == _fp;
-    }
-    void clear()
-    {
-        ptr_.set_val(0);
-    }
     friend std::ostream &operator<<(std::ostream &, const Slot &);
+    friend class SlotWithView;
+
+    SlotView view() const;
+    SlotWithView with_view() const;
+    void *addr() const;
 
 private:
+    uint8_t fp() const;
+    void set_fp(uint8_t fp);
+    uint8_t len() const;
+    void set_len(uint8_t len);
+    void *ptr() const;
+    void set_ptr(void *_ptr);
+    uint64_t val() const;
+    bool empty() const;
+    bool cas(SlotView &expected, const SlotView &desired);
+
+    bool match(uint8_t _fp) const;
+    void clear();
+    Slot(uint64_t val);
+
     // TODO: actually it is TaggedPtrImpl<KVBlock>
     TaggedPtr ptr_;
 } __attribute__((packed));
@@ -108,6 +73,98 @@ inline std::ostream &operator<<(std::ostream &os, const Slot &slot)
 {
     os << "{Slot: fp: " << pre_fp(slot.fp()) << ", len: " << (int) slot.len()
        << ", ptr: " << slot.ptr() << "}";
+    return os;
+}
+
+/**
+ * @brief A read-only view of the slot
+ */
+class SlotView
+{
+public:
+    explicit SlotView(uint64_t val)
+    {
+        ptr_.set_val(val);
+    }
+    explicit SlotView(TaggedPtr ptr)
+    {
+        ptr_ = ptr;
+    }
+    explicit SlotView(uint8_t fp, uint8_t len, void *ptr)
+    {
+        ptr_.set_u8_h(fp);
+        ptr_.set_u8_l(len);
+        ptr_.set_ptr(ptr);
+    }
+    uint8_t fp() const;
+    uint8_t len() const;
+    void *ptr() const;
+    uint64_t val() const;
+    bool empty() const;
+
+    bool match(uint8_t _fp) const;
+    SlotView view_after_clear() const;
+
+    constexpr static size_t size_bytes()
+    {
+        return 8;
+    }
+
+    friend std::ostream &operator<<(std::ostream &, const SlotView &);
+    friend class Slot;
+
+private:
+    TaggedPtr ptr_;
+} __attribute__((packed));
+static_assert(sizeof(SlotView) == sizeof(TaggedPtr));
+static_assert(sizeof(SlotView) == 8);
+
+inline std::ostream &operator<<(std::ostream &os, const SlotView &slot_view)
+{
+    os << "{SlotView: " << std::hex << slot_view.ptr_ << "}";
+    return os;
+}
+
+/**
+ * @brief SlowView is a *snapshot* of a Slot, including its address and the
+ * value when read.
+ *
+ */
+class SlotWithView
+{
+public:
+    explicit SlotWithView(Slot *slot, SlotView slot_view);
+    explicit SlotWithView();
+    Slot *slot() const;
+    SlotView view() const;
+    SlotView view_after_clear() const;
+    bool operator<(const SlotWithView &rhs) const;
+
+    // all the query goes to @view_
+    uint8_t fp() const;
+    uint8_t len() const;
+    void *ptr() const;
+    uint64_t val() const;
+    bool empty() const;
+    bool match(uint8_t fp) const;
+
+    // all the modify goes to @slot_
+    bool cas(SlotView &expected, const SlotView &desired);
+    void set_fp(uint8_t fp);
+    void set_len(uint8_t len);
+    void set_ptr(void *_ptr);
+    void clear();
+
+    friend std::ostream &operator<<(std::ostream &os, const SlotWithView &view);
+
+private:
+    Slot *slot_;
+    SlotView slot_view_;
+};
+inline std::ostream &operator<<(std::ostream &os, const SlotWithView &view)
+{
+    os << "{SlotWithView: " << view.slot_view_ << " at " << (void *) view.slot_
+       << "}";
     return os;
 }
 
@@ -156,34 +213,34 @@ public:
     {
         return Slot::size_bytes() * kSlotNr;
     }
-    std::vector<Slot *> locate(uint8_t fp)
+    std::vector<SlotWithView> locate(uint8_t fp)
     {
-        std::vector<Slot *> ret;
+        std::vector<SlotWithView> ret;
         for (size_t i = 1; i < kSlotNr; ++i)
         {
-            auto &get_slot = slot(i);
-            if (get_slot.match(fp))
+            auto view = slot(i).with_view();
+            if (view.match(fp))
             {
-                ret.push_back(&get_slot);
+                ret.push_back(view);
             }
         }
         return ret;
     }
 
-    std::vector<Slot *> fetch_empty(size_t limit) const
+    std::vector<SlotWithView> fetch_empty(size_t limit) const
     {
-        std::vector<Slot *> ret;
+        std::vector<SlotWithView> ret;
         auto poll_slot_idx = fast_pseudo_rand_int(1, kSlotNr - 1);
         for (size_t i = 0; i < kDataSlotNr; ++i)
         {
             auto idx = (poll_slot_idx + i) % kDataSlotNr + 1;
             CHECK_GE(idx, 1);
             CHECK_LT(idx, kSlotNr);
-            auto &get_slot = slot(idx);
+            auto view = slot(idx).with_view();
 
-            if (get_slot.empty())
+            if (view.empty())
             {
-                ret.push_back((Slot *) &get_slot);
+                ret.push_back(view);
                 if (ret.size() >= limit)
                 {
                     return ret;
@@ -193,34 +250,35 @@ public:
         return ret;
     }
 
-    std::pair<std::vector<Slot *>, Slot *> locate_or_empty(uint8_t fp)
+    std::pair<std::vector<SlotWithView>, SlotWithView> locate_or_empty(
+        uint8_t fp)
     {
-        std::vector<Slot *> ret;
+        std::vector<SlotWithView> ret;
         auto poll_slot_idx = fast_pseudo_rand_int(1, kSlotNr - 1);
-        Slot *first_empty_slot = nullptr;
+        SlotWithView first_empty_slot_view;
         for (size_t i = 0; i < kDataSlotNr; ++i)
         {
             auto idx = (poll_slot_idx + i) % kDataSlotNr + 1;
             CHECK_GE(idx, 1);
             CHECK_LT(idx, kSlotNr);
-            auto &get_slot = slot(idx);
+            auto view = slot(idx).view();
 
-            if (get_slot.match(fp))
+            if (view.match(fp))
             {
                 DVLOG(6) << "[bench][bucket] Search for fp " << pre_fp(fp)
                          << " got possible match slot at " << idx;
-                ret.push_back(&get_slot);
+                ret.push_back(view);
             }
 
-            if (get_slot.empty() && first_empty_slot == nullptr)
+            if (view.empty() && first_empty_slot_view.slot() == nullptr)
             {
                 DVLOG(6) << "[bench][bucket] Search for fp " << pre_fp(fp)
                          << " got first empty slot at " << idx;
-                first_empty_slot = &get_slot;
+                first_empty_slot_view = view;
             }
         }
 
-        return {ret, first_empty_slot};
+        return {ret, first_empty_slot_view};
     }
     static constexpr size_t max_capacity()
     {
@@ -231,7 +289,7 @@ public:
         size_t full_nr = 0;
         for (size_t i = 0; i < kSlotNr; ++i)
         {
-            if (!slot(i).empty())
+            if (!slot(i).view().empty())
             {
                 full_nr++;
             }
@@ -263,7 +321,7 @@ public:
     {
         return overflow_;
     }
-    std::vector<Slot *> fetch_empty(size_t limit) const
+    std::vector<SlotWithView> fetch_empty(size_t limit) const
     {
         // NOTE:
         // fetch from main bucket first
@@ -279,7 +337,7 @@ public:
                         std::make_move_iterator(overflow_ret.end()));
         return main_ret;
     }
-    std::vector<Slot *> locate(uint8_t fp)
+    std::vector<SlotWithView> locate(uint8_t fp)
     {
         auto slots_main = main_.locate(fp);
         auto slots_overflow = overflow_.locate(fp);
@@ -291,7 +349,8 @@ public:
                           std::make_move_iterator(slots_overflow.end()));
         return slots_main;
     }
-    std::pair<std::vector<Slot *>, Slot *> locate_or_empty(uint8_t fp)
+    std::pair<std::vector<SlotWithView>, SlotWithView> locate_or_empty(
+        uint8_t fp)
     {
         auto [main_slots, main_empty_slot] = main_.locate_or_empty(fp);
         auto [overflow_slots, overflow_empty_slot] =
@@ -391,8 +450,8 @@ public:
     SubTable(size_t ld, void *addr, size_t size)
         : ld_(ld), addr_((BucketGroup<kSlotNr> *) CHECK_NOTNULL(addr))
     {
-        LOG(INFO) << "Subtable ctor called. addr_: " << addr_
-                  << ", addr: " << addr << ", memset bytes: " << size_bytes();
+        DVLOG(1) << "Subtable ctor called. addr_: " << addr_
+                 << ", addr: " << addr << ", memset bytes: " << size_bytes();
 
         CHECK_GE(size, size_bytes());
         // NOTE:
@@ -446,8 +505,10 @@ public:
     {
         return ld_;
     }
-    RetCode get(const Key &key, Value &value, uint64_t hash)
+    RetCode get(const Key &key, Value &value, uint64_t hash, HashContext *dctx)
     {
+        // TODO: not enable dctx for get
+        std::ignore = dctx;
         auto h1 = hash_1(hash);
         auto h2 = hash_2(hash);
         auto fp = hash_fp(hash);
@@ -461,11 +522,11 @@ public:
         auto cb1 = combined_bucket(h1);
         auto cb2 = combined_bucket(h2);
         // RDMA: do the local search for any slot *may* match the key
-        auto slots_1 = cb1.locate(fp);
-        for (auto *slot : slots_1)
+        auto slot_views_1 = cb1.locate(fp);
+        for (auto view : slot_views_1)
         {
             // RDMA: read here
-            auto *kv_block = (KVBlock *) slot->ptr();
+            auto *kv_block = (KVBlock *) DCHECK_NOTNULL(view.ptr());
             auto rc = do_get_if_real_match(kv_block, key, value);
             if (rc == kOk)
             {
@@ -473,11 +534,12 @@ public:
             }
             DCHECK_EQ(rc, kNotFound);
         }
-        auto slots_2 = cb2.locate(fp);
-        for (auto *slot : slots_2)
+        auto slot_views_2 = cb2.locate(fp);
+        for (auto view : slot_views_2)
         {
             // RDMA: read here
-            auto *kv_block = (KVBlock *) slot->ptr();
+            auto *kv_block = (KVBlock *) DCHECK_NOTNULL(view.ptr());
+
             auto rc = do_get_if_real_match(kv_block, key, value);
             if (rc == kOk)
             {
@@ -488,7 +550,10 @@ public:
         return kNotFound;
     }
 
-    RetCode put(const Key &key, const Value &value, uint64_t hash)
+    RetCode put(const Key &key,
+                const Value &value,
+                uint64_t hash,
+                HashContext *dctx)
     {
         auto h1 = hash_1(hash);
         auto h2 = hash_2(hash);
@@ -497,14 +562,14 @@ public:
                  << " got h1: " << h1 << ", h2: " << h2
                  << ", fp: " << pre_fp(fp);
 
-        auto rc = do_put_phase_one(key, value, h1, h2, fp);
+        auto rc = do_put_phase_one(key, value, h1, h2, fp, dctx);
         if (rc != kOk)
         {
             return rc;
         }
-        return do_put_phase_two_reread(key, h1, h2, fp);
+        return do_put_phase_two_reread(key, h1, h2, fp, dctx);
     }
-    RetCode del(const Key &key, uint64_t hash)
+    RetCode del(const Key &key, uint64_t hash, HashContext *dctx)
     {
         auto h1 = hash_1(hash);
         auto h2 = hash_2(hash);
@@ -519,24 +584,24 @@ public:
         auto cb1 = combined_bucket(h1);
         auto cb2 = combined_bucket(h2);
         // RDMA: do the local search for any slot *may* match the key
-        auto slots_1 = cb1.locate(fp);
-        for (auto *slot : slots_1)
+        auto slot_views_1 = cb1.locate(fp);
+        for (auto view : slot_views_1)
         {
             // RDMA: read here
-            auto *kv_block = (KVBlock *) slot->ptr();
-            auto rc = do_del_if_real_match(slot, kv_block, key);
+            auto *kv_block = (KVBlock *) DCHECK_NOTNULL(view.ptr());
+            auto rc = do_del_if_real_match(view, kv_block, key, dctx);
             if (rc == kOk)
             {
                 return kOk;
             }
             DCHECK_EQ(rc, kNotFound);
         }
-        auto slots_2 = cb2.locate(fp);
-        for (auto *slot : slots_2)
+        auto slot_views_2 = cb2.locate(fp);
+        for (auto view : slot_views_2)
         {
             // RDMA: read here
-            auto *kv_block = (KVBlock *) slot->ptr();
-            auto rc = do_del_if_real_match(slot, kv_block, key);
+            auto *kv_block = (KVBlock *) DCHECK_NOTNULL(view.ptr());
+            auto rc = do_del_if_real_match(view, kv_block, key, dctx);
             if (rc == kOk)
             {
                 return kOk;
@@ -570,7 +635,8 @@ private:
                              const Value &value,
                              uint64_t h1,
                              uint64_t h2,
-                             uint8_t fp)
+                             uint8_t fp,
+                             HashContext *dctx)
     {
         // RDMA: read the whole combined_bucket
         // Batch together.
@@ -581,24 +647,24 @@ private:
         auto *kv_block = KVBlock::new_instance(key, value);
 
         // RDMA: do the local search for any slot *may* match or empty
-        auto slots_1 = cb1.locate(fp);
-        auto slots_2 = cb2.locate(fp);
+        auto slot_views_1 = cb1.locate(fp);
+        auto slot_views_2 = cb2.locate(fp);
 
         auto len = (key.size() + value.size() + (kLenUnit - 1)) / kLenUnit;
-        Slot new_slot(fp, len, kv_block);
+        SlotView new_slot(fp, len, kv_block);
 
-        for (auto *slot : slots_1)
+        for (auto view : slot_views_1)
         {
-            auto rc = do_update_if_real_match(slot, key, new_slot);
+            auto rc = do_update_if_real_match(view, key, new_slot, dctx);
             if (rc == kOk)
             {
                 return kOk;
             }
             DCHECK_EQ(rc, kNotFound);
         }
-        for (auto *slot : slots_2)
+        for (auto view : slot_views_2)
         {
-            auto rc = do_update_if_real_match(slot, key, new_slot);
+            auto rc = do_update_if_real_match(view, key, new_slot, dctx);
             if (rc == kOk)
             {
                 return kOk;
@@ -608,22 +674,20 @@ private:
 
         // definitely miss
         // loop and try all the empty slots
-        auto rc = do_find_empty_slot_to_insert(cb1, cb2, new_slot);
+        auto rc = do_find_empty_slot_to_insert(cb1, cb2, new_slot, dctx);
         if (rc == kOk)
         {
             return kOk;
         }
-        free(kv_block);
+        hash_table_free(kv_block);
         return rc;
     }
     /**
      * @brief reread to delete any duplicated ones
      *
      */
-    RetCode do_put_phase_two_reread(const Key &key,
-                                    uint64_t h1,
-                                    uint64_t h2,
-                                    uint8_t fp)
+    RetCode do_put_phase_two_reread(
+        const Key &key, uint64_t h1, uint64_t h2, uint8_t fp, HashContext *dctx)
     {
         DVLOG(4) << "[race][subtable] reread: " << pre(key)
                  << " to detect any duplicated ones";
@@ -631,34 +695,37 @@ private:
         auto cb1 = combined_bucket(h1);
         auto cb2 = combined_bucket(h2);
         // RDMA: do the local search for any slot *may* match or empty
-        auto slot_1 = cb1.locate(fp);
-        auto slot_2 = cb2.locate(fp);
+        auto slot_views_1 = cb1.locate(fp);
+        auto slot_views_2 = cb2.locate(fp);
         // Get the actual hit slots
-        auto real_match_slots = get_real_match_slots(key, slot_1, slot_2);
-        if (!real_match_slots.empty())
+        auto real_match_slot_views =
+            get_real_match_slots(key, slot_views_1, slot_views_2);
+        if (!real_match_slot_views.empty())
         {
-            auto *chosen_slot = deterministic_choose_slot(real_match_slots);
-            for (auto *slot : real_match_slots)
+            auto chosen_slot = deterministic_choose_slot(real_match_slot_views);
+            for (auto view : real_match_slot_views)
             {
-                if (slot != chosen_slot)
+                if (view.slot() != chosen_slot.slot())
                 {
-                    DVLOG(4) << "[race][subtable] reread: " << pre(key)
-                             << " remove duplicated slot " << (void *) slot;
-                    auto rc = do_remove(slot);
+                    DVLOG(4)
+                        << "[race][subtable] reread: " << pre(key)
+                        << " remove duplicated slot " << (void *) view.slot();
+                    auto rc = do_remove(view, dctx);
                     CHECK(rc == kOk || rc == kRetry);
                 }
             }
         }
         return kOk;
     }
-    RetCode do_remove(Slot *slot)
+    RetCode do_remove(SlotWithView view, HashContext *dctx)
     {
-        auto expect_slot = *slot;
-        auto desired_slot = expect_slot;
-        desired_slot.clear();
-        if (slot->cas(expect_slot, desired_slot))
+        auto expect_slot = view.view();
+        auto desired_slot = view.view_after_clear();
+        if (view.cas(expect_slot, desired_slot))
         {
-            free(expect_slot.ptr());
+            DVLOG(2) << "Clearing slot " << (void *) view.slot()
+                     << (dctx == nullptr ? nulldctx : *dctx);
+            hash_table_free(expect_slot.ptr());
             return kOk;
         }
         else
@@ -666,77 +733,72 @@ private:
             return kRetry;
         }
     }
-    std::vector<Slot *> get_real_match_slots(const Key &key,
-                                             const std::vector<Slot *> slot_1,
-                                             const std::vector<Slot *> slot_2)
+    std::vector<SlotWithView> get_real_match_slots(
+        const Key &key,
+        const std::vector<SlotWithView> view_1,
+        const std::vector<SlotWithView> view_2)
     {
-        std::vector<Slot *> ret;
-        for (auto *slot : slot_1)
+        std::vector<SlotWithView> ret;
+        for (auto view : view_1)
         {
             // TODO(RDMA): read here.
             // Possible to batch reads
-            auto *kv_block = (KVBlock *) slot->ptr();
+            auto *kv_block = (KVBlock *) DCHECK_NOTNULL(view.ptr());
             if (slot_real_match(kv_block, key))
             {
-                ret.push_back(slot);
+                ret.push_back(view);
             }
         }
-        for (auto *slot : slot_2)
+        for (auto view : view_2)
         {
             // TODO(RDMA): read here.
             // Possible to batch reads
-            auto *kv_block = (KVBlock *) slot->ptr();
+            auto *kv_block = (KVBlock *) DCHECK_NOTNULL(view.ptr());
             if (slot_real_match(kv_block, key))
             {
-                ret.push_back(slot);
+                ret.push_back(view);
             }
         }
         return ret;
     }
-    Slot *deterministic_choose_slot(const std::vector<Slot *> slots)
+    SlotWithView deterministic_choose_slot(
+        const std::vector<SlotWithView> views)
     {
-        if (slots.empty())
+        if (views.empty())
         {
-            return nullptr;
+            return SlotWithView();
         }
-        auto *ret = slots[0];
-        for (auto *slot : slots)
-        {
-            if (slot < ret)
-            {
-                ret = slot;
-            }
-        }
-        return ret;
+        return *std::min_element(views.begin(), views.end());
     }
     RetCode do_find_empty_slot_to_insert(const CombinedBucketView<kSlotNr> &cb1,
                                          const CombinedBucketView<kSlotNr> &cb2,
-                                         Slot &new_slot)
+                                         SlotView new_slot,
+                                         HashContext *dctx)
     {
         DVLOG(4) << "[race][subtable] do_find_empty_slot_to_insert: new_slot "
                  << new_slot << ". Try to fetch empty slots.";
         auto empty_1 = cb1.fetch_empty(10);
-        for (auto *slot : empty_1)
+        for (auto view : empty_1)
         {
-            auto rc = do_update_if_empty(slot, new_slot);
+            auto rc = do_update_if_empty(view, new_slot, dctx);
             if (rc == kOk)
             {
                 DVLOG(4) << "[race][subtable] insert to empty slot SUCCEED "
                             "at h1. new_slot "
-                         << new_slot << " at slot " << (void *) slot;
+                         << new_slot << " at slot " << (void *) view.slot();
                 return kOk;
             }
             CHECK(rc == kRetry || rc == kNotFound);
         }
         auto empty_2 = cb2.fetch_empty(10);
-        for (auto *slot : empty_2)
+        for (auto view : empty_2)
         {
-            auto rc = do_update_if_empty(slot, new_slot);
+            auto rc = do_update_if_empty(view, new_slot, dctx);
             if (rc == kOk)
             {
                 DVLOG(4) << "[race][subtable] insert to empty slot SUCCEED "
                             "at h2. new_slot "
-                         << new_slot << " at slot " << (void *) slot;
+                         << new_slot << " at slot " << (void *) view.slot();
                 return kOk;
             }
             CHECK(rc == kRetry || rc == kNotFound);
@@ -746,28 +808,34 @@ private:
                  << " and " << empty_2.size() << " empty slots each.";
         return kNoMem;
     }
-    RetCode do_update_if_real_match(Slot *slot, const Key &key, Slot &new_slot)
+    RetCode do_update_if_real_match(SlotWithView view,
+                                    const Key &key,
+                                    SlotView new_slot,
+                                    HashContext *dctx)
     {
-        auto *kv_block = (KVBlock *) slot->ptr();
+        auto *kv_block = (KVBlock *) DCHECK_NOTNULL(view.ptr());
+
         if (!slot_real_match(kv_block, key))
         {
             return kNotFound;
         }
-        return do_update(slot, new_slot);
+        return do_update(view, new_slot, dctx);
     }
-    RetCode do_update_if_empty(Slot *slot, Slot &new_slot)
+    RetCode do_update_if_empty(SlotWithView view,
+                               SlotView new_slot,
+                               HashContext *dctx)
     {
-        if (slot->empty())
+        if (view.empty())
         {
-            return do_update(slot, new_slot);
+            return do_update(view, new_slot, dctx);
         }
         return kNotFound;
     }
-    RetCode do_update(Slot *slot, Slot &new_slot)
+    RetCode do_update(SlotWithView view, SlotView new_slot, HashContext *dctx)
     {
         // TODO: the cas should free the old kv_block.
-        Slot expect_slot = *slot;
-        if (slot->cas(expect_slot, new_slot))
+        auto expect_slot = view.view();
+        if (view.cas(expect_slot, new_slot))
         {
             if (expect_slot.empty())
             {
@@ -782,8 +850,11 @@ private:
                 DVLOG(4) << "[race][subtable] do_update SUCC: for slot with "
                             "kv_block ("
                          << (void *) kv_block << ". New_slot " << new_slot;
-                free(kv_block);
+                hash_table_free(kv_block);
             }
+            DVLOG(2) << "[race][subtable] slot " << (void *) view.slot()
+                     << " update to " << new_slot
+                     << (dctx == nullptr ? nulldctx : *dctx);
             return kOk;
         }
         DVLOG(4) << "[race][subtable] do_update FAILED: new_slot " << new_slot;
@@ -817,13 +888,16 @@ private:
                kv_block->value_len);
         return kOk;
     }
-    RetCode do_del_if_real_match(Slot *slot, KVBlock *kv_block, const Key &key)
+    RetCode do_del_if_real_match(SlotWithView view,
+                                 KVBlock *kv_block,
+                                 const Key &key,
+                                 HashContext *dctx)
     {
         if (!slot_real_match(kv_block, key))
         {
             return kNotFound;
         }
-        return do_remove(slot);
+        return do_remove(view, dctx);
     }
 
     RetCode do_get_if_real_match(KVBlock *kv_block,
@@ -860,6 +934,7 @@ class RaceHashing
 {
 public:
     using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
+    using pointer = std::shared_ptr<RaceHashing>;
 
     static_assert(is_power_of_two(kDEntryNr));
 
@@ -868,8 +943,13 @@ public:
                 uint64_t seed = 5381)
         : allocator_(allocator), seed_(seed)
     {
-        entries_ = (SubTableT **) CHECK_NOTNULL(
-            allocator_->alloc(sizeof(SubTableT *) * kDEntryNr));
+        size_t dir_size = sizeof(SubTableT *) * kDEntryNr;
+        CHECK_LE(initial_subtable_nr, kDEntryNr);
+        entries_ = (SubTableT **) CHECK_NOTNULL(allocator_->alloc(dir_size));
+
+        DVLOG(1) << "Allocated director " << (void *) entries_ << " with size "
+                 << dir_size;
+
         for (size_t i = 0; i < kDEntryNr; ++i)
         {
             entries_[i] = nullptr;
@@ -878,15 +958,19 @@ public:
 
         initial_subtable_nr = round_up_to_next_power_of_2(initial_subtable_nr);
         gd_ = log2(initial_subtable_nr);
+        CHECK_LE(initial_subtable_nr, kDEntryNr);
+
         auto ld = gd();
         DVLOG(1) << "[race] initial_subtable_nr: " << initial_subtable_nr
                  << ", gd: " << gd_;
         for (size_t i = 0; i < initial_subtable_nr; ++i)
         {
-            DVLOG(3) << "[race] allocating subtable for size "
-                     << SubTableT::size_bytes();
             auto alloc_size = SubTableT::size_bytes();
             void *alloc_mem = CHECK_NOTNULL(allocator_->alloc(alloc_size));
+
+            DVLOG(1) << "[race] allocating subtable " << i << " at "
+                     << (void *) alloc_mem << " for size "
+                     << SubTableT::size_bytes();
 
             entries_[i] = new SubTableT(ld, alloc_mem, alloc_size);
         }
@@ -912,46 +996,66 @@ public:
         {
             // the address space is from allocator
             auto alloc_size = SubTableT::size_bytes();
+            DVLOG(1) << "Freeing " << i
+                     << " subtable: " << (void *) entries_[i]->addr()
+                     << " with size " << alloc_size;
             allocator_->free(entries_[i]->addr(), alloc_size);
             // the object itself is new-ed
             delete entries_[i];
         }
         auto alloc_size = sizeof(SubTableT *) * kDEntryNr;
+        DVLOG(1) << "Freeing directory: " << (void *) entries_ << " with size "
+                 << alloc_size;
         allocator_->free(entries_, alloc_size);
     }
 
-    RetCode put(const Key &key, const Value &value)
+    RetCode put(const Key &key, const Value &value, HashContext *dctx = nullptr)
     {
         auto hash = hash_impl(key.data(), key.size(), seed_);
         auto m = hash_m(hash);
+        auto fp = hash_fp(hash);
         auto rounded_m = round_hash_to_depth(m);
         DVLOG(3) << "[race] PUT key " << pre(key) << ", got hash " << std::hex
-                 << hash << ", m: " << m << ", rounded to " << rounded_m
-                 << " (subtable) by gd(may stale): " << gd();
+                 << hash << std::dec << ", m: " << m << ", rounded to "
+                 << rounded_m << " (subtable) by gd(may stale): " << gd()
+                 << ". fp: " << pre_fp(fp);
         auto *sub_table = entries_[rounded_m];
-        return sub_table->put(key, value, hash);
+        auto rc = sub_table->put(key, value, hash, dctx);
+        if (rc == kOk)
+        {
+            DVLOG(2) << "[race] PUT key `" << key << "`, val `" << value << "`";
+        }
+        return rc;
     }
-    RetCode del(const Key &key)
+    RetCode del(const Key &key, HashContext *dctx = nullptr)
     {
         auto hash = hash_impl(key.data(), key.size(), seed_);
         auto m = hash_m(hash);
+        auto fp = hash_fp(hash);
         auto rounded_m = round_hash_to_depth(m);
         DVLOG(3) << "[race] DEL key " << pre(key) << ", got hash " << std::hex
                  << hash << " hash, m: " << m << ", rounded to " << rounded_m
-                 << " by gd(may stale): " << gd();
+                 << " by gd(may stale): " << gd() << ". fp: " << pre_fp(fp);
         auto *sub_table = entries_[rounded_m];
-        return sub_table->del(key, hash);
+        auto rc = sub_table->del(key, hash, dctx);
+        if (rc == kOk)
+        {
+            DVLOG(2) << "[race] DEL key " << key;
+        }
+        return rc;
     }
-    RetCode get(const Key &key, Value &value)
+    RetCode get(const Key &key, Value &value, HashContext *dctx = nullptr)
     {
         auto hash = hash_impl(key.data(), key.size(), seed_);
         auto m = hash_m(hash);
+        auto fp = hash_fp(hash);
         auto rounded_m = round_hash_to_depth(m);
         DVLOG(3) << "[race] GET key " << pre(key) << ", got hash " << std::hex
                  << hash << ", m: " << m << ", rounded to " << rounded_m
-                 << " by gd(may stale): " << gd();
+                 << " by gd(may stale): " << gd() << ". fp: " << pre_fp(fp);
         auto *sub_table = entries_[rounded_m];
-        return sub_table->get(key, value, hash);
+        auto rc = sub_table->get(key, value, hash, dctx);
+        return rc;
     }
     static constexpr size_t max_capacity()
     {

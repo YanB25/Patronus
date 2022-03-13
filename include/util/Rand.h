@@ -3,6 +3,7 @@
 #define SHERMAM_UTIL_FAST_RAND_H_
 
 #include <random>
+#include <set>
 
 #include "glog/logging.h"
 
@@ -164,6 +165,26 @@ inline void fast_pseudo_fill_buf(char *s, size_t len)
         DCHECK(isalnum(s[i])) << " sizeof alpha: " << size_of_alpha
                               << ", size: " << sizeof(alphanum);
     }
+}
+
+inline bool true_with_prob(double prob)
+{
+    size_t r = rand() % 1000;
+    size_t okay = 1.0 * 1000 * prob;
+    return r < okay;
+}
+
+template <typename T>
+inline auto random_choose(
+    const std::set<T> &set,
+    size_t rand_limit = std::numeric_limits<size_t>::max())
+{
+    DCHECK(!set.empty());
+    auto it = set.begin();
+    size_t limit = std::min(set.size(), rand_limit);
+    auto adv = fast_pseudo_rand_int(0, limit - 1);
+    std::advance(it, adv);
+    return *it;
 }
 
 #endif

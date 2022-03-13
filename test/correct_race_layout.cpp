@@ -162,7 +162,7 @@ void test_writable()
         auto sid = fast_pseudo_rand_int(0, kSlotNr - 1);
         auto &slot = bucket.slot(sid);
         auto sptr = std::make_shared<int>();
-        slot.set_ptr(sptr.get());
+        slot.with_view().set_ptr(sptr.get());
 
         records[Record(bgid, bid, sid)] = sptr;
     }
@@ -174,7 +174,7 @@ void test_writable()
         auto bucket = group.bucket(bid);
         auto sid = record.sid;
         auto &slot = bucket.slot(sid);
-        auto *got_ptr = slot.ptr();
+        auto *got_ptr = slot.view().ptr();
         CHECK_EQ(got_ptr, sptr.get());
     }
 

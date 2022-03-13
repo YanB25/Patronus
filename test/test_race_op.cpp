@@ -27,6 +27,7 @@ void test_capacity(size_t initial_subtable)
     size_t fail_nr = 0;
     char key_buf[128];
     char value_buf[128];
+
     for (size_t i = 0; i < 16; ++i)
     {
         fast_pseudo_fill_buf(key_buf, 8);
@@ -34,6 +35,7 @@ void test_capacity(size_t initial_subtable)
         key = std::string(key_buf, 8);
         value = std::string(value_buf, 8);
         LOG(INFO) << "\nTrying to push " << key << ", " << value;
+
         auto rc = rh.put(key, value);
         if (rc == kOk)
         {
