@@ -25,6 +25,7 @@ enum RetCode
     kNoMem,
     // failed by multithread conflict.
     kRetry,
+    kCacheStale,
     kInvalid,
 };
 inline uint64_t round_up_to_next_power_of_2(uint64_t x)
@@ -285,6 +286,15 @@ inline std::ostream &operator<<(std::ostream &os, const HashContext &dctx)
         }
     }
     return os;
+}
+
+inline uint64_t round_hash_to_bit(uint32_t h, size_t bit)
+{
+    if (bit == 64)
+    {
+        return h;
+    }
+    return h & ((1ull << bit) - 1);
 }
 
 };  // namespace patronus::hash

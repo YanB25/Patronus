@@ -103,7 +103,7 @@ void test_bucket_not_overlapped(BucketGroup<kSlotNr> bucket_group)
 void test_bucket_group_not_overlapped()
 {
     void *addr = hugePageAlloc(kMemoryLimit);
-    SubTable<kBucketGroupNr, kSlotNr> sub_table(0, addr, kMemoryLimit);
+    SubTable<kBucketGroupNr, kSlotNr> sub_table(0, addr, kMemoryLimit, 0);
     size_t expect_size = SubTable<kBucketGroupNr, kSlotNr>::size_bytes();
     CHECK_GE(kMemoryLimit, expect_size);
 
@@ -150,7 +150,7 @@ struct Record
 void test_writable()
 {
     void *addr = hugePageAlloc(kMemoryLimit);
-    SubTable<kBucketGroupNr, kSlotNr> sub_table(0, addr, kMemoryLimit);
+    SubTable<kBucketGroupNr, kSlotNr> sub_table(0, addr, kMemoryLimit, 0);
 
     std::map<Record, std::shared_ptr<int>> records;
     for (size_t i = 0; i < 10_K; ++i)

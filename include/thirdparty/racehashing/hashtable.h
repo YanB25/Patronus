@@ -13,6 +13,11 @@ namespace patronus::hash
 {
 struct KVBlock
 {
+    // TODO: add checksum to KVBlock
+    // Paper sec 3.3, there will be a corner case where one client is reading
+    // @key and @value from the KVBlock. Meanwhile, the KVBlock is freed,
+    // re-allocated, and be filled with the same @key but different @value.
+    // TO detect this inconsistency, add checksum to the KVBlock.
     uint32_t key_len;
     uint32_t value_len;
     char buf[0];
@@ -170,7 +175,7 @@ inline std::ostream &operator<<(std::ostream &os, const SlotWithView &view)
 
 struct BucketHeader
 {
-    uint32_t local_depth;
+    uint32_t ld;
     uint32_t suffix;
 } __attribute__((packed));
 static_assert(sizeof(BucketHeader) == 8);
@@ -199,11 +204,11 @@ public:
     }
     BucketHeader &header()
     {
-        return slot(0);
+        return *(BucketHeader *) &slot(0);
     }
     const BucketHeader &header() const
     {
-        return slot(0);
+        return *(BucketHeader *) &slot(0);
     }
     void *addr() const
     {
@@ -287,7 +292,7 @@ public:
     double utilization() const
     {
         size_t full_nr = 0;
-        for (size_t i = 0; i < kSlotNr; ++i)
+        for (size_t i = 1; i < kSlotNr; ++i)
         {
             if (!slot(i).view().empty())
             {
@@ -298,6 +303,54 @@ public:
         //          << ", total: " << kDataSlotNr
         //          << ", util: " << 1.0 * full_nr / kDataSlotNr;
         return 1.0 * full_nr / kDataSlotNr;
+    }
+    void setup_header(uint32_t ld, uint32_t suffix)
+    {
+        auto &h = header();
+        h.ld = ld;
+        h.suffix = suffix;
+    }
+    RetCode validate_staleness(uint32_t expect_ld, uint32_t suffix)
+    {
+        auto &h = header();
+        if (expect_ld == h.ld)
+        {
+            auto rounded_suffix = round_hash_to_bit(suffix, expect_ld);
+            auto rounded_header_suffix = round_hash_to_bit(h.suffix, expect_ld);
+            CHECK_EQ(rounded_suffix, rounded_header_suffix)
+                << "Inconsistency detected";
+            DVLOG(6) << "[bench][bucket] validate_staleness kOk: expect_ld: "
+                     << expect_ld << ", expect_suffix: " << suffix << "("
+                     << rounded_suffix << ")"
+                     << ", header_ld: " << h.ld
+                     << ", header_suffix: " << h.suffix << "("
+                     << rounded_header_suffix << ")";
+            return kOk;
+        }
+        auto rounded_bit = std::max(h.ld, expect_ld);
+        auto rounded_suffix = round_hash_to_bit(suffix, rounded_bit);
+        auto rounded_header_suffix = round_hash_to_bit(h.suffix, rounded_bit);
+        if (rounded_suffix == rounded_header_suffix)
+        {
+            // stale but tolerant-able
+            DVLOG(6) << "[bench][bucket] validate_staleness kOk (tolerable): "
+                        "expect_ld: "
+                     << expect_ld << ", expect_suffix: " << suffix
+                     << ", rounded to: " << rounded_suffix
+                     << ", header_ld: " << h.ld
+                     << ", header_suffix: " << h.suffix
+                     << ", rounded to: " << rounded_header_suffix
+                     << ". Rounded  bit: " << rounded_bit;
+            return kOk;
+        }
+        DVLOG(6) << "[bench][bucket] validate_staleness kCacheStale: "
+                    "expect_ld: "
+                 << expect_ld << ", expect_suffix: " << suffix
+                 << ", rounded to: " << rounded_suffix
+                 << ", header_ld: " << h.ld << ", header_suffix: " << h.suffix
+                 << ", rounded to: " << rounded_header_suffix
+                 << ". Rounded bit: " << rounded_bit;
+        return kCacheStale;
     }
 
 private:
@@ -368,6 +421,16 @@ public:
             main_empty_slot ? main_empty_slot : overflow_empty_slot;
         return {main_slots, ret_empty_slot};
     }
+    RetCode validate_staleness(uint32_t expect_ld, uint32_t suffix)
+    {
+        auto ec = main_.validate_staleness(expect_ld, suffix);
+        if constexpr (debug())
+        {
+            auto ec2 = overflow_.validate_staleness(expect_ld, suffix);
+            CHECK_EQ(ec, ec2);
+        }
+        return ec;
+    }
 
 private:
     Bucket<kSlotNr> main_;
@@ -425,6 +488,12 @@ public:
                      overflow_bucket().utilization();
         return sum / 3;
     }
+    void setup_header(uint32_t ld, uint32_t hash_suffix)
+    {
+        main_bucket_0().setup_header(ld, hash_suffix);
+        main_bucket_1().setup_header(ld, hash_suffix);
+        overflow_bucket().setup_header(ld, hash_suffix);
+    }
 
 private:
     constexpr static size_t kItemSize = Bucket<kSlotNr>::size_bytes();
@@ -447,8 +516,8 @@ public:
 
     static_assert(is_power_of_two(kCombinedBucketNr));
 
-    SubTable(size_t ld, void *addr, size_t size)
-        : ld_(ld), addr_((BucketGroup<kSlotNr> *) CHECK_NOTNULL(addr))
+    SubTable(size_t ld, void *addr, size_t size, uint64_t hash_suffix)
+        : addr_((BucketGroup<kSlotNr> *) CHECK_NOTNULL(addr))
     {
         DVLOG(1) << "Subtable ctor called. addr_: " << addr_
                  << ", addr: " << addr << ", memset bytes: " << size_bytes();
@@ -457,6 +526,13 @@ public:
         // NOTE:
         // the memset is required to fill the slot as empty
         memset(addr_, 0, size_bytes());
+
+        // init each bucket
+        for (size_t b = 0; b < kBucketGroupNr; ++b)
+        {
+            auto bg = bucket_group(b);
+            bg.setup_header(ld, hash_suffix);
+        }
     }
 
     BucketGroup<kSlotNr> bucket_group(size_t idx) const
@@ -501,17 +577,18 @@ public:
     {
         return BucketGroup<kSlotNr>::size_bytes() * kBucketGroupNr;
     }
-    size_t ld() const
-    {
-        return ld_;
-    }
-    RetCode get(const Key &key, Value &value, uint64_t hash, HashContext *dctx)
+    RetCode get(const Key &key,
+                Value &value,
+                uint64_t hash,
+                uint32_t expect_ld,
+                HashContext *dctx)
     {
         // TODO: not enable dctx for get
         std::ignore = dctx;
         auto h1 = hash_1(hash);
         auto h2 = hash_2(hash);
         auto fp = hash_fp(hash);
+        auto m = hash_m(hash);
         DVLOG(4) << "[race][subtable] GET hash: " << std::hex << hash
                  << " got h1: " << h1 << ", h2: " << h2
                  << ", fp: " << pre_fp(fp);
@@ -521,6 +598,12 @@ public:
         // TODO(RDMA): should check header here
         auto cb1 = combined_bucket(h1);
         auto cb2 = combined_bucket(h2);
+        auto ec = cb1.validate_staleness(expect_ld, m);
+        if (ec == kCacheStale)
+        {
+            return kCacheStale;
+        }
+        DCHECK_EQ(ec, kOk);
         // RDMA: do the local search for any slot *may* match the key
         auto slot_views_1 = cb1.locate(fp);
         for (auto view : slot_views_1)
@@ -534,6 +617,12 @@ public:
             }
             DCHECK_EQ(rc, kNotFound);
         }
+        ec = cb2.validate_staleness(expect_ld, m);
+        if (ec == kCacheStale)
+        {
+            return kCacheStale;
+        }
+        DCHECK_EQ(ec, kOk);
         auto slot_views_2 = cb2.locate(fp);
         for (auto view : slot_views_2)
         {
@@ -553,27 +642,37 @@ public:
     RetCode put(const Key &key,
                 const Value &value,
                 uint64_t hash,
+                uint32_t expect_ld,
+                HashContext *dctx)
+    {
+        if constexpr (debug())
+        {
+            auto h1 = hash_1(hash);
+            auto h2 = hash_2(hash);
+            auto fp = hash_fp(hash);
+            DVLOG(4) << "[race][subtable] PUT hash: " << std::hex << hash
+                     << " got h1: " << h1 << ", h2: " << h2
+                     << ", fp: " << pre_fp(fp);
+        }
+
+        auto rc = do_put_phase_one(key, value, hash, expect_ld, dctx);
+        if (rc != kOk)
+        {
+            return rc;
+        }
+        // TODO: if do_put_phase_two_reread return kCacheStale
+        // should update cache and re-execute do_put_phase_two_reread.
+        return do_put_phase_two_reread(key, hash, expect_ld, dctx);
+    }
+    RetCode del(const Key &key,
+                uint64_t hash,
+                uint32_t expect_ld,
                 HashContext *dctx)
     {
         auto h1 = hash_1(hash);
         auto h2 = hash_2(hash);
         auto fp = hash_fp(hash);
-        DVLOG(4) << "[race][subtable] PUT hash: " << std::hex << hash
-                 << " got h1: " << h1 << ", h2: " << h2
-                 << ", fp: " << pre_fp(fp);
-
-        auto rc = do_put_phase_one(key, value, h1, h2, fp, dctx);
-        if (rc != kOk)
-        {
-            return rc;
-        }
-        return do_put_phase_two_reread(key, h1, h2, fp, dctx);
-    }
-    RetCode del(const Key &key, uint64_t hash, HashContext *dctx)
-    {
-        auto h1 = hash_1(hash);
-        auto h2 = hash_2(hash);
-        auto fp = hash_fp(hash);
+        auto m = hash_m(hash);
         DVLOG(4) << "[race][subtable] DEL hash: " << std::hex << hash
                  << " got h1: " << h1 << ", h2: " << h2
                  << ", fp: " << pre_fp(fp);
@@ -582,7 +681,19 @@ public:
         // Batch together.
         // TODO(RDMA): should check header here
         auto cb1 = combined_bucket(h1);
+        auto ec = cb1.validate_staleness(expect_ld, m);
+        if (ec == kCacheStale)
+        {
+            return ec;
+        }
+        DCHECK_EQ(ec, kOk);
         auto cb2 = combined_bucket(h2);
+        ec = cb2.validate_staleness(expect_ld, m);
+        if (ec == kCacheStale)
+        {
+            return ec;
+        }
+        DCHECK_EQ(ec, kOk);
         // RDMA: do the local search for any slot *may* match the key
         auto slot_views_1 = cb1.locate(fp);
         for (auto view : slot_views_1)
@@ -633,17 +744,34 @@ private:
      */
     RetCode do_put_phase_one(const Key &key,
                              const Value &value,
-                             uint64_t h1,
-                             uint64_t h2,
-                             uint8_t fp,
+                             uint64_t hash,
+                             uint32_t expect_ld,
                              HashContext *dctx)
     {
         // RDMA: read the whole combined_bucket
         // Batch together.
-        // TODO(RDMA): should check header here
         // TODO(RDMA): should write KV block here, parallely
+        auto h1 = hash_1(hash);
+        auto h2 = hash_2(hash);
+        auto fp = hash_fp(hash);
+        auto m = hash_m(hash);
+
         auto cb1 = combined_bucket(h1);
+        auto ec = cb1.validate_staleness(expect_ld, m);
+        if (ec == kCacheStale)
+        {
+            return kCacheStale;
+        }
+        DCHECK_EQ(ec, kOk);
+
         auto cb2 = combined_bucket(h2);
+        ec = cb2.validate_staleness(expect_ld, m);
+        if (ec == kCacheStale)
+        {
+            return kCacheStale;
+        }
+        DCHECK_EQ(ec, kOk);
+
         auto *kv_block = KVBlock::new_instance(key, value);
 
         // RDMA: do the local search for any slot *may* match or empty
@@ -686,14 +814,33 @@ private:
      * @brief reread to delete any duplicated ones
      *
      */
-    RetCode do_put_phase_two_reread(
-        const Key &key, uint64_t h1, uint64_t h2, uint8_t fp, HashContext *dctx)
+    RetCode do_put_phase_two_reread(const Key &key,
+                                    uint64_t hash,
+                                    uint32_t expect_ld,
+                                    HashContext *dctx)
     {
+        auto h1 = hash_1(hash);
+        auto h2 = hash_2(hash);
+        auto fp = hash_fp(hash);
+        auto m = hash_m(hash);
+
         DVLOG(4) << "[race][subtable] reread: " << pre(key)
                  << " to detect any duplicated ones";
         // RDMA: do the read again here
         auto cb1 = combined_bucket(h1);
+        auto ec = cb1.validate_staleness(expect_ld, m);
+        if (ec == kCacheStale)
+        {
+            return kCacheStale;
+        }
+        DCHECK_EQ(ec, kOk);
         auto cb2 = combined_bucket(h2);
+        ec = cb2.validate_staleness(expect_ld, m);
+        if (ec == kCacheStale)
+        {
+            return kCacheStale;
+        }
+        DCHECK_EQ(ec, kOk);
         // RDMA: do the local search for any slot *may* match or empty
         auto slot_views_1 = cb1.locate(fp);
         auto slot_views_2 = cb2.locate(fp);
@@ -911,7 +1058,6 @@ private:
         return do_get(kv_block, value);
     }
     constexpr static size_t kItemSize = BucketGroup<kSlotNr>::size_bytes();
-    size_t ld_{0};
     BucketGroup<kSlotNr> *addr_{nullptr};
 };
 
@@ -972,7 +1118,8 @@ public:
                      << (void *) alloc_mem << " for size "
                      << SubTableT::size_bytes();
 
-            entries_[i] = new SubTableT(ld, alloc_mem, alloc_size);
+            entries_[i] = new SubTableT(ld, alloc_mem, alloc_size, i);
+            cached_lds_[i] = ld;
         }
     }
     SubTableT &subtable(size_t idx)
@@ -1020,7 +1167,8 @@ public:
                  << rounded_m << " (subtable) by gd(may stale): " << gd()
                  << ". fp: " << pre_fp(fp);
         auto *sub_table = entries_[rounded_m];
-        auto rc = sub_table->put(key, value, hash, dctx);
+        auto rc =
+            sub_table->put(key, value, hash, cached_lds_[rounded_m], dctx);
         if (rc == kOk)
         {
             DVLOG(2) << "[race] PUT key `" << key << "`, val `" << value << "`";
@@ -1037,7 +1185,7 @@ public:
                  << hash << " hash, m: " << m << ", rounded to " << rounded_m
                  << " by gd(may stale): " << gd() << ". fp: " << pre_fp(fp);
         auto *sub_table = entries_[rounded_m];
-        auto rc = sub_table->del(key, hash, dctx);
+        auto rc = sub_table->del(key, hash, cached_lds_[rounded_m], dctx);
         if (rc == kOk)
         {
             DVLOG(2) << "[race] DEL key " << key;
@@ -1054,7 +1202,8 @@ public:
                  << hash << ", m: " << m << ", rounded to " << rounded_m
                  << " by gd(may stale): " << gd() << ". fp: " << pre_fp(fp);
         auto *sub_table = entries_[rounded_m];
-        auto rc = sub_table->get(key, value, hash, dctx);
+        auto rc =
+            sub_table->get(key, value, hash, cached_lds_[rounded_m], dctx);
         return rc;
     }
     static constexpr size_t max_capacity()
@@ -1088,6 +1237,7 @@ private:
 
     std::shared_ptr<patronus::mem::IAllocator> allocator_;
     SubTableT **entries_{nullptr};
+    std::array<uint32_t, kDEntryNr> cached_lds_;
     std::atomic<size_t> gd_{0};
     uint64_t seed_;
 };
