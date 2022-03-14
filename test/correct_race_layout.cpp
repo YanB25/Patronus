@@ -184,7 +184,9 @@ void test_writable()
 void test_put_get(size_t initial_subtable)
 {
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashing<4, 64, 64> rh(allocator, initial_subtable);
+    RaceHashingConfig conf;
+    conf.initial_subtable = initial_subtable;
+    RaceHashing<4, 64, 64> rh(allocator, conf);
     CHECK_EQ(rh.put("abc", "def"), kOk);
     std::string get;
     CHECK_EQ(rh.get("abc", get), kOk);

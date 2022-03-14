@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "./slot.h"
+#include "Common.h"
 #include "util/Rand.h"
 
 namespace patronus::hash
@@ -29,6 +30,10 @@ public:
 
     Bucket(void *addr) : addr_((Slot *) addr)
     {
+    }
+    constexpr static size_t max_item_nr()
+    {
+        return kDataSlotNr;
     }
     Slot &slot(size_t idx)
     {
@@ -56,7 +61,7 @@ public:
     {
         return Slot::size_bytes() * kSlotNr;
     }
-    std::vector<SlotWithView> locate(uint8_t fp)
+    std::vector<SlotWithView> locate(uint8_t fp, HashContext *dctx = nullptr)
     {
         std::vector<SlotWithView> ret;
         for (size_t i = 1; i < kSlotNr; ++i)
@@ -64,6 +69,10 @@ public:
             auto view = slot(i).with_view();
             if (view.match(fp))
             {
+                DLOG_IF(INFO,
+                        config::kEnableRaceHashingDebug && dctx != nullptr)
+                    << "Match with view " << view << ". for fp " << pre_fp(fp)
+                    << dctx;
                 ret.push_back(view);
             }
         }
@@ -155,8 +164,19 @@ public:
         {
             auto rounded_suffix = round_hash_to_bit(suffix, expect_ld);
             auto rounded_header_suffix = round_hash_to_bit(h.suffix, expect_ld);
-            CHECK_EQ(rounded_suffix, rounded_header_suffix)
-                << "Inconsistency detected";
+
+            if (rounded_suffix != rounded_header_suffix)
+            {
+                DVLOG(6) << "[bench][bucket] validate_staleness kStale (short "
+                            "period of RC): match "
+                            "ld but suffix mismatch.expect_ld: "
+                         << expect_ld << ", expect_suffix: " << suffix << "("
+                         << rounded_suffix << ")"
+                         << ", header_ld: " << h.ld
+                         << ", header_suffix: " << h.suffix << "("
+                         << rounded_header_suffix << ")";
+                return kCacheStale;
+            }
             DVLOG(6) << "[bench][bucket] validate_staleness kOk: expect_ld: "
                      << expect_ld << ", expect_suffix: " << suffix << "("
                      << rounded_suffix << ")"

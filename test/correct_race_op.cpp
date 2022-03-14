@@ -22,8 +22,10 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 void test_basic(size_t initial_subtable)
 {
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashing<4, 64, 64> rh(
-        allocator, initial_subtable, fast_pseudo_rand_int());
+    RaceHashingConfig conf;
+    conf.initial_subtable = initial_subtable;
+    conf.seed = fast_pseudo_rand_int();
+    RaceHashing<4, 64, 64> rh(allocator, conf);
     CHECK_EQ(rh.put("abc", "def"), kOk);
     std::string get;
     CHECK_EQ(rh.get("abc", get), kOk);
@@ -40,8 +42,10 @@ void test_basic(size_t initial_subtable)
 void test_capacity(size_t initial_subtable)
 {
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashing<4, 16, 16> rh(
-        allocator, initial_subtable, fast_pseudo_rand_int());
+    RaceHashingConfig conf;
+    conf.initial_subtable = initial_subtable;
+    conf.seed = fast_pseudo_rand_int();
+    RaceHashing<4, 16, 16> rh(allocator, conf);
 
     std::string key;
     std::string value;
@@ -274,8 +278,10 @@ void test_multithreads(size_t initial_subtable,
                        bool thread_modify_local_key)
 {
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    auto rh = std::make_shared<RaceHashing<4, 8, 8>>(
-        allocator, initial_subtable, fast_pseudo_rand_int());
+    RaceHashingConfig conf;
+    conf.initial_subtable = initial_subtable;
+    conf.seed = fast_pseudo_rand_int();
+    auto rh = std::make_shared<RaceHashing<4, 8, 8>>(allocator, conf);
 
     std::vector<std::thread> threads;
     for (size_t i = 0; i < thread_nr; ++i)
@@ -291,6 +297,255 @@ void test_multithreads(size_t initial_subtable,
     }
 }
 
+void test_expand_once_single_thread()
+{
+    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
+    RaceHashingConfig conf;
+    conf.initial_subtable = 1;
+    conf.seed = fast_pseudo_rand_int();
+    RaceHashing<2, 4, 4> rh(allocator, conf);
+
+    std::string key;
+    std::string value;
+    constexpr static size_t kKeySize = 8;
+    constexpr static size_t kValueSize = 8;
+    char key_buf[kKeySize + 5];
+    char val_buf[kValueSize + 5];
+    key.resize(kKeySize);
+    value.resize(kValueSize);
+    size_t insert_nr = 0;
+    std::map<std::string, std::string> inserted;
+    HashContext ctx(0, "", "");
+    ctx.tid = 0;
+    while (true)
+    {
+        fast_pseudo_fill_buf(key_buf, kKeySize);
+        fast_pseudo_fill_buf(val_buf, kValueSize);
+        std::string key(key_buf, kKeySize);
+        std::string value(val_buf, kValueSize);
+
+        ctx.key = key;
+        ctx.value = value;
+        ctx.op = "put";
+        auto rc = rh.put(key, value, &ctx);
+        if (rc == kNoMem)
+        {
+            LOG(INFO) << "[bench] inserted: " << insert_nr << ". Table: " << rh;
+            break;
+        }
+        CHECK_EQ(rc, kOk);
+        inserted.emplace(key, value);
+        insert_nr++;
+    }
+    for (const auto &[k, v] : inserted)
+    {
+        std::string got_v;
+        CHECK_EQ(rh.get(k, got_v), kOk);
+        CHECK_EQ(got_v, v);
+    }
+    LOG(INFO) << "[bench] begin to expand";
+    ctx.op = "expand";
+    ctx.key = "";
+    ctx.value = "";
+    rh.expand(0, &ctx);
+    for (const auto &[k, v] : inserted)
+    {
+        ctx.key = k;
+        ctx.value = v;
+        ctx.op = "get";
+        std::string got_v;
+        CHECK_EQ(rh.get(k, got_v, &ctx), kOk) << "failed to get back key " << k;
+        CHECK_EQ(got_v, v);
+    }
+    // what you inserted will not be lost
+    size_t another_insert = 0;
+    while (true)
+    {
+        fast_pseudo_fill_buf(key_buf, kKeySize);
+        fast_pseudo_fill_buf(val_buf, kValueSize);
+        std::string key(key_buf, kKeySize);
+        std::string value(val_buf, kValueSize);
+        auto rc = rh.put(key, value);
+        if (rc == kNoMem)
+        {
+            LOG(INFO) << "[bench] inserted another: " << another_insert
+                      << ". Table: " << rh;
+            break;
+        }
+        DCHECK_EQ(rc, kOk);
+        another_insert++;
+    }
+}
+
+void test_expand_multiple_single_thread()
+{
+    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
+    RaceHashingConfig conf;
+    conf.initial_subtable = 1;
+    conf.seed = fast_pseudo_rand_int();
+    conf.auto_expand = true;
+    conf.auto_update_dir = true;
+    RaceHashing<16, 4, 4> rh(allocator, conf);
+    LOG(INFO) << "[bench] seed is " << conf.seed;
+
+    std::string key;
+    std::string value;
+    constexpr static size_t kKeySize = 8;
+    constexpr static size_t kValueSize = 8;
+    char key_buf[kKeySize + 5];
+    char val_buf[kValueSize + 5];
+    key.resize(kKeySize);
+    value.resize(kValueSize);
+    std::map<std::string, std::string> inserted;
+    HashContext ctx(0, "", "");
+    ctx.tid = 0;
+    size_t inserted_nr = 0;
+    while (true)
+    {
+        fast_pseudo_fill_buf(key_buf, kKeySize);
+        fast_pseudo_fill_buf(val_buf, kValueSize);
+        std::string key(key_buf, kKeySize);
+        std::string value(val_buf, kValueSize);
+
+        ctx.key = key;
+        ctx.value = value;
+        ctx.op = "put";
+
+        auto rc = rh.put(key, value, &ctx);
+        if (rc == kNoMem)
+        {
+            LOG(INFO) << "[bench] nomem. out of directory entries. table: "
+                      << rh;
+
+            break;
+        }
+        CHECK_EQ(rc, kOk);
+        inserted.emplace(key, value);
+        inserted_nr++;
+    }
+    for (const auto &[k, v] : inserted)
+    {
+        ctx.key = k;
+        ctx.value = v;
+        ctx.op = "get";
+
+        std::string got_v;
+        auto rc = rh.get(k, got_v);
+        if (rc != kOk)
+        {
+            LOG(WARNING) << "Failed to find key `" << k
+                         << "`. Start to debug.... Got rc: " << rc;
+            // do it again with debug
+            ctx.key = k;
+            ctx.value = v;
+            ctx.op = "get";
+            rc = rh.get(k, got_v, &ctx);
+            CHECK(false) << "Failed to get `" << k << "`. Expect value `" << v
+                         << "`. Got: " << rc;
+        }
+        CHECK_EQ(got_v, v);
+    }
+
+    // check integrity and tear down
+
+    for (const auto &[k, v] : inserted)
+    {
+        ctx.key = k;
+        ctx.value = v;
+        ctx.op = "get";
+
+        std::string got_v;
+        CHECK_EQ(rh.get(k, got_v), kOk) << "failed to get back key " << k;
+        CHECK_EQ(got_v, v);
+        CHECK_EQ(rh.del(k, &ctx), kOk) << "failed to delete key " << k;
+    }
+    LOG(INFO) << "[bench] tear downed. table: " << rh;
+}
+void test_burn_expand_single_thread()
+{
+    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
+    RaceHashingConfig conf;
+    conf.initial_subtable = 1;
+    conf.seed = fast_pseudo_rand_int();
+    conf.auto_expand = true;
+    conf.auto_update_dir = true;
+    RaceHashing<128, 2, 2> rh(allocator, conf);
+    LOG(INFO) << "[bench] seed is " << conf.seed;
+
+    std::string key;
+    std::string value;
+    constexpr static size_t kKeySize = 8;
+    constexpr static size_t kValueSize = 8;
+    char key_buf[kKeySize + 5];
+    char val_buf[kValueSize + 5];
+    key.resize(kKeySize);
+    value.resize(kValueSize);
+    std::map<std::string, std::string> inserted;
+    HashContext ctx(0, "", "");
+    ctx.tid = 0;
+    size_t inserted_nr = 0;
+    while (true)
+    {
+        fast_pseudo_fill_buf(key_buf, kKeySize);
+        fast_pseudo_fill_buf(val_buf, kValueSize);
+        std::string key(key_buf, kKeySize);
+        std::string value(val_buf, kValueSize);
+
+        ctx.key = key;
+        ctx.value = value;
+        ctx.op = "put";
+
+        auto rc = rh.put(key, value, &ctx);
+        if (rc == kNoMem)
+        {
+            LOG(INFO) << "[bench] nomem. out of directory entries. table: "
+                      << rh;
+
+            break;
+        }
+        CHECK_EQ(rc, kOk);
+        inserted.emplace(key, value);
+        inserted_nr++;
+    }
+    for (const auto &[k, v] : inserted)
+    {
+        ctx.key = k;
+        ctx.value = v;
+        ctx.op = "get";
+
+        std::string got_v;
+        auto rc = rh.get(k, got_v);
+        if (rc != kOk)
+        {
+            LOG(WARNING) << "Failed to find key `" << k
+                         << "`. Start to debug.... Got rc: " << rc;
+            // do it again with debug
+            ctx.key = k;
+            ctx.value = v;
+            ctx.op = "get";
+            rc = rh.get(k, got_v, &ctx);
+            CHECK(false) << "Failed to get `" << k << "`. Expect value `" << v
+                         << "`. Got: " << rc;
+        }
+        CHECK_EQ(got_v, v);
+    }
+
+    // check integrity and tear down
+
+    for (const auto &[k, v] : inserted)
+    {
+        ctx.key = k;
+        ctx.value = v;
+        ctx.op = "get";
+
+        std::string got_v;
+        CHECK_EQ(rh.get(k, got_v), kOk) << "failed to get back key " << k;
+        CHECK_EQ(got_v, v);
+        CHECK_EQ(rh.del(k, &ctx), kOk) << "failed to delete key " << k;
+    }
+    LOG(INFO) << "[bench] tear downed. table: " << rh;
+}
+
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
@@ -300,7 +555,16 @@ int main(int argc, char *argv[])
     test_capacity(1);
     test_capacity(4);
 
-    // test_multithreads(4, 8, 1_M, true);
+    test_multithreads(4, 8, 1_M, true);
+
+    // test_expand_once_single_thread();
+    // for (size_t i = 0; i < 100; ++i)
+    // {
+    //     test_expand_multiple_single_thread();
+    // }
+
+    test_expand_multiple_single_thread();
+    test_burn_expand_single_thread();
 
     LOG(INFO) << "PASS ALL TESTS";
     LOG(INFO) << "finished. ctrl+C to quit.";

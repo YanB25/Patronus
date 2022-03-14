@@ -11,6 +11,7 @@
 
 namespace patronus::hash
 {
+constexpr static bool kEnableDebug = config::kEnableRaceHashingDebug;
 // NOTE:
 // one bucket group has two bucket and one overflow bucket
 // when using hash value to indexing the bucket
@@ -39,11 +40,80 @@ public:
         memset(addr_, 0, size_bytes());
 
         // init each bucket
+        update_header(ld, hash_suffix);
+    }
+    uint32_t ld() const
+    {
+        return bucket_group(0).bucket(0).header().ld;
+    }
+    uint32_t suffix() const
+    {
+        return bucket_group(0).bucket(0).header().suffix;
+    }
+    std::pair<uint32_t, uint32_t> ld_suffix() const
+    {
+        const auto &h = bucket_group(0).bucket(0).header();
+        return {h.ld, h.suffix};
+    }
+    void update_header(uint32_t ld, uint32_t suffix)
+    {
         for (size_t b = 0; b < kBucketGroupNr; ++b)
         {
             auto bg = bucket_group(b);
-            bg.setup_header(ld, hash_suffix);
+            bg.setup_header(ld, suffix);
         }
+    }
+    constexpr static size_t max_item_nr()
+    {
+        return kBucketGroupNr * BucketGroup<kSlotNr>::max_item_nr();
+    }
+    std::vector<MigrateView> locate_migratable(size_t test_bit,
+                                               HashContext *dctx)
+    {
+        std::vector<MigrateView> ret;
+        // the memory is contineous by design.
+        for (size_t bgid = 0; bgid < kBucketGroupNr; bgid++)
+        {
+            auto bg = bucket_group(bgid);
+            auto m0 = bg.main_bucket_0();
+            auto m1 = bg.main_bucket_1();
+            auto o = bg.overflow_bucket();
+            for (auto buck : {m0, m1, o})
+            {
+                // sid == 0 is the header
+                for (size_t sid = 1; sid < kSlotNr; ++sid)
+                {
+                    auto &slot = buck.slot(sid);
+                    auto *kv_block = (KVBlock *) slot.view().ptr();
+                    if (kv_block != nullptr)
+                    {
+                        auto hash = kv_block->hash;
+                        bool hit = (hash & (1ull << test_bit));
+                        // DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+                        //     << "[debug][race][expand] bgid: " << bgid
+                        //     << ", sid: " << sid
+                        //     << ", at slot: " << (void *) &slot << ". key: `"
+                        //     << std::string(kv_block->buf, kv_block->key_len)
+                        //     << "`. hash: " << std::hex << kv_block->hash
+                        //     << std::dec << ". test-int: " << (1ull <<
+                        //     test_bit)
+                        //     << ", hit: " << hit << ". " << *dctx;
+                        std::ignore = dctx;
+                        if (hit)
+                        {
+                            DVLOG(2) << "[race][expand] locate_migratable: the "
+                                     << sid << "-th slot got hash " << std::hex
+                                     << hash << std::dec << ", with "
+                                     << test_bit << " set. Should be migrated";
+                            // ret.push_back(MigrateView(slot_addr, view));
+                            ret.emplace_back(
+                                &slot, slot.view(), kv_block->hash);
+                        }
+                    }
+                }
+            }
+        }
+        return ret;
     }
 
     BucketGroup<kSlotNr> bucket_group(size_t idx) const
@@ -94,8 +164,6 @@ public:
                 uint32_t expect_ld,
                 HashContext *dctx)
     {
-        // TODO: not enable dctx for get
-        std::ignore = dctx;
         auto h1 = hash_1(hash);
         auto h2 = hash_2(hash);
         auto fp = hash_fp(hash);
@@ -116,7 +184,7 @@ public:
         }
         DCHECK_EQ(ec, kOk);
         // RDMA: do the local search for any slot *may* match the key
-        auto slot_views_1 = cb1.locate(fp);
+        auto slot_views_1 = cb1.locate(fp, dctx);
         for (auto view : slot_views_1)
         {
             // RDMA: read here
@@ -134,7 +202,7 @@ public:
             return kCacheStale;
         }
         DCHECK_EQ(ec, kOk);
-        auto slot_views_2 = cb2.locate(fp);
+        auto slot_views_2 = cb2.locate(fp, dctx);
         for (auto view : slot_views_2)
         {
             // RDMA: read here
@@ -248,7 +316,65 @@ public:
         return m.average();
     }
 
+    RetCode do_find_empty_slot_to_insert(const CombinedBucketView<kSlotNr> &cb1,
+                                         const CombinedBucketView<kSlotNr> &cb2,
+                                         SlotView new_slot,
+                                         HashContext *dctx)
+    {
+        DVLOG(4) << "[race][subtable] do_find_empty_slot_to_insert: new_slot "
+                 << new_slot << ". Try to fetch empty slots.";
+        auto empty_1 = cb1.fetch_empty(10);
+        for (auto view : empty_1)
+        {
+            auto rc = do_update_if_empty(view, new_slot, dctx);
+            if (rc == kOk)
+            {
+                DVLOG(4) << "[race][subtable] insert to empty slot SUCCEED "
+                            "at h1. new_slot "
+                         << new_slot << " at slot " << (void *) view.slot();
+                return kOk;
+            }
+            CHECK(rc == kRetry || rc == kNotFound);
+        }
+        auto empty_2 = cb2.fetch_empty(10);
+        for (auto view : empty_2)
+        {
+            auto rc = do_update_if_empty(view, new_slot, dctx);
+            if (rc == kOk)
+            {
+                DVLOG(4) << "[race][subtable] insert to empty slot SUCCEED "
+                            "at h2. new_slot "
+                         << new_slot << " at slot " << (void *) view.slot();
+                return kOk;
+            }
+            CHECK(rc == kRetry || rc == kNotFound);
+        }
+        DVLOG(4) << "[race][subtable] both bucket failed to insert slot "
+                 << new_slot << " to any empty ones. Tried " << empty_1.size()
+                 << " and " << empty_2.size() << " empty slots each.";
+        return kNoMem;
+    }
+    RetCode do_remove(SlotWithView view, HashContext *dctx)
+    {
+        auto expect_slot = view.view();
+        auto desired_slot = view.view_after_clear();
+        if (view.cas(expect_slot, desired_slot))
+        {
+            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+                << "Clearing slot " << (void *) view.slot() << *dctx;
+            hash_table_free(expect_slot.ptr());
+            return kOk;
+        }
+        else
+        {
+            return kRetry;
+        }
+    }
+
 private:
+    constexpr static size_t kItemSize = BucketGroup<kSlotNr>::size_bytes();
+    BucketGroup<kSlotNr> *addr_{nullptr};
+
     /**
      * @brief do anything except for re-read
      *
@@ -283,7 +409,7 @@ private:
         }
         DCHECK_EQ(ec, kOk);
 
-        auto *kv_block = KVBlock::new_instance(key, value);
+        auto *kv_block = KVBlock::new_instance(key, value, hash);
 
         // RDMA: do the local search for any slot *may* match or empty
         auto slot_views_1 = cb1.locate(fp);
@@ -375,22 +501,6 @@ private:
         }
         return kOk;
     }
-    RetCode do_remove(SlotWithView view, HashContext *dctx)
-    {
-        auto expect_slot = view.view();
-        auto desired_slot = view.view_after_clear();
-        if (view.cas(expect_slot, desired_slot))
-        {
-            DVLOG(2) << "Clearing slot " << (void *) view.slot()
-                     << (dctx == nullptr ? nulldctx : *dctx);
-            hash_table_free(expect_slot.ptr());
-            return kOk;
-        }
-        else
-        {
-            return kRetry;
-        }
-    }
     std::vector<SlotWithView> get_real_match_slots(
         const Key &key,
         const std::vector<SlotWithView> view_1,
@@ -428,44 +538,7 @@ private:
         }
         return *std::min_element(views.begin(), views.end());
     }
-    RetCode do_find_empty_slot_to_insert(const CombinedBucketView<kSlotNr> &cb1,
-                                         const CombinedBucketView<kSlotNr> &cb2,
-                                         SlotView new_slot,
-                                         HashContext *dctx)
-    {
-        DVLOG(4) << "[race][subtable] do_find_empty_slot_to_insert: new_slot "
-                 << new_slot << ". Try to fetch empty slots.";
-        auto empty_1 = cb1.fetch_empty(10);
-        for (auto view : empty_1)
-        {
-            auto rc = do_update_if_empty(view, new_slot, dctx);
-            if (rc == kOk)
-            {
-                DVLOG(4) << "[race][subtable] insert to empty slot SUCCEED "
-                            "at h1. new_slot "
-                         << new_slot << " at slot " << (void *) view.slot();
-                return kOk;
-            }
-            CHECK(rc == kRetry || rc == kNotFound);
-        }
-        auto empty_2 = cb2.fetch_empty(10);
-        for (auto view : empty_2)
-        {
-            auto rc = do_update_if_empty(view, new_slot, dctx);
-            if (rc == kOk)
-            {
-                DVLOG(4) << "[race][subtable] insert to empty slot SUCCEED "
-                            "at h2. new_slot "
-                         << new_slot << " at slot " << (void *) view.slot();
-                return kOk;
-            }
-            CHECK(rc == kRetry || rc == kNotFound);
-        }
-        DVLOG(4) << "[race][subtable] both bucket failed to insert slot "
-                 << new_slot << " to any empty ones. Tried " << empty_1.size()
-                 << " and " << empty_2.size() << " empty slots each.";
-        return kNoMem;
-    }
+
     RetCode do_update_if_real_match(SlotWithView view,
                                     const Key &key,
                                     SlotView new_slot,
@@ -510,9 +583,9 @@ private:
                          << (void *) kv_block << ". New_slot " << new_slot;
                 hash_table_free(kv_block);
             }
-            DVLOG(2) << "[race][subtable] slot " << (void *) view.slot()
-                     << " update to " << new_slot
-                     << (dctx == nullptr ? nulldctx : *dctx);
+            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+                << "[race][subtable] slot " << (void *) view.slot()
+                << " update to " << new_slot << *dctx;
             return kOk;
         }
         DVLOG(4) << "[race][subtable] do_update FAILED: new_slot " << new_slot;
@@ -568,8 +641,6 @@ private:
         }
         return do_get(kv_block, value);
     }
-    constexpr static size_t kItemSize = BucketGroup<kSlotNr>::size_bytes();
-    BucketGroup<kSlotNr> *addr_{nullptr};
 };
 
 template <size_t kBucketGroupNr, size_t kSlotNr>

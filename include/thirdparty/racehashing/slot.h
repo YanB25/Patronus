@@ -27,6 +27,7 @@ public:
     SlotView view() const;
     SlotWithView with_view() const;
     void *addr() const;
+    uint64_t val() const;
 
 private:
     uint8_t fp() const;
@@ -35,7 +36,6 @@ private:
     void set_len(uint8_t len);
     void *ptr() const;
     void set_ptr(void *_ptr);
-    uint64_t val() const;
     bool empty() const;
     bool cas(SlotView &expected, const SlotView &desired);
 
@@ -147,6 +147,36 @@ inline std::ostream &operator<<(std::ostream &os, const SlotWithView &view)
        << "}";
     return os;
 }
+
+class MigrateView
+{
+public:
+    MigrateView(Slot *slot, SlotView slot_view, uint64_t hash)
+        : slot_(slot), slot_view_(slot_view), hash_(hash)
+    {
+    }
+    uint64_t hash() const
+    {
+        return hash_;
+    }
+    Slot *slot() const
+    {
+        return slot_;
+    }
+    SlotView view() const
+    {
+        return slot_view_;
+    }
+    SlotWithView with_view() const
+    {
+        return SlotWithView(slot_, slot_view_);
+    }
+
+private:
+    Slot *slot_;
+    SlotView slot_view_;
+    uint64_t hash_;
+};
 
 }  // namespace patronus::hash
 

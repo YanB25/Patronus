@@ -186,6 +186,7 @@ inline uint64_t hash_impl(const char *buf, size_t size, uint64_t seed)
     return hash;
 }
 
+// NOTE: make FP next to M
 // (higher) [ H2 | H1 | FP | M ]  (lower)
 
 // get the bit range (upper, lower]
@@ -250,6 +251,53 @@ inline std::ostream &operator<<(std::ostream &os, const pre_fp &fp)
     return os;
 }
 
+class pre_suffix
+{
+public:
+    pre_suffix(uint32_t suffix, size_t len) : suffix_(suffix), len_(len)
+    {
+    }
+    friend std::ostream &operator<<(std::ostream &os, const pre_suffix &);
+
+private:
+    uint32_t suffix_;
+    size_t len_;
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_suffix &sfx)
+{
+    if (sfx.len_ <= 2)
+    {
+        os << sfx.suffix_ << "(" << std::bitset<2>(sfx.suffix_) << ")"
+           << std::dec;
+    }
+    else if (sfx.len_ <= 4)
+    {
+        os << sfx.suffix_ << "(" << std::bitset<4>(sfx.suffix_) << ")"
+           << std::dec;
+    }
+    else if (sfx.len_ <= 8)
+    {
+        os << sfx.suffix_ << "(" << std::bitset<8>(sfx.suffix_) << ")"
+           << std::dec;
+    }
+    else if (sfx.len_ <= 12)
+    {
+        os << sfx.suffix_ << "(" << std::bitset<12>(sfx.suffix_) << ")"
+           << std::dec;
+    }
+    else if (sfx.len_ <= 16)
+    {
+        os << sfx.suffix_ << "(" << std::bitset<16>(sfx.suffix_) << ")"
+           << std::dec;
+    }
+    else
+    {
+        os << sfx.suffix_ << "(" << std::bitset<64>(sfx.suffix_) << ")"
+           << std::dec;
+    }
+    return os;
+}
+
 using TaggedPtr = TaggedPtrImpl<void>;
 
 inline void hash_table_free([[maybe_unused]] void *addr)
@@ -259,32 +307,20 @@ inline void hash_table_free([[maybe_unused]] void *addr)
 
 struct HashContext
 {
-    HashContext(size_t tid,
-                const std::string &key,
-                const std::string &value,
-                bool enabled = true)
-        : tid(tid), key(key), value(value), enabled(enabled)
+    HashContext(size_t tid, const std::string &key, const std::string &value)
+        : tid(tid), key(key), value(value)
     {
     }
     size_t tid;
     std::string key;
     std::string value;
-    bool enabled{true};
     std::string op;
 };
 
-static HashContext nulldctx(0, "", "", false);
-
 inline std::ostream &operator<<(std::ostream &os, const HashContext &dctx)
 {
-    if constexpr (debug())
-    {
-        if (dctx.enabled)
-        {
-            os << "{dctx tid: " << dctx.tid << ", key: `" << dctx.key
-               << "`, value: `" << dctx.value << "`} by op: " << dctx.op;
-        }
-    }
+    os << "{dctx tid: " << dctx.tid << ", key: `" << dctx.key << "`, value: `"
+       << dctx.value << "`} by op: " << dctx.op;
     return os;
 }
 

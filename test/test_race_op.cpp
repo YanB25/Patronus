@@ -17,8 +17,10 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 void test_capacity(size_t initial_subtable)
 {
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashing<1, 2, 2> rh(
-        allocator, initial_subtable, fast_pseudo_rand_int());
+    RaceHashingConfig conf;
+    conf.initial_subtable = initial_subtable;
+    conf.seed = fast_pseudo_rand_int();
+    RaceHashing<1, 2, 2> rh(allocator, conf);
 
     std::string key;
     std::string value;

@@ -25,6 +25,15 @@ public:
     {
         return overflow_;
     }
+    std::vector<SlotWithView> locate_migratable(size_t test_bit)
+    {
+        auto main_ret = main_.locate_migratable(test_bit);
+        auto o_ret = overflow_.locate_migratable(test_bit);
+        main_ret.insert(main_ret.begin(),
+                        std::make_move_iterator(o_ret.begin()),
+                        std::make_move_iterator(o_ret.end()));
+        return main_ret;
+    }
     std::vector<SlotWithView> fetch_empty(size_t limit) const
     {
         // NOTE:
@@ -41,10 +50,10 @@ public:
                         std::make_move_iterator(overflow_ret.end()));
         return main_ret;
     }
-    std::vector<SlotWithView> locate(uint8_t fp)
+    std::vector<SlotWithView> locate(uint8_t fp, HashContext *dctx = nullptr)
     {
-        auto slots_main = main_.locate(fp);
-        auto slots_overflow = overflow_.locate(fp);
+        auto slots_main = main_.locate(fp, dctx);
+        auto slots_overflow = overflow_.locate(fp, dctx);
         DVLOG(5) << "[race][cb] locate fp " << pre_fp(fp)
                  << " from main bucket " << slots_main.size()
                  << " slots, overflow " << slots_overflow.size() << " slots.";
@@ -123,6 +132,10 @@ public:
     {
         return CombinedBucketView<kSlotNr>((char *) addr_ + 2 * kItemSize,
                                            (char *) addr_ + 1 * kItemSize);
+    }
+    constexpr static size_t max_item_nr()
+    {
+        return Bucket<kSlotNr>::max_item_nr() * 3;
     }
     void *addr() const
     {

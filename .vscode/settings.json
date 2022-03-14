@@ -70,7 +70,9 @@
         "any": "cpp",
         "codecvt": "cpp",
         "filesystem": "cpp",
-        "*.def": "cpp"
+        "*.def": "cpp",
+        "*.inc": "cpp",
+        "*.gen": "cpp"
     },
     "C_Cpp.default.compilerArgs": [
         "--std=c++17"
