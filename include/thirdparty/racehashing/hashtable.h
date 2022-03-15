@@ -92,6 +92,9 @@ public:
         bool expect = false;
         if (!expandings_[subtable_idx].compare_exchange_strong(expect, true))
         {
+            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+                << "[race][trace][expand] expand: FAILED. Detect concurrent "
+                   "expanding.";
             return kRetry;
         }
         // okay, entered critical section
@@ -102,9 +105,13 @@ public:
         auto expect_gd = gd();
         if (pow(2, next_depth) > kDEntryNr)
         {
-            DLOG(WARNING) << "[race][expand] trying to expand to gd "
-                          << next_depth << " with entries "
-                          << pow(2, next_depth) << ". Out of directory entry.";
+            // DLOG(WARNING) << "[race][expand] trying to expand to gd "
+            //               << next_depth << " with entries "
+            //               << pow(2, next_depth) << ". Out of directory
+            //               entry.";
+            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+                << "[race][trace][expand] expand: FAILED. exceed max directory "
+                   "entry";
             return kNoMem;
         }
         if (next_depth >= expect_gd)
@@ -120,16 +127,26 @@ public:
                         << "[race][expand] (0) Update gd and directory: "
                            "setting subtable["
                         << i << "] to subtale[" << from_subtable_idx << "]";
-                    entries_[i] = entries_[from_subtable_idx];
+                    // entries_[i] = entries_[from_subtable_idx];
+                    std::atomic<uint64_t> *patom =
+                        (std::atomic<uint64_t> *) &entries_[i];
+                    uint64_t expect = (uint64_t) nullptr;
+                    patom->compare_exchange_strong(
+                        expect, (uint64_t) entries_[from_subtable_idx]);
                 }
             }
 
             DVLOG(1)
                 << "[race][expand] (0) Update gd and directory: setting gd to "
                 << next_depth;
-            CHECK(gd_.compare_exchange_strong(expect_gd, next_depth))
-                << "Should not cas failed, because we are in the critical "
-                   "section";
+
+            while (expect_gd < next_depth)
+            {
+                if (gd_.compare_exchange_strong(expect_gd, next_depth))
+                {
+                    break;
+                }
+            }
         }
         auto next_subtable_idx = subtable_idx | (1 << depth);
 
@@ -181,19 +198,39 @@ public:
                  << "]";
 
         // 4) move data.
-        // 4.1) update bucket suffix
-        DVLOG(1) << "[race][expand] (4.1) update bucket header for subtable["
+        auto *origin_subtable = entries_[subtable_idx];
+
+        // 4.1) insert all items from the old bucket to the new
+        DVLOG(1) << "[race][expand] (4.1) migrate slots from subtable["
+                 << subtable_idx << "] to subtable[" << next_subtable_idx
+                 << "] with the " << ld << "-th bit == 1";
+        auto bits = ld;
+        CHECK_GE(bits, 1) << "Test the " << bits
+                          << "-th bits, which index from one.";
+        auto migrate_views = origin_subtable->locate_migratable(bits - 1, dctx);
+        // 4.2) delete all items from the old bucket
+        DVLOG(1) << "[race][expand] (4.2) do migrate: will migrate "
+                 << migrate_views.size() << " items from subtable["
+                 << subtable_idx << "] to subtable[" << next_subtable_idx
+                 << "]";
+        for (auto m : migrate_views)
+        {
+            CHECK_EQ(do_migrate(m, *origin_subtable, *new_subtable, dctx), kOk)
+                << (dctx == nullptr ? nulldctx : *dctx);
+        }
+
+        // 4.3) update bucket suffix
+        DVLOG(1) << "[race][expand] (4.3) update bucket header for subtable["
                  << subtable_idx << "]. ld: " << ld
                  << ", suffix: " << subtable_idx;
-        auto *origin_subtable = entries_[subtable_idx];
         origin_subtable->update_header(ld, subtable_idx);
-        // Before 4.1) Iterate all the entries in @entries_, check for any
+        // Before 4.4) Iterate all the entries in @entries_, check for any
         // recursive updates to the entries.
         // For example, when
         // subtable_idx in {1, 5, 9, 13} pointing to the same LD = 2, suffix =
         // 0b01, when expanding subtable 1 to 5, should also set 9 pointing to 1
         // (not changed) and 13 pointing to 5 (changed)
-        DVLOG(1) << "[race][expand] (4.2) recursively checks all the entries "
+        DVLOG(1) << "[race][expand] (4.4) recursively checks all the entries "
                     "for further updates";
         for (size_t i = 0; i < kDEntryNr; ++i)
         {
@@ -215,30 +252,14 @@ public:
             }
         }
 
-        // 4.3) insert all items from the old bucket to the new
-        DVLOG(1) << "[race][expand] (4.3) migrate slots from subtable["
-                 << subtable_idx << "] to subtable[" << next_subtable_idx
-                 << "] with the " << ld << "-th bit == 1";
-        auto bits = ld;
-        CHECK_GE(bits, 1) << "Test the " << bits
-                          << "-th bits, which index from one.";
-        auto migrate_views = origin_subtable->locate_migratable(bits - 1, dctx);
-        // 4.4) delete all items from the old bucket
-        DVLOG(1) << "[race][expand] (4.4) do migrate: will migrate "
-                 << migrate_views.size() << " items from subtable["
-                 << subtable_idx << "] to subtable[" << next_subtable_idx
-                 << "]";
-        for (auto m : migrate_views)
-        {
-            CHECK_EQ(do_migrate(m, *origin_subtable, *new_subtable, dctx), kOk);
-        }
-
         // 5) unlock
         DVLOG(1) << "[race][expand] (5) Unlock subtable[" << next_subtable_idx
                  << "] and subtable[" << subtable_idx << "]";
         expandings_[next_subtable_idx] = false;
         expandings_[subtable_idx] = false;
         DVLOG(1) << "[race][expand] Finished. " << *this;
+        DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            << "[race][trace][expand] expand: FINISHED. " << *this;
         return kOk;
     }
     size_t idx_to_depth(size_t idx)
@@ -281,8 +302,24 @@ public:
         auto cb2 = dst_table.combined_bucket(h2);
         // RDMA: do the local search for any slot *may* match the key
         // auto slot_views_1 = cb1.locate(fp);
+        std::string old_op;
+        if constexpr (debug())
+        {
+            if (dctx)
+            {
+                old_op = dctx->op;
+                dctx->op += "-mig";
+            }
+        }
         auto rc = dst_table.do_find_empty_slot_to_insert(
             cb1, cb2, mig_view.view(), dctx);
+        if constexpr (debug())
+        {
+            if (dctx)
+            {
+                dctx->op = old_op;
+            }
+        }
         if (rc == kOk)
         {
             auto with_view = mig_view.with_view();
@@ -338,8 +375,9 @@ public:
             {
                 cached_lds_[i] = sub_table->ld();
                 DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
-                    << "[race] update_directory_cache: update cached_ld to "
-                    << cached_lds_[i] << " for subtable[" << i << "]" << *dctx;
+                    << "[race][trace] update_directory_cache: update cached_ld "
+                       "to "
+                    << cached_lds_[i] << " for subtable[" << i << "] " << *dctx;
             }
         }
         return kOk;
@@ -361,8 +399,8 @@ public:
         if (rc == kOk)
         {
             DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
-                << "[race] PUT SUCC at subtable[" << rounded_m << "] at "
-                << (void *) sub_table << ". " << *dctx;
+                << "[race][trace] PUT SUCC at subtable[" << rounded_m << "] ("
+                << (void *) sub_table << "). " << *dctx;
 
             DVLOG(2) << "[race] PUT key `" << key << "`, val `" << value << "`";
         }
@@ -371,13 +409,28 @@ public:
             auto ld = sub_table->ld();
             auto overflow_subtable_idx = round_hash_to_bit(rounded_m, ld);
             DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
-                << "[race][auto-expand] put: put failed by kNoMem. "
+                << "[race][trace][auto-expand] put: put failed by kNoMem. "
                    "Automatically expand subtable["
                 << overflow_subtable_idx << "] from rounde_m: " << rounded_m
-                << " by ld: " << ld << ". Current table: " << *this;
+                << " by ld: " << ld << ". " << *dctx
+                << ". Current table: " << *this;
+            if constexpr (debug())
+            {
+                if (dctx)
+                {
+                    dctx->op += "-exp";
+                }
+            }
             auto rc = expand(overflow_subtable_idx, dctx);
             if (rc == kOk)
             {
+                if constexpr (debug())
+                {
+                    if (dctx)
+                    {
+                        dctx->op += "-p";
+                    }
+                }
                 return put(key, value, dctx);
             }
             return rc;
@@ -403,7 +456,16 @@ public:
         auto rc = sub_table->del(key, hash, cached_lds_[rounded_m], dctx);
         if (rc == kOk)
         {
+            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+                << "[race][trace] del: SUCC at subtable[" << rounded_m << "]. "
+                << *dctx;
             DVLOG(2) << "[race] DEL key " << key;
+        }
+        else
+        {
+            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+                << "[race][trace] del: FAILED at subtable[" << rounded_m
+                << "]: " << rc << ". " << *dctx;
         }
         return rc;
     }

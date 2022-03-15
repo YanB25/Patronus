@@ -215,3 +215,12 @@ When you come back:
 [-] Wont (REALLY DON'T WANT TO DO). see if extension is easy (like <= 1h I can do it)
 
 Then, do the shrink task!
+
+Get yourself confident! Write Racehash on your own is great, because you know the code and there's no magic.
+1. Run multiple expansion succeed under small data.
+2. add more detail log. see the log of 152.log. Print the hash of all the inserted key, so that we know whether the following expansion will touch them and move them to other subtables.
+4. is the bench code write? what will it response to retry? How many op succeed? Maybe no op succeeded?
+
+Just spend half a day to fix the multithreads expansion.
+If failed, MOVE ON to RDMA version.
+No time to make it perfect.

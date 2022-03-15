@@ -324,6 +324,10 @@ public:
         DVLOG(4) << "[race][subtable] do_find_empty_slot_to_insert: new_slot "
                  << new_slot << ". Try to fetch empty slots.";
         auto empty_1 = cb1.fetch_empty(10);
+        DLOG_IF(INFO, kEnableDebug && dctx != nullptr && empty_1.empty())
+            << "[race][trace] do_find_empty_slot_to_insert WARN: "
+               "cb1.fetch_empty() got no empty slot. "
+            << *dctx;
         for (auto view : empty_1)
         {
             auto rc = do_update_if_empty(view, new_slot, dctx);
@@ -337,6 +341,10 @@ public:
             CHECK(rc == kRetry || rc == kNotFound);
         }
         auto empty_2 = cb2.fetch_empty(10);
+        DLOG_IF(INFO, kEnableDebug && dctx != nullptr && empty_2.empty())
+            << "[race][trace] do_find_empty_slot_to_insert WARN: "
+               "cb2.fetch_empty() got no empty slot. "
+            << *dctx;
         for (auto view : empty_2)
         {
             auto rc = do_update_if_empty(view, new_slot, dctx);
@@ -361,7 +369,8 @@ public:
         if (view.cas(expect_slot, desired_slot))
         {
             DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
-                << "Clearing slot " << (void *) view.slot() << *dctx;
+                << "[race][trace] do_remove: clearing slot "
+                << (void *) view.slot() << ". " << *dctx;
             hash_table_free(expect_slot.ptr());
             return kOk;
         }
@@ -560,6 +569,11 @@ private:
         {
             return do_update(view, new_slot, dctx);
         }
+        DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            << "[race][trace][subtable] do_update_if_empty: FAILED. slot not "
+               "empty. "
+               "slot_with_view: "
+            << view << *dctx;
         return kNotFound;
     }
     RetCode do_update(SlotWithView view, SlotView new_slot, HashContext *dctx)
@@ -589,6 +603,9 @@ private:
             return kOk;
         }
         DVLOG(4) << "[race][subtable] do_update FAILED: new_slot " << new_slot;
+        DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            << "[race][trace][subtable] do_update FAILED: cas failed. slot "
+            << view << *dctx;
         return kRetry;
     }
 

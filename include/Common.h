@@ -297,7 +297,7 @@ constexpr static bool kEnableValidityMutex = false;
 constexpr static bool kEnableTrace = false;
 constexpr static uint64_t kTraceRate =
     100000;  // (1.0 / kTraceRate) possibility
-constexpr static bool kEnableRaceHashingDebug = false;
+constexpr static bool kEnableRaceHashingDebug = true;
 
 // other settings
 constexpr static size_t kLeaseCacheItemLimitNr = 3;

@@ -71,8 +71,8 @@ public:
             {
                 DLOG_IF(INFO,
                         config::kEnableRaceHashingDebug && dctx != nullptr)
-                    << "Match with view " << view << ". for fp " << pre_fp(fp)
-                    << dctx;
+                    << "[race][trace] locate: fp " << pre_fp(fp)
+                    << " got matched FP. view " << view << ". " << *dctx;
                 ret.push_back(view);
             }
         }

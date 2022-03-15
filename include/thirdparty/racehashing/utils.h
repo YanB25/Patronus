@@ -28,6 +28,34 @@ enum RetCode
     kCacheStale,
     kInvalid,
 };
+inline std::ostream &operator<<(std::ostream &os, RetCode rc)
+{
+    switch (rc)
+    {
+    case kOk:
+        os << "kOk";
+        break;
+    case kNotFound:
+        os << "kNotFound";
+        break;
+    case kNoMem:
+        os << "kNoMem";
+        break;
+    case kRetry:
+        os << "kRetry";
+        break;
+    case kCacheStale:
+        os << "kCacheStale";
+        break;
+    case kInvalid:
+        os << "kInvalid";
+        break;
+    default:
+        LOG(FATAL) << "Unknown return code " << (int) rc;
+    }
+    return os;
+}
+
 inline uint64_t round_up_to_next_power_of_2(uint64_t x)
 {
     return pow(2, ceil(log(x) / log(2)));
@@ -307,20 +335,29 @@ inline void hash_table_free([[maybe_unused]] void *addr)
 
 struct HashContext
 {
-    HashContext(size_t tid, const std::string &key, const std::string &value)
-        : tid(tid), key(key), value(value)
+    HashContext(size_t tid,
+                const std::string &key,
+                const std::string &value,
+                bool enabled = true)
+        : tid(tid), key(key), value(value), enabled_(enabled)
     {
     }
     size_t tid;
     std::string key;
     std::string value;
     std::string op;
+    bool enabled_;
 };
+
+static HashContext nulldctx(0, "", "", false);
 
 inline std::ostream &operator<<(std::ostream &os, const HashContext &dctx)
 {
-    os << "{dctx tid: " << dctx.tid << ", key: `" << dctx.key << "`, value: `"
-       << dctx.value << "`} by op: " << dctx.op;
+    if (dctx.enabled_)
+    {
+        os << "{dctx tid: " << dctx.tid << ", key: `" << dctx.key
+           << "`, value: `" << dctx.value << "`} by op: " << dctx.op;
+    }
     return os;
 }
 

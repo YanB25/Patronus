@@ -84,11 +84,6 @@ public:
     RetCode validate_staleness(uint32_t expect_ld, uint32_t suffix)
     {
         auto ec = main_.validate_staleness(expect_ld, suffix);
-        if constexpr (debug())
-        {
-            auto ec2 = overflow_.validate_staleness(expect_ld, suffix);
-            CHECK_EQ(ec, ec2);
-        }
         return ec;
     }
 

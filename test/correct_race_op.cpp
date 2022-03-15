@@ -112,8 +112,7 @@ void test_capacity(size_t initial_subtable)
 template <size_t kA, size_t kB, size_t kC>
 void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                  size_t tid,
-                 size_t test_nr,
-                 bool thread_modify_local_key)
+                 size_t test_nr)
 {
     constexpr static size_t kKeySize = 3;
     constexpr static size_t kValueSize = 3;
@@ -141,10 +140,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
 
         // so each thread will not modify others value
         char mark = 'a' + tid;
-        if (thread_modify_local_key)
-        {
-            key[0] = mark;
-        }
+        key[0] = mark;
 
         if (true_with_prob(0.5))
         {
@@ -177,7 +173,8 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
             dctx.op = "d";
             CHECK_EQ(rh->del(key, &dctx), kOk)
                 << "tid " << tid << " deleting key `" << key
-                << "` expect to succeed";
+                << "` expect to succeed. inserted.count(key): "
+                << inserted.count(key);
             inserted.erase(key);
             keys.erase(key);
             del_succ_nr++;
@@ -191,7 +188,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 dctx.key = key;
                 dctx.value = value;
                 dctx.op = "d";
-                CHECK_EQ(rh->del(key, &dctx), kOk);
+                CHECK_EQ(rh->del(key, &dctx), kOk) << dctx;
                 inserted.erase(key);
                 keys.erase(key);
                 del_succ_nr++;
@@ -201,7 +198,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 dctx.key = key;
                 dctx.value = value;
                 dctx.op = "d";
-                CHECK_EQ(rh->del(key, &dctx), kNotFound);
+                CHECK_EQ(rh->del(key, &dctx), kNotFound) << dctx;
                 del_fail_nr++;
             }
         }
@@ -214,14 +211,14 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
             }
             std::string got_value;
             key = random_choose(keys);
-            CHECK_EQ(key[0], mark);
+            CHECK_EQ(key[0], mark) << dctx;
             dctx.key = key;
             dctx.value = value;
             dctx.op = "g";
             CHECK_EQ(rh->get(key, got_value, &dctx), kOk)
                 << "Tid: " << tid << " getting key `" << key
                 << "` expect to succeed";
-            CHECK_EQ(got_value, inserted[key]);
+            CHECK_EQ(got_value, inserted[key]) << dctx;
             get_succ_nr++;
         }
         else
@@ -239,8 +236,8 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 dctx.key = key;
                 dctx.value = value;
                 dctx.op = "g";
-                CHECK_EQ(rh->get(key, got_value, &dctx), kOk);
-                CHECK_EQ(got_value, inserted[key]);
+                CHECK_EQ(rh->get(key, got_value, &dctx), kOk) << dctx;
+                CHECK_EQ(got_value, inserted[key]) << dctx;
                 get_succ_nr++;
             }
             else
@@ -249,7 +246,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 dctx.key = key;
                 dctx.value = value;
                 dctx.op = "g";
-                CHECK_EQ(rh->get(key, got_value, &dctx), kNotFound);
+                CHECK_EQ(rh->get(key, got_value, &dctx), kNotFound) << dctx;
                 get_fail_nr++;
             }
         }
@@ -262,34 +259,34 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
         std::string get_v;
         dctx.key = k;
         dctx.value = v;
-        CHECK_EQ(rh->get(k, get_v, &dctx), kOk);
-        CHECK_EQ(get_v, v);
+        CHECK_EQ(rh->get(k, get_v, &dctx), kOk) << dctx;
+        CHECK_EQ(get_v, v) << dctx;
         dctx.key = k;
         dctx.value = v;
-        CHECK_EQ(rh->del(k, &dctx), kOk);
+        CHECK_EQ(rh->del(k, &dctx), kOk) << dctx;
     }
 
     LOG(INFO) << "Tear down. tid: " << tid << ". Table: " << *rh;
 }
 
-void test_multithreads(size_t initial_subtable,
-                       size_t thread_nr,
-                       size_t test_nr,
-                       bool thread_modify_local_key)
+template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
+void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
 {
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
-    conf.initial_subtable = initial_subtable;
     conf.seed = fast_pseudo_rand_int();
-    auto rh = std::make_shared<RaceHashing<4, 8, 8>>(allocator, conf);
+    conf.auto_expand = expand;
+    conf.auto_update_dir = expand;
+    conf.initial_subtable = expand ? 1 : kDEntryNr;
+    auto rh = std::make_shared<RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>>(
+        allocator, conf);
 
     std::vector<std::thread> threads;
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [&rh, tid = i, test_nr, thread_modify_local_key]() {
-                test_thread<4, 8, 8>(rh, tid, test_nr, thread_modify_local_key);
-            });
+        threads.emplace_back([&rh, tid = i, test_nr]() {
+            test_thread<kDEntryNr, kBucketGroupNr, kSlotNr>(rh, tid, test_nr);
+        });
     }
     for (auto &t : threads)
     {
@@ -551,11 +548,11 @@ int main(int argc, char *argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    test_basic(1);
-    test_capacity(1);
-    test_capacity(4);
+    // test_basic(1);
+    // test_capacity(1);
+    // test_capacity(4);
 
-    test_multithreads(4, 8, 1_M, true);
+    // test_multithreads<4, 8, 8>(8, 1_M, false);
 
     // test_expand_once_single_thread();
     // for (size_t i = 0; i < 100; ++i)
@@ -563,8 +560,10 @@ int main(int argc, char *argv[])
     //     test_expand_multiple_single_thread();
     // }
 
-    test_expand_multiple_single_thread();
-    test_burn_expand_single_thread();
+    // test_expand_multiple_single_thread();
+    // test_burn_expand_single_thread();
+
+    test_multithreads<16, 4, 4>(8, 10, true);
 
     LOG(INFO) << "PASS ALL TESTS";
     LOG(INFO) << "finished. ctrl+C to quit.";
