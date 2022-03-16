@@ -6,6 +6,7 @@
 #include "glog/logging.h"
 #include "patronus/memory/direct_allocator.h"
 #include "thirdparty/racehashing/hashtable.h"
+#include "thirdparty/racehashing/hashtable_handle.h"
 #include "thirdparty/racehashing/utils.h"
 #include "util/Rand.h"
 
@@ -19,8 +20,12 @@ void test_capacity(size_t initial_subtable)
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
-    conf.seed = fast_pseudo_rand_int();
     RaceHashing<1, 2, 2> rh(allocator, conf);
+
+    RaceHashingHandleConfig handle_conf;
+
+    RaceHashingHandle<1, 2, 2> rhh(
+        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     std::string key;
     std::string value;
@@ -38,7 +43,7 @@ void test_capacity(size_t initial_subtable)
         value = std::string(value_buf, 8);
         LOG(INFO) << "\nTrying to push " << key << ", " << value;
 
-        auto rc = rh.put(key, value);
+        auto rc = rhh.put(key, value);
         if (rc == kOk)
         {
             inserted.emplace(key, value);
@@ -62,7 +67,7 @@ void test_capacity(size_t initial_subtable)
     for (const auto &[key, expect_value] : inserted)
     {
         std::string get_val;
-        CHECK_EQ(rh.get(key, get_val), kOk);
+        CHECK_EQ(rhh.get(key, get_val), kOk);
         CHECK_EQ(get_val, expect_value);
     }
     LOG(INFO) << rh;

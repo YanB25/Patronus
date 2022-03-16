@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <unordered_set>
 #include <vector>
 
 #include "./slot.h"
@@ -28,110 +29,43 @@ public:
     static_assert(kSlotNr > 1);
     constexpr static size_t kDataSlotNr = kSlotNr - 1;
 
-    Bucket(void *addr) : addr_((Slot *) addr)
+    Bucket(void *bucket_buf) : bucket_buf_(bucket_buf)
     {
     }
     constexpr static size_t max_item_nr()
     {
         return kDataSlotNr;
     }
-    Slot &slot(size_t idx)
+
+    Slot &slot(size_t idx) const
     {
         DCHECK_LT(idx, kSlotNr);
-        return *(addr_ + idx);
+        auto *slot = (Slot *) bucket_buf_ + idx;
+        return *slot;
     }
-    const Slot &slot(size_t idx) const
+    SlotView slot_view(size_t idx) const
     {
-        DCHECK_LT(idx, kSlotNr);
-        return *(addr_ + idx);
+        return SlotView(slot(idx).val());
     }
+
     BucketHeader &header()
     {
-        return *(BucketHeader *) &slot(0);
+        return *(BucketHeader *) bucket_buf_;
     }
     const BucketHeader &header() const
     {
-        return *(BucketHeader *) &slot(0);
+        return *(BucketHeader *) bucket_buf_;
     }
-    void *addr() const
+
+    const void *buffer_addr() const
     {
-        return addr_;
+        return bucket_buf_;
     }
     constexpr static size_t size_bytes()
     {
         return Slot::size_bytes() * kSlotNr;
     }
-    std::vector<SlotWithView> locate(uint8_t fp, HashContext *dctx = nullptr)
-    {
-        std::vector<SlotWithView> ret;
-        for (size_t i = 1; i < kSlotNr; ++i)
-        {
-            auto view = slot(i).with_view();
-            if (view.match(fp))
-            {
-                DLOG_IF(INFO,
-                        config::kEnableRaceHashingDebug && dctx != nullptr)
-                    << "[race][trace] locate: fp " << pre_fp(fp)
-                    << " got matched FP. view " << view << ". " << *dctx;
-                ret.push_back(view);
-            }
-        }
-        return ret;
-    }
 
-    std::vector<SlotWithView> fetch_empty(size_t limit) const
-    {
-        std::vector<SlotWithView> ret;
-        auto poll_slot_idx = fast_pseudo_rand_int(1, kSlotNr - 1);
-        for (size_t i = 0; i < kDataSlotNr; ++i)
-        {
-            auto idx = (poll_slot_idx + i) % kDataSlotNr + 1;
-            CHECK_GE(idx, 1);
-            CHECK_LT(idx, kSlotNr);
-            auto view = slot(idx).with_view();
-
-            if (view.empty())
-            {
-                ret.push_back(view);
-                if (ret.size() >= limit)
-                {
-                    return ret;
-                }
-            }
-        }
-        return ret;
-    }
-
-    std::pair<std::vector<SlotWithView>, SlotWithView> locate_or_empty(
-        uint8_t fp)
-    {
-        std::vector<SlotWithView> ret;
-        auto poll_slot_idx = fast_pseudo_rand_int(1, kSlotNr - 1);
-        SlotWithView first_empty_slot_view;
-        for (size_t i = 0; i < kDataSlotNr; ++i)
-        {
-            auto idx = (poll_slot_idx + i) % kDataSlotNr + 1;
-            CHECK_GE(idx, 1);
-            CHECK_LT(idx, kSlotNr);
-            auto view = slot(idx).view();
-
-            if (view.match(fp))
-            {
-                DVLOG(6) << "[bench][bucket] Search for fp " << pre_fp(fp)
-                         << " got possible match slot at " << idx;
-                ret.push_back(view);
-            }
-
-            if (view.empty() && first_empty_slot_view.slot() == nullptr)
-            {
-                DVLOG(6) << "[bench][bucket] Search for fp " << pre_fp(fp)
-                         << " got first empty slot at " << idx;
-                first_empty_slot_view = view;
-            }
-        }
-
-        return {ret, first_empty_slot_view};
-    }
     static constexpr size_t max_capacity()
     {
         return kDataSlotNr;
@@ -141,7 +75,7 @@ public:
         size_t full_nr = 0;
         for (size_t i = 1; i < kSlotNr; ++i)
         {
-            if (!slot(i).view().empty())
+            if (!slot_view(i).empty())
             {
                 full_nr++;
             }
@@ -157,7 +91,106 @@ public:
         h.ld = ld;
         h.suffix = suffix;
     }
-    RetCode validate_staleness(uint32_t expect_ld, uint32_t suffix)
+
+private:
+    constexpr static size_t kItemSize = Slot::size_bytes();
+    void *bucket_buf_{nullptr};
+};
+
+template <size_t kSlotNr>
+class BucketHandle
+{
+public:
+    static_assert(kSlotNr > 1);
+    constexpr static size_t kDataSlotNr = kSlotNr - 1;
+
+    BucketHandle(uint64_t addr, char *bucket_buf)
+        : addr_(addr), bucket_buf_(bucket_buf)
+    {
+    }
+    constexpr static size_t max_item_nr()
+    {
+        return kDataSlotNr;
+    }
+
+    uint64_t slot_remote_addr(size_t idx) const
+    {
+        return addr_ + idx * sizeof(Slot);
+    }
+    SlotHandle slot_handle(size_t idx) const
+    {
+        // Slot *slot = (Slot *) bucket_buf_ + idx;
+        // return SlotView(slot->val());
+        return SlotHandle(slot_remote_addr(idx), slot_view(idx));
+    }
+    SlotView slot_view(size_t idx) const
+    {
+        auto *slot = (Slot *) ((char *) bucket_buf_ + idx * sizeof(Slot));
+        return SlotView(slot->val());
+    }
+    // Slot &slot(size_t idx)
+    // {
+    //     DCHECK_LT(idx, kSlotNr);
+    //     return *((Slot *) bucket_buf_ + idx);
+    // }
+    // const Slot &slot(size_t idx) const
+    // {
+    //     DCHECK_LT(idx, kSlotNr);
+    //     return *((Slot *) bucket_buf_ + idx);
+    // }
+    BucketHeader &header()
+    {
+        return *(BucketHeader *) bucket_buf_;
+    }
+    const BucketHeader &header() const
+    {
+        return *(BucketHeader *) bucket_buf_;
+    }
+    uint64_t remote_addr() const
+    {
+        return addr_;
+    }
+    const void *bucket_buffer() const
+    {
+        return bucket_buf_;
+    }
+    constexpr static size_t size_bytes()
+    {
+        return Slot::size_bytes() * kSlotNr;
+    }
+    RetCode locate(uint8_t fp,
+                   uint32_t ld,
+                   uint32_t suffix,
+                   std::unordered_set<SlotHandle> &ret,
+                   HashContext *dctx) const
+    {
+        RetCode rc;
+        if ((rc = validate_staleness(ld, suffix)) != kOk)
+        {
+            return rc;
+        }
+
+        for (size_t i = 0; i < kSlotNr; ++i)
+        {
+            auto view_handle = slot_handle(i);
+            if (view_handle.match(fp))
+            {
+                DLOG_IF(INFO,
+                        config::kEnableRaceHashingDebug && dctx != nullptr)
+                    << "[race][trace] locate: fp " << pre_fp(fp)
+                    << " got matched FP. view " << view_handle << ". " << *dctx;
+                ret.insert(view_handle);
+            }
+        }
+        return kOk;
+    }
+
+    static constexpr size_t max_capacity()
+    {
+        return kDataSlotNr;
+    }
+
+    RetCode validate_staleness(uint32_t expect_ld, uint32_t suffix) const
     {
         auto &h = header();
         if (expect_ld == h.ld)
@@ -167,7 +200,7 @@ public:
 
             if (rounded_suffix != rounded_header_suffix)
             {
-                DVLOG(6) << "[bench][bucket] validate_staleness kStale (short "
+                DVLOG(6) << "[bench][bucket] validate_staleness kStale (short"
                             "period of RC): match "
                             "ld but suffix mismatch.expect_ld: "
                          << expect_ld << ", expect_suffix: " << suffix << "("
@@ -191,7 +224,7 @@ public:
         if (rounded_suffix == rounded_header_suffix)
         {
             // stale but tolerant-able
-            DVLOG(6) << "[bench][bucket] validate_staleness kOk (tolerable): "
+            DVLOG(6) << "[bench][bucket] validate_staleness kOk (tolerable):"
                         "expect_ld: "
                      << expect_ld << ", expect_suffix: " << suffix
                      << ", rounded to: " << rounded_suffix
@@ -213,7 +246,8 @@ public:
 
 private:
     constexpr static size_t kItemSize = Slot::size_bytes();
-    Slot *addr_{nullptr};
+    uint64_t addr_{0};
+    char *bucket_buf_{nullptr};
 };
 
 }  // namespace patronus::hash

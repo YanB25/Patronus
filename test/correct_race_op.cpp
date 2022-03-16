@@ -6,6 +6,7 @@
 #include "glog/logging.h"
 #include "patronus/memory/direct_allocator.h"
 #include "thirdparty/racehashing/hashtable.h"
+#include "thirdparty/racehashing/hashtable_handle.h"
 #include "thirdparty/racehashing/utils.h"
 #include "util/Rand.h"
 
@@ -24,18 +25,25 @@ void test_basic(size_t initial_subtable)
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
-    conf.seed = fast_pseudo_rand_int();
     RaceHashing<4, 64, 64> rh(allocator, conf);
-    CHECK_EQ(rh.put("abc", "def"), kOk);
+
+    RaceHashingHandleConfig handle_conf;
+    handle_conf.auto_expand = false;
+    handle_conf.auto_update_dir = false;
+
+    RaceHashingHandle<4, 64, 64> rhh(
+        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
+
+    CHECK_EQ(rhh.put("abc", "def"), kOk);
     std::string get;
-    CHECK_EQ(rh.get("abc", get), kOk);
+    CHECK_EQ(rhh.get("abc", get), kOk);
     CHECK_EQ(get, "def");
-    CHECK_EQ(rh.put("abc", "!!!"), kOk);
-    CHECK_EQ(rh.get("abc", get), kOk);
+    CHECK_EQ(rhh.put("abc", "!!!"), kOk);
+    CHECK_EQ(rhh.get("abc", get), kOk);
     CHECK_EQ(get, "!!!");
-    CHECK_EQ(rh.del("abc"), kOk);
-    CHECK_EQ(rh.get("abc", get), kNotFound);
-    CHECK_EQ(rh.del("abs"), kNotFound);
+    CHECK_EQ(rhh.del("abc"), kOk);
+    CHECK_EQ(rhh.get("abc", get), kNotFound);
+    CHECK_EQ(rhh.del("abs"), kNotFound);
     LOG(INFO) << "max capacity: " << rh.max_capacity();
 }
 
@@ -44,8 +52,14 @@ void test_capacity(size_t initial_subtable)
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
-    conf.seed = fast_pseudo_rand_int();
     RaceHashing<4, 16, 16> rh(allocator, conf);
+
+    RaceHashingHandleConfig handle_conf;
+    handle_conf.auto_expand = false;
+    handle_conf.auto_update_dir = false;
+
+    RaceHashingHandle<4, 64, 64> rhh(
+        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     std::string key;
     std::string value;
@@ -59,7 +73,7 @@ void test_capacity(size_t initial_subtable)
     {
         fast_pseudo_fill_buf(key.data(), key.size());
         fast_pseudo_fill_buf(value.data(), value.size());
-        auto rc = rh.put(key, value);
+        auto rc = rhh.put(key, value);
         if (rc == kOk)
         {
             inserted.emplace(key, value);
@@ -69,7 +83,7 @@ void test_capacity(size_t initial_subtable)
         {
             if (first_fail)
             {
-                LOG(INFO) << "First insert fail. " << rh;
+                LOG(INFO) << "First insert fail. " << rhh;
                 CHECK_GE(rh.utilization(), 0.5)
                     << "Expect to at least utilize 50%";
                 first_fail = false;
@@ -82,7 +96,7 @@ void test_capacity(size_t initial_subtable)
         }
         if (i == rh.max_capacity() / 2)
         {
-            LOG(INFO) << "Inserted a half: " << rh;
+            LOG(INFO) << "Inserted a half: " << rhh;
         }
     }
     CHECK_GE(rh.utilization(), 0.9)
@@ -94,23 +108,23 @@ void test_capacity(size_t initial_subtable)
 
     LOG(INFO) << "Checking integrity";
 
-    LOG(INFO) << rh;
+    LOG(INFO) << rhh;
     for (const auto &[key, expect_value] : inserted)
     {
         std::string get_val;
-        CHECK_EQ(rh.get(key, get_val), kOk);
+        CHECK_EQ(rhh.get(key, get_val), kOk);
         CHECK_EQ(get_val, expect_value);
-        CHECK_EQ(rh.del(key), kOk);
-        CHECK_EQ(rh.del(key), kNotFound);
-        CHECK_EQ(rh.get(key, get_val), kNotFound);
+        CHECK_EQ(rhh.del(key), kOk);
+        CHECK_EQ(rhh.del(key), kNotFound);
+        CHECK_EQ(rhh.get(key, get_val), kNotFound);
     }
     CHECK_EQ(rh.utilization(), 0)
         << "Removed all the items should result in 0 utilization";
-    LOG(INFO) << rh;
+    LOG(INFO) << rhh;
 }
 
 template <size_t kA, size_t kB, size_t kC>
-void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
+void test_thread(typename RaceHashingHandle<kA, kB, kC>::pointer rhh,
                  size_t tid,
                  size_t test_nr)
 {
@@ -148,7 +162,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
             dctx.key = key;
             dctx.value = value;
             dctx.op = "p";
-            auto rc = rh->put(key, value, &dctx);
+            auto rc = rhh->put(key, value, &dctx);
             if (rc == kOk)
             {
                 keys.insert(key);
@@ -171,7 +185,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
             dctx.key = key;
             dctx.value = value;
             dctx.op = "d";
-            CHECK_EQ(rh->del(key, &dctx), kOk)
+            CHECK_EQ(rhh->del(key, &dctx), kOk)
                 << "tid " << tid << " deleting key `" << key
                 << "` expect to succeed. inserted.count(key): "
                 << inserted.count(key);
@@ -188,7 +202,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 dctx.key = key;
                 dctx.value = value;
                 dctx.op = "d";
-                CHECK_EQ(rh->del(key, &dctx), kOk) << dctx;
+                CHECK_EQ(rhh->del(key, &dctx), kOk) << dctx;
                 inserted.erase(key);
                 keys.erase(key);
                 del_succ_nr++;
@@ -198,7 +212,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 dctx.key = key;
                 dctx.value = value;
                 dctx.op = "d";
-                CHECK_EQ(rh->del(key, &dctx), kNotFound) << dctx;
+                CHECK_EQ(rhh->del(key, &dctx), kNotFound) << dctx;
                 del_fail_nr++;
             }
         }
@@ -215,7 +229,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
             dctx.key = key;
             dctx.value = value;
             dctx.op = "g";
-            CHECK_EQ(rh->get(key, got_value, &dctx), kOk)
+            CHECK_EQ(rhh->get(key, got_value, &dctx), kOk)
                 << "Tid: " << tid << " getting key `" << key
                 << "` expect to succeed";
             CHECK_EQ(got_value, inserted[key]) << dctx;
@@ -236,7 +250,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 dctx.key = key;
                 dctx.value = value;
                 dctx.op = "g";
-                CHECK_EQ(rh->get(key, got_value, &dctx), kOk) << dctx;
+                CHECK_EQ(rhh->get(key, got_value, &dctx), kOk) << dctx;
                 CHECK_EQ(got_value, inserted[key]) << dctx;
                 get_succ_nr++;
             }
@@ -246,27 +260,27 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 dctx.key = key;
                 dctx.value = value;
                 dctx.op = "g";
-                CHECK_EQ(rh->get(key, got_value, &dctx), kNotFound) << dctx;
+                CHECK_EQ(rhh->get(key, got_value, &dctx), kNotFound) << dctx;
                 get_fail_nr++;
             }
         }
     }
 
-    LOG(INFO) << "Finished test. tid: " << tid << ". Table: " << *rh;
+    LOG(INFO) << "Finished test. tid: " << tid << ". Table: " << rhh;
 
     for (const auto &[k, v] : inserted)
     {
         std::string get_v;
         dctx.key = k;
         dctx.value = v;
-        CHECK_EQ(rh->get(k, get_v, &dctx), kOk) << dctx;
+        CHECK_EQ(rhh->get(k, get_v, &dctx), kOk) << dctx;
         CHECK_EQ(get_v, v) << dctx;
         dctx.key = k;
         dctx.value = v;
-        CHECK_EQ(rh->del(k, &dctx), kOk) << dctx;
+        CHECK_EQ(rhh->del(k, &dctx), kOk) << dctx;
     }
 
-    LOG(INFO) << "Tear down. tid: " << tid << ". Table: " << *rh;
+    LOG(INFO) << "Tear down. tid: " << tid << ". Table: " << *rhh;
 }
 
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
@@ -274,9 +288,6 @@ void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
 {
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
-    conf.seed = fast_pseudo_rand_int();
-    conf.auto_expand = expand;
-    conf.auto_update_dir = expand;
     conf.initial_subtable = expand ? 1 : kDEntryNr;
     auto rh = std::make_shared<RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>>(
         allocator, conf);
@@ -284,8 +295,17 @@ void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
     std::vector<std::thread> threads;
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back([&rh, tid = i, test_nr]() {
-            test_thread<kDEntryNr, kBucketGroupNr, kSlotNr>(rh, tid, test_nr);
+        RaceHashingHandleConfig handle_conf;
+        handle_conf.auto_expand = expand;
+        handle_conf.auto_update_dir = expand;
+        auto handle = std::make_shared<
+            RaceHashingHandle<kDEntryNr, kBucketGroupNr, kSlotNr>>(
+            rh->meta_addr(),
+            handle_conf,
+            RaceHashingRdmaContext::new_instance());
+        threads.emplace_back([tid = i, test_nr, handle]() {
+            test_thread<kDEntryNr, kBucketGroupNr, kSlotNr>(
+                handle, tid, test_nr);
         });
     }
     for (auto &t : threads)
@@ -299,8 +319,13 @@ void test_expand_once_single_thread()
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = 1;
-    conf.seed = fast_pseudo_rand_int();
     RaceHashing<2, 4, 4> rh(allocator, conf);
+
+    RaceHashingHandleConfig handle_conf;
+    handle_conf.auto_expand = false;
+    handle_conf.auto_update_dir = true;
+    RaceHashingHandle<2, 4, 4> rhh(
+        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     std::string key;
     std::string value;
@@ -324,7 +349,7 @@ void test_expand_once_single_thread()
         ctx.key = key;
         ctx.value = value;
         ctx.op = "put";
-        auto rc = rh.put(key, value, &ctx);
+        auto rc = rhh.put(key, value, &ctx);
         if (rc == kNoMem)
         {
             LOG(INFO) << "[bench] inserted: " << insert_nr << ". Table: " << rh;
@@ -337,21 +362,22 @@ void test_expand_once_single_thread()
     for (const auto &[k, v] : inserted)
     {
         std::string got_v;
-        CHECK_EQ(rh.get(k, got_v), kOk);
+        CHECK_EQ(rhh.get(k, got_v), kOk);
         CHECK_EQ(got_v, v);
     }
     LOG(INFO) << "[bench] begin to expand";
     ctx.op = "expand";
     ctx.key = "";
     ctx.value = "";
-    rh.expand(0, &ctx);
+    rhh.expand(0, &ctx);
     for (const auto &[k, v] : inserted)
     {
         ctx.key = k;
         ctx.value = v;
         ctx.op = "get";
         std::string got_v;
-        CHECK_EQ(rh.get(k, got_v, &ctx), kOk) << "failed to get back key " << k;
+        CHECK_EQ(rhh.get(k, got_v, &ctx), kOk)
+            << "failed to get back key " << k;
         CHECK_EQ(got_v, v);
     }
     // what you inserted will not be lost
@@ -362,7 +388,7 @@ void test_expand_once_single_thread()
         fast_pseudo_fill_buf(val_buf, kValueSize);
         std::string key(key_buf, kKeySize);
         std::string value(val_buf, kValueSize);
-        auto rc = rh.put(key, value);
+        auto rc = rhh.put(key, value);
         if (rc == kNoMem)
         {
             LOG(INFO) << "[bench] inserted another: " << another_insert
@@ -379,11 +405,13 @@ void test_expand_multiple_single_thread()
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = 1;
-    conf.seed = fast_pseudo_rand_int();
-    conf.auto_expand = true;
-    conf.auto_update_dir = true;
     RaceHashing<16, 4, 4> rh(allocator, conf);
-    LOG(INFO) << "[bench] seed is " << conf.seed;
+
+    RaceHashingHandleConfig handle_conf;
+    handle_conf.auto_expand = true;
+    handle_conf.auto_update_dir = true;
+    RaceHashingHandle<16, 4, 4> rhh(
+        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     std::string key;
     std::string value;
@@ -408,7 +436,7 @@ void test_expand_multiple_single_thread()
         ctx.value = value;
         ctx.op = "put";
 
-        auto rc = rh.put(key, value, &ctx);
+        auto rc = rhh.put(key, value, &ctx);
         if (rc == kNoMem)
         {
             LOG(INFO) << "[bench] nomem. out of directory entries. table: "
@@ -427,7 +455,7 @@ void test_expand_multiple_single_thread()
         ctx.op = "get";
 
         std::string got_v;
-        auto rc = rh.get(k, got_v);
+        auto rc = rhh.get(k, got_v);
         if (rc != kOk)
         {
             LOG(WARNING) << "Failed to find key `" << k
@@ -436,7 +464,7 @@ void test_expand_multiple_single_thread()
             ctx.key = k;
             ctx.value = v;
             ctx.op = "get";
-            rc = rh.get(k, got_v, &ctx);
+            rc = rhh.get(k, got_v, &ctx);
             CHECK(false) << "Failed to get `" << k << "`. Expect value `" << v
                          << "`. Got: " << rc;
         }
@@ -452,9 +480,9 @@ void test_expand_multiple_single_thread()
         ctx.op = "get";
 
         std::string got_v;
-        CHECK_EQ(rh.get(k, got_v), kOk) << "failed to get back key " << k;
+        CHECK_EQ(rhh.get(k, got_v), kOk) << "failed to get back key " << k;
         CHECK_EQ(got_v, v);
-        CHECK_EQ(rh.del(k, &ctx), kOk) << "failed to delete key " << k;
+        CHECK_EQ(rhh.del(k, &ctx), kOk) << "failed to delete key " << k;
     }
     LOG(INFO) << "[bench] tear downed. table: " << rh;
 }
@@ -463,11 +491,13 @@ void test_burn_expand_single_thread()
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = 1;
-    conf.seed = fast_pseudo_rand_int();
-    conf.auto_expand = true;
-    conf.auto_update_dir = true;
     RaceHashing<128, 2, 2> rh(allocator, conf);
-    LOG(INFO) << "[bench] seed is " << conf.seed;
+
+    RaceHashingHandleConfig handle_conf;
+    handle_conf.auto_expand = true;
+    handle_conf.auto_update_dir = true;
+    RaceHashingHandle<128, 2, 2> rhh(
+        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     std::string key;
     std::string value;
@@ -492,11 +522,11 @@ void test_burn_expand_single_thread()
         ctx.value = value;
         ctx.op = "put";
 
-        auto rc = rh.put(key, value, &ctx);
+        auto rc = rhh.put(key, value, &ctx);
         if (rc == kNoMem)
         {
             LOG(INFO) << "[bench] nomem. out of directory entries. table: "
-                      << rh;
+                      << rhh;
 
             break;
         }
@@ -511,7 +541,7 @@ void test_burn_expand_single_thread()
         ctx.op = "get";
 
         std::string got_v;
-        auto rc = rh.get(k, got_v);
+        auto rc = rhh.get(k, got_v);
         if (rc != kOk)
         {
             LOG(WARNING) << "Failed to find key `" << k
@@ -520,7 +550,7 @@ void test_burn_expand_single_thread()
             ctx.key = k;
             ctx.value = v;
             ctx.op = "get";
-            rc = rh.get(k, got_v, &ctx);
+            rc = rhh.get(k, got_v, &ctx);
             CHECK(false) << "Failed to get `" << k << "`. Expect value `" << v
                          << "`. Got: " << rc;
         }
@@ -536,11 +566,11 @@ void test_burn_expand_single_thread()
         ctx.op = "get";
 
         std::string got_v;
-        CHECK_EQ(rh.get(k, got_v), kOk) << "failed to get back key " << k;
+        CHECK_EQ(rhh.get(k, got_v), kOk) << "failed to get back key " << k;
         CHECK_EQ(got_v, v);
-        CHECK_EQ(rh.del(k, &ctx), kOk) << "failed to delete key " << k;
+        CHECK_EQ(rhh.del(k, &ctx), kOk) << "failed to delete key " << k;
     }
-    LOG(INFO) << "[bench] tear downed. table: " << rh;
+    LOG(INFO) << "[bench] tear downed. table: " << rhh;
 }
 
 int main(int argc, char *argv[])

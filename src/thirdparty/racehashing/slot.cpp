@@ -2,83 +2,9 @@
 
 namespace patronus::hash
 {
-SlotWithView::SlotWithView(Slot *slot, SlotView slot_view)
-    : slot_(slot), slot_view_(slot_view)
-{
-}
-SlotWithView::SlotWithView() : slot_(nullptr), slot_view_(0)
-{
-}
-Slot *SlotWithView::slot() const
-{
-    return slot_;
-}
 Slot::Slot(uint64_t val)
 {
     ptr_.set_val(val);
-}
-SlotView SlotWithView::view() const
-{
-    return slot_view_;
-}
-SlotWithView Slot::with_view() const
-{
-    return SlotWithView((Slot *) this, view());
-}
-SlotView SlotWithView::view_after_clear() const
-{
-    return slot_view_.view_after_clear();
-}
-bool SlotWithView::operator<(const SlotWithView &rhs) const
-{
-    return slot_ < rhs.slot_;
-}
-
-uint8_t SlotWithView::fp() const
-{
-    return slot_view_.fp();
-}
-uint8_t SlotWithView::len() const
-{
-    return slot_view_.len();
-}
-void *SlotWithView::ptr() const
-{
-    return slot_view_.ptr();
-}
-uint64_t SlotWithView::val() const
-{
-    return slot_view_.val();
-}
-bool SlotWithView::empty() const
-{
-    return slot_view_.empty();
-}
-bool SlotWithView::match(uint8_t fp) const
-{
-    return slot_view_.match(fp) && !empty();
-}
-
-void SlotWithView::set_fp(uint8_t fp)
-{
-    slot_->set_fp(fp);
-}
-void SlotWithView::set_len(uint8_t len)
-{
-    slot_->set_len(len);
-}
-void SlotWithView::set_ptr(void *_ptr)
-{
-    slot_->set_ptr(_ptr);
-}
-void SlotWithView::clear()
-{
-    slot_->clear();
-}
-
-bool SlotWithView::cas(SlotView &expected, const SlotView &desired)
-{
-    return slot_->cas(expected, desired);
 }
 
 Slot::Slot(uint8_t fp, uint8_t len, void *ptr)

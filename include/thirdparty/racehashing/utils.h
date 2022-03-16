@@ -204,9 +204,11 @@ static_assert((64 - M - FP) % 2 == 0);
 
 constexpr static size_t kLenUnit = 64;
 
-inline uint64_t hash_impl(const char *buf, size_t size, uint64_t seed)
+constexpr static uint64_t kRaceHashingHashSeed = 5381;
+
+inline uint64_t hash_impl(const char *buf, size_t size)
 {
-    uint64_t hash = seed;
+    uint64_t hash = kRaceHashingHashSeed;
     for (size_t i = 0; i < size; ++i)
     {
         hash = ((hash << 5) + hash) + buf[i]; /* hash * 33 + c */
@@ -368,6 +370,15 @@ inline uint64_t round_hash_to_bit(uint32_t h, size_t bit)
         return h;
     }
     return h & ((1ull << bit) - 1);
+}
+
+inline uint64_t round_to_bits(uint64_t hash, size_t bits)
+{
+    if (bits == 64)
+    {
+        return hash;
+    }
+    return hash & ((1ull << bits) - 1);
 }
 
 };  // namespace patronus::hash

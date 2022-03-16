@@ -10,7 +10,6 @@
 namespace patronus::hash
 {
 class SlotView;
-class SlotWithView;
 class Slot
 {
 public:
@@ -22,10 +21,8 @@ public:
     }
 
     friend std::ostream &operator<<(std::ostream &, const Slot &);
-    friend class SlotWithView;
 
     SlotView view() const;
-    SlotWithView with_view() const;
     void *addr() const;
     uint64_t val() const;
 
@@ -76,6 +73,10 @@ public:
         ptr_.set_u8_l(len);
         ptr_.set_ptr(ptr);
     }
+    size_t actual_len_bytes() const
+    {
+        return len() * kLenUnit;
+    }
     uint8_t fp() const;
     uint8_t len() const;
     void *ptr() const;
@@ -105,79 +106,64 @@ inline std::ostream &operator<<(std::ostream &os, const SlotView &slot_view)
     return os;
 }
 
-/**
- * @brief SlowView is a *snapshot* of a Slot, including its address and the
- * value when read.
- *
- */
-class SlotWithView
+class SlotHandle
 {
 public:
-    explicit SlotWithView(Slot *slot, SlotView slot_view);
-    explicit SlotWithView();
-    Slot *slot() const;
-    SlotView view() const;
-    SlotView view_after_clear() const;
-    bool operator<(const SlotWithView &rhs) const;
-
-    // all the query goes to @view_
-    uint8_t fp() const;
-    uint8_t len() const;
-    void *ptr() const;
-    uint64_t val() const;
-    bool empty() const;
-    bool match(uint8_t fp) const;
-
-    // all the modify goes to @slot_
-    bool cas(SlotView &expected, const SlotView &desired);
-    void set_fp(uint8_t fp);
-    void set_len(uint8_t len);
-    void set_ptr(void *_ptr);
-    void clear();
-
-    friend std::ostream &operator<<(std::ostream &os, const SlotWithView &view);
-
-private:
-    Slot *slot_;
-    SlotView slot_view_;
-};
-inline std::ostream &operator<<(std::ostream &os, const SlotWithView &view)
-{
-    os << "{SlotWithView: " << view.slot_view_ << " at " << (void *) view.slot_
-       << "}";
-    return os;
-}
-
-class MigrateView
-{
-public:
-    MigrateView(Slot *slot, SlotView slot_view, uint64_t hash)
-        : slot_(slot), slot_view_(slot_view), hash_(hash)
+    SlotHandle(uint64_t addr, SlotView slot) : addr_(addr), slot_view_(slot)
     {
     }
-    uint64_t hash() const
+    uint64_t remote_addr() const
     {
-        return hash_;
+        return addr_;
     }
-    Slot *slot() const
+    bool operator<(const SlotHandle &rhs) const
     {
-        return slot_;
+        return addr_ < rhs.addr_;
     }
-    SlotView view() const
+    bool operator==(const SlotHandle &rhs) const
+    {
+        return addr_ == rhs.addr_;
+    }
+    SlotView slot_view() const
     {
         return slot_view_;
     }
-    SlotWithView with_view() const
+    SlotView view_after_clear() const
     {
-        return SlotWithView(slot_, slot_view_);
+        return slot_view_.view_after_clear();
+    }
+    uint64_t val() const
+    {
+        return slot_view_.val();
+    }
+    bool match(uint8_t fp) const
+    {
+        return slot_view_.match(fp);
     }
 
 private:
-    Slot *slot_;
+    uint64_t addr_;
     SlotView slot_view_;
-    uint64_t hash_;
 };
+inline std::ostream &operator<<(std::ostream &os, const SlotHandle &handle)
+{
+    os << "{SlotHandle: remote_addr: " << (void *) handle.remote_addr() << "}";
+    return os;
+}
 
 }  // namespace patronus::hash
+
+namespace std
+{
+template <>
+struct hash<patronus::hash::SlotHandle>
+{
+    std::size_t operator()(const patronus::hash::SlotHandle &v) const
+    {
+        return v.remote_addr();
+    }
+};
+
+}  // namespace std
 
 #endif
