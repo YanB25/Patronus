@@ -75,7 +75,7 @@ public:
     }
     size_t actual_len_bytes() const
     {
-        return len() * kLenUnit;
+        return ptr_len_to_len(len());
     }
     uint8_t fp() const;
     uint8_t len() const;
@@ -139,6 +139,10 @@ public:
     bool match(uint8_t fp) const
     {
         return slot_view_.match(fp);
+    }
+    void *ptr() const
+    {
+        return slot_view_.ptr();
     }
 
 private:

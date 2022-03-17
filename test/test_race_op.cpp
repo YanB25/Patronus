@@ -20,12 +20,13 @@ void test_capacity(size_t initial_subtable)
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
-    RaceHashing<1, 2, 2> rh(allocator, conf);
+    using RaceHashingT = RaceHashing<1, 2, 2>;
+    RaceHashingT rh(allocator, conf);
 
     RaceHashingHandleConfig handle_conf;
 
-    RaceHashingHandle<1, 2, 2> rhh(
-        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
+    auto rdma_ctx = RaceHashingRdmaContext::new_instance();
+    RaceHashingHandle<1, 2, 2> rhh(rh.meta_addr(), handle_conf, rdma_ctx);
 
     std::string key;
     std::string value;
@@ -35,19 +36,30 @@ void test_capacity(size_t initial_subtable)
     char key_buf[128];
     char value_buf[128];
 
+    HashContext ctx(0);
+
+    LOG(INFO) << "Meta of hashtable: "
+              << *(RaceHashingT::MetaT *) rh.meta_addr();
+
     for (size_t i = 0; i < 16; ++i)
     {
         fast_pseudo_fill_buf(key_buf, 8);
         fast_pseudo_fill_buf(value_buf, 8);
         key = std::string(key_buf, 8);
         value = std::string(value_buf, 8);
-        LOG(INFO) << "\nTrying to push " << key << ", " << value;
+        LOG(INFO) << "Trying to push " << key << ", " << value;
 
-        auto rc = rhh.put(key, value);
+        ctx.key = key;
+        ctx.value = value;
+        ctx.op = "put";
+        auto rc = rhh.put(key, value, &ctx);
         if (rc == kOk)
         {
             inserted.emplace(key, value);
             succ_nr++;
+            LOG(WARNING) << "[bench] pushed " << i
+                         << "-th. succ_nr: " << succ_nr
+                         << ", failed_nr: " << fail_nr << ", Table: " << rh;
         }
         else if (rc == kNoMem)
         {
@@ -58,6 +70,7 @@ void test_capacity(size_t initial_subtable)
             CHECK(false) << "Unknow return code: " << rc;
         }
     }
+    rdma_ctx->gc();
     LOG(INFO) << "Inserted " << succ_nr << ", failed: " << fail_nr
               << ", ultilization: " << 1.0 * succ_nr / rh.max_capacity()
               << ", success rate: " << 1.0 * succ_nr / (succ_nr + fail_nr);
@@ -66,11 +79,24 @@ void test_capacity(size_t initial_subtable)
 
     for (const auto &[key, expect_value] : inserted)
     {
+        ctx.key = key;
+        ctx.value = expect_value;
+        ctx.op = "get";
         std::string get_val;
-        CHECK_EQ(rhh.get(key, get_val), kOk);
+        CHECK_EQ(rhh.get(key, get_val, &ctx), kOk);
         CHECK_EQ(get_val, expect_value);
     }
     LOG(INFO) << rh;
+
+    LOG(INFO) << "[bench] Integrity Passed. Delete all the kvs";
+
+    for (const auto &[key, expect_value] : inserted)
+    {
+        ctx.key = key;
+        ctx.value = expect_value;
+        ctx.op = "del";
+        CHECK_EQ(rhh.del(key, &ctx), kOk);
+    }
 }
 
 int main(int argc, char *argv[])

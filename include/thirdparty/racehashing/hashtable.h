@@ -31,7 +31,30 @@ struct RaceHashingMeta
     std::array<uint32_t, kDEntryNr> lds;
     std::array<std::atomic<bool>, kDEntryNr> expanding;
     std::atomic<uint64_t> gd;
+    // template <size_t kA, size_t kB, size_t kC>
+    // std::ostream &operator<<(std::ostream &,
+    //                          const RaceHashingMeta<kA, kB, kC> &);
 };
+template <size_t kA, size_t kB, size_t kC>
+inline std::ostream &operator<<(std::ostream &os,
+                                const RaceHashingMeta<kA, kB, kC> &meta)
+{
+    os << "{RaceHashingMeta: gd: " << meta.gd << std::endl;
+    for (size_t i = 0; i < pow(size_t(2), size_t(meta.gd)); ++i)
+    {
+        if (meta.entries[i] != nullptr)
+        {
+            os << "subtable[" << i << "] lds: " << meta.lds[i]
+               << ", lock: " << meta.expanding[i] << " at "
+               << (void *) meta.entries[i];
+        }
+        else
+        {
+            os << "subtable[" << i << "] NULL";
+        }
+    }
+    return os;
+}
 
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
 class RaceHashing
@@ -39,6 +62,7 @@ class RaceHashing
 public:
     using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
     using pointer = std::shared_ptr<RaceHashing>;
+    using MetaT = RaceHashingMeta<kDEntryNr, kBucketGroupNr, kSlotNr>;
 
     static_assert(is_power_of_two(kDEntryNr));
 
@@ -51,17 +75,12 @@ public:
                 const RaceHashingConfig &conf)
         : conf_(conf), allocator_(allocator)
     {
-        CHECK(false) << "TODO: when allocating subtable, should memset it to 0";
-        CHECK(false) << "TODO: when allocating subtable, should init all its "
-                        "bucket header";
-
         auto initial_subtable_nr = conf_.initial_subtable;
         size_t alloc_size = meta_size();
         CHECK_LE(initial_subtable_nr, kDEntryNr);
         void *alloc_addr = CHECK_NOTNULL(allocator_->alloc(alloc_size));
-        memset(alloc_addr, 0, sizeof(alloc_size));
-        meta_ =
-            (RaceHashingMeta<kDEntryNr, kBucketGroupNr, kSlotNr> *) alloc_addr;
+        memset(alloc_addr, 0, alloc_size);
+        meta_ = (MetaT *) alloc_addr;
 
         DVLOG(1) << "Allocated meta region " << (void *) meta_ << " with size "
                  << alloc_size;
@@ -85,10 +104,13 @@ public:
                      << (void *) alloc_mem << " for size "
                      << SubTableT::size_bytes();
 
-            meta_->entries[i] = (SubTableT *) alloc_mem;
             subtables_[i] =
                 std::make_shared<SubTableT>(ld, alloc_mem, alloc_size, i);
+            meta_->lds[i] = ld;
+            meta_->entries[i] = (SubTableT *) alloc_mem;
         }
+        LOG(INFO) << "[debug] meta addr: " << (void *) meta_addr()
+                  << ", or real: " << (void *) meta_ << ", content: " << *meta_;
     }
     std::shared_ptr<SubTableT> subtable(size_t idx) const
     {
@@ -195,11 +217,13 @@ inline std::ostream &operator<<(
        << std::endl;
     for (size_t i = 0; i < pow(2, rh.gd()); ++i)
     {
-        auto *sub_table = rh.meta_->entries[i];
-        if (sub_table)
+        // auto *sub_table = rh.meta_->entries[i];
+        auto subtable = rh.subtable(i);
+        auto *subtable_addr = rh.meta_->entries[i];
+        if (subtable)
         {
-            os << "sub-table[" << i << "] at " << (void *) sub_table << ". "
-               << *sub_table << std::endl;
+            os << "sub-table[" << i << "] at " << (void *) subtable_addr << ". "
+               << *subtable << std::endl;
         }
         else
         {

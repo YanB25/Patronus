@@ -82,12 +82,14 @@ public:
                    std::unordered_set<SlotHandle> &ret,
                    HashContext *dctx)
     {
-        auto rc = main_bucket_handle().locate(fp, ld, suffix, ret, dctx);
+        auto mbh = main_bucket_handle();
+        auto rc = mbh.locate(fp, ld, suffix, ret, dctx);
         if (rc != kOk)
         {
             return rc;
         }
-        return overflow_bucket_handle().locate(fp, ld, suffix, ret, dctx);
+        auto obh = overflow_bucket_handle();
+        return obh.locate(fp, ld, suffix, ret, dctx);
     }
 
     uint64_t remote_addr() const
@@ -112,10 +114,12 @@ public:
     {
         if (main_on_left_)
         {
-            return BucketHandle<kSlotNr>(addr_, (char *) buffer_);
+            return BucketHandle<kSlotNr>(addr_,
+                                         (char *) DCHECK_NOTNULL(buffer_));
         }
-        return BucketHandle<kSlotNr>(addr_ + bucket_size_bytes(),
-                                     (char *) buffer_ + bucket_size_bytes());
+        return BucketHandle<kSlotNr>(
+            addr_ + bucket_size_bytes(),
+            (char *) DCHECK_NOTNULL(buffer_) + bucket_size_bytes());
     }
 
     BucketHandle<kSlotNr> overflow_bucket_handle() const
@@ -124,9 +128,9 @@ public:
         {
             return BucketHandle<kSlotNr>(
                 addr_ + bucket_size_bytes(),
-                (char *) buffer_ + bucket_size_bytes());
+                (char *) DCHECK_NOTNULL(buffer_) + bucket_size_bytes());
         }
-        return BucketHandle<kSlotNr>(addr_, (char *) buffer_);
+        return BucketHandle<kSlotNr>(addr_, (char *) DCHECK_NOTNULL(buffer_));
     }
 
 private:
@@ -146,8 +150,8 @@ public:
                             RaceHashingRdmaContext &rdma_ctx)
         : h1_(h1), h2_(h2), cb1_(std::move(cb1)), cb2_(std::move(cb2))
     {
-        CHECK_EQ(cb1.read(rdma_ctx), kOk);
-        CHECK_EQ(cb2.read(rdma_ctx), kOk);
+        CHECK_EQ(cb1_.read(rdma_ctx), kOk);
+        CHECK_EQ(cb2_.read(rdma_ctx), kOk);
     }
     TwoCombinedBucketHandle(const TwoCombinedBucketHandle &) = delete;
     TwoCombinedBucketHandle &operator=(const TwoCombinedBucketHandle &) =

@@ -50,8 +50,8 @@ link_libraries(unwind)
 
 # boost coroutine does not work well with boost::coroutine and boost::coroutine2
 # if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-#     set(ASAN_OPTIONS "fast_unwind_on_fatal=1")
-#     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address")
+    set(ASAN_OPTIONS "fast_unwind_on_fatal=1")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address")
 #     add_definitions(-DBOOST_USE_ASAN)
 # endif()
 

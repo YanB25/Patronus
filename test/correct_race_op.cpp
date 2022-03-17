@@ -143,7 +143,7 @@ void test_thread(typename RaceHashingHandle<kA, kB, kC>::pointer rhh,
     std::map<std::string, std::string> inserted;
     std::set<std::string> keys;
 
-    HashContext dctx(tid, "", "");
+    HashContext dctx(tid);
 
     for (size_t i = 0; i < test_nr; ++i)
     {
@@ -337,7 +337,7 @@ void test_expand_once_single_thread()
     value.resize(kValueSize);
     size_t insert_nr = 0;
     std::map<std::string, std::string> inserted;
-    HashContext ctx(0, "", "");
+    HashContext ctx(0);
     ctx.tid = 0;
     while (true)
     {
@@ -422,7 +422,7 @@ void test_expand_multiple_single_thread()
     key.resize(kKeySize);
     value.resize(kValueSize);
     std::map<std::string, std::string> inserted;
-    HashContext ctx(0, "", "");
+    HashContext ctx(0);
     ctx.tid = 0;
     size_t inserted_nr = 0;
     while (true)
@@ -508,7 +508,7 @@ void test_burn_expand_single_thread()
     key.resize(kKeySize);
     value.resize(kValueSize);
     std::map<std::string, std::string> inserted;
-    HashContext ctx(0, "", "");
+    HashContext ctx(0);
     ctx.tid = 0;
     size_t inserted_nr = 0;
     while (true)

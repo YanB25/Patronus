@@ -18,21 +18,41 @@ struct RdmaContextOp
     void *buffer;
     int op;  // 0 for read, 1 for write, 2 for cas
     size_t size;
-    uint64_t *expect;
+    uint64_t expect;
     uint64_t desired;
-    bool *success;
 };
+inline std::ostream &operator<<(std::ostream &os, const RdmaContextOp &op)
+{
+    os << "{op: remote: " << (void *) op.remote << ", buffer: " << op.buffer
+       << ", op: " << op.op << ", size: " << op.size
+       << ", expect: " << op.expect << ", desired: " << op.desired << "}";
+    return os;
+}
+
 class RaceHashingRdmaContext
 {
 public:
-    using pointer = std::unique_ptr<RaceHashingRdmaContext>;
+    using pointer = std::shared_ptr<RaceHashingRdmaContext>;
     RaceHashingRdmaContext() = default;
     RaceHashingRdmaContext(const RaceHashingRdmaContext &) = delete;
     RaceHashingRdmaContext &operator=(const RaceHashingRdmaContext &) = delete;
 
     static pointer new_instance()
     {
-        return std::make_unique<RaceHashingRdmaContext>();
+        return std::make_shared<RaceHashingRdmaContext>();
+    }
+    void *remote_alloc(size_t size)
+    {
+        auto *ret = malloc(size);
+        remote_allocated_buffers_.insert(ret);
+        return ret;
+    }
+    void remote_free(void *addr)
+    {
+        CHECK_EQ(remote_allocated_buffers_.count(addr), 1)
+            << "Addr " << (void *) addr << " not allocated from remote buffer.";
+        remote_allocated_buffers_.erase(addr);
+        free(addr);
     }
 
     void *get_rdma_buffer(size_t size)
@@ -44,41 +64,39 @@ public:
     }
     RetCode rdma_read(uint64_t addr, char *rdma_buf, size_t size)
     {
+        addr = adapt_to_remote_addr(addr);
         RdmaContextOp op;
         op.remote = addr;
         op.buffer = rdma_buf;
         op.op = 0;
         op.size = size;
-        op.success = nullptr;
         ops_.emplace_back(std::move(op));
-        // LOG(INFO) << "Registering rdma_buf: " << (void *) rdma_buf;
         return kOk;
     }
     RetCode rdma_write(uint64_t addr, const char *rdma_buf, size_t size)
     {
-        // memcpy((char *) addr, rdma_buf, size);
+        addr = adapt_to_remote_addr(addr);
         RdmaContextOp op;
         op.remote = addr;
         op.buffer = (char *) rdma_buf;
         op.op = 1;
         op.size = size;
-        op.success = nullptr;
         ops_.emplace_back(std::move(op));
         return kOk;
     }
     RetCode rdma_cas(uint64_t addr,
-                     uint64_t &expect,
+                     uint64_t expect,
                      uint64_t desired,
-                     bool *success)
+                     void *rdma_buf)
     {
-        // return kOk;
+        addr = adapt_to_remote_addr(addr);
         RdmaContextOp op;
+        op.op = 2;
         op.remote = addr;
-        op.buffer = nullptr;
-        op.expect = &expect;
+        op.buffer = (char *) rdma_buf;
+        op.expect = expect;
         op.desired = desired;
         op.size = 8;
-        op.success = success;
         ops_.emplace_back(std::move(op));
         return kOk;
     }
@@ -88,6 +106,9 @@ public:
         {
             free(buf);
         }
+        LOG_IF(WARNING, remote_allocated_buffers_.size() != 0)
+            << "[race][rdma] Possible memory leak. Out-going nr: "
+            << remote_allocated_buffers_.size();
     }
 
     RetCode commit()
@@ -107,13 +128,12 @@ public:
             }
             else if (op.op == 2)
             {
+                uint64_t expect = op.expect;
                 std::atomic<uint64_t> &atm =
                     *(std::atomic<uint64_t> *) op.remote;
-                if (atm.compare_exchange_strong(*op.expect, op.desired))
-                {
-                    (*op.success) = true;
-                }
-                (*op.success) = false;
+                atm.compare_exchange_strong(expect, op.desired);
+                DCHECK_EQ(op.size, 8);
+                memcpy(op.buffer, (char *) &expect, op.size);
             }
             else
             {
@@ -121,16 +141,28 @@ public:
             }
         }
         ops_.clear();
+
+        return kOk;
+    }
+
+    void gc()
+    {
         for (void *addr : allocated_buffers_)
         {
             free(addr);
         }
         allocated_buffers_.clear();
-
-        return kOk;
     }
 
 private:
+    /**
+     * @brief sometimes, the addr from client should be transformed before
+     * handling to RDMA.
+     */
+    uint64_t adapt_to_remote_addr(uint64_t addr) const
+    {
+        return addr;
+    }
     // void put_rmda_buffer(void *buf)
     // {
     //     DCHECK_EQ(allocated_buffers_.count(buf), 1);
@@ -139,6 +171,7 @@ private:
     // }
     std::vector<RdmaContextOp> ops_;
     std::unordered_set<void *> allocated_buffers_;
+    std::unordered_set<void *> remote_allocated_buffers_;
 };
 
 }  // namespace patronus::hash

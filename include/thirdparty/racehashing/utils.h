@@ -280,6 +280,22 @@ inline std::ostream &operator<<(std::ostream &os, const pre_fp &fp)
     os << std::hex << (int) fp.fp_ << std::dec;
     return os;
 }
+class pre_hash
+{
+public:
+    pre_hash(uint64_t hash) : hash_(hash)
+    {
+    }
+    friend std::ostream &operator<<(std::ostream &os, const pre_hash &);
+
+private:
+    uint64_t hash_;
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_hash &ph)
+{
+    os << std::hex << ph.hash_ << std::dec;
+    return os;
+}
 
 class pre_suffix
 {
@@ -337,11 +353,7 @@ inline void hash_table_free([[maybe_unused]] void *addr)
 
 struct HashContext
 {
-    HashContext(size_t tid,
-                const std::string &key,
-                const std::string &value,
-                bool enabled = true)
-        : tid(tid), key(key), value(value), enabled_(enabled)
+    HashContext(size_t tid, bool enabled = true) : tid(tid), enabled_(enabled)
     {
     }
     size_t tid;
@@ -351,7 +363,7 @@ struct HashContext
     bool enabled_;
 };
 
-static HashContext nulldctx(0, "", "", false);
+static HashContext nulldctx(0, false);
 
 inline std::ostream &operator<<(std::ostream &os, const HashContext &dctx)
 {
@@ -379,6 +391,15 @@ inline uint64_t round_to_bits(uint64_t hash, size_t bits)
         return hash;
     }
     return hash & ((1ull << bits) - 1);
+}
+
+inline size_t len_to_ptr_len(size_t len)
+{
+    return (len + (kLenUnit - 1)) / kLenUnit;
+}
+inline size_t ptr_len_to_len(size_t ptr_len)
+{
+    return ptr_len * kLenUnit;
 }
 
 };  // namespace patronus::hash

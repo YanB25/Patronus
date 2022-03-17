@@ -165,7 +165,7 @@ public:
                    HashContext *dctx) const
     {
         RetCode rc;
-        if ((rc = validate_staleness(ld, suffix)) != kOk)
+        if ((rc = validate_staleness(ld, suffix, dctx)) != kOk)
         {
             return rc;
         }
@@ -190,7 +190,9 @@ public:
         return kDataSlotNr;
     }
 
-    RetCode validate_staleness(uint32_t expect_ld, uint32_t suffix) const
+    RetCode validate_staleness(uint32_t expect_ld,
+                               uint32_t suffix,
+                               HashContext *dctx) const
     {
         auto &h = header();
         if (expect_ld == h.ld)
@@ -200,22 +202,23 @@ public:
 
             if (rounded_suffix != rounded_header_suffix)
             {
-                DVLOG(6) << "[bench][bucket] validate_staleness kStale (short"
-                            "period of RC): match "
-                            "ld but suffix mismatch.expect_ld: "
-                         << expect_ld << ", expect_suffix: " << suffix << "("
-                         << rounded_suffix << ")"
-                         << ", header_ld: " << h.ld
-                         << ", header_suffix: " << h.suffix << "("
-                         << rounded_header_suffix << ")";
+                DLOG_IF(INFO,
+                        config::kEnableRaceHashingDebug && dctx != nullptr)
+                    << "[race][trace] validate_staleness kStale: (short"
+                       "period of RC): match "
+                       "ld but suffix mismatch.expect_ld: "
+                    << "expect (" << expect_ld << ", " << suffix
+                    << ") suffix rounded to " << rounded_suffix << ". Got ("
+                    << h.ld << ", " << h.suffix << ") suffix rounded to "
+                    << rounded_header_suffix << ". " << *dctx;
                 return kCacheStale;
             }
-            DVLOG(6) << "[bench][bucket] validate_staleness kOk: expect_ld: "
-                     << expect_ld << ", expect_suffix: " << suffix << "("
-                     << rounded_suffix << ")"
-                     << ", header_ld: " << h.ld
-                     << ", header_suffix: " << h.suffix << "("
-                     << rounded_header_suffix << ")";
+            // DLOG_IF(INFO, config::kEnableRaceHashingDebug && dctx != nullptr)
+            //     << "[race][trace] validate_staleness kOk: expect_ld: "
+            //     << expect_ld << ", expect_suffix: " << suffix << "("
+            //     << rounded_suffix << ")"
+            //     << ", header_ld: " << h.ld << ", header_suffix: " << h.suffix
+            //     << "(" << rounded_header_suffix << "). " << *dctx;
             return kOk;
         }
         auto rounded_bit = std::max(h.ld, expect_ld);
@@ -224,23 +227,24 @@ public:
         if (rounded_suffix == rounded_header_suffix)
         {
             // stale but tolerant-able
-            DVLOG(6) << "[bench][bucket] validate_staleness kOk (tolerable):"
-                        "expect_ld: "
-                     << expect_ld << ", expect_suffix: " << suffix
-                     << ", rounded to: " << rounded_suffix
-                     << ", header_ld: " << h.ld
-                     << ", header_suffix: " << h.suffix
-                     << ", rounded to: " << rounded_header_suffix
-                     << ". Rounded  bit: " << rounded_bit;
+            DLOG_IF(INFO, config::kEnableRaceHashingDebug && dctx != nullptr)
+                << "[race][trace] validate_staleness kOk (tolerable):"
+                   "expect_ld: "
+                << expect_ld << ", expect_suffix: " << suffix
+                << ", rounded to: " << rounded_suffix << ", header_ld: " << h.ld
+                << ", header_suffix: " << h.suffix
+                << ", rounded to: " << rounded_header_suffix
+                << ". Rounded  bit: " << rounded_bit;
             return kOk;
         }
-        DVLOG(6) << "[bench][bucket] validate_staleness kCacheStale: "
-                    "expect_ld: "
-                 << expect_ld << ", expect_suffix: " << suffix
-                 << ", rounded to: " << rounded_suffix
-                 << ", header_ld: " << h.ld << ", header_suffix: " << h.suffix
-                 << ", rounded to: " << rounded_header_suffix
-                 << ". Rounded bit: " << rounded_bit;
+        DLOG_IF(INFO, config::kEnableRaceHashingDebug && dctx != nullptr)
+            << "[race][trace] validate_staleness kCacheStale: "
+               "expect_ld: "
+            << expect_ld << ", expect_suffix: " << suffix
+            << ", rounded to: " << rounded_suffix << ", header_ld: " << h.ld
+            << ", header_suffix: " << h.suffix
+            << ", rounded to: " << rounded_header_suffix
+            << ". Rounded bit: " << rounded_bit;
         return kCacheStale;
     }
 

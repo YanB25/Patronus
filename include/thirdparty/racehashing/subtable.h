@@ -123,6 +123,7 @@ public:
           hash_suffix_(hash_suffix)
     {
         CHECK_GE(st_size, size_bytes());
+        CHECK_NE(st_addr_, 0);
     }
     uint32_t expect_ld() const
     {
@@ -209,7 +210,7 @@ inline std::ostream &operator<<(std::ostream &os,
         double util = st.bucket_group(i).utilization();
         m.collect(util);
     }
-    os << m;
+    os << "Util: " << m.abs_average() << ": " << m;
     return os;
 }
 }  // namespace patronus::hash
