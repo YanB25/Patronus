@@ -23,18 +23,18 @@ struct RaceHashingHandleConfig
  *
  */
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
-class RaceHashingHandle
+class RaceHashingHandleImpl
 {
 public:
     using SubTableHandleT = SubTableHandle<kBucketGroupNr, kSlotNr>;
     using RaceHashingT = RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>;
-    using pointer = std::shared_ptr<RaceHashingHandle>;
+    using pointer = std::shared_ptr<RaceHashingHandleImpl>;
 
     using MetaT = RaceHashingMeta<kDEntryNr, kBucketGroupNr, kSlotNr>;
 
-    RaceHashingHandle(uint64_t table_meta_addr,
-                      const RaceHashingHandleConfig &conf,
-                      RaceHashingRdmaContext::pointer rdma_ctx)
+    RaceHashingHandleImpl(uint64_t table_meta_addr,
+                          const RaceHashingHandleConfig &conf,
+                          RaceHashingRdmaContext::pointer rdma_ctx)
         : table_meta_addr_(table_meta_addr),
           conf_(conf),
           rdma_ctx_(std::move(rdma_ctx))
@@ -56,15 +56,15 @@ public:
                  kOk);
         CHECK_EQ(rdma_ctx_->commit(), kOk);
         memcpy(&cached_meta_, rdma_buf, meta_size());
-        LOG_IF(INFO, config::kEnableRaceHashingDebug)
+        LOG_IF(INFO, config::kEnableDebug)
             << "[race][trace] update_directory_cache: update cache to "
             << cached_meta_;
         return kOk;
     }
 
     template <size_t kA, size_t kB, size_t kC>
-    friend std::ostream &operator<<(std::ostream &os,
-                                    const RaceHashingHandle<kA, kB, kC> &rhh);
+    friend std::ostream &operator<<(
+        std::ostream &os, const RaceHashingHandleImpl<kA, kB, kC> &rhh);
 
     size_t gd() const
     {
@@ -80,9 +80,10 @@ public:
         auto h1 = hash_1(hash);
         auto h2 = hash_2(hash);
 
-        DVLOG(3) << "[race] DEL key " << pre(key) << ", got hash " << std::hex
-                 << hash << ", m: " << m << ", rounded to " << rounded_m
-                 << " by cached_gd: " << gd() << ". fp: " << pre_fp(fp);
+        DVLOG(3) << "[race] DEL key " << pre(key) << ", got hash "
+                 << pre_hash(hash) << ", m: " << m << ", rounded to "
+                 << rounded_m << " by cached_gd: " << gd()
+                 << ". fp: " << pre_fp(fp);
         auto st = subtable_handle(rounded_m);
 
         // get the two combined buckets the same time
@@ -106,10 +107,10 @@ public:
     {
         auto f = [this](const Key &key,
                         SlotHandle slot_handles,
-                        KVBlock *kv_block,
+                        KVBlockHandle kvblock_handle,
                         HashContext *dctx) {
             std::ignore = key;
-            std::ignore = kv_block;
+            std::ignore = kvblock_handle;
             return do_remove(slot_handles, dctx);
         };
         return for_the_real_match_do(slot_handles, key, f, dctx);
@@ -255,10 +256,10 @@ public:
     {
         auto f = [&real_matches](const Key &key,
                                  SlotHandle slot,
-                                 KVBlock *kv_block,
+                                 KVBlockHandle kvblock_handle,
                                  HashContext *dctx) {
             std::ignore = key;
-            std::ignore = kv_block;
+            std::ignore = kvblock_handle;
             std::ignore = dctx;
             real_matches.insert(slot);
             return kOk;
@@ -277,7 +278,7 @@ public:
         auto h2 = hash_2(hash);
         auto rounded_m = round_to_bits(m, gd());
         auto ld = cached_ld(rounded_m);
-        DLOG_IF(INFO, config::kEnableRaceHashingDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
             << "[race][trace] put_phase_one: got hash " << pre_hash(hash)
             << ", m: " << m << ", rounded to " << rounded_m
             << " (subtable) by gd(may stale): " << gd()
@@ -294,9 +295,10 @@ public:
         CHECK_EQ(rdma_ctx_->commit(), kOk);
 
         SlotView new_slot(fp, len, (char *) kv_block);
-        LOG(INFO) << "[debug] new remote kv_block addr: " << (void *) kv_block
-                  << " with len: " << len
-                  << ". actual len: " << new_slot.actual_len_bytes();
+        DLOG_IF(INFO, config::kEnableMemoryDebug)
+            << "[race][mem] new remote kv_block addr: " << (void *) kv_block
+            << " with len: " << len
+            << ". actual len: " << new_slot.actual_len_bytes();
 
         std::unordered_set<SlotHandle> slot_handles;
         rc = cbs.locate(fp, ld, m, slot_handles, dctx);
@@ -445,7 +447,7 @@ public:
         return kOk;
     }
     using ApplyF = std::function<RetCode(
-        const Key &, SlotHandle, KVBlock *, HashContext *)>;
+        const Key &, SlotHandle, KVBlockHandle, HashContext *)>;
 
     RetCode for_the_real_match_do(
         const std::unordered_set<SlotHandle> &slot_handles,
@@ -453,35 +455,40 @@ public:
         const ApplyF &func,
         HashContext *dctx)
     {
-        std::map<SlotHandle, void *> slots_rdma_buffers;
+        std::map<SlotHandle, KVBlockHandle> slots_rdma_buffers;
         for (auto slot_handle : slot_handles)
         {
             size_t actual_size = slot_handle.slot_view().actual_len_bytes();
+            DCHECK_GT(actual_size, 0)
+                << "make no sense to have actual size == 0. slot_handle: "
+                << slot_handle;
             auto *rdma_buffer = rdma_ctx_->get_rdma_buffer(actual_size);
             // TODO(race): the high 16 bits is zero.
             // If using GlobalAddress, remember to fill the nodeID here.
-            auto remote_kvblock_addr = slot_handle.ptr();
-            LOG(INFO) << "[debug] Reading remote kvblock addr: "
-                      << (void *) remote_kvblock_addr << " with size "
-                      << actual_size;
-            CHECK_EQ(rdma_ctx_->rdma_read((uint64_t) remote_kvblock_addr,
-                                          (char *) rdma_buffer,
-                                          actual_size),
-                     kOk);
-            slots_rdma_buffers[slot_handle] = rdma_buffer;
+            auto remote_kvblock_addr = (uint64_t) slot_handle.ptr();
+            DLOG_IF(INFO, config::kEnableMemoryDebug)
+                << "[race][mem] Reading remote kvblock addr: "
+                << (void *) remote_kvblock_addr << " with size " << actual_size
+                << ", fp: " << pre_fp(slot_handle.fp());
+            CHECK_EQ(
+                rdma_ctx_->rdma_read(
+                    remote_kvblock_addr, (char *) rdma_buffer, actual_size),
+                kOk);
+            slots_rdma_buffers.emplace(
+                slot_handle,
+                KVBlockHandle(remote_kvblock_addr, (KVBlock *) rdma_buffer));
         }
         CHECK_EQ(rdma_ctx_->commit(), kOk);
 
         RetCode rc = kNotFound;
-        for (const auto &[slot_handle, rdma_buffer] : slots_rdma_buffers)
+        for (const auto &[slot_handle, kvblock_handle] : slots_rdma_buffers)
         {
-            auto *kv_block = (KVBlock *) rdma_buffer;
-            if (is_real_match(kv_block, key, dctx) != kOk)
+            if (is_real_match(kvblock_handle.buffer_addr(), key, dctx) != kOk)
             {
                 continue;
             }
             // okay, it is the real match
-            rc = func(key, slot_handle, kv_block, dctx);
+            rc = func(key, slot_handle, kvblock_handle, dctx);
             CHECK_NE(rc, kNotFound)
                 << "Make no sense to return kNotFound: already found for you.";
         }
@@ -498,9 +505,10 @@ public:
         auto h1 = hash_1(hash);
         auto h2 = hash_2(hash);
 
-        DVLOG(3) << "[race] GET key " << pre(key) << ", got hash " << std::hex
-                 << hash << ", m: " << m << ", rounded to " << rounded_m
-                 << " by cached_gd: " << cached_gd << ". fp: " << pre_fp(fp);
+        DVLOG(3) << "[race] GET key " << pre(key) << ", got hash "
+                 << pre_hash(hash) << ", m: " << m << ", rounded to "
+                 << rounded_m << " by cached_gd: " << cached_gd
+                 << ". fp: " << pre_fp(fp);
         auto st = subtable_handle(rounded_m);
 
         // get the two combined buckets the same time
@@ -531,7 +539,7 @@ public:
     {
         auto f = [&value](const Key &key,
                           SlotHandle slot_handle,
-                          KVBlock *kv_block,
+                          KVBlockHandle kvblock_handle,
                           HashContext *dctx) {
             std::ignore = key;
             std::ignore = slot_handle;
@@ -539,10 +547,10 @@ public:
             DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
                 << "[race][trace] get_from_slot_views SUCC: slot_handle "
                 << slot_handle << ". " << *dctx;
-            value.resize(kv_block->value_len);
+            value.resize(kvblock_handle.value_len());
             memcpy(value.data(),
-                   kv_block->buf + kv_block->key_len,
-                   kv_block->value_len);
+                   (char *) kvblock_handle.buf() + kvblock_handle.key_len(),
+                   kvblock_handle.value_len());
             return kOk;
         };
 
@@ -557,7 +565,7 @@ public:
         auto f = [&rdma_ctx = *rdma_ctx_.get(), new_slot](
                      const Key &key,
                      SlotHandle slot_handle,
-                     KVBlock *kv_block,
+                     KVBlockHandle kvblock_handle,
                      HashContext *dctx) {
             std::ignore = key;
 
@@ -569,8 +577,9 @@ public:
                                        rdma_buf),
                      kOk);
             CHECK_EQ(rdma_ctx.commit(), kOk);
-            SlotView expect_slot(expect_val);
             bool success = memcmp(rdma_buf, (char *) &expect_val, 8) == 0;
+            expect_val = *(uint64_t *) rdma_buf;
+            SlotView expect_slot(expect_val);
             if (success)
             {
                 if (expect_slot.empty())
@@ -582,9 +591,9 @@ public:
                 else
                 {
                     DVLOG(4) << "[race][subtable] do_update SUCC: for slot "
-                                "with kv_block ("
-                             << (void *) kv_block << ". New_slot " << new_slot;
-                    rdma_ctx.remote_free(kv_block);
+                                "with kvblock_handle:"
+                             << kvblock_handle << ". New_slot " << new_slot;
+                    rdma_ctx.remote_free(expect_slot.ptr());
                 }
                 DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
                     << "[race][subtable] slot " << slot_handle << " update to "
@@ -602,20 +611,20 @@ public:
         return for_the_real_match_do(slot_handles, key, f, dctx);
     }
 
-    RetCode is_real_match(KVBlock *kv_block, const Key &key, HashContext *dctx)
+    RetCode is_real_match(KVBlock *kvblock, const Key &key, HashContext *dctx)
     {
         std::ignore = dctx;
-        if (kv_block->key_len != key.size())
+        if (kvblock->key_len != key.size())
         {
             // DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
             //          << pre(key) << " miss: key len mismatch";
             DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
                 << "[race][stable] is_real_match FAILED: key len " << key.size()
-                << " mismatch with block->key_len: " << kv_block->key_len
-                << ". " << *dctx;
+                << " mismatch with block->key_len: " << kvblock->key_len << ". "
+                << *dctx;
             return kNotFound;
         }
-        if (memcmp(key.data(), kv_block->buf, key.size()) != 0)
+        if (memcmp(key.data(), kvblock->buf, key.size()) != 0)
         {
             // DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
             //          << pre(key) << " miss: key content mismatch";
@@ -667,9 +676,9 @@ private:
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
 inline std::ostream &operator<<(
     std::ostream &os,
-    const RaceHashingHandle<kDEntryNr, kBucketGroupNr, kSlotNr> &rhh)
+    const RaceHashingHandleImpl<kDEntryNr, kBucketGroupNr, kSlotNr> &rhh)
 {
-    os << "RaceHashingHandle gd: " << rhh.cached_gd() << std::endl;
+    os << "RaceHashingHandleImpl gd: " << rhh.cached_gd() << std::endl;
     for (size_t i = 0; i < rhh.cached_subtable_nr(); ++i)
     {
         os << "sub-table[" << i << "]: ld: " << rhh.cached_meta_.lds[i]

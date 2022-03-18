@@ -170,15 +170,15 @@ public:
             return rc;
         }
 
-        for (size_t i = 0; i < kSlotNr; ++i)
+        for (size_t i = 1; i < kSlotNr; ++i)
         {
             auto view_handle = slot_handle(i);
             if (view_handle.match(fp))
             {
-                DLOG_IF(INFO,
-                        config::kEnableRaceHashingDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                     << "[race][trace] locate: fp " << pre_fp(fp)
-                    << " got matched FP. view " << view_handle << ". " << *dctx;
+                    << " got matched FP " << pre_fp(fp) << ". view "
+                    << view_handle << ". " << *dctx;
                 ret.insert(view_handle);
             }
         }
@@ -202,8 +202,7 @@ public:
 
             if (rounded_suffix != rounded_header_suffix)
             {
-                DLOG_IF(INFO,
-                        config::kEnableRaceHashingDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                     << "[race][trace] validate_staleness kStale: (short"
                        "period of RC): match "
                        "ld but suffix mismatch.expect_ld: "
@@ -213,7 +212,7 @@ public:
                     << rounded_header_suffix << ". " << *dctx;
                 return kCacheStale;
             }
-            // DLOG_IF(INFO, config::kEnableRaceHashingDebug && dctx != nullptr)
+            // DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
             //     << "[race][trace] validate_staleness kOk: expect_ld: "
             //     << expect_ld << ", expect_suffix: " << suffix << "("
             //     << rounded_suffix << ")"
@@ -227,7 +226,7 @@ public:
         if (rounded_suffix == rounded_header_suffix)
         {
             // stale but tolerant-able
-            DLOG_IF(INFO, config::kEnableRaceHashingDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                 << "[race][trace] validate_staleness kOk (tolerable):"
                    "expect_ld: "
                 << expect_ld << ", expect_suffix: " << suffix
@@ -237,7 +236,7 @@ public:
                 << ". Rounded  bit: " << rounded_bit;
             return kOk;
         }
-        DLOG_IF(INFO, config::kEnableRaceHashingDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
             << "[race][trace] validate_staleness kCacheStale: "
                "expect_ld: "
             << expect_ld << ", expect_suffix: " << suffix

@@ -11,7 +11,7 @@
 
 namespace patronus::hash
 {
-constexpr static bool kEnableDebug = config::kEnableRaceHashingDebug;
+constexpr static bool kEnableDebug = config::kEnableDebug;
 // NOTE:
 // one bucket group has two bucket and one overflow bucket
 // when using hash value to indexing the bucket
@@ -170,12 +170,20 @@ public:
     }
     CombinedBucketHandle<kSlotNr> combined_bucket_handle(size_t idx)
     {
+        auto origin_idx = idx;
         idx = idx % kCombinedBucketNr;
         if (idx % 2 == 0)
         {
             // even
             idx /= 2;
             void *bucket_group_addr = (char *) st_addr_ + kItemSize * idx;
+            DLOG_IF(INFO, config::kEnableMemoryDebug)
+                << "[race][mem] combined_bucket_handle: left. indexing "
+                << origin_idx << ", map to idx " << idx
+                << ", from kCombinedBucketNr: " << kCombinedBucketNr
+                << ", st_addr: " << (void *) st_addr_
+                << ", kItemSize: " << kItemSize << ", got "
+                << (void *) bucket_group_addr;
             return CombinedBucketHandle<kSlotNr>((uint64_t) bucket_group_addr,
                                                  true);
         }
@@ -186,6 +194,13 @@ public:
             void *bucket_group_addr = (char *) st_addr_ + kItemSize * idx;
             void *overflow_bucket_addr =
                 (char *) bucket_group_addr + Bucket<kSlotNr>::size_bytes();
+            LOG_IF(INFO, config::kEnableMemoryDebug)
+                << "[race][mem] combined_bucket_handle: right. indexing "
+                << origin_idx << ", map to idx " << idx
+                << " from kCombinedBucketNr: " << kCombinedBucketNr
+                << ", st_addr: " << (void *) st_addr_
+                << ", kItemSize: " << kItemSize << ", got "
+                << (void *) overflow_bucket_addr;
             return CombinedBucketHandle<kSlotNr>(
                 (uint64_t) overflow_bucket_addr, false);
         }

@@ -73,6 +73,9 @@ public:
     RetCode read(RaceHashingRdmaContext &rdma_ctx)
     {
         buffer_ = CHECK_NOTNULL(rdma_ctx.get_rdma_buffer(size_bytes()));
+        DLOG_IF(INFO, config::kEnableMemoryDebug)
+            << "[race][mem] in bucket_group::read: addr_: " << (void *) addr_
+            << ", buffer: " << (void *) buffer_;
         return rdma_ctx.rdma_read(addr_, (char *) buffer_, size_bytes());
     }
 
@@ -294,7 +297,7 @@ public:
     }
     constexpr static size_t max_item_nr()
     {
-        return Bucket<kSlotNr>::max_item_nr() * 3;
+        return BucketGroup<kSlotNr>::max_item_nr();
     }
 
     uint64_t remote_addr() const
@@ -304,7 +307,7 @@ public:
 
     constexpr static size_t size_bytes()
     {
-        return Bucket<kSlotNr>::size_bytes() * 3;
+        return BucketGroup<kSlotNr>::size_bytes();
     }
 
 private:

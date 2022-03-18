@@ -35,5 +35,43 @@ struct KVBlock
     }
 } __attribute__((packed));
 
+class KVBlockHandle
+{
+public:
+    KVBlockHandle(uint64_t addr, KVBlock *buffer) : addr_(addr), buffer_(buffer)
+    {
+    }
+    uint64_t remote_addr() const
+    {
+        return addr_;
+    }
+    KVBlock *buffer_addr() const
+    {
+        return buffer_;
+    }
+    size_t key_len() const
+    {
+        return buffer_->key_len;
+    }
+    size_t value_len() const
+    {
+        return buffer_->value_len;
+    }
+    void *buf() const
+    {
+        return buffer_->buf;
+    }
+
+private:
+    uint64_t addr_{0};
+    KVBlock *buffer_{nullptr};
+};
+inline std::ostream &operator<<(std::ostream &os, const KVBlockHandle &kbh)
+{
+    os << "{KVBlockHandle addr: " << (void *) kbh.remote_addr()
+       << ", buffer: " << kbh.buffer_addr() << "}";
+    return os;
+}
+
 }  // namespace patronus::hash
 #endif

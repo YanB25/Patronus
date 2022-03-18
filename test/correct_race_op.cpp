@@ -22,16 +22,18 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 void test_basic(size_t initial_subtable)
 {
+    using RaceHashingT = RaceHashing<4, 64, 64>;
+
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
-    RaceHashing<4, 64, 64> rh(allocator, conf);
+    RaceHashingT rh(allocator, conf);
 
     RaceHashingHandleConfig handle_conf;
     handle_conf.auto_expand = false;
     handle_conf.auto_update_dir = false;
 
-    RaceHashingHandle<4, 64, 64> rhh(
+    RaceHashingT::Handle rhh(
         rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     CHECK_EQ(rhh.put("abc", "def"), kOk);
@@ -49,17 +51,20 @@ void test_basic(size_t initial_subtable)
 
 void test_capacity(size_t initial_subtable)
 {
+    using RaceHashingT = RaceHashing<4, 16, 16>;
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
-    RaceHashing<4, 16, 16> rh(allocator, conf);
+    RaceHashingT rh(allocator, conf);
 
     RaceHashingHandleConfig handle_conf;
     handle_conf.auto_expand = false;
     handle_conf.auto_update_dir = false;
 
-    RaceHashingHandle<4, 64, 64> rhh(
-        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
+    HashContext dctx(0);
+    RaceHashingT::Handle rhh(rh.meta_addr(),
+                             handle_conf,
+                             RaceHashingRdmaContext::new_instance(&dctx));
 
     std::string key;
     std::string value;
@@ -69,11 +74,16 @@ void test_capacity(size_t initial_subtable)
     size_t succ_nr = 0;
     size_t fail_nr = 0;
     bool first_fail = true;
+
     for (size_t i = 0; i < rh.max_capacity(); ++i)
     {
         fast_pseudo_fill_buf(key.data(), key.size());
         fast_pseudo_fill_buf(value.data(), value.size());
-        auto rc = rhh.put(key, value);
+        dctx.key = key;
+        dctx.value = value;
+
+        dctx.op = "put";
+        auto rc = rhh.put(key, value, &dctx);
         if (rc == kOk)
         {
             inserted.emplace(key, value);
@@ -112,19 +122,23 @@ void test_capacity(size_t initial_subtable)
     for (const auto &[key, expect_value] : inserted)
     {
         std::string get_val;
-        CHECK_EQ(rhh.get(key, get_val), kOk);
+        dctx.key = key;
+        dctx.value = expect_value;
+        dctx.op = "get";
+        CHECK_EQ(rhh.get(key, get_val, &dctx), kOk);
         CHECK_EQ(get_val, expect_value);
-        CHECK_EQ(rhh.del(key), kOk);
+        CHECK_EQ(rhh.del(key, &dctx), kOk);
         CHECK_EQ(rhh.del(key), kNotFound);
         CHECK_EQ(rhh.get(key, get_val), kNotFound);
     }
     CHECK_EQ(rh.utilization(), 0)
         << "Removed all the items should result in 0 utilization";
     LOG(INFO) << rhh;
+    LOG(INFO) << rh;
 }
 
 template <size_t kA, size_t kB, size_t kC>
-void test_thread(typename RaceHashingHandle<kA, kB, kC>::pointer rhh,
+void test_thread(typename RaceHashing<kA, kB, kC>::Handle::pointer rhh,
                  size_t tid,
                  size_t test_nr)
 {
@@ -299,7 +313,7 @@ void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
         handle_conf.auto_expand = expand;
         handle_conf.auto_update_dir = expand;
         auto handle = std::make_shared<
-            RaceHashingHandle<kDEntryNr, kBucketGroupNr, kSlotNr>>(
+            RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>::Handle>(
             rh->meta_addr(),
             handle_conf,
             RaceHashingRdmaContext::new_instance());
@@ -316,15 +330,17 @@ void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
 
 void test_expand_once_single_thread()
 {
+    using RaceHashingT = RaceHashing<2, 4, 4>;
+
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = 1;
-    RaceHashing<2, 4, 4> rh(allocator, conf);
+    RaceHashingT rh(allocator, conf);
 
     RaceHashingHandleConfig handle_conf;
     handle_conf.auto_expand = false;
     handle_conf.auto_update_dir = true;
-    RaceHashingHandle<2, 4, 4> rhh(
+    RaceHashingT::Handle rhh(
         rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     std::string key;
@@ -402,15 +418,17 @@ void test_expand_once_single_thread()
 
 void test_expand_multiple_single_thread()
 {
+    using RaceHashingT = RaceHashing<16, 4, 4>;
+
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = 1;
-    RaceHashing<16, 4, 4> rh(allocator, conf);
+    RaceHashingT rh(allocator, conf);
 
     RaceHashingHandleConfig handle_conf;
     handle_conf.auto_expand = true;
     handle_conf.auto_update_dir = true;
-    RaceHashingHandle<16, 4, 4> rhh(
+    RaceHashingT::Handle rhh(
         rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     std::string key;
@@ -488,15 +506,17 @@ void test_expand_multiple_single_thread()
 }
 void test_burn_expand_single_thread()
 {
+    using RaceHashingT = RaceHashing<128, 2, 2>;
+
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = 1;
-    RaceHashing<128, 2, 2> rh(allocator, conf);
+    RaceHashingT rh(allocator, conf);
 
     RaceHashingHandleConfig handle_conf;
     handle_conf.auto_expand = true;
     handle_conf.auto_update_dir = true;
-    RaceHashingHandle<128, 2, 2> rhh(
+    RaceHashingT::Handle rhh(
         rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
 
     std::string key;
@@ -580,7 +600,7 @@ int main(int argc, char *argv[])
 
     // test_basic(1);
     // test_capacity(1);
-    // test_capacity(4);
+    test_capacity(4);
 
     // test_multithreads<4, 8, 8>(8, 1_M, false);
 
@@ -593,7 +613,7 @@ int main(int argc, char *argv[])
     // test_expand_multiple_single_thread();
     // test_burn_expand_single_thread();
 
-    test_multithreads<16, 4, 4>(8, 10, true);
+    // test_multithreads<16, 4, 4>(8, 10, true);
 
     LOG(INFO) << "PASS ALL TESTS";
     LOG(INFO) << "finished. ctrl+C to quit.";

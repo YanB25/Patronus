@@ -277,7 +277,45 @@ private:
 };
 inline std::ostream &operator<<(std::ostream &os, const pre_fp &fp)
 {
-    os << std::hex << (int) fp.fp_ << std::dec;
+    auto flags = std::cout.flags();
+    os << std::hex << (int) fp.fp_;
+    std::cout.flags(flags);
+    return os;
+}
+
+class pre_addr
+{
+public:
+    pre_addr(uint64_t addr) : addr_(addr)
+    {
+    }
+    friend std::ostream &operator<<(std::ostream &os, const pre_addr &);
+
+private:
+    uint64_t addr_{0};
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_addr &addr)
+{
+    auto flags = std::cout.flags();
+    os << std::hex << (void *) addr.addr_;
+    std::cout.flags(flags);
+    return os;
+}
+
+class pre_len
+{
+public:
+    pre_len(uint8_t len) : len_(len)
+    {
+    }
+    friend std::ostream &operator<<(std::ostream &os, const pre_len &);
+
+private:
+    uint8_t len_{0};
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_len &len)
+{
+    os << (int) len.len_;
     return os;
 }
 class pre_hash
@@ -293,7 +331,9 @@ private:
 };
 inline std::ostream &operator<<(std::ostream &os, const pre_hash &ph)
 {
-    os << std::hex << ph.hash_ << std::dec;
+    auto flags = std::cout.flags();
+    os << std::hex << ph.hash_;
+    std::cout.flags(flags);
     return os;
 }
 
@@ -313,33 +353,27 @@ inline std::ostream &operator<<(std::ostream &os, const pre_suffix &sfx)
 {
     if (sfx.len_ <= 2)
     {
-        os << sfx.suffix_ << "(" << std::bitset<2>(sfx.suffix_) << ")"
-           << std::dec;
+        os << sfx.suffix_ << "(" << std::bitset<2>(sfx.suffix_) << ")";
     }
     else if (sfx.len_ <= 4)
     {
-        os << sfx.suffix_ << "(" << std::bitset<4>(sfx.suffix_) << ")"
-           << std::dec;
+        os << sfx.suffix_ << "(" << std::bitset<4>(sfx.suffix_) << ")";
     }
     else if (sfx.len_ <= 8)
     {
-        os << sfx.suffix_ << "(" << std::bitset<8>(sfx.suffix_) << ")"
-           << std::dec;
+        os << sfx.suffix_ << "(" << std::bitset<8>(sfx.suffix_) << ")";
     }
     else if (sfx.len_ <= 12)
     {
-        os << sfx.suffix_ << "(" << std::bitset<12>(sfx.suffix_) << ")"
-           << std::dec;
+        os << sfx.suffix_ << "(" << std::bitset<12>(sfx.suffix_) << ")";
     }
     else if (sfx.len_ <= 16)
     {
-        os << sfx.suffix_ << "(" << std::bitset<16>(sfx.suffix_) << ")"
-           << std::dec;
+        os << sfx.suffix_ << "(" << std::bitset<16>(sfx.suffix_) << ")";
     }
     else
     {
-        os << sfx.suffix_ << "(" << std::bitset<64>(sfx.suffix_) << ")"
-           << std::dec;
+        os << sfx.suffix_ << "(" << std::bitset<64>(sfx.suffix_) << ")";
     }
     return os;
 }

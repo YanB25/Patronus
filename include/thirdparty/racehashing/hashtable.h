@@ -46,15 +46,18 @@ inline std::ostream &operator<<(std::ostream &os,
         {
             os << "subtable[" << i << "] lds: " << meta.lds[i]
                << ", lock: " << meta.expanding[i] << " at "
-               << (void *) meta.entries[i];
+               << (void *) meta.entries[i] << std::endl;
         }
         else
         {
-            os << "subtable[" << i << "] NULL";
+            os << "subtable[" << i << "] NULL" << std::endl;
         }
     }
     return os;
 }
+
+template <size_t kA, size_t kB, size_t kC>
+class RaceHashingHandleImpl;
 
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
 class RaceHashing
@@ -63,6 +66,7 @@ public:
     using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
     using pointer = std::shared_ptr<RaceHashing>;
     using MetaT = RaceHashingMeta<kDEntryNr, kBucketGroupNr, kSlotNr>;
+    using Handle = RaceHashingHandleImpl<kDEntryNr, kBucketGroupNr, kSlotNr>;
 
     static_assert(is_power_of_two(kDEntryNr));
 
@@ -109,8 +113,8 @@ public:
             meta_->lds[i] = ld;
             meta_->entries[i] = (SubTableT *) alloc_mem;
         }
-        LOG(INFO) << "[debug] meta addr: " << (void *) meta_addr()
-                  << ", or real: " << (void *) meta_ << ", content: " << *meta_;
+        DLOG(INFO) << "[race] meta addr: " << (void *) meta_addr()
+                   << ", content: " << *meta_;
     }
     std::shared_ptr<SubTableT> subtable(size_t idx) const
     {

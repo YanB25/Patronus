@@ -102,7 +102,9 @@ static_assert(sizeof(SlotView) == 8);
 
 inline std::ostream &operator<<(std::ostream &os, const SlotView &slot_view)
 {
-    os << "{SlotView: " << std::hex << slot_view.ptr_ << "}";
+    os << "{SlotView: " << slot_view.ptr_ << ", fp: " << pre_fp(slot_view.fp())
+       << ", len: " << pre_len(slot_view.len()) << ", ptr: " << slot_view.ptr()
+       << "}";
     return os;
 }
 
@@ -138,12 +140,18 @@ public:
     }
     bool match(uint8_t fp) const
     {
-        return slot_view_.match(fp);
+        return !slot_view_.empty() && slot_view_.match(fp);
     }
     void *ptr() const
     {
         return slot_view_.ptr();
     }
+    uint8_t fp() const
+    {
+        return slot_view_.fp();
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const SlotHandle &handle);
 
 private:
     uint64_t addr_;
@@ -151,7 +159,8 @@ private:
 };
 inline std::ostream &operator<<(std::ostream &os, const SlotHandle &handle)
 {
-    os << "{SlotHandle: remote_addr: " << (void *) handle.remote_addr() << "}";
+    os << "{SlotHandle: remote_addr: " << handle.addr_
+       << ", slot_view: " << handle.slot_view() << "}";
     return os;
 }
 

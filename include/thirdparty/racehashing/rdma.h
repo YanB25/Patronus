@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "./utils.h"
+#include "Common.h"
 
 namespace patronus::hash
 {
@@ -33,18 +34,23 @@ class RaceHashingRdmaContext
 {
 public:
     using pointer = std::shared_ptr<RaceHashingRdmaContext>;
-    RaceHashingRdmaContext() = default;
+    RaceHashingRdmaContext(HashContext *dctx = nullptr) : dctx_(dctx)
+    {
+    }
     RaceHashingRdmaContext(const RaceHashingRdmaContext &) = delete;
     RaceHashingRdmaContext &operator=(const RaceHashingRdmaContext &) = delete;
 
-    static pointer new_instance()
+    static pointer new_instance(HashContext *dctx = nullptr)
     {
-        return std::make_shared<RaceHashingRdmaContext>();
+        return std::make_shared<RaceHashingRdmaContext>(dctx);
     }
     void *remote_alloc(size_t size)
     {
         auto *ret = malloc(size);
         remote_allocated_buffers_.insert(ret);
+        DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
+            << "[rdma][trace] remote_alloc: " << (void *) ret << " for size "
+            << size;
         return ret;
     }
     void remote_free(void *addr)
@@ -52,14 +58,19 @@ public:
         CHECK_EQ(remote_allocated_buffers_.count(addr), 1)
             << "Addr " << (void *) addr << " not allocated from remote buffer.";
         remote_allocated_buffers_.erase(addr);
+        DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
+            << "[rdma][trace] remote_free: " << (void *) addr;
         free(addr);
     }
 
     void *get_rdma_buffer(size_t size)
     {
+        DCHECK_GT(size, 0) << "Make no sense to alloc size with 0";
         void *ret = malloc(size);
         allocated_buffers_.insert(ret);
-        // LOG(INFO) << "Allocating " << (void *) ret;
+        DLOG_IF(INFO, config::kEnableMemoryDebug && dctx_ != nullptr)
+            << "[rdma][trace] get_rdma_buffer: " << (void *) ret << " for size "
+            << size;
         return ret;
     }
     RetCode rdma_read(uint64_t addr, char *rdma_buf, size_t size)
@@ -70,6 +81,11 @@ public:
         op.buffer = rdma_buf;
         op.op = 0;
         op.size = size;
+
+        // DLOG_IF(INFO, config::kEnableMemoryDebug)
+        //     << "[race] rdma_read: op.remote: " << (void *) op.remote
+        //     << ", op.buffer: " << op.buffer << ", size: " << op.size;
+
         ops_.emplace_back(std::move(op));
         return kOk;
     }
@@ -150,11 +166,14 @@ public:
         for (void *addr : allocated_buffers_)
         {
             free(addr);
+            DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
+                << "[rdma][trace] gc: freeing " << (void *) addr;
         }
         allocated_buffers_.clear();
     }
 
 private:
+    HashContext *dctx_{nullptr};
     /**
      * @brief sometimes, the addr from client should be transformed before
      * handling to RDMA.

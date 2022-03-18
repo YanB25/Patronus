@@ -26,7 +26,7 @@ void test_capacity(size_t initial_subtable)
     RaceHashingHandleConfig handle_conf;
 
     auto rdma_ctx = RaceHashingRdmaContext::new_instance();
-    RaceHashingHandle<1, 2, 2> rhh(rh.meta_addr(), handle_conf, rdma_ctx);
+    RaceHashingT::Handle rhh(rh.meta_addr(), handle_conf, rdma_ctx);
 
     std::string key;
     std::string value;

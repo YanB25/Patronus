@@ -297,11 +297,16 @@ constexpr static bool kEnableValidityMutex = false;
 constexpr static bool kEnableTrace = false;
 constexpr static uint64_t kTraceRate =
     100000;  // (1.0 / kTraceRate) possibility
-constexpr static bool kEnableRaceHashingDebug = true;
 
 // other settings
 constexpr static size_t kLeaseCacheItemLimitNr = 3;
 }  // namespace config
+
+namespace patronus::hash::config
+{
+constexpr static bool kEnableDebug = true;
+constexpr static bool kEnableMemoryDebug = false;
+}  // namespace patronus::hash::config
 
 #define likely(x) __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
