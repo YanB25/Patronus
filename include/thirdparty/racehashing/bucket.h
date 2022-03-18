@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "./conf.h"
 #include "./slot.h"
 #include "Common.h"
 #include "util/Rand.h"
@@ -175,7 +176,7 @@ public:
             auto view_handle = slot_handle(i);
             if (view_handle.match(fp))
             {
-                DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
                     << "[race][trace] locate: fp " << pre_fp(fp)
                     << " got matched FP " << pre_fp(fp) << ". view "
                     << view_handle << ". " << *dctx;

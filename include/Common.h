@@ -302,12 +302,6 @@ constexpr static uint64_t kTraceRate =
 constexpr static size_t kLeaseCacheItemLimitNr = 3;
 }  // namespace config
 
-namespace patronus::hash::config
-{
-constexpr static bool kEnableDebug = true;
-constexpr static bool kEnableMemoryDebug = false;
-}  // namespace patronus::hash::config
-
 #define likely(x) __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
 

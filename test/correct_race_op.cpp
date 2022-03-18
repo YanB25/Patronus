@@ -138,7 +138,8 @@ void test_capacity(size_t initial_subtable)
 }
 
 template <size_t kA, size_t kB, size_t kC>
-void test_thread(typename RaceHashing<kA, kB, kC>::Handle::pointer rhh,
+void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
+                 typename RaceHashing<kA, kB, kC>::Handle::pointer rhh,
                  size_t tid,
                  size_t test_nr)
 {
@@ -161,6 +162,11 @@ void test_thread(typename RaceHashing<kA, kB, kC>::Handle::pointer rhh,
 
     for (size_t i = 0; i < test_nr; ++i)
     {
+        if (i % (test_nr / 10) == 0)
+        {
+            LOG(INFO) << "Finished " << 1.0 * i / test_nr * 100 << "%. "
+                      << dctx;
+        }
         fast_pseudo_fill_buf(key_buf, kKeySize);
         fast_pseudo_fill_buf(val_buf, kValueSize);
         std::string key(key_buf, kKeySize);
@@ -280,7 +286,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::Handle::pointer rhh,
         }
     }
 
-    LOG(INFO) << "Finished test. tid: " << tid << ". Table: " << rhh;
+    LOG(INFO) << "Finished test. tid: " << tid << ". Table: " << *rh;
 
     for (const auto &[k, v] : inserted)
     {
@@ -294,7 +300,7 @@ void test_thread(typename RaceHashing<kA, kB, kC>::Handle::pointer rhh,
         CHECK_EQ(rhh->del(k, &dctx), kOk) << dctx;
     }
 
-    LOG(INFO) << "Tear down. tid: " << tid << ". Table: " << *rhh;
+    LOG(INFO) << "Tear down. tid: " << tid << ". Table: " << *rh;
 }
 
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
@@ -313,13 +319,13 @@ void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
         handle_conf.auto_expand = expand;
         handle_conf.auto_update_dir = expand;
         auto handle = std::make_shared<
-            RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>::Handle>(
+            typename RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>::Handle>(
             rh->meta_addr(),
             handle_conf,
             RaceHashingRdmaContext::new_instance());
-        threads.emplace_back([tid = i, test_nr, handle]() {
+        threads.emplace_back([tid = i, test_nr, handle, rh]() {
             test_thread<kDEntryNr, kBucketGroupNr, kSlotNr>(
-                handle, tid, test_nr);
+                rh, handle, tid, test_nr);
         });
     }
     for (auto &t : threads)
@@ -600,9 +606,9 @@ int main(int argc, char *argv[])
 
     // test_basic(1);
     // test_capacity(1);
-    test_capacity(4);
+    // test_capacity(4);
 
-    // test_multithreads<4, 8, 8>(8, 1_M, false);
+    test_multithreads<4, 8, 8>(8, 1_M, false);
 
     // test_expand_once_single_thread();
     // for (size_t i = 0; i < 100; ++i)

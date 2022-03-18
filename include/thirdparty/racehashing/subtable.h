@@ -11,7 +11,6 @@
 
 namespace patronus::hash
 {
-constexpr static bool kEnableDebug = config::kEnableDebug;
 // NOTE:
 // one bucket group has two bucket and one overflow bucket
 // when using hash value to indexing the bucket

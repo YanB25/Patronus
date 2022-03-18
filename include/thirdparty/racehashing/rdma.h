@@ -55,18 +55,23 @@ public:
     }
     void remote_free(void *addr)
     {
+        LOG_FIRST_N(WARNING, 1)
+            << "[race] Will not actually do remote_free here. Otherwise will "
+               "segment fault when other clients trying to access the memory "
+               "(especially the kv_block)";
         CHECK_EQ(remote_allocated_buffers_.count(addr), 1)
             << "Addr " << (void *) addr << " not allocated from remote buffer.";
         remote_allocated_buffers_.erase(addr);
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
             << "[rdma][trace] remote_free: " << (void *) addr;
-        free(addr);
+        remote_not_freed_buffers_.insert(addr);
+        // free(addr);
     }
 
     void *get_rdma_buffer(size_t size)
     {
-        DCHECK_GT(size, 0) << "Make no sense to alloc size with 0";
         void *ret = malloc(size);
+        DCHECK_GT(size, 0) << "Make no sense to alloc size with 0";
         allocated_buffers_.insert(ret);
         DLOG_IF(INFO, config::kEnableMemoryDebug && dctx_ != nullptr)
             << "[rdma][trace] get_rdma_buffer: " << (void *) ret << " for size "
@@ -119,6 +124,10 @@ public:
     ~RaceHashingRdmaContext()
     {
         for (auto *buf : allocated_buffers_)
+        {
+            free(buf);
+        }
+        for (auto *buf : remote_not_freed_buffers_)
         {
             free(buf);
         }
@@ -191,6 +200,7 @@ private:
     std::vector<RdmaContextOp> ops_;
     std::unordered_set<void *> allocated_buffers_;
     std::unordered_set<void *> remote_allocated_buffers_;
+    std::unordered_set<void *> remote_not_freed_buffers_;
 };
 
 }  // namespace patronus::hash

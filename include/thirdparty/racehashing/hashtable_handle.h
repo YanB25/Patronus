@@ -147,7 +147,7 @@ public:
         CHECK_NE(rc, kNoMem);
         if constexpr (debug())
         {
-            LOG_IF(INFO, kEnableDebug && dctx != nullptr && rc == kOk)
+            LOG_IF(INFO, config::kEnableDebug && dctx != nullptr && rc == kOk)
                 << "[race][trace] PUT succeed: hash: " << pre_hash(hash)
                 << ", h1: " << pre_hash(h1) << ", h2: " << pre_hash(h2)
                 << ", fp: " << pre_hash(fp) << ", m: " << pre_hash(m)
@@ -227,7 +227,7 @@ public:
         bool success = memcmp(rdma_buf, &expect_val, 8) == 0;
         if (success)
         {
-            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                 << "[race][trace] do_remove SUCC: clearing slot " << slot_handle
                 << ". kOk: " << *dctx;
             rdma_ctx_->remote_free(expect_slot.ptr());
@@ -235,7 +235,7 @@ public:
         }
         else
         {
-            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                 << "[race][trace] do_remove FAILED: clearing slot "
                 << slot_handle << ". kRetry: " << *dctx;
             return kRetry;
@@ -396,13 +396,13 @@ public:
             CHECK(expect_slot.empty())
                 << "[trace][handle] the succeess of insert should happen on an "
                    "empty slot";
-            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                 << "[race][handle] slot " << slot_handle << " update to "
                 << new_slot << *dctx;
             return kOk;
         }
         DVLOG(4) << "[race][handle] do_update FAILED: new_slot " << new_slot;
-        DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
             << "[race][trace][handle] do_update FAILED: cas failed. slot "
             << slot_handle << *dctx;
         return kRetry;
@@ -438,7 +438,7 @@ public:
         (*remote_kvblock_addr) = (uint64_t) remote_buf;
         (*len) = tag_ptr_len;
 
-        DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
             << "[race][trace] parallel_write_kv: allocate kv_block: "
             << (void *) remote_kvblock_addr
             << ", allocated_size: " << kvblock_size
@@ -524,7 +524,7 @@ public:
             CHECK_EQ(update_directory_cache(dctx), kOk);
             return get(key, value, dctx);
         }
-        DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
             << "[race][trace] GET from subtable[" << rounded_m << "] from hash "
             << pre_hash(hash) << " and gd " << cached_gd
             << ". Possible match nr: " << slot_handles.size() << ". " << *dctx;
@@ -544,7 +544,7 @@ public:
             std::ignore = key;
             std::ignore = slot_handle;
 
-            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                 << "[race][trace] get_from_slot_views SUCC: slot_handle "
                 << slot_handle << ". " << *dctx;
             value.resize(kvblock_handle.value_len());
@@ -595,14 +595,14 @@ public:
                              << kvblock_handle << ". New_slot " << new_slot;
                     rdma_ctx.remote_free(expect_slot.ptr());
                 }
-                DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                     << "[race][subtable] slot " << slot_handle << " update to "
                     << new_slot << *dctx;
                 return kOk;
             }
             DVLOG(4) << "[race][subtable] do_update FAILED: new_slot "
                      << new_slot;
-            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                 << "[race][trace][subtable] do_update FAILED: cas failed. slot "
                 << slot_handle << *dctx;
             return kRetry;
@@ -618,7 +618,7 @@ public:
         {
             // DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
             //          << pre(key) << " miss: key len mismatch";
-            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
                 << "[race][stable] is_real_match FAILED: key len " << key.size()
                 << " mismatch with block->key_len: " << kvblock->key_len << ". "
                 << *dctx;
@@ -628,14 +628,14 @@ public:
         {
             // DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
             //          << pre(key) << " miss: key content mismatch";
-            DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
                 << "[race][stable] is_real_match FAILED: key content mismatch. "
                 << *dctx;
             return kNotFound;
         }
         // DVLOG(4) << "[race][subtable] slot_real_match SUCCEED: key "
         //          << pre(key);
-        DLOG_IF(INFO, kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
             << "[race][stable] is_real_match SUCC. " << *dctx;
         return kOk;
     }
