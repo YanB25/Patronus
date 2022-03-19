@@ -106,7 +106,7 @@ void test_bucket_not_overlapped(BucketGroup<kSlotNr> bucket_group)
 void test_bucket_group_not_overlapped()
 {
     void *addr = hugePageAlloc(kMemoryLimit);
-    SubTable<kBucketGroupNr, kSlotNr> sub_table(0, addr, kMemoryLimit, 0);
+    SubTable<kBucketGroupNr, kSlotNr> sub_table(addr, kMemoryLimit);
     size_t expect_size = SubTable<kBucketGroupNr, kSlotNr>::size_bytes();
     CHECK_GE(kMemoryLimit, expect_size);
 

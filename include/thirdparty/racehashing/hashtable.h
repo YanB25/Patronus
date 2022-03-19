@@ -46,7 +46,7 @@ inline std::ostream &operator<<(std::ostream &os,
     {
         if (meta.entries[i] != nullptr)
         {
-            os << "subtable[" << i << "] lds: " << meta.lds[i]
+            os << "subtable[" << i << "] ld: " << meta.lds[i]
                << ", lock: " << meta.expanding[i] << " at "
                << (void *) meta.entries[i] << std::endl;
         }
@@ -110,13 +110,26 @@ public:
                      << (void *) alloc_mem << " for size "
                      << SubTableT::size_bytes();
 
-            subtables_[i] =
-                std::make_shared<SubTableT>(ld, alloc_mem, alloc_size, i);
+            subtables_[i] = std::make_shared<SubTableT>(alloc_mem, alloc_size);
+            subtables_[i]->update_header(ld, i);
             meta_->lds[i] = ld;
             meta_->entries[i] = (SubTableT *) alloc_mem;
         }
         DLOG(INFO) << "[race] meta addr: " << (void *) meta_addr()
                    << ", content: " << *meta_;
+    }
+    void refresh_subtables()
+    {
+        for (size_t i = 0; i < kDEntryNr; ++i)
+        {
+            auto subtable = subtables_[i];
+            auto *raw_addr = meta_->entries[i];
+            if (raw_addr != nullptr && subtable == nullptr)
+            {
+                subtables_[i] = std::make_shared<SubTableT>(
+                    raw_addr, SubTableT::size_bytes());
+            }
+        }
     }
     std::shared_ptr<SubTableT> subtable(size_t idx) const
     {
@@ -184,8 +197,7 @@ public:
     }
 
     template <size_t A, size_t B, size_t C>
-    friend std::ostream &operator<<(std::ostream &os,
-                                    const RaceHashing<A, B, C> &rh);
+    friend std::ostream &operator<<(std::ostream &os, RaceHashing<A, B, C> &rh);
     uint64_t meta_addr() const
     {
         return (uint64_t) meta_;
@@ -216,30 +228,27 @@ private:
 
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
 inline std::ostream &operator<<(
-    std::ostream &os, const RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr> &rh)
+    std::ostream &os, RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr> &rh)
 {
-    os << "RaceHashTable with " << kDEntryNr << " dir entries, "
-       << kBucketGroupNr << " bucket groups, " << kSlotNr << " slots each. "
-       << std::endl;
+    rh.refresh_subtables();
+    os << "RaceHashTable util: " << rh.utilization() << " with " << kDEntryNr
+       << " dir entries, " << kBucketGroupNr << " bucket groups, " << kSlotNr
+       << " slots each. " << std::endl;
     for (size_t i = 0; i < pow(2, rh.gd()); ++i)
     {
         // auto *sub_table = rh.meta_->entries[i];
         auto subtable = rh.subtable(i);
         auto *subtable_addr = rh.meta_->entries[i];
+        auto ld = subtable->ld();
 
         if (subtable != nullptr)
         {
-            os << "sub-table[" << i << "] at " << (void *) subtable_addr << ". "
-               << *subtable << std::endl;
-        }
-        else if (subtable_addr != nullptr)
-        {
-            os << "sub-table[" << i << "] at " << (void *) subtable_addr
-               << std::endl;
+            os << "subtable[" << i << "] ld: " << ld << " at "
+               << (void *) subtable_addr << ". " << *subtable << std::endl;
         }
         else
         {
-            os << "sub-table[" << i << "]: NULL " << std::endl;
+            os << "subtable[" << i << "]: NULL " << std::endl;
         }
     }
 

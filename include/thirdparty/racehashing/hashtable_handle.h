@@ -363,10 +363,10 @@ public:
         update_directory_cache(dctx);
         auto depth = cached_meta_.lds[subtable_idx];
         auto next_subtable_idx = subtable_idx | (1 << depth);
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
-            << "[race][expand] Expanding subtable[" << subtable_idx
-            << "] to subtable[" << next_subtable_idx
-            << "]. meta: " << cached_meta_;
+        // DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        //     << "[race][expand] Expanding subtable[" << subtable_idx
+        //     << "] to subtable[" << next_subtable_idx
+        //     << "]. meta: " << cached_meta_;
         auto subtable_remote_addr = cached_meta_.entries[subtable_idx];
 
         // okay, entered critical section
@@ -379,6 +379,8 @@ public:
                           << pow(2, next_depth) << ". Out of directory entry.";
             CHECK_EQ(expand_unlock_subtable_nodrain(subtable_idx), kOk);
             CHECK_EQ(rdma_ctx_->commit(), kOk);
+            DCHECK_EQ(cached_meta_.expanding[subtable_idx], 1);
+            cached_meta_.expanding[subtable_idx] = 0;
             return kNoMem;
         }
         // 2) Expand the directory first

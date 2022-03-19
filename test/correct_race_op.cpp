@@ -93,7 +93,7 @@ void test_capacity(size_t initial_subtable)
         {
             if (first_fail)
             {
-                LOG(INFO) << "First insert fail. " << rhh;
+                LOG(INFO) << "First insert fail. " << rh;
                 CHECK_GE(rh.utilization(), 0.5)
                     << "Expect to at least utilize 50%";
                 first_fail = false;
@@ -106,7 +106,7 @@ void test_capacity(size_t initial_subtable)
         }
         if (i == rh.max_capacity() / 2)
         {
-            LOG(INFO) << "Inserted a half: " << rhh;
+            LOG(INFO) << "Inserted a half: " << rh;
         }
     }
     CHECK_GE(rh.utilization(), 0.9)
@@ -118,7 +118,7 @@ void test_capacity(size_t initial_subtable)
 
     LOG(INFO) << "Checking integrity";
 
-    LOG(INFO) << rhh;
+    LOG(INFO) << rh;
     for (const auto &[key, expect_value] : inserted)
     {
         std::string get_val;
@@ -133,7 +133,6 @@ void test_capacity(size_t initial_subtable)
     }
     CHECK_EQ(rh.utilization(), 0)
         << "Removed all the items should result in 0 utilization";
-    LOG(INFO) << rhh;
     LOG(INFO) << rh;
 }
 
@@ -431,6 +430,30 @@ void test_expand_once_single_thread()
         std::string get_v;
         CHECK_EQ(rhh.get(k, get_v), kOk);
         CHECK_EQ(get_v, v);
+    }
+
+    // insert another to fill the hashtable
+    for (size_t i = 0; i < rh.max_capacity(); ++i)
+    {
+        fast_pseudo_fill_buf(key_buf, kKeySize);
+        fast_pseudo_fill_buf(val_buf, kValueSize);
+        std::string key(key_buf, kKeySize);
+        std::string value(val_buf, kValueSize);
+        auto rc = rhh.put(key, value);
+        CHECK(rc == kOk || rc == kNoMem);
+        if (rc == kOk)
+        {
+            inserted.emplace(key, value);
+        }
+        another_insert++;
+    }
+    LOG(WARNING) << "[bench] fill the hashtable: " << rh;
+
+    for (const auto &[k, v] : inserted)
+    {
+        std::string get_v;
+        CHECK_EQ(rhh.get(k, get_v), kOk);
+        CHECK_EQ(get_v, v);
         CHECK_EQ(rhh.del(k), kOk);
     }
     LOG(WARNING) << "[bench] after deleted. " << rh;
@@ -574,7 +597,7 @@ void test_burn_expand_single_thread()
         inserted.emplace(key, value);
         inserted_nr++;
     }
-    LOG(WARNING) << rh;
+    LOG(INFO) << rh;
     for (const auto &[k, v] : inserted)
     {
         ctx.key = k;
@@ -598,8 +621,7 @@ void test_burn_expand_single_thread()
         CHECK_EQ(got_v, v);
     }
 
-    // check integrity and tear down
-
+    // check integrity
     for (const auto &[k, v] : inserted)
     {
         ctx.key = k;
@@ -609,11 +631,49 @@ void test_burn_expand_single_thread()
         std::string got_v;
         CHECK_EQ(rhh.get(k, got_v), kOk) << "failed to get back key " << k;
         CHECK_EQ(got_v, v);
+    }
+    LOG(INFO) << "[bench] pass integrity check. See whether we can fill the "
+                 "hashtable to full";
+    size_t another_inserted_nr = 0;
+    for (size_t i = 0; i < rh.max_capacity(); ++i)
+    {
+        fast_pseudo_fill_buf(key_buf, kKeySize);
+        fast_pseudo_fill_buf(val_buf, kValueSize);
+        std::string key(key_buf, kKeySize);
+        std::string value(val_buf, kValueSize);
+
+        ctx.key = key;
+        ctx.value = value;
+        ctx.op = "put";
+
+        auto rc = rhh.put(key, value, &ctx);
+        CHECK(rc == kNoMem || rc == kOk);
+        if (rc == kOk)
+        {
+            inserted.emplace(key, value);
+            another_inserted_nr++;
+        }
+    }
+    LOG(INFO) << "[bench] after filling the hashtable: " << rh
+              << ", with another inserted: " << another_inserted_nr
+              << ", actual capacity: "
+              << 1.0 * (inserted_nr + another_inserted_nr) / rh.max_capacity();
+
+    // tear down
+    for (const auto &[k, v] : inserted)
+    {
+        ctx.key = k;
+        ctx.value = v;
+        ctx.op = "del";
+
         CHECK_EQ(rhh.del(k, &ctx), kOk) << "failed to delete key " << k;
     }
-    LOG(INFO) << "[bench] tear downed. table: " << rhh;
+    LOG(INFO) << "[bench] tear downed. table: " << rh;
     LOG(INFO) << "[bench] inserted_nr: " << inserted_nr
-              << ", table_size: " << rh.max_capacity();
+              << ", another_inserted: " << another_inserted_nr
+              << ", table_size: " << rh.max_capacity()
+              << " actual utilization: "
+              << 1.0 * (inserted_nr + another_inserted_nr) / rh.max_capacity();
 }
 
 int main(int argc, char *argv[])

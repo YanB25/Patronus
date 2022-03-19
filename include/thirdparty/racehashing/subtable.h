@@ -32,11 +32,15 @@ public:
         return BucketGroup<kSlotNr>::size_bytes() * kBucketGroupNr;
     }
 
-    SubTable(uint32_t ld, void *addr, size_t size, uint64_t hash_suffix)
-        : ld_(ld), addr_(addr), size_(size), hash_suffix_(hash_suffix)
+    SubTable(void *addr, size_t size) : addr_(addr), size_(size)
     {
         CHECK_GE(size_, size_bytes());
-        update_header(ld, hash_suffix);
+    }
+    uint32_t ld() const
+    {
+        auto first_bucket = Bucket<kSlotNr>(addr_);
+        auto &header = first_bucket.header();
+        return header.ld;
     }
 
     void update_header(uint32_t ld, uint32_t suffix)
@@ -94,10 +98,8 @@ public:
     }
 
 private:
-    uint32_t ld_;
     void *addr_;
     size_t size_;
-    uint64_t hash_suffix_;
 };
 
 template <size_t kBucketGroupNr, size_t kSlotNr>
