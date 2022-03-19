@@ -59,7 +59,7 @@ public:
         memcpy(&cached_meta_, rdma_buf, meta_size());
         LOG_IF(INFO, config::kEnableDebug)
             << "[race][trace] update_directory_cache: update cache to "
-            << cached_meta_;
+            << cached_meta_ << ". " << (dctx == nullptr ? nulldctx : *dctx);
         return kOk;
     }
 
@@ -100,7 +100,20 @@ public:
             return del(key, dctx);
         }
 
-        return remove_if_exists(slot_handles, key, dctx);
+        rc = remove_if_exists(slot_handles, key, dctx);
+        if (rc == kOk)
+        {
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+                << "[race][trace] del: rm at subtable[" << rounded_m << "]. "
+                << *dctx;
+        }
+        else
+        {
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+                << "[race][trace] del: not found at subtable[" << rounded_m
+                << "]. " << *dctx;
+        }
+        return rc;
     }
     RetCode remove_if_exists(const std::unordered_set<SlotHandle> slot_handles,
                              const Key &key,
@@ -138,7 +151,7 @@ public:
         {
             auto overflow_subtable_idx = round_to_bits(rounded_m, ld);
             auto rc = expand(overflow_subtable_idx, dctx);
-            if (rc == kNoMem)
+            if (rc == kNoMem || rc == kRetry)
             {
                 return rc;
             }
@@ -176,7 +189,6 @@ public:
             << "]. Expect 0 or 1, got " << r;
         if (r == 0)
         {
-            DCHECK_EQ(cached_meta_.expanding[subtable_idx], expect);
             DCHECK_EQ(desired, 1);
             cached_meta_.expanding[subtable_idx] = desired;
             return kOk;
@@ -670,9 +682,9 @@ public:
         if (slot_handles.size() >= 2)
         {
             std::unordered_set<SlotHandle> real_match_slot_handles;
-            CHECK_EQ(get_real_match_slots(
-                         slot_handles, key, real_match_slot_handles, dctx),
-                     kOk);
+            auto rc = get_real_match_slots(
+                slot_handles, key, real_match_slot_handles, dctx);
+            CHECK(rc == kOk || rc == kNotFound) << "Unexpected rc: " << rc;
             if (real_match_slot_handles.size() <= 1)
             {
                 return kOk;
@@ -859,38 +871,7 @@ public:
         }
         return kNoMem;
     }
-    // RetCode do_insert(SlotHandle slot_handle,
-    //                   SlotView new_slot,
-    //                   HashContext *dctx)
-    // {
-    //     uint64_t expect_val = slot_handle.val();
-    //     auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(8));
-    //     CHECK_EQ(rdma_ctx_->rdma_cas(slot_handle.remote_addr(),
-    //                                  expect_val,
-    //                                  new_slot.val(),
-    //                                  rdma_buf),
-    //              kOk);
-    //     CHECK_EQ(rdma_ctx_->commit(), kOk);
-    //     bool success = memcmp(rdma_buf, &expect_val, 8) == 0;
 
-    //     SlotView expect_slot(expect_val);
-    //     if (success)
-    //     {
-    //         CHECK(expect_slot.empty())
-    //             << "[trace][handle] the succeess of insert should happen on
-    //             an "
-    //                "empty slot";
-    //         DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
-    //             << "[race][handle] slot " << slot_handle << " update to "
-    //             << new_slot << *dctx;
-    //         return kOk;
-    //     }
-    //     DVLOG(4) << "[race][handle] do_update FAILED: new_slot " << new_slot;
-    //     DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
-    //         << "[race][trace][handle] do_update FAILED: cas failed. slot "
-    //         << slot_handle << *dctx;
-    //     return kRetry;
-    // }
     void *patronus_alloc(size_t size)
     {
         return malloc(size);

@@ -167,7 +167,7 @@ private:
 };
 inline std::ostream &operator<<(std::ostream &os, const SlotHandle &handle)
 {
-    os << "{SlotHandle: remote_addr: " << handle.addr_
+    os << "{SlotHandle: remote_addr: " << (void *) handle.addr_
        << ", slot_view: " << handle.slot_view() << "}";
     return os;
 }

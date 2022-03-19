@@ -4,10 +4,10 @@
 
 namespace patronus::hash::config
 {
-constexpr static bool kEnableDebug = false;
-constexpr static bool kEnableMemoryDebug = false;
-constexpr static bool kEnableLocateDebug = false;
-constexpr static bool kEnableExpandDebug = false;
+constexpr static bool kEnableDebug = true;
+constexpr static bool kEnableMemoryDebug = true;
+constexpr static bool kEnableLocateDebug = true;
+constexpr static bool kEnableExpandDebug = true;
 }  // namespace patronus::hash::config
 
 #endif

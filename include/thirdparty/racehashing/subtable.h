@@ -190,8 +190,11 @@ public:
                                                rdma_ctx,
                                                ret,
                                                dctx);
-                    CHECK_EQ(rc, kOk);
-                    return rc;
+                    CHECK(rc == kOk || rc == kRetry) << "Unexpected rc " << rc;
+                    if (rc == kOk)
+                    {
+                        return rc;
+                    }
                 }
                 else
                 {

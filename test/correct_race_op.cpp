@@ -312,6 +312,11 @@ void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
         allocator, conf);
 
     std::vector<std::thread> threads;
+    // maintain a shared_ptr copy here
+    // so that will not be dctor-ed when other threads are still running.
+    std::vector<typename RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>::
+                    Handle::pointer>
+        handles;
     for (size_t i = 0; i < thread_nr; ++i)
     {
         RaceHashingHandleConfig handle_conf;
@@ -322,6 +327,7 @@ void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
             rh->meta_addr(),
             handle_conf,
             RaceHashingRdmaContext::new_instance());
+        handles.push_back(handle);
         threads.emplace_back([tid = i, test_nr, handle, rh]() {
             test_thread<kDEntryNr, kBucketGroupNr, kSlotNr>(
                 rh, handle, tid, test_nr);
@@ -685,7 +691,7 @@ int main(int argc, char *argv[])
     // test_capacity(1);
     // test_capacity(4);
 
-    test_multithreads<4, 8, 8>(8, 1_M, false);
+    // test_multithreads<4, 8, 8>(8, 1_M, false);
 
     // test_expand_once_single_thread();
     // for (size_t i = 0; i < 100; ++i)
@@ -696,7 +702,7 @@ int main(int argc, char *argv[])
     // test_expand_multiple_single_thread();
     // test_burn_expand_single_thread();
 
-    // test_multithreads<16, 4, 4>(8, 10, true);
+    test_multithreads<16, 4, 4>(8, 10, true);
 
     LOG(INFO) << "PASS ALL TESTS";
     LOG(INFO) << "finished. ctrl+C to quit.";
