@@ -681,13 +681,13 @@ int main(int argc, char *argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    // test_basic(1);
-    // test_capacity(1);
-    // test_capacity(4);
+    test_basic(1);
+    test_capacity(1);
+    test_capacity(4);
 
     // test_multithreads<4, 8, 8>(8, 1_M, false);
 
-    // test_expand_once_single_thread();
+    test_expand_once_single_thread();
     // for (size_t i = 0; i < 100; ++i)
     // {
     //     test_expand_multiple_single_thread();
