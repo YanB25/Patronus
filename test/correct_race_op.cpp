@@ -112,9 +112,9 @@ void test_capacity(size_t initial_subtable)
     CHECK_GE(rh.utilization(), 0.9)
         << "Expect to have at least 90%% utilization";
 
-    LOG(INFO) << "Inserted " << succ_nr << ", failed: " << fail_nr
-              << ", ultilization: " << 1.0 * succ_nr / rh.max_capacity()
-              << ", success rate: " << 1.0 * succ_nr / (succ_nr + fail_nr);
+    LOG(WARNING) << "Inserted " << succ_nr << ", failed: " << fail_nr
+                 << ", ultilization: " << 1.0 * succ_nr / rh.max_capacity()
+                 << ", success rate: " << 1.0 * succ_nr / (succ_nr + fail_nr);
 
     LOG(INFO) << "Checking integrity";
 
@@ -413,13 +413,27 @@ void test_expand_once_single_thread()
         auto rc = rhh.put(key, value);
         if (rc == kNoMem)
         {
-            LOG(INFO) << "[bench] inserted another: " << another_insert
-                      << ". Table: " << rh;
+            LOG(WARNING) << "[bench] inserted another: " << another_insert
+                         << ". Table: " << rh;
             break;
+        }
+        else
+        {
+            CHECK_EQ(rc, kOk);
+            inserted.emplace(key, value);
         }
         DCHECK_EQ(rc, kOk);
         another_insert++;
     }
+
+    for (const auto &[k, v] : inserted)
+    {
+        std::string get_v;
+        CHECK_EQ(rhh.get(k, get_v), kOk);
+        CHECK_EQ(get_v, v);
+        CHECK_EQ(rhh.del(k), kOk);
+    }
+    LOG(WARNING) << "[bench] after deleted. " << rh;
 }
 
 void test_expand_multiple_single_thread()
@@ -560,6 +574,7 @@ void test_burn_expand_single_thread()
         inserted.emplace(key, value);
         inserted_nr++;
     }
+    LOG(WARNING) << rh;
     for (const auto &[k, v] : inserted)
     {
         ctx.key = k;
@@ -597,6 +612,8 @@ void test_burn_expand_single_thread()
         CHECK_EQ(rhh.del(k, &ctx), kOk) << "failed to delete key " << k;
     }
     LOG(INFO) << "[bench] tear downed. table: " << rhh;
+    LOG(INFO) << "[bench] inserted_nr: " << inserted_nr
+              << ", table_size: " << rh.max_capacity();
 }
 
 int main(int argc, char *argv[])
@@ -608,7 +625,7 @@ int main(int argc, char *argv[])
     // test_capacity(1);
     // test_capacity(4);
 
-    test_multithreads<4, 8, 8>(8, 1_M, false);
+    // test_multithreads<4, 8, 8>(8, 1_M, false);
 
     // test_expand_once_single_thread();
     // for (size_t i = 0; i < 100; ++i)
@@ -617,7 +634,7 @@ int main(int argc, char *argv[])
     // }
 
     // test_expand_multiple_single_thread();
-    // test_burn_expand_single_thread();
+    test_burn_expand_single_thread();
 
     // test_multithreads<16, 4, 4>(8, 10, true);
 

@@ -27,9 +27,11 @@ struct RaceHashingMeta
     static_assert(is_power_of_two(kDEntryNr));
     using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
 
+    // Take care before chaning the type
+    // client need the sizeof(T) to work right
     std::array<SubTableT *, kDEntryNr> entries;
     std::array<uint32_t, kDEntryNr> lds;
-    std::array<std::atomic<bool>, kDEntryNr> expanding;
+    std::array<std::atomic<uint64_t>, kDEntryNr> expanding;
     std::atomic<uint64_t> gd;
     // template <size_t kA, size_t kB, size_t kC>
     // std::ostream &operator<<(std::ostream &,
@@ -224,10 +226,16 @@ inline std::ostream &operator<<(
         // auto *sub_table = rh.meta_->entries[i];
         auto subtable = rh.subtable(i);
         auto *subtable_addr = rh.meta_->entries[i];
-        if (subtable)
+
+        if (subtable != nullptr)
         {
             os << "sub-table[" << i << "] at " << (void *) subtable_addr << ". "
                << *subtable << std::endl;
+        }
+        else if (subtable_addr != nullptr)
+        {
+            os << "sub-table[" << i << "] at " << (void *) subtable_addr
+               << std::endl;
         }
         else
         {

@@ -27,6 +27,7 @@ class RaceHashingHandleImpl
 {
 public:
     using SubTableHandleT = SubTableHandle<kBucketGroupNr, kSlotNr>;
+    using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
     using RaceHashingT = RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>;
     using pointer = std::shared_ptr<RaceHashingHandleImpl>;
 
@@ -136,7 +137,12 @@ public:
         if (rc == kNoMem && conf_.auto_expand)
         {
             auto overflow_subtable_idx = round_to_bits(rounded_m, ld);
-            CHECK_EQ(expand(overflow_subtable_idx, dctx), kOk);
+            auto rc = expand(overflow_subtable_idx, dctx);
+            if (rc == kNoMem)
+            {
+                return rc;
+            }
+            CHECK_EQ(rc, kOk);
             return put(key, value, dctx);
         }
         if (rc != kOk)
@@ -156,10 +162,481 @@ public:
         }
         return rc;
     }
-    RetCode expand(size_t subtable_id, HashContext *dctx)
+    RetCode expand_try_lock_subtable_drain(size_t subtable_idx)
     {
-        CHECK(false) << "TODO: " << subtable_id << ", " << dctx;
-        return kInvalid;
+        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(8));
+        auto remote = lock_remote_addr(subtable_idx);
+        uint64_t expect = 0;   // no lock
+        uint64_t desired = 1;  // lock
+        CHECK_EQ(rdma_ctx_->rdma_cas(remote, expect, desired, rdma_buf), kOk);
+        CHECK_EQ(rdma_ctx_->commit(), kOk);
+        uint64_t r = *(uint64_t *) rdma_buf;
+        CHECK(r == 0 || r == 1)
+            << "Unexpected value read from lock of subtable[" << subtable_idx
+            << "]. Expect 0 or 1, got " << r;
+        if (r == 0)
+        {
+            DCHECK_EQ(cached_meta_.expanding[subtable_idx], expect);
+            DCHECK_EQ(desired, 1);
+            cached_meta_.expanding[subtable_idx] = desired;
+            return kOk;
+        }
+        return kRetry;
+    }
+    uint64_t lock_remote_addr(size_t subtable_idx) const
+    {
+        DCHECK_LT(subtable_idx, kDEntryNr);
+        auto offset = offsetof(MetaT, expanding);
+        offset += subtable_idx * sizeof(uint64_t);
+        return table_meta_addr_ + offset;
+    }
+    RetCode expand_unlock_subtable_nodrain(size_t subtable_idx)
+    {
+        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(8));
+        auto remote = lock_remote_addr(subtable_idx);
+        *(uint64_t *) rdma_buf = 0;  // no lock
+        return rdma_ctx_->rdma_write(remote, (char *) rdma_buf, 8);
+    }
+    RetCode expand_write_entry_nodrain(size_t subtable_idx,
+                                       uint64_t subtable_remote_addr)
+    {
+        auto entry_size = sizeof(subtable_remote_addr);
+        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(entry_size));
+        *(uint64_t *) rdma_buf = subtable_remote_addr;
+        auto remote = entries_remote_addr(subtable_idx);
+        return rdma_ctx_->rdma_write(remote, (char *) rdma_buf, entry_size);
+    }
+    uint64_t entries_remote_addr(size_t subtable_idx) const
+    {
+        DCHECK_LT(subtable_idx, kDEntryNr)
+            << "make no sense to ask for overflowed addr";
+        auto offset = offsetof(MetaT, entries);
+        offset += subtable_idx * sizeof(SubTableT *);
+        return table_meta_addr_ + offset;
+    }
+    uint64_t ld_remote_addr(size_t subtable_idx) const
+    {
+        DCHECK_LT(subtable_idx, kDEntryNr);
+        auto offset = offsetof(MetaT, lds);
+        offset += subtable_idx * sizeof(uint32_t);
+        return table_meta_addr_ + offset;
+    }
+    RetCode expand_update_ld_nodrain(size_t subtable_idx, uint32_t ld)
+    {
+        // just uint32_t
+        // I am afraid that I will change the type of ld and ruins everything
+        DCHECK_LT(subtable_idx, kDEntryNr);
+        using ld_t =
+            typename std::remove_reference<decltype(cached_meta_.lds[0])>::type;
+        auto entry_size = sizeof(ld_t);
+        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(entry_size));
+        *(ld_t *) rdma_buf = ld;
+        auto remote = ld_remote_addr(subtable_idx);
+        return rdma_ctx_->rdma_write(remote, (char *) rdma_buf, entry_size);
+    }
+    uint64_t gd_remote_addr() const
+    {
+        return table_meta_addr_ + offsetof(MetaT, gd);
+    }
+    RetCode expand_cas_gd_drain(uint64_t expect, uint64_t desired)
+    {
+        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(8));
+        auto remote = gd_remote_addr();
+        CHECK_EQ(rdma_ctx_->rdma_cas(remote, expect, desired, rdma_buf), kOk);
+        CHECK_EQ(rdma_ctx_->commit(), kOk);
+        uint64_t r = *(uint64_t *) rdma_buf;
+        DCHECK_LE(r, log2(kDEntryNr))
+            << "The old gd should not larger than log2(entries_nr)";
+        bool success = r == expect;
+        if (success)
+        {
+            DCHECK_EQ(cached_meta_.gd, expect);
+            cached_meta_.gd = desired;
+            return kOk;
+        }
+        return kRetry;
+    }
+    RetCode expand_update_remote_bucket_header_drain(uint64_t st_addr,
+                                                     uint32_t ld,
+                                                     uint32_t suffix,
+                                                     HashContext *dctx)
+    {
+        // just a wrapper, this parameters to the ctor is not used.
+        SubTableHandleT subtable_handle(
+            ld, st_addr, SubTableHandleT::size_bytes(), suffix);
+        auto rc = subtable_handle.update_bucket_header_nodrain(
+            ld, suffix, *rdma_ctx_, dctx);
+        if (rc != kOk)
+        {
+            return rc;
+        }
+        return rdma_ctx_->commit();
+    }
+    RetCode expand_init_and_update_remote_bucket_header_drain(uint64_t st_addr,
+                                                              uint32_t ld,
+                                                              uint32_t suffix,
+                                                              HashContext *dctx)
+    {
+        // just a wrapper, this parameters to the ctor is not used.
+        SubTableHandleT subtable_handle(
+            ld, st_addr, SubTableHandleT::size_bytes(), suffix);
+        auto rc = subtable_handle.init_and_update_bucket_header_drain(
+            ld, suffix, *rdma_ctx_, dctx);
+        if (rc != kOk)
+        {
+            return rc;
+        }
+        return rdma_ctx_->commit();
+    }
+    RetCode expand_install_subtable_nodrain(size_t subtable_idx,
+                                            uint64_t new_remote_subtable)
+    {
+        auto size = sizeof(new_remote_subtable);
+        auto *rdma_buf = rdma_ctx_->get_rdma_buffer(size);
+        *(uint64_t *) rdma_buf = new_remote_subtable;
+        auto remote = entries_remote_addr(subtable_idx);
+        return rdma_ctx_->rdma_write(remote, (char *) rdma_buf, size);
+    }
+    /**
+     * pre-condition: the subtable of dst_staddr is all empty.
+     */
+    RetCode expand_migrate_subtable(uint64_t src_staddr,
+                                    uint64_t dst_staddr,
+                                    size_t bit,
+                                    HashContext *dctx)
+    {
+        std::unordered_set<SlotMigrateHandle> should_migrate;
+        auto st_size = SubTableT::size_bytes();
+        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(st_size));
+        CHECK_EQ(rdma_ctx_->rdma_read(src_staddr, rdma_buf, st_size), kOk);
+        CHECK_EQ(rdma_ctx_->commit(), kOk);
+        SubTableHandleT src_st(0, src_staddr, st_size, 0);
+        // CHECK_EQ(
+        //     src_st.locate_should_migrate(bit, *rdma_ctx_, should_migrate,
+        //     dctx), kOk);
+        for (size_t i = 0; i < SubTableHandleT::kTotalBucketNr; ++i)
+        {
+            auto remote_bucket_addr =
+                src_staddr + i * Bucket<kSlotNr>::size_bytes();
+            void *bucket_buffer_addr =
+                (char *) rdma_buf + i * Bucket<kSlotNr>::size_bytes();
+            BucketHandle<kSlotNr> b(remote_bucket_addr,
+                                    (char *) bucket_buffer_addr);
+            CHECK_EQ(b.should_migrate(bit, *rdma_ctx_, should_migrate, dctx),
+                     kOk);
+        }
+
+        SubTableHandleT dst_st(0, dst_staddr, st_size, 0);
+        // TODO: rethink about how batching can boost performance
+        for (auto slot_handle : should_migrate)
+        {
+            SlotHandle ret_slot(0, SlotView(0));
+            CHECK_EQ(dst_st.put_slot(slot_handle, *rdma_ctx_, &ret_slot, dctx),
+                     kOk);
+            auto rc =
+                src_st.try_del_slot(slot_handle.slot_handle(), *rdma_ctx_);
+            if (rc != kOk)
+            {
+                DCHECK_NE((uint64_t) ret_slot.ptr(), 0);
+                dst_st.del_slot(ret_slot, *rdma_ctx_);
+            }
+        }
+
+        return kOk;
+    }
+    // TODO: expand still has lots of problem
+    // When trying to expand to dst subtable, the concurrent clients can insert
+    // lots of items to make it full. Therefore cascaded expansion is required.
+    // The client can always find out cache stale and update their directory
+    // cache.
+    RetCode expand(size_t subtable_idx, HashContext *dctx)
+    {
+        CHECK_LT(subtable_idx, kDEntryNr);
+        // 0) try lock
+        auto rc = expand_try_lock_subtable_drain(subtable_idx);
+        if (rc != kOk)
+        {
+            return rc;
+        }
+        // 1) I think updating the directory cache is definitely necessary
+        // while expanding.
+        update_directory_cache(dctx);
+        auto depth = cached_meta_.lds[subtable_idx];
+        auto next_subtable_idx = subtable_idx | (1 << depth);
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] Expanding subtable[" << subtable_idx
+            << "] to subtable[" << next_subtable_idx
+            << "]. meta: " << cached_meta_;
+        auto subtable_remote_addr = cached_meta_.entries[subtable_idx];
+
+        // okay, entered critical section
+        auto next_depth = depth + 1;
+        auto expect_gd = gd();
+        if (pow(2, next_depth) > kDEntryNr)
+        {
+            DLOG(WARNING) << "[race][expand] (1) trying to expand to gd "
+                          << next_depth << " with entries "
+                          << pow(2, next_depth) << ". Out of directory entry.";
+            CHECK_EQ(expand_unlock_subtable_nodrain(subtable_idx), kOk);
+            CHECK_EQ(rdma_ctx_->commit(), kOk);
+            return kNoMem;
+        }
+        // 2) Expand the directory first
+        if (next_depth >= expect_gd)
+        {
+            // insert all the entries into the directory
+            // before updating gd
+            for (size_t i = 0; i < pow(2, next_depth); ++i)
+            {
+                if (cached_meta_.entries[i] == nullptr)
+                {
+                    auto from_subtable_idx = i & (~(1 << depth));
+                    DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                        << "[race][expand] (2) Update gd and directory: "
+                           "setting subtable["
+                        << i << "] to subtale[" << from_subtable_idx << "]. "
+                        << *dctx;
+                    uint64_t subtable_remote_addr =
+                        (uint64_t) cached_meta_.entries[from_subtable_idx];
+                    auto ld = cached_ld(from_subtable_idx);
+                    CHECK_EQ(
+                        expand_write_entry_nodrain(i, subtable_remote_addr),
+                        kOk);
+                    CHECK_EQ(expand_update_ld_nodrain(i, ld), kOk);
+                    // TODO(race): update cache here. Not sure if it is right
+                    cached_meta_.entries[i] =
+                        (SubTableT *) subtable_remote_addr;
+                    cached_meta_.lds[i] = ld;
+                }
+            }
+            CHECK_EQ(rdma_ctx_->commit(), kOk);
+
+            DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                << "[race][expand] (2) Update gd and directory: setting gd to "
+                << next_depth;
+            CHECK_EQ(expand_cas_gd_drain(expect_gd, next_depth), kOk);
+        }
+
+        CHECK_LT(next_subtable_idx, kDEntryNr);
+
+        // do some debug checks
+        auto *cached_meta_next_subtable =
+            cached_meta_.entries[next_subtable_idx];
+        auto *cached_meta_subtable = cached_meta_.entries[subtable_idx];
+        if (cached_meta_next_subtable != nullptr &&
+            cached_meta_next_subtable != cached_meta_subtable)
+        {
+            CHECK(false) << "Failed to extend: already have subtables here. "
+                            "Trying to expand subtable["
+                         << subtable_idx << "] to subtable["
+                         << next_subtable_idx
+                         << "]. But already exists subtable at "
+                         << (void *) cached_meta_next_subtable
+                         << ", which is not nullptr or "
+                         << (void *) cached_meta_subtable << " from subtable["
+                         << subtable_idx << "]"
+                         << ". depth: " << depth
+                         << ", (1<<depth): " << (1 << depth);
+        }
+
+        // 3) allocate subtable here
+        auto alloc_size = SubTableT::size_bytes();
+        uint64_t new_remote_subtable =
+            (uint64_t) rdma_ctx_->remote_alloc(alloc_size);
+        LOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] (3) expanding subtable[" << subtable_idx
+            << "] to next subtable[" << next_subtable_idx << "]. Allocated "
+            << alloc_size << " at " << (void *) new_remote_subtable;
+
+        // 4) init subtable: setup the bucket header
+        auto ld = next_depth;
+        auto suffix = next_subtable_idx;
+        LOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] (4) set up header for subtable["
+            << next_subtable_idx << "]. ld: " << ld
+            << ", suffix: " << next_subtable_idx;
+        // should remotely memset the buffer to zero
+        // then set up the header.
+        rc = expand_init_and_update_remote_bucket_header_drain(
+            new_remote_subtable, ld, suffix, dctx);
+        CHECK_EQ(rc, kOk);
+        cached_meta_.lds[next_subtable_idx] = ld;
+
+        // 5) insert the subtable into the directory AND lock the subtable.
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] (5) Lock subtable[" << next_subtable_idx
+            << "] at directory. Insert subtable "
+            << (void *) new_remote_subtable << " into directory. Update ld to "
+            << ld << " for subtable[" << subtable_idx << "] and subtable["
+            << next_subtable_idx << "]";
+        CHECK_EQ(expand_try_lock_subtable_drain(next_subtable_idx), kOk)
+            << "Should not be conflict with concurrent expand.";
+        CHECK_EQ(expand_install_subtable_nodrain(next_subtable_idx,
+                                                 new_remote_subtable),
+                 kOk);
+        CHECK_EQ(expand_update_ld_nodrain(subtable_idx, ld), kOk);
+        CHECK_EQ(expand_update_ld_nodrain(next_subtable_idx, ld), kOk);
+        CHECK_EQ(rdma_ctx_->commit(), kOk);
+        // update local cache
+        cached_meta_.entries[next_subtable_idx] =
+            (SubTableT *) new_remote_subtable;
+        cached_meta_.lds[subtable_idx] = ld;
+        cached_meta_.lds[next_subtable_idx] = ld;
+
+        // 6) move data.
+        // 6.1) update bucket suffix
+        DLOG_IF(INFO, config::kEnableExpandDebug)
+            << "[race][expand] (6.1) update bucket header for subtable["
+            << subtable_idx << "]. ld: " << ld << ", suffix: " << subtable_idx;
+        // auto *origin_subtable = entries_[subtable_idx];
+        // origin_subtable->update_header(ld, subtable_idx);
+        auto origin_subtable_remote_addr =
+            (uint64_t) cached_meta_.entries[subtable_idx];
+        CHECK_EQ(expand_update_remote_bucket_header_drain(
+                     origin_subtable_remote_addr, ld, subtable_idx, dctx),
+                 kOk);
+        cached_meta_.lds[subtable_idx] = ld;
+        // Before 6.1) Iterate all the entries in @entries_, check for any
+        // recursive updates to the entries.
+        // For example, when
+        // subtable_idx in {1, 5, 9, 13} pointing to the same LD = 2, suffix =
+        // 0b01, when expanding subtable 1 to 5, should also set 9 pointing to 1
+        // (not changed) and 13 pointing to 5 (changed)
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] (6.1) recursively checks all the entries "
+               "for further updates. "
+            << *dctx;
+        CHECK_EQ(expand_cascade_update_entries_drain(
+                     new_remote_subtable,
+                     (uint64_t) subtable_remote_addr,
+                     ld,
+                     round_to_bits(next_subtable_idx, ld),
+                     *rdma_ctx_,
+                     dctx),
+                 kOk);
+
+        // 6.3) insert all items from the old bucket to the new
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] (6.3) migrate slots from subtable["
+            << subtable_idx << "] to subtable[" << next_subtable_idx
+            << "] with the " << ld << "-th bit == 1. " << *dctx;
+        auto bits = ld;
+        CHECK_GE(bits, 1) << "Test the " << bits
+                          << "-th bits, which index from one.";
+        CHECK_EQ(expand_migrate_subtable(origin_subtable_remote_addr,
+                                         new_remote_subtable,
+                                         bits - 1,
+                                         dctx),
+                 kOk);
+
+        // 7) unlock
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] (7) Unlock subtable[" << next_subtable_idx
+            << "] and subtable[" << subtable_idx << "]. " << *dctx;
+        CHECK_EQ(expand_unlock_subtable_nodrain(next_subtable_idx), kOk);
+        CHECK_EQ(expand_unlock_subtable_nodrain(subtable_idx), kOk);
+        CHECK_EQ(rdma_ctx_->commit(), kOk);
+        cached_meta_.expanding[next_subtable_idx] = 0;
+        cached_meta_.expanding[subtable_idx] = 0;
+
+        if constexpr (debug())
+        {
+            print_latest_meta_image(dctx);
+        }
+
+        return kOk;
+    }
+    void print_latest_meta_image(HashContext *dctx)
+    {
+        auto *rdma_buf = rdma_ctx_->get_rdma_buffer(sizeof(MetaT));
+        CHECK_EQ(
+            rdma_ctx_->rdma_read(table_meta_addr_, rdma_buf, sizeof(MetaT)),
+            kOk);
+        CHECK_EQ(rdma_ctx_->commit(), kOk);
+        auto &meta = *(MetaT *) rdma_buf;
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand][result][debug] The latest remote meta: " << meta
+            << ". dctx: " << *dctx;
+        if constexpr (debug())
+        {
+            for (size_t i = 0; i < pow((size_t) 2, (size_t) meta.gd); ++i)
+            {
+                auto ld = meta.lds[i];
+                auto addr = meta.entries[i];
+                size_t ptr_nr = 0;
+                for (size_t t = 0; t < pow((size_t) 2, (size_t) meta.gd); ++t)
+                {
+                    if (meta.entries[t] == addr)
+                    {
+                        ptr_nr++;
+                    }
+                }
+                CHECK_EQ(ptr_nr, pow((ssize_t) 2, (ssize_t) meta.gd - ld))
+                    << "** If multithread, plz comment out me. subtable[" << i
+                    << "]: ld " << ld << ", gd " << meta.gd
+                    << ", number of ptr wrong.";
+            }
+        }
+    }
+    RetCode expand_cascade_update_entries_drain(
+        uint64_t next_subtable_addr,
+        uint64_t origin_subtable_addr,
+        uint32_t ld,
+        uint32_t suffix,
+        RaceHashingRdmaContext &rdma_ctx,
+        HashContext *dctx)
+    {
+        for (size_t i = 0; i < pow((size_t) 2, (size_t) cached_meta_.gd); ++i)
+        {
+            auto subtable_addr = (uint64_t) cached_meta_.entries[i];
+            auto rounded_i = round_to_bits(i, ld);
+            // DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            //     << "[race][trace] expand_cascade_update_entries_drain: "
+            //        "subtable["
+            //     << i << "] at " << (void *) subtable_addr
+            //     << ", test match with " << (void *) origin_subtable_addr
+            //     << ", rounded_i: " << rounded_i << ", test match with "
+            //     << suffix;
+            if (subtable_addr == origin_subtable_addr)
+            {
+                // if addr match, should update ld.
+                auto ld_remote = ld_remote_addr(i);
+                auto *ld_rdma_buf = rdma_ctx.get_rdma_buffer(sizeof(uint32_t));
+                *(uint32_t *) ld_rdma_buf = ld;
+                CHECK_EQ(rdma_ctx.rdma_write(
+                             ld_remote, ld_rdma_buf, sizeof(uint32_t)),
+                         kOk);
+                cached_meta_.lds[i] = ld;
+                DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                    << "[race][trace] expand_cascade_update_entries_drain: "
+                       "UPDATE LD "
+                       "subtable["
+                    << i << "] update LD to " << ld << ". " << *dctx;
+
+                // if suffix match, further update entries
+                if (rounded_i == suffix)
+                {
+                    // for entry
+                    auto *entry_rdma_buf =
+                        rdma_ctx.get_rdma_buffer(sizeof(next_subtable_addr));
+                    *(uint64_t *) entry_rdma_buf = next_subtable_addr;
+                    auto entry_remote = entries_remote_addr(i);
+                    CHECK_EQ(rdma_ctx.rdma_write(entry_remote,
+                                                 entry_rdma_buf,
+                                                 sizeof(next_subtable_addr)),
+                             kOk);
+                    DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                        << "[race][trace] expand_cascade_update_entries_drain: "
+                           "UPDATE ENTRY "
+                           "subtable["
+                        << i << "] update entry from "
+                        << (void *) origin_subtable_addr << " to "
+                        << (void *) next_subtable_addr << ". " << *dctx;
+                }
+            }
+        }
+        CHECK_EQ(rdma_ctx_->commit(), kOk);
+        return kOk;
     }
     RetCode phase_two_deduplicate(const Key &key,
                                   uint64_t hash,
@@ -291,10 +768,11 @@ public:
                      key, value, hash, *rdma_ctx_, &kv_block, &len, dctx),
                  kOk);
 
+        SlotView new_slot(fp, len, (char *) kv_block);
+
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_ctx_);
         CHECK_EQ(rdma_ctx_->commit(), kOk);
 
-        SlotView new_slot(fp, len, (char *) kv_block);
         DLOG_IF(INFO, config::kEnableMemoryDebug)
             << "[race][mem] new remote kv_block addr: " << (void *) kv_block
             << " with len: " << len
@@ -346,7 +824,7 @@ public:
         std::vector<BucketHandle<kSlotNr>> buckets;
         buckets.reserve(4);
         CHECK_EQ(cb.get_bucket_handle(buckets), kOk);
-        for (const auto &bucket : buckets)
+        for (auto &bucket : buckets)
         {
             RetCode rc;
             if ((rc = bucket.validate_staleness(ld, suffix, dctx)) != kOk)
@@ -364,8 +842,11 @@ public:
                 auto view = bucket.slot_view(idx);
                 if (view.empty())
                 {
-                    auto rc =
-                        do_insert(bucket.slot_handle(idx), new_slot, dctx);
+                    auto rc = bucket.do_insert(bucket.slot_handle(idx),
+                                               new_slot,
+                                               *rdma_ctx_,
+                                               nullptr,
+                                               dctx);
                     if (rc == kOk)
                     {
                         return kOk;
@@ -376,37 +857,38 @@ public:
         }
         return kNoMem;
     }
-    RetCode do_insert(SlotHandle slot_handle,
-                      SlotView new_slot,
-                      HashContext *dctx)
-    {
-        uint64_t expect_val = slot_handle.val();
-        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(8));
-        CHECK_EQ(rdma_ctx_->rdma_cas(slot_handle.remote_addr(),
-                                     expect_val,
-                                     new_slot.val(),
-                                     rdma_buf),
-                 kOk);
-        CHECK_EQ(rdma_ctx_->commit(), kOk);
-        bool success = memcmp(rdma_buf, &expect_val, 8) == 0;
+    // RetCode do_insert(SlotHandle slot_handle,
+    //                   SlotView new_slot,
+    //                   HashContext *dctx)
+    // {
+    //     uint64_t expect_val = slot_handle.val();
+    //     auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx_->get_rdma_buffer(8));
+    //     CHECK_EQ(rdma_ctx_->rdma_cas(slot_handle.remote_addr(),
+    //                                  expect_val,
+    //                                  new_slot.val(),
+    //                                  rdma_buf),
+    //              kOk);
+    //     CHECK_EQ(rdma_ctx_->commit(), kOk);
+    //     bool success = memcmp(rdma_buf, &expect_val, 8) == 0;
 
-        SlotView expect_slot(expect_val);
-        if (success)
-        {
-            CHECK(expect_slot.empty())
-                << "[trace][handle] the succeess of insert should happen on an "
-                   "empty slot";
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
-                << "[race][handle] slot " << slot_handle << " update to "
-                << new_slot << *dctx;
-            return kOk;
-        }
-        DVLOG(4) << "[race][handle] do_update FAILED: new_slot " << new_slot;
-        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
-            << "[race][trace][handle] do_update FAILED: cas failed. slot "
-            << slot_handle << *dctx;
-        return kRetry;
-    }
+    //     SlotView expect_slot(expect_val);
+    //     if (success)
+    //     {
+    //         CHECK(expect_slot.empty())
+    //             << "[trace][handle] the succeess of insert should happen on
+    //             an "
+    //                "empty slot";
+    //         DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+    //             << "[race][handle] slot " << slot_handle << " update to "
+    //             << new_slot << *dctx;
+    //         return kOk;
+    //     }
+    //     DVLOG(4) << "[race][handle] do_update FAILED: new_slot " << new_slot;
+    //     DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+    //         << "[race][trace][handle] do_update FAILED: cas failed. slot "
+    //         << slot_handle << *dctx;
+    //     return kRetry;
+    // }
     void *patronus_alloc(size_t size)
     {
         return malloc(size);

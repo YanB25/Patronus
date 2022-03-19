@@ -150,6 +150,14 @@ public:
     {
         return slot_view_.fp();
     }
+    size_t actual_len_bytes() const
+    {
+        return slot_view_.actual_len_bytes();
+    }
+    bool empty() const
+    {
+        return slot_view_.empty();
+    }
 
     friend std::ostream &operator<<(std::ostream &os, const SlotHandle &handle);
 
@@ -164,6 +172,64 @@ inline std::ostream &operator<<(std::ostream &os, const SlotHandle &handle)
     return os;
 }
 
+class SlotMigrateHandle
+{
+public:
+    SlotMigrateHandle(SlotHandle slot, uint64_t hash)
+        : slot_handle_(slot), hash_(hash)
+    {
+    }
+    uint64_t remote_addr() const
+    {
+        return slot_handle_.remote_addr();
+    }
+    bool operator<(const SlotMigrateHandle &rhs) const
+    {
+        return slot_handle_ < rhs.slot_handle_;
+    }
+    bool operator==(const SlotMigrateHandle &rhs) const
+    {
+        return slot_handle_ == rhs.slot_handle_;
+    }
+    SlotHandle slot_handle() const
+    {
+        return slot_handle_;
+    }
+    SlotView slot_view() const
+    {
+        return slot_handle_.slot_view();
+    }
+    SlotView view_after_clear() const
+    {
+        return slot_handle_.view_after_clear();
+    }
+    uint64_t val() const
+    {
+        return slot_handle_.val();
+    }
+
+    uint64_t hash() const
+    {
+        return hash_;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os,
+                                    const SlotMigrateHandle &handle);
+
+private:
+    uint64_t addr_;
+    SlotHandle slot_handle_;
+    uint64_t hash_;
+};
+inline std::ostream &operator<<(std::ostream &os,
+                                const SlotMigrateHandle &handle)
+{
+    os << "{SlotMigrateHandle: remote_addr: " << handle.addr_
+       << ", slot_handle: " << handle.slot_handle()
+       << ", hash: " << pre_hash(handle.hash()) << "}";
+    return os;
+}
+
 }  // namespace patronus::hash
 
 namespace std
@@ -174,6 +240,14 @@ struct hash<patronus::hash::SlotHandle>
     std::size_t operator()(const patronus::hash::SlotHandle &v) const
     {
         return v.remote_addr();
+    }
+};
+template <>
+struct hash<patronus::hash::SlotMigrateHandle>
+{
+    std::size_t operator()(const patronus::hash::SlotMigrateHandle &v) const
+    {
+        return v.hash();
     }
 };
 

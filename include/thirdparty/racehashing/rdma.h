@@ -78,7 +78,7 @@ public:
             << size;
         return ret;
     }
-    RetCode rdma_read(uint64_t addr, char *rdma_buf, size_t size)
+    RetCode rdma_read(uint64_t addr, void *rdma_buf, size_t size)
     {
         addr = adapt_to_remote_addr(addr);
         RdmaContextOp op;
@@ -94,7 +94,7 @@ public:
         ops_.emplace_back(std::move(op));
         return kOk;
     }
-    RetCode rdma_write(uint64_t addr, const char *rdma_buf, size_t size)
+    RetCode rdma_write(uint64_t addr, const void *rdma_buf, size_t size)
     {
         addr = adapt_to_remote_addr(addr);
         RdmaContextOp op;
@@ -132,7 +132,9 @@ public:
             free(buf);
         }
         LOG_IF(WARNING, remote_allocated_buffers_.size() != 0)
-            << "[race][rdma] Possible memory leak. Out-going nr: "
+            << "[race][rdma] Possible memory leak. May be false positive when "
+               "enable rehash.. "
+               "Out-going remote buffer nr: "
             << remote_allocated_buffers_.size();
     }
 

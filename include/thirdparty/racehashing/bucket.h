@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "./conf.h"
+#include "./kv_block.h"
+#include "./rdma.h"
 #include "./slot.h"
 #include "Common.h"
 #include "util/Rand.h"
@@ -112,6 +114,97 @@ public:
     constexpr static size_t max_item_nr()
     {
         return kDataSlotNr;
+    }
+    RetCode do_insert(SlotHandle slot_handle,
+                      SlotView new_slot,
+                      RaceHashingRdmaContext &rdma_ctx,
+                      SlotHandle *ret_slot,
+                      HashContext *dctx)
+    {
+        uint64_t expect_val = slot_handle.val();
+        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(8));
+        CHECK_EQ(rdma_ctx.rdma_cas(slot_handle.remote_addr(),
+                                   expect_val,
+                                   new_slot.val(),
+                                   rdma_buf),
+                 kOk);
+        CHECK_EQ(rdma_ctx.commit(), kOk);
+        bool success = memcmp(rdma_buf, &expect_val, 8) == 0;
+
+        SlotView expect_slot(expect_val);
+        if (success)
+        {
+            CHECK(expect_slot.empty())
+                << "[trace][handle] the succeess of insert should happen on an "
+                   "empty slot";
+            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+                << "[race][handle] slot " << slot_handle << " update to "
+                << new_slot << *dctx;
+            // set ret_slot here
+            if (ret_slot)
+            {
+                *ret_slot = SlotHandle(slot_handle.remote_addr(),
+                                       slot_handle.slot_view());
+            }
+            return kOk;
+        }
+        DVLOG(4) << "[race][handle] do_update FAILED: new_slot " << new_slot;
+        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            << "[race][trace][handle] do_update FAILED: cas failed. slot "
+            << slot_handle << *dctx;
+        return kRetry;
+    }
+    RetCode should_migrate(size_t bit,
+                           RaceHashingRdmaContext &rdma_ctx,
+                           std::unordered_set<SlotMigrateHandle> &ret,
+                           HashContext *dctx)
+    {
+        for (size_t i = 1; i < kSlotNr; ++i)
+        {
+            auto h = slot_handle(i);
+            if (h.empty())
+            {
+                continue;
+            }
+            auto kvblock_remote_addr = (uint64_t) h.ptr();
+            // we don't need the key and value content
+            // just the buffered hash.
+            auto kvblock_len = sizeof(KVBlock);
+            auto *rdma_buf =
+                DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(kvblock_len));
+            CHECK_EQ(
+                rdma_ctx.rdma_read(kvblock_remote_addr, rdma_buf, kvblock_len),
+                kOk);
+            CHECK_EQ(rdma_ctx.commit(), kOk);
+            KVBlock &kv_block = *(KVBlock *) rdma_buf;
+            auto hash = kv_block.hash;
+            if (hash & (1 << bit))
+            {
+                DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                    << "[race][trace] should_migrate: slot " << h
+                    << " should migrate for tested bit " << bit;
+                ret.insert(SlotMigrateHandle(h, hash));
+            }
+        }
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][trace] Bucket::should_migrate: collected migrate "
+               "entries (accumulated): "
+            << ret.size() << ". " << *dctx;
+        return kOk;
+    }
+    RetCode update_header_nodrain(uint32_t ld,
+                                  uint32_t suffix,
+                                  RaceHashingRdmaContext &rdma_ctx,
+                                  HashContext *dctx)
+    {
+        // header is at the first of the addr.
+        std::ignore = dctx;
+        auto *rdma_buf =
+            DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(sizeof(BucketHeader)));
+        auto &header = *(BucketHeader *) rdma_buf;
+        header.ld = ld;
+        header.suffix = suffix;
+        return rdma_ctx.rdma_write(addr_, rdma_buf, sizeof(BucketHeader));
     }
 
     uint64_t slot_remote_addr(size_t idx) const
