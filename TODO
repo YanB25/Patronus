@@ -149,6 +149,7 @@ NO MORE. That should be easy.
     - The client relinquish its lease, but not de-allocating the memory
     - The client get_rwlease the second time: bind the memory directly and RW.
     - The client finally free the memory
+- Make Lease only movable. Copying may be too expensive.
 
 If all the things above finish, I can move on to adopt the uPaxos!
 

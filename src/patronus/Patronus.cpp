@@ -825,9 +825,8 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
         ret_lease.node_id_ = resp->cid.node_id;
         ret_lease.buffer_size_ = request->size;
         ret_lease.header_size_ = sizeof(ProtectionRegion);
-        ret_lease.rkey_0_ = resp->rkey_0;
         ret_lease.header_rkey_ = resp->rkey_header;
-        ret_lease.cur_rkey_ = ret_lease.rkey_0_;
+        ret_lease.cur_rkey_ = resp->rkey_0;
         ret_lease.begin_term_ = resp->begin_term;
         ret_lease.ns_per_unit_ = resp->ns_per_unit;
         // TODO(patronus): without negotiate, @cur_unit_nr set to 1

@@ -77,13 +77,14 @@ public:
         dir_id_ = rhs.dir_id_;
         header_size_ = rhs.header_size_;
         buffer_size_ = rhs.buffer_size_;
-        rkey_0_ = rhs.rkey_0_;
         cur_rkey_ = rhs.cur_rkey_;
         header_rkey_ = rhs.header_rkey_;
         begin_term_ = rhs.begin_term_;
         ns_per_unit_ = rhs.ns_per_unit_;
         aba_unit_nr_to_ddl_ = rhs.aba_unit_nr_to_ddl_;
         ddl_term_ = rhs.ddl_term_;
+        no_gc_ = rhs.no_gc_;
+        cur_unit_nr_ = rhs.cur_unit_nr_;
 
         status_ = AcquireRequestStatus::kReserved;
         ready_ = false;
@@ -134,7 +135,6 @@ private:
         status_ = AcquireRequestStatus::kReserved;
         id_ = 0;
         cur_rkey_ = 0;
-        rkey_0_ = 0;
         ddl_term_ = 0;
     }
 
@@ -167,7 +167,6 @@ private:
     size_t dir_id_{0};
     size_t buffer_size_{0};
     size_t header_size_{0};
-    rkey_t rkey_0_{0};
     rkey_t cur_rkey_{0};
     rkey_t header_rkey_{0};
 

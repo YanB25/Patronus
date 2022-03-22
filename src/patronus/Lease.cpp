@@ -9,7 +9,7 @@ std::ostream &operator<<(std::ostream &os, const Lease &lease)
        << ", header_addr: " << (void *) lease.header_addr_
        << ", node: " << lease.node_id_ << ", dir_id: " << lease.dir_id_
        << ", header: " << lease.header_size_
-       << ", buffer: " << lease.buffer_size_ << ", rkey_0: " << lease.rkey_0_
+       << ", buffer: " << lease.buffer_size_
        << ", cur_rkey: " << lease.cur_rkey_
        << ", header_rkey: " << lease.header_rkey_
        << ", begin_term_: " << lease.begin_term_
