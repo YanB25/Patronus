@@ -8,6 +8,7 @@
 
 // Two nodes
 // one node issues cas operations
+DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;

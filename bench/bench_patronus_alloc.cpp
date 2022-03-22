@@ -469,7 +469,7 @@ void bench_patronus_alloc(Patronus::pointer patronus,
 {
     uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kTypeAllocation |
                            (uint8_t) AcquireRequestFlag::kNoGc;
-    uint8_t relinquish_flag = 0;
+    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kTypeDeallocation;
     return bench_template("alloc w(unbind)",
                           patronus,
                           bar,
@@ -495,7 +495,8 @@ void bench_patronus_alloc_no_unbind(Patronus::pointer patronus,
 {
     uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kTypeAllocation |
                            (uint8_t) AcquireRequestFlag::kNoGc;
-    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind |
+                              (uint8_t) LeaseModifyFlag::kTypeDeallocation;
     return bench_template("alloc w/o(unbind)",
                           patronus,
                           bar,

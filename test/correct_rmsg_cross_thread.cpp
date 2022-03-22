@@ -8,6 +8,8 @@
 #include "boost/thread/barrier.hpp"
 #include "util/monitor.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 // Two nodes
 // one node issues cas operations
 

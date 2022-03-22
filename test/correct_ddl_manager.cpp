@@ -5,6 +5,8 @@
 #include "Common.h"
 #include "patronus/DDLManager.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 using namespace define::literals;
 
 constexpr static size_t kTestTime = 1_M;

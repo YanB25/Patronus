@@ -913,6 +913,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     {
         with_pr = false;
     }
+    // TODO(Patronus): with kTypeAllocation, will auto disable pr.
+    // Is it correct?
     if (type_alloc)
     {
         with_pr = false;
@@ -1006,8 +1008,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                             (uint64_t) DCHECK_NOTNULL(object_addr),
                             req->size,
                             access_flag);
-            DVLOG(4) << "[patronus] Bind mw for buffer (debug_no_bind_pr or "
-                        "type_alloc). addr "
+            DVLOG(4) << "[patronus] Bind mw for buffer. addr "
                      << (void *) object_addr
                      << "(dsm_offset: " << object_dsm_offset
                      << "), size: " << req->size << " with access flag "
@@ -2082,7 +2083,8 @@ void Patronus::task_gc_lease(uint64_t lease_id,
 
     bool with_pr = lease_ctx->with_pr;
     bool with_buf = lease_ctx->with_buf;
-    bool type_alloc = lease_ctx->type_alloc;
+    bool type_dealloc = flag & (uint8_t) LeaseModifyFlag::kTypeDeallocation;
+    bool is_type_alloc = lease_ctx->type_alloc;
 
     uint64_t protection_region_id = 0;
     ProtectionRegion *protection_region = nullptr;
@@ -2275,8 +2277,16 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         auto slot_id = lease_ctx->key_slot_id;
         lock_manager_.unlock(bucket_id, slot_id);
     }
-    if (type_alloc)
+    if (type_dealloc)
     {
+        CHECK(is_type_alloc)
+            << "** Currently patronus does not allow cross-client "
+               "allocation/deallocation. "
+               "It could. so you can comment me out later."
+               "This piece of memory is not allocated "
+               "from the requesting client. lease_ctx.cid"
+            << lease_ctx->client_cid << ", cid: " << cid
+            << ", lease_id: " << lease_id;
         patronus_free((void *) lease_ctx->addr_to_bind, lease_ctx->buffer_size);
     }
 

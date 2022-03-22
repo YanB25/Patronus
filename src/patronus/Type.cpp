@@ -211,6 +211,11 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
     {
         os << "force-unbind, ";
     }
+    bool dealloc = flag.flag & (uint8_t) LeaseModifyFlag::kTypeDeallocation;
+    if (dealloc)
+    {
+        os << "de-alloc";
+    }
     bool reserve = flag.flag & (uint8_t) LeaseModifyFlag::kReserved;
     DCHECK(!reserve);
 

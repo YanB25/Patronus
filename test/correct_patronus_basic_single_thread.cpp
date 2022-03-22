@@ -9,6 +9,8 @@
 
 using namespace std::chrono_literals;
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 // Two nodes
 // one node issues cas operations
 

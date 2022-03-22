@@ -33,6 +33,8 @@ using namespace patronus;
 constexpr uint16_t kClientNodeId = 0;
 constexpr uint32_t kMachineNr = 2;
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 void client(patronus::Patronus::pointer p)
 {
     // okay, continue unit test

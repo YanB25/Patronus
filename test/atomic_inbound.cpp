@@ -4,6 +4,8 @@
 #include "Timer.h"
 #include "zipf.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 /*
 ./restartMemc.sh && /usr/local/openmpi/bin/mpiexec --allow-run-as-root -hostfile
 ./host  -np 9 ./atomic_inbound 9 4 0 0 8
@@ -208,6 +210,9 @@ void read_args(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+    google::InitGoogleLogging(argv[0]);
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+
     bindCore(0);
 
     read_args(argc, argv);

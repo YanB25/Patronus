@@ -6,6 +6,8 @@
 #include "boost/coroutine2/all.hpp"
 #include "util/monitor.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 constexpr static size_t kTestTime = 1 * define::M;
 constexpr static size_t kCoroNr = 16;
 constexpr static size_t kLargeStackSize = 16 * define::MB;

@@ -25,6 +25,8 @@ std::ostream &operator<<(std::ostream &os,
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 using namespace define::literals;
 using namespace patronus;
 

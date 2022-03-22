@@ -8,6 +8,8 @@
 #include "Common.h"
 #include "patronus/LockManager.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 using namespace define::literals;
 constexpr static size_t kTestSize = 1_M;
 

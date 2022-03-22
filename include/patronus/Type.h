@@ -193,7 +193,8 @@ enum class LeaseModifyFlag : uint8_t
 {
     kNoRelinquishUnbind = 1 << 0,
     kForceUnbind = 1 << 1,
-    kReserved = 1 << 2,
+    kTypeDeallocation = 1 << 2,
+    kReserved = 1 << 3,
 };
 struct LeaseModifyFlagOut
 {

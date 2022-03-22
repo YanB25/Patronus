@@ -8,6 +8,8 @@
 
 using namespace define::literals;
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);

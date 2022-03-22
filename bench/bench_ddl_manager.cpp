@@ -8,6 +8,8 @@
 
 using namespace define::literals;
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 void test_handle_speed(size_t test_size, size_t interval_us)
 {
     using namespace std::chrono_literals;

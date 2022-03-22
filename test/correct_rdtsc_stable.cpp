@@ -9,6 +9,8 @@
 #include "util/PerformanceReporter.h"
 using namespace std::chrono_literals;
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 constexpr static size_t kThreadNr = 8;
 [[maybe_unused]] constexpr static double kScale = 1.0;
 

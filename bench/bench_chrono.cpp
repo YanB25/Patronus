@@ -9,6 +9,8 @@
 
 using namespace define::literals;
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 std::map<std::chrono::time_point<std::chrono::steady_clock>, std::string>
     time_to_str;
 

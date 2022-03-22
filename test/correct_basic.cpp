@@ -5,6 +5,8 @@
 #include "Timer.h"
 #include "util/monitor.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 // Two nodes
 // one node issues cas operations
 
@@ -16,6 +18,7 @@ int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
+
     VLOG(1) << "It is 1 vlog";
     VLOG(2) << "It is 2 vlog";
     VLOG(3) << "It is 3 vlog";

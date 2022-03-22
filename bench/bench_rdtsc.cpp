@@ -6,6 +6,7 @@
 #include "util/monitor.h"
 
 constexpr static size_t kTestTime = 100 * define::M;
+DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 int main(int argc, char *argv[])
 {

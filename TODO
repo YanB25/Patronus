@@ -121,22 +121,34 @@ FUTURES:
         - Don't access lease parallely. i.e., use a lock
         - respect to lease.dir_id_. Any modify/query/ops hit to the original dir_id_.
 - The support of sync/async get_[rw]lease API, which supports fairness (request queuing)
-- The support of memory allocation. Better be interesting and relate to other guidelines/designs.
+[-] The support of memory allocation. Better be interesting and relate to other guidelines/designs.
 [-] Bench: the time of registering S GB MR totally, with V each time.
 - Checking: What about the rdtsc of ARM core? Is it constant? Is it stable across core?
 - Is `Lease` thread-safe? Can I make it thread-safe?
 [-] Port RapidCSV or Dataframe into this proj.
-- What is the extreme throughput of bind_mw? What is the bottleneck? Is it really scalable according to CPU core? Should figure it out. Most important: The max throughput one machine can provide. I *think* the bottleneck should be on the NIC.
+[-] What is the extreme throughput of bind_mw? What is the bottleneck? Is it really scalable according to CPU core? Should figure it out. Most important: The max throughput one machine can provide. I *think* the bottleneck should be on the NIC.
 
 2/11-2/16 go to Sanya. 2/17 write dairy and sync my photos. Not working.
 
 NO MORE. That should be easy.
 
 2/18-2/19 I think two days may be enough and safe.
-- read papers that @WQ has send to me.
+[-] read papers that @WQ has send to me.
 
 2/20 Talk to @WQ and starts to write the paper
 2/21-2/23 Write the basic story, time-sync and impls of the paper.
+
+- 20220322: many test cases from patronus seems to have problems. Fix them.
+- Patronus API modification: Add deallocation API
+    - Alloc only, Alloc + perm, Perm only. Free only, free + perm, perm only.
+    - Yes, Allocation implies permission granting. However, deallocation does NOT necessarily imply permission modification
+    - So we need an API for free-ing the memory ONLY. Without touching any lease_id, lease_ctx stuffs
+    - Should be easy. Add a flag and see Patronus::handle_request_lease_relinquish
+- correct_patronus_alloc: do the following tests
+    - One client get_rwlease by allocation semantics
+    - The client relinquish its lease, but not de-allocating the memory
+    - The client get_rwlease the second time: bind the memory directly and RW.
+    - The client finally free the memory
 
 If all the things above finish, I can move on to adopt the uPaxos!
 

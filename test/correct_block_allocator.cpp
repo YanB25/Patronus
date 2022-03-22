@@ -7,6 +7,8 @@
 #include "patronus/memory/slab_allocator.h"
 #include "util/monitor.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 using namespace patronus::mem;
 
 void test_4kb_2mb(SlabAllocator &allocator)
@@ -168,8 +170,8 @@ int main(int argc, char *argv[])
 
     LOG(INFO) << "Pass burning, start complex test";
     SlabAllocatorConfig complex_conf;
-    complex_conf.block_class = {4_KB, 2_MB, 512_MB, 1_GB};
-    complex_conf.block_ratio = {1.0 / 8, 1.0 / 8, 1.0 / 8, 3.0 / 8};
+    complex_conf.block_class = {256, 4_KB, 2_MB, 512_MB, 1_GB};
+    complex_conf.block_ratio = {2.0 / 8, 1.0 / 8, 1.0 / 8, 1.0 / 8, 3.0 / 8};
     SlabAllocator complex_alloc(addr, 16_GB, complex_conf);
     LOG(INFO) << "[bench] complex allocator: " << complex_alloc;
     test_complex(complex_alloc);

@@ -6,9 +6,6 @@
 #include "util/Rand.h"
 #include "util/monitor.h"
 
-// Two nodes
-// one node issues cas operations
-
 constexpr uint16_t kClientNodeId = 0;
 // constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;

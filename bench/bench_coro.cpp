@@ -4,6 +4,8 @@
 #include "Timer.h"
 #include "util/monitor.h"
 
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
 using namespace define::literals;
 
 constexpr static size_t kTestTime = 1 * define::M;
