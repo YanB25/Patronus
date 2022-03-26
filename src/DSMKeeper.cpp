@@ -382,11 +382,11 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
                        &dirCon[k]->ctx);
             remote.dirToAppAh[k][i] = DCHECK_NOTNULL(
                 ibv_create_ah(CHECK_NOTNULL(dirCon[k]->ctx.pd), &ahAttr));
-            LOG(INFO) << "[debug] creating dirToAppAh[" << k << "][" << i
-                      << "] val " << (void *) remote.dirToAppAh[k][i]
-                      << " for node " << remoteID << ". bind with ctx "
-                      << (void *) &dirCon[k]->ctx << ", with pd "
-                      << (void *) dirCon[k]->ctx.pd;
+            // LOG(INFO) << "[debug] creating dirToAppAh[" << k << "][" << i
+            //           << "] val " << (void *) remote.dirToAppAh[k][i]
+            //           << " for node " << remoteID << ". bind with ctx "
+            //           << (void *) &dirCon[k]->ctx << ", with pd "
+            //   << (void *) dirCon[k]->ctx.pd;
         }
     }
 }

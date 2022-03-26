@@ -588,7 +588,8 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
     int ret = ibv_bind_mw(qp, mw, &mw_bind);
     // auto then = std::chrono::steady_clock::now();
     // auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(then -
-    // now).count(); LOG_FIRST_N(INFO, 200) << "[debug] bind mw latency: " << ns
+    // now).count();
+    // LOG_FIRST_N(INFO, 200) << "[debug] bind mw latency: " << ns
     // << " ns";
     if (ret == EINVAL)
     {

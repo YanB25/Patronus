@@ -1206,12 +1206,12 @@ handle_response:
                         lease_id, cid, aba_unit_to_ddl, 0 /* flag */, ctx);
                 });
 
-            DVLOG(4) << "[debug] get client require ns " << req->required_ns
-                     << ", for key: " << req->key
-                     << ", ns_per_unit: " << ns_per_unit
-                     << ", at patronus_now: " << patronus_now
-                     << ", patronus_ddl_term: " << patronus_ddl_term
-                     << ", epsilon: " << time_syncer_->epsilon();
+            // DVLOG(4) << "[debug] get client require ns " << req->required_ns
+            //          << ", for key: " << req->key
+            //          << ", ns_per_unit: " << ns_per_unit
+            //          << ", at patronus_now: " << patronus_now
+            //          << ", patronus_ddl_term: " << patronus_ddl_term
+            //          << ", epsilon: " << time_syncer_->epsilon();
 
             resp_msg->begin_term = patronus_now.term();
             resp_msg->ns_per_unit = ns_per_unit;
