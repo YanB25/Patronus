@@ -222,3 +222,10 @@ Should add some tests.
     - no difference
 [-] bring coroutine into reg_mw cases
     - got x2 performance
+
+
+
+Current TODOs:
+- PASS the test_all.sh, let patronus being okay
+- go back to branch feat/rdma-race, make sure the modification to keeper is not harmful
+- bench the correctness/performance of put/get/barrier performance. It is useful in racehashing exprs, especially in sharing the meta address of race hashing.
