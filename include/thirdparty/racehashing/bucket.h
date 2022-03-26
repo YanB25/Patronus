@@ -9,7 +9,7 @@
 
 #include "./conf.h"
 #include "./kv_block.h"
-#include "./rdma.h"
+#include "./mock_rdma_adaptor.h"
 #include "./slot.h"
 #include "Common.h"
 #include "util/Rand.h"

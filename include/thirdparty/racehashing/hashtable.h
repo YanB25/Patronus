@@ -7,7 +7,7 @@
 #include "./bucket.h"
 #include "./bucket_group.h"
 #include "./kv_block.h"
-#include "./rdma.h"
+#include "./mock_rdma_adaptor.h"
 #include "./slot.h"
 #include "./subtable.h"
 #include "./utils.h"

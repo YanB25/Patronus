@@ -7,7 +7,7 @@
 #include <cstring>
 
 #include "./hashtable.h"
-#include "./rdma.h"
+#include "./mock_rdma_adaptor.h"
 #include "./utils.h"
 #include "Common.h"
 

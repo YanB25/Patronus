@@ -6,7 +6,7 @@
 #include <cstdint>
 
 #include "./bucket.h"
-#include "./rdma.h"
+#include "./mock_rdma_adaptor.h"
 
 namespace patronus::hash
 {
