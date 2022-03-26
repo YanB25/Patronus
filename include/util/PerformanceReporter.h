@@ -29,6 +29,14 @@ public:
     {
         return absolute_avg_;
     }
+    double sum() const
+    {
+        return num_;
+    }
+    double abs_sum() const
+    {
+        return absolute_num_;
+    }
 
 private:
     double num_{0};
@@ -58,6 +66,14 @@ public:
     T abs_min() const
     {
         return abs_min_;
+    }
+    T sum() const
+    {
+        return avg_.sum();
+    }
+    T abs_sum() const
+    {
+        return avg_.abs_sum();
     }
     T max() const
     {

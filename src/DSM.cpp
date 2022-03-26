@@ -103,7 +103,6 @@ DSM::~DSM()
 {
     for (size_t node_id = 0; node_id < remoteInfo.size(); ++node_id)
     {
-        LOG(INFO) << "Destroying for node_id " << node_id;
         remoteInfo[node_id].destroy();
     }
 }

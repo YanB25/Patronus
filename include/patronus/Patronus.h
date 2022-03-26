@@ -308,6 +308,14 @@ public:
     {
         return 0;
     }
+    size_t lease_buffer_size() const
+    {
+        return conf_.lease_buffer_size;
+    }
+    size_t alloc_buffer_size() const
+    {
+        return conf_.alloc_buffer_size;
+    }
 
 private:
     PatronusConfig conf_;

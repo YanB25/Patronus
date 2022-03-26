@@ -183,7 +183,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     LOG_IF(ERROR, fail_to_unbind_m.max() > 0)
         << "[bench] in some tests, server fails to expire the lease "
            "immediately. fail_to_unbind_nr: "
-        << fail_to_unbind_m;
+        << fail_to_unbind_m << ". failed_nr: " << fail_to_unbind_m.sum();
 
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;

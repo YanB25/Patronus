@@ -29,7 +29,7 @@ thread_local CoroCall master;
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
 
-constexpr static auto kInitialLeasePeriod = 50us;
+constexpr static auto kInitialLeasePeriod = 100us;
 constexpr static auto kExtendLeasePeriod = 10ms;
 
 using namespace std::chrono_literals;
@@ -75,8 +75,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
     for (size_t i = 0; i < kTestTime; ++i)
     {
-        auto max_key = dsm->buffer_size() / sizeof(Object);
-        auto key = rand() % max_key;
+        auto max_key = p->lease_buffer_size() / sizeof(Object);
+        auto key = rand() % (max_key - 1);
         auto before_get_rlease = std::chrono::steady_clock::now();
         Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
@@ -92,7 +92,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                 after_get_rlease - before_get_rlease)
                 .count();
         CHECK(lease.success())
-            << "Failed to successfully get lease. err: " << lease.ec();
+            << "Failed to successfully get lease. err: " << lease.ec()
+            << ", key: " << key
+            << ". dsm_buffer_size: " << p->lease_buffer_size()
+            << ", object_size: " << sizeof(Object) << ", max_key: " << max_key;
 
         auto lease_ddl = lease.ddl_term();
         auto now = syncer.patronus_now();
@@ -183,12 +186,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         << fail_to_unbind_m;
     LOG_IF(ERROR, extend_fail_m.max() > 0)
         << "[bench] p->extend(lease) fails in some cases. extend_fail_m: "
-        << extend_fail_m;
+        << extend_fail_m << ". Fail case_nr: " << extend_fail_m.sum();
     LOG_IF(ERROR, extend_fail_to_work_m.max() > 0)
         << "[bench] p->extend(lease) succeeded but the lease does not live so "
            "long in some cases. extend_fail_to_work_m: "
         << extend_fail_to_work_m;
-    CHECK_EQ(extend_fail_m.max(), 0) << "** extend can not failed to work";
+    CHECK_EQ(extend_fail_m.max(), 0)
+        << "** extend can not failed to work. extend_fail_m: " << extend_fail_m;
 
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;
