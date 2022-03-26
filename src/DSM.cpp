@@ -25,7 +25,7 @@ std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
 DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 {
     baseAddrSize = dsm_reserve_size() + user_reserve_size() + buffer_size();
-    baseAddr = (uint64_t) hugePageAlloc(baseAddrSize);
+    baseAddr = (uint64_t) CHECK_NOTNULL(hugePageAlloc(baseAddrSize));
     LOG(INFO) << "[DSM] Total buffer: "
               << Buffer((char *) baseAddr, baseAddrSize);
 
