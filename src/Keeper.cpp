@@ -152,7 +152,7 @@ void Keeper::memSet(const char *key,
         {
             break;
         }
-        sleep(400);
+        usleep(400);
         std::this_thread::yield();
     }
 }
