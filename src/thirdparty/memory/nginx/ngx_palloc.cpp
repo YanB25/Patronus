@@ -128,6 +128,9 @@ void ngx_destroy_pool(ngx_pool_t *pool)
     // because freeing the page will immeidately make pool->internal_allocator
     // invalid.
     auto a = pool->internal_allocator;
+    // must setting this to nullptr
+    // otherwise memory leak
+    pool->internal_allocator = nullptr;
 
     for (p = pool, n = pool->d.next; /* void */; p = n, n = n->d.next)
     {

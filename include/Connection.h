@@ -42,6 +42,9 @@ struct RemoteConnection
             {
                 if (dirToAppAh[i][j])
                 {
+                    // LOG(INFO)
+                    //     << "[debug] trying to free dirToAppAh[" << i << "]["
+                    //     << j << "] val " << (void *) dirToAppAh[i][j];
                     PLOG_IF(ERROR, ibv_destroy_ah(dirToAppAh[i][j]))
                         << "failed to destroy ah";
                     dirToAppAh[i][j] = nullptr;

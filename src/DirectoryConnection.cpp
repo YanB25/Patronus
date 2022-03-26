@@ -14,7 +14,7 @@ DirectoryConnection::DirectoryConnection(
     uint64_t dsmSize,
     uint32_t machineNR,
     std::vector<RemoteConnection> &remoteInfo)
-    : dirID(dirID), remoteInfo(&remoteInfo)
+    : dirID(dirID), remoteInfo(&remoteInfo), machine_nr_(machineNR)
 {
     DefOnceContTimer(timer,
                      config::kMonitorControlPath,
@@ -109,17 +109,28 @@ DirectoryConnection::~DirectoryConnection()
     timer.pin("destroy cqs");
     // must free AH before freeing PD, otherwise it crashes when trying to free
     // AH.
-    for (size_t i = 0; i < kMaxAppThread; ++i)
+    for (size_t node_id = 0; node_id < machine_nr_; ++node_id)
     {
-        CHECK_NE(node_id_, size_t(-1));
-        ibv_ah *pah = (*remoteInfo)[node_id_].dirToAppAh[dirID][i];
-        if (unlikely(pah == nullptr))
+        for (size_t i = 0; i < kMaxAppThread; ++i)
         {
-            continue;
+            ibv_ah *pah = (*remoteInfo)[node_id].dirToAppAh[dirID][i];
+            if (unlikely(pah == nullptr))
+            {
+                continue;
+            }
+            // LOG(INFO) << "[debug] trying to free dirToAppAh[" << dirID <<
+            // "]["
+            //           << i << "] val "
+            //           << (void *) (*remoteInfo)[node_id].dirToAppAh[dirID][i]
+            //           << " to node_id " << node_id;
+
+            PLOG_IF(ERROR, ibv_destroy_ah(pah)) << "failed to destroy ah";
+            (*remoteInfo)[node_id].dirToAppAh[dirID][i] = nullptr;
         }
-        PLOG_IF(ERROR, ibv_destroy_ah(pah)) << "failed to destroy ah";
-        (*remoteInfo)[node_id_].dirToAppAh[dirID][i] = nullptr;
     }
+    // LOG(INFO) << "!!! [debug] freeing context " << (void *) &ctx << " with pd
+    // "
+    //           << (void *) ctx.pd;
     CHECK(destroyContext(&ctx));
     timer.pin("destroy context (dealloc PD, close device)");
     timer.report();

@@ -81,6 +81,7 @@ void test_tagged_ptr()
         CHECK_EQ(new_ptr, remember_new_ptr);
         CHECK_EQ(ptr, origin_ptr);
     }
+    free(expect_ptr);
 }
 
 void test_utagged_ptr()

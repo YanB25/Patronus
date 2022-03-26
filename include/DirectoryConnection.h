@@ -41,14 +41,10 @@ struct DirectoryConnection
     void *dmPool{nullptr};  // address on-chip
     uint64_t lockSize{0};
     uint32_t lockLKey{0};
-    size_t node_id_{size_t(-1)};
 
     std::vector<RemoteConnection> *remoteInfo;
 
-    void set_node_id(size_t nid)
-    {
-        node_id_ = nid;
-    }
+    size_t machine_nr_{0};
 
     DirectoryConnection(uint16_t dirID,
                         void *dsmPool,
@@ -82,8 +78,6 @@ struct DirectoryConnection
         lockLKey = rhs.lockLKey;
         remoteInfo = std::move(rhs.remoteInfo);
         rhs.remoteInfo = nullptr;
-        node_id_ = rhs.node_id_;
-        rhs.node_id_ = 0;
         return *this;
     }
     DirectoryConnection(DirectoryConnection &&rhs)

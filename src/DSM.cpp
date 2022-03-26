@@ -101,9 +101,10 @@ void DSM::syncMetadataBootstrap(const ExchangeMeta &self_meta, size_t remoteID)
 
 DSM::~DSM()
 {
-    for (auto &rc : remoteInfo)
+    for (size_t node_id = 0; node_id < remoteInfo.size(); ++node_id)
     {
-        rc.destroy();
+        LOG(INFO) << "Destroying for node_id " << node_id;
+        remoteInfo[node_id].destroy();
     }
 }
 
@@ -117,7 +118,6 @@ ExchangeMeta &DSM::getExchangeMetaBootstrap(size_t node_id) const
 
 bool DSM::reinitializeDir(size_t dirID)
 {
-    auto nid = get_node_id();
     ContTimer<config::kMonitorReconnection> timer("DSM::reinitialzeDir");
     LOG(INFO) << "[DSM] Reinitialize DirectoryConnetion[" << dirID << "]";
 
@@ -126,7 +126,6 @@ bool DSM::reinitializeDir(size_t dirID)
     dirCon[dirID].reset();
     dirCon[dirID] = std::make_unique<DirectoryConnection>(
         dirID, (void *) baseAddr, baseAddrSize, conf.machineNR, remoteInfo);
-    dirCon[dirID]->set_node_id(nid);
 
     timer.pin("Reinit DirConnection");
 
@@ -293,11 +292,6 @@ void DSM::initRDMAConnection()
 
     myNodeID = keeper->getMyNodeID();
     timer.report();
-
-    for (int i = 0; i < NR_DIRECTORY; ++i)
-    {
-        dirCon[i]->set_node_id(myNodeID);
-    }
 }
 
 void DSM::rkey_read(uint32_t rkey,
