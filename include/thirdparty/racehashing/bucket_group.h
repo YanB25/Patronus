@@ -60,8 +60,8 @@ template <size_t kSlotNr>
 class CombinedBucketHandle
 {
 public:
-    CombinedBucketHandle(uint64_t addr, bool main_on_left)
-        : addr_(addr), main_on_left_(main_on_left)
+    CombinedBucketHandle(GlobalAddress gaddr, bool main_on_left)
+        : gaddr_(gaddr), main_on_left_(main_on_left)
     {
     }
     CombinedBucketHandle(const CombinedBucketHandle &rhs) = delete;
@@ -70,13 +70,14 @@ public:
     CombinedBucketHandle(CombinedBucketHandle &&) = default;
     CombinedBucketHandle &operator=(CombinedBucketHandle &&) = default;
 
-    RetCode read(RaceHashingRdmaContext &rdma_ctx)
+    RetCode read(IRdmaAdaptor &rdma_ctx, RemoteMemHandle &handle)
     {
         buffer_ = CHECK_NOTNULL(rdma_ctx.get_rdma_buffer(size_bytes()));
         DLOG_IF(INFO, config::kEnableMemoryDebug)
-            << "[race][mem] in bucket_group::read: addr_: " << (void *) addr_
+            << "[race][mem] in bucket_group::read: gaddr_: " << gaddr_
             << ", buffer: " << (void *) buffer_;
-        return rdma_ctx.rdma_read(addr_, (char *) buffer_, size_bytes());
+        return rdma_ctx.rdma_read(
+            (char *) buffer_, gaddr_, size_bytes(), handle);
     }
 
     RetCode locate(uint8_t fp,
@@ -95,9 +96,9 @@ public:
         return obh.locate(fp, ld, suffix, ret, dctx);
     }
 
-    uint64_t remote_addr() const
+    GlobalAddress remote_addr() const
     {
-        return addr_;
+        return gaddr_;
     }
     void *buffer_addr() const
     {
@@ -117,12 +118,10 @@ public:
     {
         if (main_on_left_)
         {
-            return BucketHandle<kSlotNr>(addr_,
-                                         (char *) DCHECK_NOTNULL(buffer_));
+            return BucketHandle<kSlotNr>(gaddr_, (char *) buffer_);
         }
-        return BucketHandle<kSlotNr>(
-            addr_ + bucket_size_bytes(),
-            (char *) DCHECK_NOTNULL(buffer_) + bucket_size_bytes());
+        return BucketHandle<kSlotNr>(gaddr_ + bucket_size_bytes(),
+                                     (char *) buffer_ + bucket_size_bytes());
     }
 
     BucketHandle<kSlotNr> overflow_bucket_handle() const
@@ -130,14 +129,14 @@ public:
         if (main_on_left_)
         {
             return BucketHandle<kSlotNr>(
-                addr_ + bucket_size_bytes(),
-                (char *) DCHECK_NOTNULL(buffer_) + bucket_size_bytes());
+                gaddr_ + bucket_size_bytes(),
+                (char *) buffer_ + bucket_size_bytes());
         }
-        return BucketHandle<kSlotNr>(addr_, (char *) DCHECK_NOTNULL(buffer_));
+        return BucketHandle<kSlotNr>(gaddr_, (char *) buffer_);
     }
 
 private:
-    uint64_t addr_{0};
+    GlobalAddress gaddr_{0};
     void *buffer_{nullptr};
     bool main_on_left_;
 };
@@ -150,11 +149,12 @@ public:
                             uint32_t h2,
                             CombinedBucketHandle<kSlotNr> &&cb1,
                             CombinedBucketHandle<kSlotNr> &&cb2,
-                            RaceHashingRdmaContext &rdma_ctx)
+                            IRdmaAdaptor &rdma_ctx,
+                            RemoteMemHandle &subtable_mem_handle)
         : h1_(h1), h2_(h2), cb1_(std::move(cb1)), cb2_(std::move(cb2))
     {
-        CHECK_EQ(cb1_.read(rdma_ctx), kOk);
-        CHECK_EQ(cb2_.read(rdma_ctx), kOk);
+        CHECK_EQ(cb1_.read(rdma_ctx, subtable_mem_handle), kOk);
+        CHECK_EQ(cb2_.read(rdma_ctx, subtable_mem_handle), kOk);
     }
     TwoCombinedBucketHandle(const TwoCombinedBucketHandle &) = delete;
     TwoCombinedBucketHandle &operator=(const TwoCombinedBucketHandle &) =
@@ -256,7 +256,7 @@ template <size_t kSlotNr>
 class BucketGroupHandle
 {
 public:
-    BucketGroupHandle(uint64_t addr) : addr_(addr)
+    BucketGroupHandle(GlobalAddress gaddr) : gaddr_(gaddr)
     {
     }
     BucketHandle<kSlotNr> bucket(size_t idx) const
@@ -265,7 +265,7 @@ public:
         DCHECK_LT(idx, 3);
         constexpr size_t bucket_size_bytes = Bucket<kSlotNr>::size_bytes();
         size_t offset = idx * bucket_size_bytes;
-        return Bucket<kSlotNr>(addr_ + offset, nullptr);
+        return Bucket<kSlotNr>(gaddr_ + offset, nullptr);
     }
     BucketHandle<kSlotNr> main_bucket_0() const
     {
@@ -287,22 +287,21 @@ public:
     }
     CombinedBucketHandle<kSlotNr> combined_bucket_0()
     {
-        return CombinedBucketHandle<kSlotNr>((char *) addr_,
-                                             (char *) addr_ + 1 * kItemSize);
+        return CombinedBucketHandle<kSlotNr>(gaddr_, gaddr_ + 1 * kItemSize);
     }
     CombinedBucketHandle<kSlotNr> &combined_bucket_1()
     {
-        return CombinedBucketHandle<kSlotNr>((char *) addr_ + 2 * kItemSize,
-                                             (char *) addr_ + 1 * kItemSize);
+        return CombinedBucketHandle<kSlotNr>(gaddr_ + 2 * kItemSize,
+                                             gaddr_ + 1 * kItemSize);
     }
     constexpr static size_t max_item_nr()
     {
         return BucketGroup<kSlotNr>::max_item_nr();
     }
 
-    uint64_t remote_addr() const
+    GlobalAddress remote_addr() const
     {
-        return addr_;
+        return gaddr_;
     }
 
     constexpr static size_t size_bytes()
@@ -312,7 +311,7 @@ public:
 
 private:
     constexpr static size_t kItemSize = Bucket<kSlotNr>::size_bytes();
-    uint64_t addr_{0};
+    GlobalAddress gaddr_{0};
 };
 }  // namespace patronus::hash
 #endif

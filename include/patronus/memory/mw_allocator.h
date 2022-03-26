@@ -103,7 +103,7 @@ public:
         }
         DVLOG(10) << "[mw-alloc][allocation] allocate for size " << size
                   << ", ret: " << (void *) ret
-                  << ". coro: " << (ctx == nullptr ? nullctx : *ctx);
+                  << ". coro: " << pre_coro_ctx(ctx);
         return ret;
     }
     void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
@@ -113,7 +113,7 @@ public:
             unbind_mw(ctx, addr);
         }
         DVLOG(10) << "[mw-alloc][allocation] free " << (void *) addr
-                  << ". coro: " << (ctx == nullptr ? nullctx : *ctx);
+                  << ". coro: " << pre_coro_ctx(ctx);
         conf_.allocator->free(addr);
     }
     void free(void *addr,
@@ -125,8 +125,7 @@ public:
             unbind_mw(ctx, addr);
         }
         DVLOG(10) << "[mw-alloc][allocation] free " << (void *) addr
-                  << " for size " << size
-                  << ". coro: " << (ctx == nullptr ? nullctx : *ctx);
+                  << " for size " << size << ". coro: " << pre_coro_ctx(ctx);
         conf_.allocator->free(addr, size);
     }
     std::shared_ptr<IAllocator> get_internal_allocator()

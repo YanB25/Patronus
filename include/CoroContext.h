@@ -108,4 +108,21 @@ inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
     return os;
 }
 
+class pre_coro_ctx
+{
+public:
+    pre_coro_ctx(CoroContext *ctx) : ctx_(ctx)
+    {
+    }
+    CoroContext *ctx_;
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_coro_ctx &pctx)
+{
+    if (pctx.ctx_)
+    {
+        os << *pctx.ctx_;
+    }
+    return os;
+}
+
 #endif

@@ -6,6 +6,7 @@
 #include <iostream>
 
 #include "./utils.h"
+#include "GlobalAddress.h"
 
 namespace patronus::hash
 {
@@ -67,11 +68,12 @@ public:
     {
         ptr_ = ptr;
     }
-    explicit SlotView(uint8_t fp, uint8_t len, void *ptr)
+    explicit SlotView(uint8_t fp, uint8_t len, GlobalAddress ptr)
     {
         ptr_.set_u8_h(fp);
         ptr_.set_u8_l(len);
-        ptr_.set_ptr(ptr);
+        DCHECK_EQ(ptr.nodeID, 0) << "Expect to get higher 16 bits zero";
+        ptr_.set_ptr((void *) ptr.val);
     }
     size_t actual_len_bytes() const
     {
@@ -79,7 +81,7 @@ public:
     }
     uint8_t fp() const;
     uint8_t len() const;
-    void *ptr() const;
+    GlobalAddress ptr() const;
     uint64_t val() const;
     bool empty() const;
 
@@ -111,10 +113,11 @@ inline std::ostream &operator<<(std::ostream &os, const SlotView &slot_view)
 class SlotHandle
 {
 public:
-    SlotHandle(uint64_t addr, SlotView slot) : addr_(addr), slot_view_(slot)
+    SlotHandle(GlobalAddress addr, SlotView slot)
+        : addr_(addr), slot_view_(slot)
     {
     }
-    uint64_t remote_addr() const
+    GlobalAddress remote_addr() const
     {
         return addr_;
     }
@@ -142,7 +145,7 @@ public:
     {
         return !slot_view_.empty() && slot_view_.match(fp);
     }
-    void *ptr() const
+    GlobalAddress ptr() const
     {
         return slot_view_.ptr();
     }
@@ -162,12 +165,12 @@ public:
     friend std::ostream &operator<<(std::ostream &os, const SlotHandle &handle);
 
 private:
-    uint64_t addr_;
+    GlobalAddress addr_;
     SlotView slot_view_;
 };
 inline std::ostream &operator<<(std::ostream &os, const SlotHandle &handle)
 {
-    os << "{SlotHandle: remote_addr: " << (void *) handle.addr_
+    os << "{SlotHandle: remote_addr: " << handle.addr_
        << ", slot_view: " << handle.slot_view() << "}";
     return os;
 }
@@ -179,7 +182,7 @@ public:
         : slot_handle_(slot), hash_(hash)
     {
     }
-    uint64_t remote_addr() const
+    GlobalAddress remote_addr() const
     {
         return slot_handle_.remote_addr();
     }
@@ -239,7 +242,7 @@ struct hash<patronus::hash::SlotHandle>
 {
     std::size_t operator()(const patronus::hash::SlotHandle &v) const
     {
-        return v.remote_addr();
+        return v.remote_addr().val;
     }
 };
 template <>

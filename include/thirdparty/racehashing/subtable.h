@@ -11,6 +11,8 @@
 
 namespace patronus::hash
 {
+template <size_t kBucketGroupNr, size_t kSlotNr>
+class SubTableHandle;
 // NOTE:
 // one bucket group has two bucket and one overflow bucket
 // when using hash value to indexing the bucket
@@ -19,6 +21,8 @@ template <size_t kBucketGroupNr, size_t kSlotNr>
 class SubTable
 {
 public:
+    using Handle = SubTableHandle<kBucketGroupNr, kSlotNr>;
+
     constexpr static size_t kMainBucketNr = 2 * kBucketGroupNr;
     constexpr static size_t kOverflowBucketNr = kBucketGroupNr;
     constexpr static size_t kTotalBucketNr = kMainBucketNr + kOverflowBucketNr;
@@ -114,35 +118,20 @@ public:
 
     static_assert(is_power_of_two(kCombinedBucketNr));
 
-    SubTableHandle(uint32_t expect_ld,
-                   uint64_t st_addr,
-                   size_t st_size,
-                   uint64_t hash_suffix)
-        : expect_ld_(expect_ld),
-          st_addr_(st_addr),
-          st_size_(st_size),
-          hash_suffix_(hash_suffix)
+    SubTableHandle(GlobalAddress st_gaddr, RemoteMemHandle &st_mem_handle)
+        : st_gaddr_(st_gaddr), st_mem_handle_(st_mem_handle)
     {
-        CHECK_GE(st_size, size_bytes());
-        CHECK_NE(st_addr_, 0);
+        CHECK(!st_gaddr_.is_null());
     }
-    uint32_t expect_ld() const
-    {
-        return expect_ld_;
-    }
-    uint32_t hash_suffix() const
-    {
-        return hash_suffix_;
-    }
-    RetCode try_del_slot(SlotHandle slot_handle,
-                         RaceHashingRdmaContext &rdma_ctx)
+    RetCode try_del_slot(SlotHandle slot_handle, IRdmaAdaptor &rdma_ctx)
     {
         auto remote = slot_handle.remote_addr();
         uint64_t expect_val = slot_handle.slot_view().val();
         auto clear_view = slot_handle.view_after_clear();
         auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(8));
         CHECK_EQ(
-            rdma_ctx.rdma_cas(remote, expect_val, clear_view.val(), rdma_buf),
+            rdma_ctx.rdma_cas(
+                remote, expect_val, clear_view.val(), rdma_buf, st_mem_handle_),
             kOk);
         CHECK_EQ(rdma_ctx.commit(), kOk);
         uint64_t read = *(uint64_t *) rdma_buf;
@@ -153,13 +142,13 @@ public:
         }
         return kRetry;
     }
-    RetCode del_slot(SlotHandle slot_handle, RaceHashingRdmaContext &rdma_ctx)
+    RetCode del_slot(SlotHandle slot_handle, IRdmaAdaptor &rdma_ctx)
     {
         CHECK_EQ(try_del_slot(slot_handle, rdma_ctx), kOk);
         return kOk;
     }
     RetCode put_slot(SlotMigrateHandle slot_handle,
-                     RaceHashingRdmaContext &rdma_ctx,
+                     IRdmaAdaptor &rdma_ctx,
                      SlotHandle *ret,
                      HashContext *dctx)
     {
@@ -188,6 +177,7 @@ public:
                     auto rc = bucket.do_insert(bucket.slot_handle(idx),
                                                slot_handle.slot_view(),
                                                rdma_ctx,
+                                               st_mem_handle_,
                                                ret,
                                                dctx);
                     CHECK(rc == kOk || rc == kRetry) << "Unexpected rc " << rc;
@@ -219,21 +209,21 @@ public:
      * @return TwoCombinedBucketHandle<kSlotNr>
      */
     TwoCombinedBucketHandle<kSlotNr> get_two_combined_bucket_handle(
-        uint64_t h1, uint64_t h2, RaceHashingRdmaContext &rdma_ctx)
+        uint64_t h1, uint64_t h2, IRdmaAdaptor &rdma_ctx)
     {
         auto cb1 = combined_bucket_handle(h1);
         auto cb2 = combined_bucket_handle(h2);
         return TwoCombinedBucketHandle<kSlotNr>(
-            h1, h2, std::move(cb1), std::move(cb2), rdma_ctx);
+            h1, h2, std::move(cb1), std::move(cb2), rdma_ctx, st_mem_handle_);
     }
     constexpr static size_t max_item_nr()
     {
         return kBucketGroupNr * BucketGroup<kSlotNr>::max_item_nr();
     }
 
-    void *st_addr() const
+    GlobalAddress gaddr() const
     {
-        return (void *) st_addr_;
+        return st_gaddr_;
     }
 
     static constexpr size_t size_bytes()
@@ -245,17 +235,27 @@ public:
     {
         return SubTable<kBucketGroupNr, kSlotNr>::max_capacity();
     }
+    RemoteMemHandle &mem_handle()
+    {
+        return st_mem_handle_;
+    }
+    const RemoteMemHandle &mem_handle() const
+    {
+        return st_mem_handle_;
+    }
 
     RetCode update_bucket_header_nodrain(uint32_t ld,
                                          uint32_t suffix,
-                                         RaceHashingRdmaContext &rdma_ctx,
+                                         IRdmaAdaptor &rdma_ctx,
                                          HashContext *dctx)
     {
         for (size_t i = 0; i < kTotalBucketNr; ++i)
         {
-            auto b = BucketHandle<kSlotNr>(
-                st_addr_ + i * Bucket<kSlotNr>::size_bytes(), nullptr);
-            auto rc = b.update_header_nodrain(ld, suffix, rdma_ctx, dctx);
+            auto bucket_gaddr =
+                GlobalAddress(st_gaddr_ + i * Bucket<kSlotNr>::size_bytes());
+            auto b = BucketHandle<kSlotNr>(bucket_gaddr, nullptr);
+            auto rc = b.update_header_nodrain(
+                ld, suffix, rdma_ctx, st_mem_handle_, dctx);
             if (rc != kOk)
             {
                 return rc;
@@ -264,11 +264,10 @@ public:
         return kOk;
     }
 
-    RetCode init_and_update_bucket_header_drain(
-        uint32_t ld,
-        uint32_t suffix,
-        RaceHashingRdmaContext &rdma_ctx,
-        HashContext *dctx)
+    RetCode init_and_update_bucket_header_drain(uint32_t ld,
+                                                uint32_t suffix,
+                                                IRdmaAdaptor &rdma_ctx,
+                                                HashContext *dctx)
     {
         DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
             << "[race][trace] init_and_update_bucket_header_nodrain: ld: " << ld
@@ -285,7 +284,9 @@ public:
             bucket.header().suffix = suffix;
         }
 
-        CHECK_EQ(rdma_ctx.rdma_write(st_addr_, rdma_buf, st_size), kOk);
+        CHECK_EQ(
+            rdma_ctx.rdma_write(st_gaddr_, rdma_buf, st_size, st_mem_handle_),
+            kOk);
         CHECK_EQ(rdma_ctx.commit(), kOk);
 
         return kOk;
@@ -299,43 +300,37 @@ public:
         {
             // even
             idx /= 2;
-            void *bucket_group_addr = (char *) st_addr_ + kItemSize * idx;
+            GlobalAddress bucket_group_gaddr = st_gaddr_ + kItemSize * idx;
             DLOG_IF(INFO, config::kEnableMemoryDebug)
                 << "[race][mem] combined_bucket_handle: left. indexing "
                 << origin_idx << ", map to idx " << idx
                 << ", from kCombinedBucketNr: " << kCombinedBucketNr
-                << ", st_addr: " << (void *) st_addr_
-                << ", kItemSize: " << kItemSize << ", got "
-                << (void *) bucket_group_addr;
-            return CombinedBucketHandle<kSlotNr>((uint64_t) bucket_group_addr,
-                                                 true);
+                << ", st_addr: " << st_gaddr_ << ", kItemSize: " << kItemSize
+                << ", got " << bucket_group_gaddr;
+            return CombinedBucketHandle<kSlotNr>(bucket_group_gaddr, true);
         }
         else
         {
             // odd
             idx = (idx - 1) / 2;
-            void *bucket_group_addr = (char *) st_addr_ + kItemSize * idx;
-            void *overflow_bucket_addr =
-                (char *) bucket_group_addr + Bucket<kSlotNr>::size_bytes();
+            GlobalAddress bucket_group_gaddr = st_gaddr_ + kItemSize * idx;
+            GlobalAddress overflow_bucket_gaddr =
+                bucket_group_gaddr + Bucket<kSlotNr>::size_bytes();
             LOG_IF(INFO, config::kEnableMemoryDebug)
                 << "[race][mem] combined_bucket_handle: right. indexing "
                 << origin_idx << ", map to idx " << idx
                 << " from kCombinedBucketNr: " << kCombinedBucketNr
-                << ", st_addr: " << (void *) st_addr_
-                << ", kItemSize: " << kItemSize << ", got "
-                << (void *) overflow_bucket_addr;
-            return CombinedBucketHandle<kSlotNr>(
-                (uint64_t) overflow_bucket_addr, false);
+                << ", st_addr: " << st_gaddr_ << ", kItemSize: " << kItemSize
+                << ", got " << overflow_bucket_gaddr;
+            return CombinedBucketHandle<kSlotNr>(overflow_bucket_gaddr, false);
         }
     }
 
 private:
     constexpr static size_t kItemSize =
         BucketGroupHandle<kSlotNr>::size_bytes();
-    uint32_t expect_ld_;
-    uint64_t st_addr_;
-    size_t st_size_;
-    uint64_t hash_suffix_;
+    GlobalAddress st_gaddr_;
+    RemoteMemHandle &st_mem_handle_;
 };
 
 template <size_t kBucketGroupNr, size_t kSlotNr>

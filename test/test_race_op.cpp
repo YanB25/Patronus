@@ -20,13 +20,33 @@ void test_capacity(size_t initial_subtable)
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
+    conf.g_kvblock_pool_size = 512_MB;
+    conf.g_kvblock_pool_addr = malloc(conf.g_kvblock_pool_size);
+
     using RaceHashingT = RaceHashing<1, 2, 2>;
-    RaceHashingT rh(allocator, conf);
+    auto server_rdma_ctx = MockRdmaAdaptor::new_instance({});
+
+    server_rdma_ctx->reg_default_allocator(
+        patronus::mem::MallocAllocator::new_instance());
+    patronus::mem::SlabAllocatorConfig slab_conf;
+    slab_conf.block_class = {patronus::hash::config::kKVBlockAllocBatchSize};
+    slab_conf.block_ratio = {1.0};
+    auto slab_allocator = std::make_shared<patronus::mem::SlabAllocator>(
+        conf.g_kvblock_pool_addr, conf.g_kvblock_pool_size, slab_conf);
+    server_rdma_ctx->reg_allocator(patronus::hash::config::kAllocHintKVBlock,
+                                   slab_allocator);
+
+    RaceHashingT rh(server_rdma_ctx, allocator, conf);
 
     RaceHashingHandleConfig handle_conf;
 
-    auto rdma_ctx = RaceHashingRdmaContext::new_instance();
-    RaceHashingT::Handle rhh(rh.meta_addr(), handle_conf, rdma_ctx);
+    auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
+    RaceHashingT::Handle rhh(0 /* node_id */,
+                             rh.meta_gaddr(),
+                             handle_conf,
+                             handle_rdma_ctx,
+                             nullptr /* coro */);
+    rhh.init();
 
     std::string key;
     std::string value;
@@ -70,7 +90,7 @@ void test_capacity(size_t initial_subtable)
             CHECK(false) << "Unknow return code: " << rc;
         }
     }
-    rdma_ctx->gc();
+    handle_rdma_ctx->put_all_rdma_buffer();
     LOG(INFO) << "Inserted " << succ_nr << ", failed: " << fail_nr
               << ", ultilization: " << 1.0 * succ_nr / rh.max_capacity()
               << ", success rate: " << 1.0 * succ_nr / (succ_nr + fail_nr);
@@ -97,6 +117,8 @@ void test_capacity(size_t initial_subtable)
         ctx.op = "del";
         CHECK_EQ(rhh.del(key, &ctx), kOk);
     }
+
+    free(conf.g_kvblock_pool_addr);
 }
 
 int main(int argc, char *argv[])

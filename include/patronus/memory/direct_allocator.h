@@ -130,6 +130,32 @@ public:
 private:
 };
 
+class MallocAllocator : public IAllocator
+{
+public:
+    static std::shared_ptr<MallocAllocator> new_instance()
+    {
+        return std::make_shared<MallocAllocator>();
+    }
+    void *alloc(size_t size,
+                [[maybe_unused]] CoroContext *ctx = nullptr) override
+    {
+        return ::malloc(size);
+    }
+    void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
+    {
+        ::free(addr);
+    }
+    void free(void *addr,
+              [[maybe_unused]] size_t size,
+              [[maybe_unused]] CoroContext *ctx = nullptr) override
+    {
+        ::free(addr);
+    }
+
+private:
+};
+
 }  // namespace patronus::mem
 
 #endif

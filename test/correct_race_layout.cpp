@@ -37,7 +37,9 @@ void check_in_rng(const std::vector<void *> addrs,
     for (size_t i = 0; i < addrs.size(); ++i)
     {
         CHECK_GE(addrs[i], base_addr);
-        CHECK_LT((char *) addrs[i], (char *) base_addr + addr_size);
+        CHECK_LT((void *) addrs[i], (void *) ((char *) base_addr + addr_size))
+            << "Checking addr: " << (void *) addrs[i] << " overflow base "
+            << (void *) base_addr << " size " << addr_size;
     }
 }
 
@@ -133,10 +135,10 @@ void test_bucket_handle(const BucketHandle<kSlotNr> &bh)
     std::vector<void *> addrs;
     for (size_t i = 0; i < kSlotNr; ++i)
     {
-        addrs.push_back((void *) bh.slot_remote_addr(i));
+        addrs.push_back((void *) bh.slot_remote_addr(i).val);
     }
     check_not_overlapped(addrs, Slot::size_bytes());
-    check_in_rng(addrs, (void *) bh.remote_addr(), bh.size_bytes());
+    check_in_rng(addrs, (void *) bh.remote_addr().val, bh.size_bytes());
 }
 
 void test_combined_bucket_handle(const CombinedBucketHandle<kSlotNr> &cb)
@@ -146,25 +148,31 @@ void test_combined_bucket_handle(const CombinedBucketHandle<kSlotNr> &cb)
     test_bucket_handle(mh);
     test_bucket_handle(oh);
     std::vector<void *> addrs;
-    addrs.push_back((void *) mh.remote_addr());
-    addrs.push_back((void *) oh.remote_addr());
+    addrs.push_back((void *) mh.remote_addr().val);
+    addrs.push_back((void *) oh.remote_addr().val);
     check_not_overlapped(addrs, Bucket<kSlotNr>::size_bytes());
-    check_in_rng(addrs, (void *) cb.remote_addr(), cb.size_bytes());
+    check_in_rng(addrs, (void *) cb.remote_addr().val, cb.size_bytes());
 }
 
 void test_bucket_group_not_overlapped_handle()
 {
     void *addr = hugePageAlloc(kMemoryLimit);
-    SubTableHandle<kBucketGroupNr, kSlotNr> sub_table(
-        0, (uint64_t) addr, kMemoryLimit, 0);
+    auto rdma_ctx = MockRdmaAdaptor::new_instance({});
+    auto exposed_gaddr = rdma_ctx->to_exposed_gaddr(addr);
+    auto handle = rdma_ctx->acquire_perm(exposed_gaddr,
+                                         std::numeric_limits<size_t>::max());
+
+    SubTableHandle<kBucketGroupNr, kSlotNr> sub_table(exposed_gaddr, handle);
     size_t expect_size = SubTable<kBucketGroupNr, kSlotNr>::size_bytes();
     CHECK_GE(kMemoryLimit, expect_size);
 
     std::vector<void *> left_addrs;
     std::vector<void *> right_addrs;
-    auto rdma_ctx = RaceHashingRdmaContext::new_instance();
     CHECK_EQ(sub_table.kCombinedBucketNr % 2, 0);
     std::vector<void *> buckets;
+    DVLOG(1) << "[bench] test_bucket_group_not_overlapped_handle: addr: "
+             << (void *) addr << ", size: " << sub_table.size_bytes()
+             << ", kCombinedBucketNr: " << sub_table.kCombinedBucketNr;
     for (size_t i = 0; i < sub_table.kCombinedBucketNr; i += 2)
     {
         auto left_idx = i;
@@ -172,49 +180,68 @@ void test_bucket_group_not_overlapped_handle()
         auto cb_left = sub_table.combined_bucket_handle(left_idx);
         auto cb_right = sub_table.combined_bucket_handle(right_idx);
         auto overflow_left_addr =
-            cb_left.overflow_bucket_handle().remote_addr();
+            cb_left.overflow_bucket_handle().remote_addr().val;
         auto overflow_right_addr =
-            cb_right.overflow_bucket_handle().remote_addr();
+            cb_right.overflow_bucket_handle().remote_addr().val;
         CHECK_EQ(overflow_left_addr, overflow_right_addr);
-        auto left_main_addr = cb_left.main_bucket_handle().remote_addr();
-        auto right_main_addr = cb_right.main_bucket_handle().remote_addr();
+        auto left_main_addr = cb_left.main_bucket_handle().remote_addr().val;
+        auto right_main_addr = cb_right.main_bucket_handle().remote_addr().val;
         CHECK_EQ(left_main_addr + Bucket<kSlotNr>::size_bytes(),
                  overflow_left_addr);
         CHECK_EQ(overflow_right_addr + Bucket<kSlotNr>::size_bytes(),
                  right_main_addr);
         test_combined_bucket_handle(cb_left);
         test_combined_bucket_handle(cb_right);
+        DVLOG(1) << "combined_bucket_LEFT[" << left_idx
+                 << "].main: " << (void *) left_main_addr;
+        DVLOG(1) << "combined_bucket_LEFT[" << left_idx
+                 << "].overflow: " << (void *) overflow_left_addr;
+        DVLOG(1) << "combined_bucket_RIGHT[" << right_idx
+                 << "].main: " << (void *) right_main_addr;
+        DVLOG(1) << "combined_bucket_RIGHT[" << right_idx
+                 << "].overflow: " << (void *) overflow_right_addr;
         buckets.push_back((void *) left_main_addr);
         buckets.push_back((void *) right_main_addr);
         buckets.push_back((void *) overflow_left_addr);
         buckets.push_back((void *) overflow_right_addr);
     }
     // every bucket group within valid range.
-    check_in_rng(buckets, addr, sub_table.size_bytes());
+    // from the view of exposed_gaddr
+    check_in_rng(buckets, (void *) exposed_gaddr.val, sub_table.size_bytes());
 
     hugePageFree(addr, kMemoryLimit);
 }
 
 void test_bucket_group_not_overlapped_handle2()
 {
+    using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
+    using SubTableHandleT = typename SubTableT::Handle;
+
     void *addr = hugePageAlloc(kMemoryLimit);
-    SubTableHandle<kBucketGroupNr, kSlotNr> sub_table(
-        0, (uint64_t) addr, kMemoryLimit, 0);
+    auto rdma_ctx = MockRdmaAdaptor::new_instance({});
+    auto exposed_gaddr = rdma_ctx->to_exposed_gaddr(addr);
+    auto handle =
+        rdma_ctx->acquire_perm(exposed_gaddr, SubTableT::size_bytes());
+    DVLOG(1)
+        << "[bench] test_bucket_group_not_overlapped_handle2: handle.gaddr "
+        << exposed_gaddr << ", size: " << SubTableT::size_bytes();
+    SubTableHandleT sub_table(exposed_gaddr, handle);
     size_t expect_size = SubTable<kBucketGroupNr, kSlotNr>::size_bytes();
     CHECK_GE(kMemoryLimit, expect_size);
 
     std::vector<void *> addrs;
-    auto rdma_ctx = RaceHashingRdmaContext::new_instance();
     for (size_t i = 0; i < sub_table.kCombinedBucketNr; ++i)
     {
         auto cb = sub_table.combined_bucket_handle(i);
-        CHECK_EQ(cb.read(*rdma_ctx), kOk);
+        DVLOG(1) << "combined_bucket[" << i
+                 << "].gaddr(): " << cb.remote_addr();
+        CHECK_EQ(cb.read(*rdma_ctx, handle), kOk);
         CHECK_EQ(rdma_ctx->commit(), kOk);
-        addrs.push_back((void *) cb.remote_addr());
+        addrs.push_back((void *) cb.remote_addr().val);
         test_combined_bucket_handle(cb);
     }
     // every bucket group within valid range.
-    check_in_rng(addrs, addr, sub_table.size_bytes());
+    check_in_rng(addrs, (void *) exposed_gaddr.val, sub_table.size_bytes());
 
     hugePageFree(addr, kMemoryLimit);
 }

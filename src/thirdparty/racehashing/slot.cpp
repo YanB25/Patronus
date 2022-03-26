@@ -22,9 +22,12 @@ uint8_t SlotView::len() const
 {
     return ptr_.u8_l();
 }
-void *SlotView::ptr() const
+GlobalAddress SlotView::ptr() const
 {
-    return ptr_.ptr();
+    auto *ret = ptr_.ptr();
+    auto gaddr = GlobalAddress(ret);
+    DCHECK_EQ(gaddr.nodeID, 0);
+    return gaddr;
 }
 uint64_t SlotView::val() const
 {

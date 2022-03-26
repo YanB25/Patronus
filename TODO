@@ -140,16 +140,22 @@ NO MORE. That should be easy.
 
 - 20220322: many test cases from patronus seems to have problems. Fix them.
 - Patronus API modification: Add deallocation API
-    - Alloc only, Alloc + perm, Perm only. Free only, free + perm, perm only.
-    - Yes, Allocation implies permission granting. However, deallocation does NOT necessarily imply permission modification
-    - So we need an API for free-ing the memory ONLY. Without touching any lease_id, lease_ctx stuffs
-    - Should be easy. Add a flag and see Patronus::handle_request_lease_relinquish
+    - alloc only, perm only, alloc + perm
+    - free only, rel only, free + rel
+    - Yes, alloc only and free only API makes sense.
 - correct_patronus_alloc: do the following tests
     - One client get_rwlease by allocation semantics
     - The client relinquish its lease, but not de-allocating the memory
     - The client get_rwlease the second time: bind the memory directly and RW.
     - The client finally free the memory
 - Make Lease only movable. Copying may be too expensive.
+- Can we remove the gc API of IRdmaAdaptor? Since HashTableHandle is already a state machine, we can store the temporal resource their. We can always keep tracks of all the allocated resources at HashTableHandle, and then clean up the resource at exit.
+- Enable batching API for Patronus: if needed!
+    - This feature may boost performance, because each op of hash table may need to call memory deallocation / relinquish when finished.
+    - rmsg should tune up the max buffer. I believe it have no performance penalty, just waste memory
+    - Patronus API should add *_batch() and commit() API. Maintain the context in a structure. Then the message can be issued at one time.
+- Patronus: add message API.
+- We could do the gc (the gc of kv_block for example) across client. Just let it gc-ed into slab allocator and skip the checking. I believe that will be okay. But this is not urgent, so postpone until really necessary.
 
 If all the things above finish, I can move on to adopt the uPaxos!
 
@@ -216,24 +222,3 @@ Should add some tests.
     - no difference
 [-] bring coroutine into reg_mw cases
     - got x2 performance
-
-if you do not know what to do:
-Start to mock the Race Hashing now!
-
-When you come back:
-[-] Rewrite the API of hash table: in a *Remote-able* object way!
-[-] Add more logs for your debugging.
-[-] make sure it works well! See the load factor.
-- make sure it behaves good under multiple threads!
-[-] Wont (REALLY DON'T WANT TO DO). see if extension is easy (like <= 1h I can do it)
-
-Then, do the shrink task!
-
-Get yourself confident! Write Racehash on your own is great, because you know the code and there's no magic.
-1. Run multiple expansion succeed under small data.
-2. add more detail log. see the log of 152.log. Print the hash of all the inserted key, so that we know whether the following expansion will touch them and move them to other subtables.
-4. is the bench code write? what will it response to retry? How many op succeed? Maybe no op succeeded?
-
-Just spend half a day to fix the multithreads expansion.
-If failed, MOVE ON to RDMA version.
-No time to make it perfect.

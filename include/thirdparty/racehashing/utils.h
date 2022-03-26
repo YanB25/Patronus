@@ -12,49 +12,12 @@
 
 #include "Common.h"
 #include "util/Debug.h"
+#include "util/RetCode.h"
 
 namespace patronus::hash
 {
 using Key = std::string;
 using Value = std::string;
-
-enum RetCode
-{
-    kOk,
-    kNotFound,
-    kNoMem,
-    // failed by multithread conflict.
-    kRetry,
-    kCacheStale,
-    kInvalid,
-};
-inline std::ostream &operator<<(std::ostream &os, RetCode rc)
-{
-    switch (rc)
-    {
-    case kOk:
-        os << "kOk";
-        break;
-    case kNotFound:
-        os << "kNotFound";
-        break;
-    case kNoMem:
-        os << "kNoMem";
-        break;
-    case kRetry:
-        os << "kRetry";
-        break;
-    case kCacheStale:
-        os << "kCacheStale";
-        break;
-    case kInvalid:
-        os << "kInvalid";
-        break;
-    default:
-        LOG(FATAL) << "Unknown return code " << (int) rc;
-    }
-    return os;
-}
 
 inline uint64_t round_up_to_next_power_of_2(uint64_t x)
 {
@@ -405,6 +368,23 @@ inline std::ostream &operator<<(std::ostream &os, const HashContext &dctx)
     {
         os << "{dctx tid: " << dctx.tid << ", key: `" << dctx.key
            << "`, value: `" << dctx.value << "`} by op: " << dctx.op;
+    }
+    return os;
+}
+
+class pre_dctx
+{
+public:
+    pre_dctx(HashContext *dctx) : dctx_(dctx)
+    {
+    }
+    HashContext *dctx_;
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_dctx &pdctx)
+{
+    if (pdctx.dctx_)
+    {
+        os << *pdctx.dctx_;
     }
     return os;
 }

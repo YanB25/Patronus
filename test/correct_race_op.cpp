@@ -18,23 +18,82 @@ using namespace define::literals;
 // constexpr static size_t kSlotNr = 128;
 // constexpr static size_t kMemoryLimit = 1_G;
 
+constexpr static size_t kKVBlockPoolReserveSize = 512_MB;
+
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-void test_basic(size_t initial_subtable)
-{
-    using RaceHashingT = RaceHashing<4, 64, 64>;
+template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
+using TablePair = std::pair<
+    typename RaceHashing<kDEntry, kBucketNr, kSlotNr>::pointer,
+    std::vector<
+        typename RaceHashingHandleImpl<kDEntry, kBucketNr, kSlotNr>::pointer>>;
 
+template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
+TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
+                                                        size_t thread_nr,
+                                                        bool auto_expand)
+{
+    using RaceHashingT = RaceHashing<kDEntry, kBucketNr, kSlotNr>;
+    using RaceHashingHandleT = typename RaceHashingT::Handle;
+
+    // generate rh here
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
-    RaceHashingT rh(allocator, conf);
+    conf.g_kvblock_pool_size = kKVBlockPoolReserveSize;
+    // let the memory leak, I don't care
+    conf.g_kvblock_pool_addr = malloc(conf.g_kvblock_pool_size);
 
-    RaceHashingHandleConfig handle_conf;
-    handle_conf.auto_expand = false;
-    handle_conf.auto_update_dir = false;
+    auto server_rdma_ctx = MockRdmaAdaptor::new_instance({});
+    server_rdma_ctx->reg_default_allocator(
+        patronus::mem::MallocAllocator::new_instance());
+    patronus::mem::SlabAllocatorConfig slab_conf;
+    slab_conf.block_class = {patronus::hash::config::kKVBlockAllocBatchSize};
+    slab_conf.block_ratio = {1.0};
+    auto slab_allocator = std::make_shared<patronus::mem::SlabAllocator>(
+        conf.g_kvblock_pool_addr, conf.g_kvblock_pool_size, slab_conf);
+    server_rdma_ctx->reg_allocator(patronus::hash::config::kAllocHintKVBlock,
+                                   slab_allocator);
 
-    RaceHashingT::Handle rhh(
-        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
+    auto rh = std::make_shared<RaceHashingT>(server_rdma_ctx, allocator, conf);
+
+    // generate rhh here
+    std::vector<std::shared_ptr<RaceHashingHandleT>> rhhs;
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        RaceHashingHandleConfig handle_conf;
+        handle_conf.auto_expand = auto_expand;
+        handle_conf.auto_update_dir = auto_expand;
+        auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
+        auto rhh = std::make_shared<RaceHashingHandleT>(0 /* node_id */,
+                                                        rh->meta_gaddr(),
+                                                        handle_conf,
+                                                        handle_rdma_ctx,
+                                                        nullptr /* coro */);
+        rhh->init();
+        rhhs.push_back(rhh);
+    }
+    return {rh, rhhs};
+}
+
+template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
+void tear_down_mock_rdma_rh(
+    typename RaceHashing<kDEntry, kBucketNr, kSlotNr>::pointer rh,
+    std::vector<
+        typename RaceHashingHandleImpl<kDEntry, kBucketNr, kSlotNr>::pointer>
+        rhhs)
+{
+    const auto &rh_conf = rh->config();
+    free(rh_conf.g_kvblock_pool_addr);
+    std::ignore = rhhs;
+}
+
+void test_basic(size_t initial_subtable)
+{
+    auto [rh_ptr, rhh_ptrs] = gen_mock_rdma_rh<4, 64, 64>(
+        initial_subtable, 1 /* thread_nr */, false /* auto-expand */);
+    auto &rh = *rh_ptr;
+    auto &rhh = *rhh_ptrs[0];
 
     CHECK_EQ(rhh.put("abc", "def"), kOk);
     std::string get;
@@ -43,29 +102,24 @@ void test_basic(size_t initial_subtable)
     CHECK_EQ(rhh.put("abc", "!!!"), kOk);
     CHECK_EQ(rhh.get("abc", get), kOk);
     CHECK_EQ(get, "!!!");
+    CHECK_GT(rh.utilization(), 0);
     CHECK_EQ(rhh.del("abc"), kOk);
     CHECK_EQ(rhh.get("abc", get), kNotFound);
     CHECK_EQ(rhh.del("abs"), kNotFound);
+    CHECK_EQ(rh.utilization(), 0);
     LOG(INFO) << "max capacity: " << rh.max_capacity();
+
+    tear_down_mock_rdma_rh<4, 64, 64>(rh_ptr, rhh_ptrs);
 }
 
 void test_capacity(size_t initial_subtable)
 {
-    using RaceHashingT = RaceHashing<4, 16, 16>;
-    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashingConfig conf;
-    conf.initial_subtable = initial_subtable;
-    RaceHashingT rh(allocator, conf);
-
-    RaceHashingHandleConfig handle_conf;
-    handle_conf.auto_expand = false;
-    handle_conf.auto_update_dir = false;
+    auto [rh_ptr, rhh_ptrs] = gen_mock_rdma_rh<4, 16, 16>(
+        initial_subtable, 1 /* thread_nr */, false /* auto-expand */);
+    auto &rh = *rh_ptr;
+    auto &rhh = *rhh_ptrs[0];
 
     HashContext dctx(0);
-    RaceHashingT::Handle rhh(rh.meta_addr(),
-                             handle_conf,
-                             RaceHashingRdmaContext::new_instance(&dctx));
-
     std::string key;
     std::string value;
     key.resize(8);
@@ -134,6 +188,8 @@ void test_capacity(size_t initial_subtable)
     CHECK_EQ(rh.utilization(), 0)
         << "Removed all the items should result in 0 utilization";
     LOG(INFO) << rh;
+
+    tear_down_mock_rdma_rh<4, 16, 16>(rh_ptr, rhh_ptrs);
 }
 
 template <size_t kA, size_t kB, size_t kC>
@@ -305,54 +361,33 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
 void test_multithreads(size_t thread_nr, size_t test_nr, bool expand)
 {
-    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashingConfig conf;
-    conf.initial_subtable = expand ? 1 : kDEntryNr;
-    auto rh = std::make_shared<RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>>(
-        allocator, conf);
+    auto [rh_ptr, rhh_ptrs] =
+        gen_mock_rdma_rh<kDEntryNr, kBucketGroupNr, kSlotNr>(
+            1, thread_nr, expand);
 
     std::vector<std::thread> threads;
-    // maintain a shared_ptr copy here
-    // so that will not be dctor-ed when other threads are still running.
-    std::vector<typename RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>::
-                    Handle::pointer>
-        handles;
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        RaceHashingHandleConfig handle_conf;
-        handle_conf.auto_expand = expand;
-        handle_conf.auto_update_dir = expand;
-        auto handle = std::make_shared<
-            typename RaceHashing<kDEntryNr, kBucketGroupNr, kSlotNr>::Handle>(
-            rh->meta_addr(),
-            handle_conf,
-            RaceHashingRdmaContext::new_instance());
-        handles.push_back(handle);
-        threads.emplace_back([tid = i, test_nr, handle, rh]() {
-            test_thread<kDEntryNr, kBucketGroupNr, kSlotNr>(
-                rh, handle, tid, test_nr);
-        });
+        threads.emplace_back(
+            [tid = i, test_nr, rh = rh_ptr, rhh = rhh_ptrs[i]]() {
+                test_thread<kDEntryNr, kBucketGroupNr, kSlotNr>(
+                    rh, rhh, tid, test_nr);
+            });
     }
     for (auto &t : threads)
     {
         t.join();
     }
+
+    tear_down_mock_rdma_rh<kDEntryNr, kBucketGroupNr, kSlotNr>(rh_ptr,
+                                                               rhh_ptrs);
 }
 
 void test_expand_once_single_thread()
 {
-    using RaceHashingT = RaceHashing<2, 4, 4>;
-
-    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashingConfig conf;
-    conf.initial_subtable = 1;
-    RaceHashingT rh(allocator, conf);
-
-    RaceHashingHandleConfig handle_conf;
-    handle_conf.auto_expand = false;
-    handle_conf.auto_update_dir = true;
-    RaceHashingT::Handle rhh(
-        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
+    auto [rh_ptr, rhhs_ptr] = gen_mock_rdma_rh<2, 4, 4>(1, 1, false);
+    auto &rh = *rh_ptr;
+    auto &rhh = *rhhs_ptr[0];
 
     std::string key;
     std::string value;
@@ -463,22 +498,15 @@ void test_expand_once_single_thread()
         CHECK_EQ(rhh.del(k), kOk);
     }
     LOG(WARNING) << "[bench] after deleted. " << rh;
+
+    tear_down_mock_rdma_rh<2, 4, 4>(rh_ptr, rhhs_ptr);
 }
 
 void test_expand_multiple_single_thread()
 {
-    using RaceHashingT = RaceHashing<16, 4, 4>;
-
-    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashingConfig conf;
-    conf.initial_subtable = 1;
-    RaceHashingT rh(allocator, conf);
-
-    RaceHashingHandleConfig handle_conf;
-    handle_conf.auto_expand = true;
-    handle_conf.auto_update_dir = true;
-    RaceHashingT::Handle rhh(
-        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
+    auto [rh_ptr, rhh_ptrs] = gen_mock_rdma_rh<16, 4, 4>(1, 1, true);
+    auto &rh = *rh_ptr;
+    auto &rhh = *rhh_ptrs[0];
 
     std::string key;
     std::string value;
@@ -552,21 +580,14 @@ void test_expand_multiple_single_thread()
         CHECK_EQ(rhh.del(k, &ctx), kOk) << "failed to delete key " << k;
     }
     LOG(INFO) << "[bench] tear downed. table: " << rh;
+
+    tear_down_mock_rdma_rh<16, 4, 4>(rh_ptr, rhh_ptrs);
 }
 void test_burn_expand_single_thread()
 {
-    using RaceHashingT = RaceHashing<128, 2, 2>;
-
-    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
-    RaceHashingConfig conf;
-    conf.initial_subtable = 1;
-    RaceHashingT rh(allocator, conf);
-
-    RaceHashingHandleConfig handle_conf;
-    handle_conf.auto_expand = true;
-    handle_conf.auto_update_dir = true;
-    RaceHashingT::Handle rhh(
-        rh.meta_addr(), handle_conf, RaceHashingRdmaContext::new_instance());
+    auto [rh_ptr, rhh_ptrs] = gen_mock_rdma_rh<128, 2, 2>(1, 1, true);
+    auto &rh = *rh_ptr;
+    auto &rhh = *rhh_ptrs[0];
 
     std::string key;
     std::string value;
@@ -680,6 +701,8 @@ void test_burn_expand_single_thread()
               << ", table_size: " << rh.max_capacity()
               << " actual utilization: "
               << 1.0 * (inserted_nr + another_inserted_nr) / rh.max_capacity();
+
+    tear_down_mock_rdma_rh<128, 2, 2>(rh_ptr, rhh_ptrs);
 }
 
 int main(int argc, char *argv[])
@@ -687,22 +710,21 @@ int main(int argc, char *argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    // test_basic(1);
-    // test_capacity(1);
-    // test_capacity(4);
+    test_basic(1);
+    test_capacity(1);
+    test_capacity(4);
 
-    // test_multithreads<4, 8, 8>(8, 1_M, false);
+    test_multithreads<4, 8, 8>(8, 100_K, false);
 
-    // test_expand_once_single_thread();
-    // for (size_t i = 0; i < 100; ++i)
-    // {
-    //     test_expand_multiple_single_thread();
-    // }
+    test_expand_once_single_thread();
 
-    // test_expand_multiple_single_thread();
-    // test_burn_expand_single_thread();
+    test_expand_multiple_single_thread();
+    test_burn_expand_single_thread();
 
-    test_multithreads<16, 4, 4>(8, 10, true);
+    // NOTE: not runnable, not correct
+    // There are so many corner cases under expansion
+    // so not going to check the correctness
+    // test_multithreads<16, 4, 4>(8, 10, true);
 
     LOG(INFO) << "PASS ALL TESTS";
     LOG(INFO) << "finished. ctrl+C to quit.";

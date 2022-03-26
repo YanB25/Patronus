@@ -107,8 +107,8 @@ public:
     static_assert(kSlotNr > 1);
     constexpr static size_t kDataSlotNr = kSlotNr - 1;
 
-    BucketHandle(uint64_t addr, char *bucket_buf)
-        : addr_(addr), bucket_buf_(bucket_buf)
+    BucketHandle(GlobalAddress gaddr, char *bucket_buf)
+        : gaddr_(gaddr), bucket_buf_(bucket_buf)
     {
     }
     constexpr static size_t max_item_nr()
@@ -117,7 +117,8 @@ public:
     }
     RetCode do_insert(SlotHandle slot_handle,
                       SlotView new_slot,
-                      RaceHashingRdmaContext &rdma_ctx,
+                      IRdmaAdaptor &rdma_ctx,
+                      RemoteMemHandle &subtable_mem_handle,
                       SlotHandle *ret_slot,
                       HashContext *dctx)
     {
@@ -126,7 +127,8 @@ public:
         CHECK_EQ(rdma_ctx.rdma_cas(slot_handle.remote_addr(),
                                    expect_val,
                                    new_slot.val(),
-                                   rdma_buf),
+                                   rdma_buf,
+                                   subtable_mem_handle),
                  kOk);
         CHECK_EQ(rdma_ctx.commit(), kOk);
         bool success = memcmp(rdma_buf, &expect_val, 8) == 0;
@@ -155,7 +157,8 @@ public:
         return kRetry;
     }
     RetCode should_migrate(size_t bit,
-                           RaceHashingRdmaContext &rdma_ctx,
+                           IRdmaAdaptor &rdma_ctx,
+                           RemoteMemHandle &kvblock_mem_handle,
                            std::unordered_set<SlotMigrateHandle> &ret,
                            HashContext *dctx)
     {
@@ -166,15 +169,17 @@ public:
             {
                 continue;
             }
-            auto kvblock_remote_addr = (uint64_t) h.ptr();
+            auto kvblock_remote_addr = GlobalAddress(h.ptr());
             // we don't need the key and value content
             // just the buffered hash.
             auto kvblock_len = sizeof(KVBlock);
             auto *rdma_buf =
                 DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(kvblock_len));
-            CHECK_EQ(
-                rdma_ctx.rdma_read(kvblock_remote_addr, rdma_buf, kvblock_len),
-                kOk);
+            CHECK_EQ(rdma_ctx.rdma_read(rdma_buf,
+                                        kvblock_remote_addr,
+                                        kvblock_len,
+                                        kvblock_mem_handle),
+                     kOk);
             CHECK_EQ(rdma_ctx.commit(), kOk);
             KVBlock &kv_block = *(KVBlock *) rdma_buf;
             auto hash = kv_block.hash;
@@ -194,7 +199,8 @@ public:
     }
     RetCode update_header_nodrain(uint32_t ld,
                                   uint32_t suffix,
-                                  RaceHashingRdmaContext &rdma_ctx,
+                                  IRdmaAdaptor &rdma_ctx,
+                                  RemoteMemHandle &mem_handle,
                                   HashContext *dctx)
     {
         // header is at the first of the addr.
@@ -204,12 +210,13 @@ public:
         auto &header = *(BucketHeader *) rdma_buf;
         header.ld = ld;
         header.suffix = suffix;
-        return rdma_ctx.rdma_write(addr_, rdma_buf, sizeof(BucketHeader));
+        return rdma_ctx.rdma_write(
+            gaddr_, rdma_buf, sizeof(BucketHeader), mem_handle);
     }
 
-    uint64_t slot_remote_addr(size_t idx) const
+    GlobalAddress slot_remote_addr(size_t idx) const
     {
-        return addr_ + idx * sizeof(Slot);
+        return gaddr_ + idx * sizeof(Slot);
     }
     SlotHandle slot_handle(size_t idx) const
     {
@@ -222,16 +229,7 @@ public:
         auto *slot = (Slot *) ((char *) bucket_buf_ + idx * sizeof(Slot));
         return SlotView(slot->val());
     }
-    // Slot &slot(size_t idx)
-    // {
-    //     DCHECK_LT(idx, kSlotNr);
-    //     return *((Slot *) bucket_buf_ + idx);
-    // }
-    // const Slot &slot(size_t idx) const
-    // {
-    //     DCHECK_LT(idx, kSlotNr);
-    //     return *((Slot *) bucket_buf_ + idx);
-    // }
+
     BucketHeader &header()
     {
         return *(BucketHeader *) bucket_buf_;
@@ -240,9 +238,9 @@ public:
     {
         return *(BucketHeader *) bucket_buf_;
     }
-    uint64_t remote_addr() const
+    GlobalAddress remote_addr() const
     {
-        return addr_;
+        return gaddr_;
     }
     const void *bucket_buffer() const
     {
@@ -343,7 +341,7 @@ public:
 
 private:
     constexpr static size_t kItemSize = Slot::size_bytes();
-    uint64_t addr_{0};
+    GlobalAddress gaddr_{0};
     char *bucket_buf_{nullptr};
 };
 

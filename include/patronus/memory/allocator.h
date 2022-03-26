@@ -30,6 +30,7 @@ inline std::pair<void *, size_t> align_address(void *addr,
 class IAllocator
 {
 public:
+    using pointer = std::shared_ptr<IAllocator>;
     virtual ~IAllocator() = default;
     virtual void *alloc(size_t size, CoroContext *ctx = nullptr) = 0;
     virtual void free(void *addr, size_t size, CoroContext *ctx = nullptr) = 0;

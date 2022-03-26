@@ -214,7 +214,8 @@ bool Tree::update_new_root(GlobalAddress left,
 
     new_root->set_consistent();
     dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize, cxt);
-    if (dsm->cas_sync(root_ptr_ptr, old_root, new_root_addr, cas_buffer, cxt))
+    if (dsm->cas_sync(
+            root_ptr_ptr, old_root.val, new_root_addr.val, cas_buffer, cxt))
     {
         broadcast_new_root(new_root_addr, level);
         std::cout << "new root level " << level << " " << new_root_addr
