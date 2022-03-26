@@ -8,6 +8,7 @@
 #include <cstring>
 #include <vector>
 
+#include "./conf.h"
 #include "./utils.h"
 #include "Common.h"
 #include "patronus/memory/allocator.h"

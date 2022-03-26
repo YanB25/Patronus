@@ -216,6 +216,15 @@ public:
                        uint8_t flag /* RWFlag */,
                        CoroContext *ctx = nullptr);
     // handy cluster-wide put/get. Not very performance, but convenient
+    template <typename V,
+              typename T,
+              std::enable_if_t<std::is_trivially_copyable_v<V>, bool> = true,
+              std::enable_if_t<!std::is_array_v<V>, bool> = true>
+    void put(const std::string &key, const V &v, const T &sleep_time)
+    {
+        auto value = std::string((const char *) &v, sizeof(V));
+        return dsm_->put(key, value, sleep_time);
+    }
     template <typename T>
     void put(const std::string &key,
              const std::string &value,
@@ -233,6 +242,16 @@ public:
     {
         return dsm_->get(key, sleep_time);
     }
+    template <typename V, typename T>
+    V get_object(const std::string &key, const T &sleep_time)
+    {
+        auto v = dsm_->get(key, sleep_time);
+        V ret;
+        CHECK_GE(v.size(), sizeof(V));
+        memcpy((char *) &ret, v.data(), sizeof(V));
+        return ret;
+    }
+
     template <typename T>
     void keeper_barrier(const std::string &key, const T &sleep_time)
     {

@@ -5,6 +5,8 @@
 
 #include "Timer.h"
 #include "patronus/Patronus.h"
+#include "thirdparty/racehashing/mock_rdma_adaptor.h"
+#include "util/Rand.h"
 #include "util/monitor.h"
 
 using namespace std::chrono_literals;
@@ -55,7 +57,7 @@ void test_basic_server(Patronus::pointer p)
     {
         v = p->get("magic", 100us);
     }
-    CHECK_EQ(v, "magic!");
+    CHECK_EQ(v, "magic!") << " v is `" << v << "`, length " << v.length();
     p->put("magic2", "magic2!", 100us);
 }
 
@@ -76,6 +78,19 @@ void test_bulk_get(Patronus::pointer p)
     }
 }
 
+void test_type_client(Patronus::pointer p)
+{
+    auto gaddr = p->get_object<GlobalAddress>("race:gaddr", 10us);
+    LOG(INFO) << "Got v: " << gaddr;
+}
+
+void test_type_server(Patronus::pointer p)
+{
+    GlobalAddress gaddr((void *) fast_pseudo_rand_int());
+    p->put("race:gaddr", gaddr, 10ns);
+    LOG(INFO) << "Put v: " << gaddr;
+}
+
 void client(Patronus::pointer p)
 {
     LOG(INFO) << "[bench] begin basic test";
@@ -84,6 +99,8 @@ void client(Patronus::pointer p)
     test_bulk_put(p);
     LOG(INFO) << "[bench] PASS bulk test";
     test_complex_barrier(p);
+
+    test_type_client(p);
 }
 
 void server(Patronus::pointer p)
@@ -94,6 +111,8 @@ void server(Patronus::pointer p)
     test_bulk_get(p);
     LOG(INFO) << "[bench] PASS bulk test";
     test_complex_barrier(p);
+
+    test_type_server(p);
 }
 
 int main(int argc, char *argv[])
