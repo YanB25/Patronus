@@ -2,9 +2,12 @@
 
 #include <glog/logging.h>
 
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <random>
+
+using namespace std::chrono_literals;
 
 char *getIP();
 
@@ -135,64 +138,5 @@ void Keeper::serverConnect()
             }
         }
         curServer = serverNum;
-    }
-}
-
-void Keeper::memSet(const char *key,
-                    uint32_t klen,
-                    const char *val,
-                    uint32_t vlen)
-{
-    memcached_return rc;
-    while (true)
-    {
-        rc =
-            memcached_set(memc, key, klen, val, vlen, (time_t) 0, (uint32_t) 0);
-        if (rc == MEMCACHED_SUCCESS)
-        {
-            break;
-        }
-        usleep(400);
-        std::this_thread::yield();
-    }
-}
-
-char *Keeper::memGet(const char *key, uint32_t klen, size_t *v_size)
-{
-    size_t l;
-    char *res;
-    uint32_t flags;
-    memcached_return rc;
-
-    while (true)
-    {
-        res = memcached_get(memc, key, klen, &l, &flags, &rc);
-        if (rc == MEMCACHED_SUCCESS)
-        {
-            break;
-        }
-        usleep(400 * myNodeID);
-    }
-
-    if (v_size != nullptr)
-    {
-        *v_size = l;
-    }
-
-    return res;
-}
-
-uint64_t Keeper::memFetchAndAdd(const char *key, uint32_t klen)
-{
-    uint64_t res;
-    while (true)
-    {
-        memcached_return rc = memcached_increment(memc, key, klen, 1, &res);
-        if (rc == MEMCACHED_SUCCESS)
-        {
-            return res;
-        }
-        usleep(10000);
-        std::this_thread::yield();
     }
 }

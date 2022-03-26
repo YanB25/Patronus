@@ -215,6 +215,30 @@ public:
                        uint64_t swap,
                        uint8_t flag /* RWFlag */,
                        CoroContext *ctx = nullptr);
+    // handy cluster-wide put/get. Not very performance, but convenient
+    template <typename T>
+    void put(const std::string &key,
+             const std::string &value,
+             const T &sleep_time)
+    {
+        return dsm_->put(key, value, sleep_time);
+    }
+    template <typename T>
+    std::string try_get(const std::string &key, const T &sleep_time)
+    {
+        return dsm_->try_get(key, sleep_time);
+    }
+    template <typename T>
+    std::string get(const std::string &key, const T &sleep_time)
+    {
+        return dsm_->get(key, sleep_time);
+    }
+    template <typename T>
+    void keeper_barrier(const std::string &key, const T &sleep_time)
+    {
+        return dsm_->barrier(key, sleep_time);
+    }
+
     /**
      * @brief After all the node call this function, @should_exit() will
      * return true

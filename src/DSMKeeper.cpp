@@ -108,12 +108,13 @@ bool DSMKeeper::connectNode(uint16_t remoteID)
     memSet(setK.c_str(),
            setK.size(),
            (char *) (&exchangeMeta),
-           sizeof(exchangeMeta));
+           sizeof(exchangeMeta),
+           100us);
 
     // read peer exchange data from memcached
     std::string getK = connMetaRemoteKey(remoteID);
     ExchangeMeta *remoteMeta =
-        (ExchangeMeta *) memGet(getK.c_str(), getK.size());
+        (ExchangeMeta *) memGet(getK.c_str(), getK.size(), nullptr, 100us);
 
     // apply the queried ExchangeMeta to update the QPs
     applyExchangeMeta(remoteID, *remoteMeta);
@@ -401,27 +402,7 @@ void DSMKeeper::initRouteRule()
 {
     std::string k =
         std::string(ServerPrefix) + std::to_string(this->getMyNodeID());
-    memSet(k.c_str(), k.size(), getMyIP().c_str(), getMyIP().size());
-}
-
-void DSMKeeper::barrier(const std::string &barrierKey)
-{
-    std::string key = std::string("barrier-") + barrierKey;
-    if (this->getMyNodeID() == 0)
-    {
-        memSet(key.c_str(), key.size(), "0", 1);
-    }
-    memFetchAndAdd(key.c_str(), key.size());
-    while (true)
-    {
-        auto *ret = memGet(key.c_str(), key.size());
-        uint64_t v = std::stoull(ret);
-        free(ret);
-        if (v == this->getServerNR())
-        {
-            return;
-        }
-    }
+    memSet(k.c_str(), k.size(), getMyIP().c_str(), getMyIP().size(), 100us);
 }
 
 uint64_t DSMKeeper::sum(const std::string &sum_key, uint64_t value)
@@ -429,13 +410,13 @@ uint64_t DSMKeeper::sum(const std::string &sum_key, uint64_t value)
     std::string key_prefix = std::string("sum-") + sum_key;
 
     std::string key = key_prefix + std::to_string(this->getMyNodeID());
-    memSet(key.c_str(), key.size(), (char *) &value, sizeof(value));
+    memSet(key.c_str(), key.size(), (char *) &value, sizeof(value), 100us);
 
     uint64_t ret = 0;
     for (int i = 0; i < this->getServerNR(); ++i)
     {
         key = key_prefix + std::to_string(i);
-        auto buf_ret = memGet(key.c_str(), key.size());
+        auto buf_ret = memGet(key.c_str(), key.size(), nullptr, 100us);
         ret += *(uint64_t *) buf_ret;
         free(buf_ret);
     }

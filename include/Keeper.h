@@ -10,12 +10,15 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <functional>
 #include <string>
 #include <thread>
 
 #include "Config.h"
 #include "Rdma.h"
+
+using namespace std::chrono_literals;
 
 class Keeper
 {
@@ -61,9 +64,110 @@ public:
         return this->myIP;
     }
 
-    void memSet(const char *key, uint32_t klen, const char *val, uint32_t vlen);
-    char *memGet(const char *key, uint32_t klen, size_t *v_size = nullptr);
-    uint64_t memFetchAndAdd(const char *key, uint32_t klen);
+    template <typename T>
+    void memSet(const char *key,
+                uint32_t klen,
+                const char *val,
+                uint32_t vlen,
+                const T &sleep_time)
+    {
+        memcached_return rc;
+        while (true)
+        {
+            rc = memcached_set(
+                memc, key, klen, val, vlen, (time_t) 0, (uint32_t) 0);
+            if (rc == MEMCACHED_SUCCESS)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(sleep_time);
+        }
+    }
+
+    template <typename T>
+    char *memTryGet(const char *key,
+                    uint32_t klen,
+                    size_t *v_size,
+                    const T &sleep_time)
+    {
+        size_t l;
+        char *res;
+        uint32_t flags;
+        memcached_return rc;
+
+        while (true)
+        {
+            res = memcached_get(memc, key, klen, &l, &flags, &rc);
+            if (rc == MEMCACHED_SUCCESS || rc == MEMCACHED_NOTFOUND)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(sleep_time);
+        }
+
+        if (rc == MEMCACHED_NOTFOUND)
+        {
+            if (v_size)
+            {
+                *v_size = 0;
+            }
+            return nullptr;
+        }
+        else
+        {
+            if (v_size)
+            {
+                *v_size = l;
+            }
+
+            return res;
+        }
+    }
+
+    template <typename T>
+    char *memGet(const char *key,
+                 uint32_t klen,
+                 size_t *v_size,
+                 const T &sleep_time)
+    {
+        size_t l;
+        char *res;
+        uint32_t flags;
+        memcached_return rc;
+
+        while (true)
+        {
+            res = memcached_get(memc, key, klen, &l, &flags, &rc);
+            if (rc == MEMCACHED_SUCCESS)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(sleep_time);
+        }
+
+        if (v_size != nullptr)
+        {
+            *v_size = l;
+        }
+
+        return res;
+    }
+
+    template <typename T>
+    uint64_t memFetchAndAdd(const char *key, uint32_t klen, const T &sleep_time)
+    {
+        uint64_t res;
+        while (true)
+        {
+            memcached_return rc = memcached_increment(memc, key, klen, 1, &res);
+            if (rc == MEMCACHED_SUCCESS)
+            {
+                return res;
+            }
+
+            std::this_thread::sleep_for(sleep_time);
+        }
+    }
 };
 
 #endif
