@@ -130,8 +130,50 @@ std::ostream &operator<<(std::ostream &os, const ClientID &cid)
     return os;
 }
 
+void debug_validate_acquire_request_flag(uint8_t flag)
+{
+    if constexpr (debug())
+    {
+        bool no_gc = flag & (uint8_t) AcquireRequestFlag::kNoGc;
+        bool with_conflict_detect =
+            flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+        bool debug_no_bind_pr =
+            flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
+        bool debug_no_bind_any =
+            flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
+        bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+        bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+        bool reserved = flag & (uint8_t) AcquireRequestFlag::kReserved;
+        DCHECK(!reserved);
+        if (with_alloc)
+        {
+            DCHECK(no_gc) << "Set no-gc for allocation semantics.";
+            DCHECK(!with_conflict_detect)
+                << "Allocation semantics will not detect conflict";
+            DCHECK(!debug_no_bind_any)
+                << "Allocation semantics will not bind any";
+            DCHECK(!debug_no_bind_pr)
+                << "Allocation semantics will not bind pr";
+            DCHECK(!only_alloc) << "only_alloc conflict with with_alloc";
+        }
+        if (only_alloc)
+        {
+            DCHECK(no_gc) << "Set no-gc for allocation semantics";
+            DCHECK(!with_conflict_detect)
+                << "Allocation semantics will not detect conflict";
+            DCHECK(!debug_no_bind_any)
+                << "Allocation semantics will not bind any";
+            DCHECK(!debug_no_bind_pr)
+                << "Allocation semantics will not bind pr";
+            DCHECK(!with_alloc) << "with_alloc conflict with only_alloc";
+        }
+    }
+}
+
 std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
 {
+    debug_validate_acquire_request_flag(flag.flag);
+
     os << "{AcquireRequestFlag ";
     bool no_gc = flag.flag & (uint8_t) AcquireRequestFlag::kNoGc;
     if (no_gc)
@@ -156,18 +198,16 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
     {
         os << "no-any, ";
     }
-    bool type_alloc = flag.flag & (uint8_t) AcquireRequestFlag::kTypeAllocation;
-    if (type_alloc)
+    bool with_alloc = flag.flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+    if (with_alloc)
     {
-        os << "alloc, ";
-        DCHECK(no_gc) << "Set no-gc for allocation semantics.";
-        DCHECK(!with_conflict_detect)
-            << "Allocation semantics will not detect conflict";
-        DCHECK(!debug_no_bind_any) << "Allocation semantics will not bind any";
-        DCHECK(!debug_no_bind_pr) << "Allocation semantics will not bind pr";
+        os << "with-alloc, ";
     }
-    bool reserved = flag.flag & (uint8_t) AcquireRequestFlag::kReserved;
-    DCHECK(!reserved);
+    bool only_alloc = flag.flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+    if (only_alloc)
+    {
+        os << "only-alloc, ";
+    }
     os << "}";
     return os;
 }
@@ -196,9 +236,33 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
     os << "}";
     return os;
 }
+void debug_validate_lease_modify_flag(uint8_t flag)
+{
+    if constexpr (debug())
+    {
+        [[maybe_unused]] bool no_relinquish_unbind =
+            flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        [[maybe_unused]] bool force_unbind =
+            flag & (uint8_t) LeaseModifyFlag::kForceUnbind;
+        bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
+        bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+        bool reserved = flag & (uint8_t) LeaseModifyFlag::kReserved;
+        if (only_dealloc)
+        {
+            DCHECK(!with_dealloc) << "with_dealloc conflict with only_dealloc";
+        }
+        if (with_dealloc)
+        {
+            DCHECK(!only_dealloc) << "only_dealloc conflict with with_dealloc";
+        }
+        DCHECK(!reserved);
+    }
+}
 
 std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
 {
+    debug_validate_lease_modify_flag(flag.flag);
+
     os << "{LeaseModifyFlag ";
     bool no_relinquish_unbind =
         flag.flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
@@ -211,14 +275,18 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
     {
         os << "force-unbind, ";
     }
-    bool dealloc = flag.flag & (uint8_t) LeaseModifyFlag::kTypeDeallocation;
-    if (dealloc)
+    bool with_dealloc =
+        flag.flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
+    if (with_dealloc)
     {
-        os << "de-alloc";
+        os << "with-dealloc";
     }
-    bool reserve = flag.flag & (uint8_t) LeaseModifyFlag::kReserved;
-    DCHECK(!reserve);
-
+    bool only_dealloc =
+        flag.flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    if (only_dealloc)
+    {
+        os << "only-dealloc";
+    }
     os << "}";
     return os;
 }
@@ -255,7 +323,7 @@ std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req)
 {
     os << "{LeaseModifyRequest type: " << req.type << ", cid: " << req.cid
        << ", lease_id: " << req.lease_id << ", ns: " << req.ns
-       << ", flag: " << req.flag << " }";
+       << ", hint: " << req.hint << ", flag: " << req.flag << " }";
     return os;
 }
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &resp)

@@ -172,6 +172,13 @@ void Patronus::internal_barrier()
     }
 }
 
+/**
+ * @brief The actual implementation (dirty and complex but versatile) to get the
+ * lease.
+ *
+ * If allocation is on, the @key field is used as @hint for the allocator.
+ * Otherwise, the @key is provided to the locator to locate the address.
+ */
 Lease Patronus::get_lease_impl(uint16_t node_id,
                                uint16_t dir_id,
                                id_t key,
@@ -196,18 +203,6 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
                 enable_trace = true;
                 trace = ctx->trace();
             }
-        }
-    }
-
-    if constexpr (debug())
-    {
-        // validate flag
-        bool type_alloc = flag & (uint8_t) AcquireRequestFlag::kTypeAllocation;
-        bool with_lock =
-            flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
-        if (type_alloc)
-        {
-            DCHECK(!with_lock) << "allocation should not enable lock semantics";
         }
     }
 
@@ -573,8 +568,23 @@ ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
 
     return ErrCode::kOpExecutionErr;
 }
-
+/**
+ * @brief the actual implementation to modify a lease (especially relinquish
+ * it).
+ *
+ * Depending on whether flag & (uint8_t) LeaseModifyFlag::kOnlyAllocation is ON,
+ * the actual implemention will be very different.
+ *
+ * If flag is ON:
+ * the server will skip lease_ctx and read the @hint, and @address and @size
+ * from lease.
+ *
+ * If flag is OFF:
+ * the server will find lease_ctx by @lease_id from lease, and use the info
+ * there.
+ */
 Lease Patronus::lease_modify_impl(Lease &lease,
+                                  uint64_t hint,
                                   RequestType type,
                                   time::ns_t ns,
                                   uint8_t flag,
@@ -609,6 +619,12 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     msg->lease_id = lease.id();
     msg->ns = ns;
     msg->flag = flag;
+    msg->hint = hint;
+    // msg->addr and msg->size are only used when flag & only_alloc is true
+    // In this case, the provided lease should provide the expected values.
+    // Otherwise, msg->addr & msg->size is not used.
+    msg->addr = lease.base_addr_;
+    msg->size = lease.buffer_size_;
 
     rpc_context->ret_lease = &ret_lease;
     rpc_context->ready = false;
@@ -858,11 +874,11 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
 
 void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 {
+    debug_validate_acquire_request_flag(req->flag);
+
     DCHECK_NE(req->type, RequestType::kAcquireNoLease) << "** Deprecated";
 
     auto dirID = req->dir_id;
-    auto *buffer_mw = get_mw(dirID);
-    auto *header_mw = get_mw(dirID);
 
     // auto internal = dsm_->get_server_buffer();
     if constexpr (debug())
@@ -888,6 +904,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     uint64_t slot_id = 0;
     ProtectionRegion *protection_region = nullptr;
     uint64_t protection_region_id = 0;
+    ibv_mw *buffer_mw = nullptr;
+    ibv_mw *header_mw = nullptr;
 
     // will not actually bind memory window.
     // TODO(patronus): even with no_bind_pr, the PR is also allocated
@@ -896,13 +914,15 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         req->flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
     bool debug_no_bind_any =
         req->flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
-    bool type_alloc = req->flag & (uint8_t) AcquireRequestFlag::kTypeAllocation;
+    bool with_alloc = req->flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+    bool only_alloc = req->flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
 
     bool with_lock =
         req->flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
 
     bool with_buf = true;
     bool with_pr = true;
+    bool with_lease_ctx = true;
     if (debug_no_bind_any)
     {
         with_buf = false;
@@ -912,11 +932,16 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     {
         with_pr = false;
     }
-    // TODO(Patronus): with kTypeAllocation, will auto disable pr.
-    // Is it correct?
-    if (type_alloc)
+
+    if (with_alloc)
     {
         with_pr = false;
+    }
+    if (only_alloc)
+    {
+        with_pr = false;
+        with_buf = false;
+        with_lease_ctx = false;
     }
 
     if (with_lock)
@@ -933,10 +958,10 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         }
     }
 
-    if (type_alloc)
+    if (with_alloc || only_alloc)
     {
         // allocation
-        object_addr = patronus_alloc(req->size);
+        object_addr = patronus_alloc(req->size, req->key /* hint */);
         if (unlikely(object_addr == nullptr))
         {
             status = AcquireRequestStatus::kNoMem;
@@ -1000,6 +1025,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         {
             // only binding buffer. not to bind ProtectionRegion
             bind_req_nr = 1;
+            buffer_mw = get_mw(dirID);
             fill_bind_mw_wr(wrs[0],
                             nullptr,
                             buffer_mw,
@@ -1021,6 +1047,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
             // bind buffer & ProtectionRegion
             // for buffer
             bind_req_nr = 2;
+            buffer_mw = get_mw(dirID);
+            header_mw = get_mw(dirID);
             fill_bind_mw_wr(wrs[0],
                             &wrs[1],
                             buffer_mw,
@@ -1127,43 +1155,62 @@ handle_response:
     resp_msg->cid.node_id = get_node_id();
     resp_msg->cid.thread_id = get_thread_id();
     resp_msg->status = status;
+
+    using LeaseIdT = decltype(AcquireResponse::lease_id);
+
     if (likely(status == AcquireRequestStatus::kSuccess))
     {
-        auto *lease_ctx = get_lease_context();
-        lease_ctx->client_cid = req->cid;
-        lease_ctx->buffer_mw = buffer_mw;
-        lease_ctx->header_mw = header_mw;
-        lease_ctx->dir_id = dirID;
-        lease_ctx->addr_to_bind = (uint64_t) object_addr;
-        lease_ctx->buffer_size = req->size;
-        lease_ctx->with_pr = with_pr;
-        lease_ctx->with_buf = with_buf;
-        lease_ctx->type_alloc = type_alloc;
-
-        if (likely(with_pr))
+        // set to a scaring value so that we know it is invalid.
+        LeaseIdT lease_id = std::numeric_limits<LeaseIdT>::max();
+        if (likely(with_lease_ctx))
         {
-            lease_ctx->protection_region_id = protection_region_id;
-            // set to valid until linked to lease_ctx
-            protection_region->valid = true;
+            auto *lease_ctx = get_lease_context();
+            lease_ctx->client_cid = req->cid;
+            lease_ctx->buffer_mw = buffer_mw;
+            lease_ctx->header_mw = header_mw;
+            lease_ctx->dir_id = dirID;
+            lease_ctx->addr_to_bind = (uint64_t) object_addr;
+            lease_ctx->buffer_size = req->size;
+            lease_ctx->with_pr = with_pr;
+            lease_ctx->with_buf = with_buf;
+            lease_ctx->hint = req->key;  // key is hint when allocation is on
+
+            if (likely(with_pr))
+            {
+                lease_ctx->protection_region_id = protection_region_id;
+                // set to valid until linked to lease_ctx
+                protection_region->valid = true;
+            }
+            else
+            {
+                lease_ctx->protection_region_id = 0;
+            }
+            lease_ctx->with_conflict_detect = with_conflict_detect;
+            lease_ctx->key_bucket_id = bucket_id;
+            lease_ctx->key_slot_id = slot_id;
+            lease_ctx->valid = true;
+
+            lease_id = lease_context_.obj_to_id(lease_ctx);
+            DCHECK_LT(lease_id, std::numeric_limits<LeaseIdT>::max());
+        }
+
+        auto ns_per_unit = req->required_ns;
+        if (buffer_mw)
+        {
+            resp_msg->rkey_0 = buffer_mw->rkey;
         }
         else
         {
-            lease_ctx->protection_region_id = 0;
+            resp_msg->rkey_0 = 0;
         }
-        lease_ctx->with_conflict_detect = with_conflict_detect;
-        lease_ctx->key_bucket_id = bucket_id;
-        lease_ctx->key_slot_id = slot_id;
-        lease_ctx->valid = true;
-
-        auto lease_id = lease_context_.obj_to_id(lease_ctx);
-        DCHECK_LT(
-            lease_id,
-            std::numeric_limits<decltype(AcquireResponse::lease_id)>::max());
-
-        auto ns_per_unit = req->required_ns;
-
-        resp_msg->rkey_0 = buffer_mw->rkey;
-        resp_msg->rkey_header = header_mw->rkey;
+        if (header_mw)
+        {
+            resp_msg->rkey_header = header_mw->rkey;
+        }
+        else
+        {
+            resp_msg->rkey_header = 0;
+        }
         resp_msg->buffer_base = object_dsm_offset;
         resp_msg->header_base = header_dsm_offset;
         resp_msg->lease_id = lease_id;
@@ -1190,8 +1237,7 @@ handle_response:
         DCHECK(!invalid) << "Invalid flag: if enable auto-gc (no_gc: " << no_gc
                          << "), could not disable pr (with_pr: " << with_pr
                          << "). debug_no_bind_pr: " << debug_no_bind_pr
-                         << ", debug_no_bind_any: " << debug_no_bind_any
-                         << ", type_alloc: " << type_alloc;
+                         << ", debug_no_bind_any: " << debug_no_bind_any;
 
         if (likely(!no_gc && with_pr))
         {
@@ -1233,7 +1279,7 @@ handle_response:
     else
     {
         // gc here for all allocated resources
-        resp_msg->lease_id = 0;
+        resp_msg->lease_id = std::numeric_limits<LeaseIdT>::max();
         put_mw(dirID, buffer_mw);
         buffer_mw = nullptr;
         put_mw(dirID, header_mw);
@@ -1241,10 +1287,10 @@ handle_response:
         put_protection_region(protection_region);
 
         protection_region = nullptr;
-        if (type_alloc)
+        if (with_alloc || only_alloc)
         {
             // freeing nullptr is always well-defined
-            patronus_free(object_addr, req->size);
+            patronus_free(object_addr, req->size, req->key /* hint */);
         }
     }
 
@@ -1266,6 +1312,7 @@ handle_response:
 void Patronus::handle_request_lease_modify(LeaseModifyRequest *req,
                                            [[maybe_unused]] CoroContext *ctx)
 {
+    debug_validate_lease_modify_flag(req->flag);
     auto type = req->type;
     switch (type)
     {
@@ -1296,8 +1343,20 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
                                                CoroContext *ctx)
 {
     DCHECK_EQ(req->type, RequestType::kRelinquish);
-    auto lease_id = req->lease_id;
 
+    bool only_dealloc =
+        req->flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+
+    // handle dealloc here
+    if (only_dealloc)
+    {
+        auto dsm_offset = req->addr;
+        auto *addr = dsm_->dsm_offset_to_addr(dsm_offset);
+        patronus_free(addr, req->size, req->hint);
+        return;
+    }
+
+    auto lease_id = req->lease_id;
     task_gc_lease(lease_id,
                   req->cid,
                   compound_uint64_t(0),
@@ -2058,14 +2117,17 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                              uint8_t flag,
                              CoroContext *ctx)
 {
+    debug_validate_lease_modify_flag(flag);
+
     DVLOG(4) << "[patronus][gc_lease] task_gc_lease for lease_id " << lease_id
              << ", expect cid " << cid << ", coro: " << (ctx ? *ctx : nullctx)
              << ", at patronus time: " << time_syncer_->patronus_now();
-    bool reserved = flag & (uint8_t) LeaseModifyFlag::kReserved;
-    DCHECK(!reserved) << "** Reserved flag set detected";
 
+    bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
+    bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    DCHECK(!only_dealloc) << "This case should have been handled. "
+                             "task_gc_lease never handle this";
     auto *lease_ctx = get_lease_context(lease_id);
-
     if (unlikely(lease_ctx == nullptr))
     {
         DVLOG(4) << "[patronus][gc_lease] skip relinquish. lease_id "
@@ -2075,15 +2137,14 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     DCHECK(lease_ctx->valid);
     if (unlikely(lease_ctx->client_cid != cid))
     {
-        DVLOG(4)
-            << "[patronus][gc_lease] skip relinquish. cid mismatch: expect: "
-            << lease_ctx->client_cid << ", got: " << cid;
+        DVLOG(4) << "[patronus][gc_lease] skip relinquish. cid mismatch: "
+                    "expect: "
+                 << lease_ctx->client_cid << ", got: " << cid;
+        return;
     }
 
     bool with_pr = lease_ctx->with_pr;
     bool with_buf = lease_ctx->with_buf;
-    bool type_dealloc = flag & (uint8_t) LeaseModifyFlag::kTypeDeallocation;
-    bool is_type_alloc = lease_ctx->type_alloc;
 
     uint64_t protection_region_id = 0;
     ProtectionRegion *protection_region = nullptr;
@@ -2190,6 +2251,10 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     }
 
     bool no_unbind = flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    if (only_dealloc)
+    {
+        no_unbind = true;
+    }
     if (likely(!no_unbind))
     {
         // should issue unbind here.
@@ -2276,17 +2341,13 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         auto slot_id = lease_ctx->key_slot_id;
         lock_manager_.unlock(bucket_id, slot_id);
     }
-    if (type_dealloc)
+
+    if (with_dealloc)
     {
-        CHECK(is_type_alloc)
-            << "** Currently patronus does not allow cross-client "
-               "allocation/deallocation. "
-               "It could. so you can comment me out later."
-               "This piece of memory is not allocated "
-               "from the requesting client. lease_ctx.cid"
-            << lease_ctx->client_cid << ", cid: " << cid
-            << ", lease_id: " << lease_id;
-        patronus_free((void *) lease_ctx->addr_to_bind, lease_ctx->buffer_size);
+        auto *addr = (void *) lease_ctx->addr_to_bind;
+        auto size = lease_ctx->buffer_size;
+        auto hint = lease_ctx->hint;
+        patronus_free(addr, size, hint);
     }
 
     put_mw(lease_ctx->dir_id, lease_ctx->header_mw);

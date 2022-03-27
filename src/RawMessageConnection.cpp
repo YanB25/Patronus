@@ -32,15 +32,15 @@ void RawMessageConnection::syncSendRawMessage(RawMessage *m,
                                               ibv_ah *ah)
 {
     uint64_t magic_wr_id = fast_pseudo_rand_int();
-    rdmaSend(message,
-             (uint64_t) m - sendPadding,
-             sizeof(RawMessage) + sendPadding,
-             messageLkey,
-             ah,
-             remoteQPN,
-             true,
-             false,
-             magic_wr_id);
+    CHECK(rdmaSend(message,
+                   (uint64_t) m - sendPadding,
+                   sizeof(RawMessage) + sendPadding,
+                   messageLkey,
+                   ah,
+                   remoteQPN,
+                   true,
+                   false,
+                   magic_wr_id));
     ibv_wc wc;
 
     std::atomic<bool> found{false};
@@ -72,13 +72,13 @@ void RawMessageConnection::sendRawMessage(RawMessage *m,
         pollWithCQ(send_cq, 1, &wc);
     }
 
-    rdmaSend(message,
-             (uint64_t) m - sendPadding,
-             sizeof(RawMessage) + sendPadding,
-             messageLkey,
-             ah,
-             remoteQPN,
-             (sendCounter & SIGNAL_BATCH) == 0);
+    CHECK(rdmaSend(message,
+                   (uint64_t) m - sendPadding,
+                   sizeof(RawMessage) + sendPadding,
+                   messageLkey,
+                   ah,
+                   remoteQPN,
+                   (sendCounter & SIGNAL_BATCH) == 0));
 
     ++sendCounter;
 }

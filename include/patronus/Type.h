@@ -82,9 +82,12 @@ enum class AcquireRequestFlag : uint8_t
     kWithConflictDetect = 1 << 1,
     kDebugNoBindPR = 1 << 2,
     kDebugNoBindAny = 1 << 3,
-    kTypeAllocation = 1 << 4,
-    kReserved = 1 << 5,
+    kWithAllocation = 1 << 4,
+    kOnlyAllocation = 1 << 5,
+    kReserved = 1 << 6,
 };
+
+void debug_validate_acquire_request_flag(uint8_t flag);
 struct AcquireRequestFlagOut
 {
     AcquireRequestFlagOut(uint8_t flag) : flag(flag)
@@ -154,7 +157,10 @@ struct LeaseModifyRequest
     ClientID cid;
     id_t lease_id;
     time::ns_t ns;
-    uint8_t flag /* LeaseModifyFlag */;
+    uint64_t hint; /* when only_dealloc is ON */
+    uint8_t flag;  /* LeaseModifyFlag */
+    uint64_t addr; /* when only_dealloc is ON */
+    uint32_t size; /* when only_dealloc is ON */
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(LeaseModifyRequest) < ReliableConnection::kMessageSize);
@@ -193,9 +199,11 @@ enum class LeaseModifyFlag : uint8_t
 {
     kNoRelinquishUnbind = 1 << 0,
     kForceUnbind = 1 << 1,
-    kTypeDeallocation = 1 << 2,
-    kReserved = 1 << 3,
+    kWithDeallocation = 1 << 2,
+    kOnlyDeallocation = 1 << 3,
+    kReserved = 1 << 4,
 };
+void debug_validate_lease_modify_flag(uint8_t flag);
 struct LeaseModifyFlagOut
 {
     LeaseModifyFlagOut(uint8_t flag) : flag(flag)

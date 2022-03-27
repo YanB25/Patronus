@@ -38,6 +38,7 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     size_t max_cqe_for_receiver = machine_nr * RMSG_MULTIPLEXING *
                                   kPostRecvBufferBatch *
                                   kPostRecvBufferAdvanceBatch;
+    DLOG(INFO) << "[rmsg] max_cqe_for_receiver: " << max_cqe_for_receiver;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
         recv_cqs_[i] = CHECK_NOTNULL(
@@ -48,6 +49,7 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     // at maximum, the sender will have (RMSG_MULTIPLEXING) * kSenderBatchSize
     // pending cqes
     size_t max_cqe_for_sender = machine_nr * kMaxAppThread;
+    DLOG(INFO) << "[rmsg] max_cqe_for_sender: " << max_cqe_for_sender;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
         send_cqs_[i] = CHECK_NOTNULL(
@@ -61,6 +63,8 @@ ReliableConnection::ReliableConnection(uint64_t mm,
     // receiver size requirement
     size_t qp_max_depth_recv =
         kPostRecvBufferAdvanceBatch * kPostRecvBufferBatch;
+    DLOG(INFO) << "[rmsg] qp_max_depth_send: " << qp_max_depth_send
+               << ", qp_max_depth_recv: " << qp_max_depth_recv;
     for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
     {
         QPs_.emplace_back(machine_nr);

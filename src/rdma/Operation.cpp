@@ -227,8 +227,6 @@ bool rdmaSend(ibv_qp *qp,
     wr.wr_id = wr_id;
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        PLOG(ERROR) << "Send with RDMA_SEND failed. wrid: " << WRID(wr.wr_id)
-                    << ", QP: " << (void *) qp;
         return false;
     }
     return true;

@@ -224,9 +224,12 @@ public:
             if (ret)
             {
                 debug_class_allocated_nr_[it->first]++;
-                CHECK(debug_ongoing_bufs_.insert(ret).second)
-                    << "The returned pair.second denotes whether insertion "
-                       "succeeds. Expect to insert a new element";
+                if constexpr (config::kEnableSlabAllocatorStrictChecking)
+                {
+                    CHECK(debug_ongoing_bufs_.insert(ret).second)
+                        << "The returned pair.second denotes whether insertion "
+                           "succeeds. Expect to insert a new element";
+                }
             }
         }
         DVLOG(20) << "[slab-alloc] allocating size " << size << " from class "
@@ -246,8 +249,11 @@ public:
         if constexpr (debug())
         {
             debug_class_freed_nr_[ptr_class]++;
-            CHECK_EQ(debug_ongoing_bufs_.erase(addr), 1)
-                << "Expect addr " << (void *) addr << " found in the set";
+            if constexpr (config::kEnableSlabAllocatorStrictChecking)
+            {
+                CHECK_EQ(debug_ongoing_bufs_.erase(addr), 1)
+                    << "Expect addr " << (void *) addr << " found in the set";
+            }
         }
         DVLOG(20) << "[slab-alloc] freeing " << addr;
     }

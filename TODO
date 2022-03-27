@@ -229,3 +229,21 @@ Current TODOs:
 - PASS the test_all.sh, let patronus being okay
 - go back to branch feat/rdma-race, make sure the modification to keeper is not harmful
 - bench the correctness/performance of put/get/barrier performance. It is useful in racehashing exprs, especially in sharing the meta address of race hashing.
+
+
+
+when you get back:
+
+let patronus support alloc and free ONLY...
+- let task_gc_lease works well: handle all the cases!
+- read task_gc_lease carefully
+add correct_patronus_alloc to test the correctness.
+let slab allocator work in strict mode: CHECK all the freed address! make sure it is allocated by me!
+make sure all the tests not fail by test_all.sh
+
+correct_patronus_alloc_single_thread:
+keep going and checks whether acquire_perm works well.
+
+MUST DO BEFORE MERGING:
+1. PASS ALL TESTS
+2. Test whether the performance got worse. Especially the allocator and bench_rmsg. Because I add the rate limiter.

@@ -124,11 +124,11 @@ struct LeaseContext
     size_t protection_region_id;
     // about with_conflict_detect
     bool with_conflict_detect{false};
-    bool type_alloc{false};
     bool with_pr{true};
     bool with_buf{true};
     uint64_t key_bucket_id{0};
     uint64_t key_slot_id{0};
+    uint64_t hint{0};
 };
 
 class Patronus
@@ -172,6 +172,11 @@ public:
                             std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
+    inline Lease alloc(uint16_t node_id,
+                       uint16_t dir_id,
+                       size_t size,
+                       uint64_t hint,
+                       CoroContext *ctx = nullptr);
     inline Lease get_wlease(uint16_t node_id,
                             uint16_t dir_id,
                             id_t key,
@@ -180,18 +185,24 @@ public:
                             uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     inline Lease upgrade(Lease &lease,
-                         uint8_t flag /*LeaseModificationFlag */,
+                         uint8_t flag /*LeaseModifyFlag */,
                          CoroContext *ctx = nullptr);
     /**
      * @brief extend the lifecycle of lease for another more ns.
      */
     inline ErrCode extend(Lease &lease,
                           std::chrono::nanoseconds ns,
-                          uint8_t flag /* LeaseModificationFlag */,
+                          uint8_t flag /* LeaseModifyFlag */,
                           CoroContext *ctx = nullptr);
     inline void relinquish(Lease &lease,
-                           uint8_t flag /* LeaseModificationFlag */,
+                           uint8_t flag /* LeaseModifyFlag */,
                            CoroContext *ctx = nullptr);
+    inline void dealloc(uint16_t node_id,
+                        uint16_t dir_id,
+                        uint64_t address,
+                        size_t size,
+                        uint64_t hint,
+                        CoroContext *ctx = nullptr);
     inline void relinquish_write(Lease &lease, CoroContext *ctx = nullptr);
     inline ErrCode read(Lease &lease,
                         char *obuf,
@@ -615,6 +626,7 @@ private:
                      uint16_t wr_prefix,
                      CoroContext *ctx = nullptr);
     Lease lease_modify_impl(Lease &lease,
+                            uint64_t hint,
                             RequestType type,
                             time::ns_t ns,
                             uint8_t flag /* LeaseModificationFlag */,
@@ -628,8 +640,8 @@ private:
                                 int access_flag);
     ErrCode maybe_auto_extend(Lease &lease, CoroContext *ctx = nullptr);
 
-    inline void *patronus_alloc(size_t size);
-    inline void patronus_free(void *addr, size_t size);
+    inline void *patronus_alloc(size_t size, uint64_t hint);
+    inline void patronus_free(void *addr, size_t size, uint64_t hint);
 
     inline bool valid_lease_buffer_offset(size_t buffer_offset) const;
     inline bool valid_total_buffer_offset(size_t buffer_offset) const;
@@ -694,6 +706,24 @@ bool Patronus::already_passed_ddl(time::PatronusTime patronus_ddl) const
     return already_pass_ddl;
 }
 
+Lease Patronus::alloc(uint16_t node_id,
+                      uint16_t dir_id,
+                      size_t size,
+                      uint64_t hint,
+                      CoroContext *ctx)
+{
+    auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
+                (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+    return get_lease_impl(node_id,
+                          dir_id,
+                          hint /* key & hint */,
+                          size,
+                          0,
+                          RequestType::kAcquireWLease,
+                          flag,
+                          ctx);
+}
+
 Lease Patronus::get_rlease(uint16_t node_id,
                            uint16_t dir_id,
                            id_t key,
@@ -702,6 +732,10 @@ Lease Patronus::get_rlease(uint16_t node_id,
                            uint8_t flag,
                            CoroContext *ctx)
 {
+    debug_validate_acquire_request_flag(flag);
+    bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+    DCHECK(!only_alloc) << "Please use Patronus::alloc";
+
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     return get_lease_impl(
@@ -715,6 +749,7 @@ Lease Patronus::get_wlease(uint16_t node_id,
                            uint8_t flag,
                            CoroContext *ctx)
 {
+    debug_validate_acquire_request_flag(flag);
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     return get_lease_impl(
@@ -723,8 +758,10 @@ Lease Patronus::get_wlease(uint16_t node_id,
 
 Lease Patronus::upgrade(Lease &lease, uint8_t flag, CoroContext *ctx)
 {
-    return lease_modify_impl(
-        lease, RequestType::kUpgrade, 0 /* term */, flag, ctx);
+    debug_validate_lease_modify_flag(flag);
+    // return lease_modify_impl(
+    //     lease, RequestType::kUpgrade, 0 /* term */, flag, ctx);
+    CHECK(false) << "deprecated " << lease << flag << pre_coro_ctx(ctx);
 }
 ErrCode Patronus::extend_impl(Lease &lease,
                               size_t extend_unit_nr,
@@ -766,6 +803,7 @@ ErrCode Patronus::extend(Lease &lease,
                          uint8_t flag,
                          CoroContext *ctx)
 {
+    debug_validate_lease_modify_flag(flag);
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     auto ns_per_unit = lease.ns_per_unit_;
@@ -794,10 +832,36 @@ ErrCode Patronus::extend(Lease &lease,
 
     return extend_impl(lease, extend_unit_nr, flag, ctx);
 }
+void Patronus::dealloc(uint16_t node_id,
+                       uint16_t dir_id,
+                       uint64_t address,
+                       size_t size,
+                       uint64_t hint,
+                       CoroContext *ctx)
+{
+    // construct a lease to make lease_modify_impl happy
+    Lease lease;
+    using LeaseIDT = decltype(lease.id_);
+    lease.node_id_ = node_id;
+    lease.dir_id_ = dir_id;
+    lease.base_addr_ = address;
+    lease.buffer_size_ = size;
+    lease.id_ = std::numeric_limits<LeaseIDT>::max();
+
+    auto flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind |
+                (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    lease_modify_impl(
+        lease, hint, RequestType::kRelinquish, 0 /* term */, flag, ctx);
+}
 void Patronus::relinquish(Lease &lease, uint8_t flag, CoroContext *ctx)
 {
+    bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    DCHECK(!only_dealloc) << "Please use Patronus::dealloc instead";
+
+    debug_validate_lease_modify_flag(flag);
     // TODO(Patronus): the term is set to 0 here.
-    lease_modify_impl(lease, RequestType::kRelinquish, 0 /* term */, flag, ctx);
+    lease_modify_impl(
+        lease, 0 /* hint */, RequestType::kRelinquish, 0 /* term */, flag, ctx);
 }
 
 ErrCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)
@@ -961,16 +1025,35 @@ void Patronus::relinquish_write(Lease &lease, CoroContext *ctx)
 
     put_rdma_buffer(rdma_buffer.buffer);
 }
-void *Patronus::patronus_alloc(size_t size)
+void *Patronus::patronus_alloc(size_t size, uint64_t hint)
 {
-    return allocator_->alloc(size);
+    // auto it = allocators_.find(hint);
+    // if (it == allocators_.end())
+    // {
+    //     // miss, use default
+    //     return allocators_[0]->alloc(size);
+    // }
+    // return it->second->alloc(size);
+    std::ignore = hint;
+    auto *ret = allocator_->alloc(size);
+    return ret;
 }
-void Patronus::patronus_free(void *addr, size_t size)
+void Patronus::patronus_free(void *addr, size_t size, uint64_t hint)
 {
-    if (addr != nullptr)
+    if (addr == nullptr)
     {
-        allocator_->free(addr, size);
+        return;
     }
+
+    // auto it = allocators_.find(hint);
+    // if (it == allocators_.end())
+    // {
+    //     return allocators_[0]->free(addr, size);
+    // }
+    // return it->second->free(addr, size);
+
+    std::ignore = hint;
+    allocator_->free(addr, size);
 }
 
 bool Patronus::valid_lease_buffer_offset(size_t buffer_offset) const

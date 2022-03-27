@@ -20,7 +20,8 @@ public:
               size_t targetID);
 
 private:
-    void poll_cq(size_t mid);
+    ssize_t poll_cq(size_t mid);
+    ssize_t poll_cq_at_least(size_t mid, ssize_t until);
 
     std::vector<std::vector<ibv_qp *>> &QPs_;
     std::array<ibv_cq *, RMSG_MULTIPLEXING> send_cqs_;
