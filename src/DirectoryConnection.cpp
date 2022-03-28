@@ -118,19 +118,12 @@ DirectoryConnection::~DirectoryConnection()
             {
                 continue;
             }
-            // LOG(INFO) << "[debug] trying to free dirToAppAh[" << dirID <<
-            // "]["
-            //           << i << "] val "
-            //           << (void *) (*remoteInfo)[node_id].dirToAppAh[dirID][i]
-            //           << " to node_id " << node_id;
 
             PLOG_IF(ERROR, ibv_destroy_ah(pah)) << "failed to destroy ah";
             (*remoteInfo)[node_id].dirToAppAh[dirID][i] = nullptr;
         }
     }
-    // LOG(INFO) << "!!! [debug] freeing context " << (void *) &ctx << " with pd
-    // "
-    //           << (void *) ctx.pd;
+
     CHECK(destroyContext(&ctx));
     timer.pin("destroy context (dealloc PD, close device)");
     timer.report();

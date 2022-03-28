@@ -76,7 +76,7 @@ public:
         {
             auto ex = getExchangeMetaBootstrap(i);
             uint64_t digest = djb2_digest((char *) &ex, sizeof(ex));
-            LOG(INFO) << "[debug] node: " << i << " digest: " << std::hex
+            LOG(INFO) << "[boot-meta] node: " << i << " digest: " << std::hex
                       << digest;
         }
     }

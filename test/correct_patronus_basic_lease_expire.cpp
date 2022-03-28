@@ -43,7 +43,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -116,7 +116,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /* offset */,
                               0 /* flag */,
                               &ctx);
-            if (ec != ErrCode::kSuccess)
+            if (ec != RetCode::kOk)
             {
                 auto patronus_now = syncer.patronus_now();
                 time::ns_t ns_diff = lease.ddl_term() - patronus_now;
@@ -126,7 +126,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                 }
                 else
                 {
-                    CHECK_EQ(ec, ErrCode::kSuccess)
+                    CHECK_EQ(ec, RetCode::kOk)
                         << "[bench] " << i << "-th, read " << t
                         << "-th failed. lease until DDL: " << ns_diff
                         << ", patronus_now: " << patronus_now;
@@ -159,7 +159,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           (uint8_t) RWFlag::kNoLocalExpireCheck,
                           &ctx);
 
-        if (ec == ErrCode::kSuccess)
+        if (ec == RetCode::kOk)
         {
             fail_to_unbind_m.collect(1);
         }
@@ -172,7 +172,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                  << " start to relinquish lease ";
 
         // make sure this will take no harm.
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);
 
         p->put_rdma_buffer(rdma_buf);
     }

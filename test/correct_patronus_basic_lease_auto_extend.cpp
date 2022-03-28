@@ -41,7 +41,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -99,7 +99,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /*offset*/,
                               (uint8_t) RWFlag::kWithAutoExtend,
                               &ctx);
-            if (ec == ErrCode::kSuccess)
+            if (ec == RetCode::kOk)
             {
                 read_loop_succ_cnt++;
             }
@@ -123,7 +123,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         read_loop_nr_m.collect(read_loop_succ_cnt);
 
         // make sure this will take no harm.
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);
 
         p->put_rdma_buffer(rdma_buf);
     }

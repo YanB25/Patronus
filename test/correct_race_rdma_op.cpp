@@ -47,7 +47,8 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_rdma_rh(Patronus::pointer patronus,
     // let the memory leak, I don't care
     conf.g_kvblock_pool_addr = malloc(conf.g_kvblock_pool_size);
 
-    auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(0, patronus);
+    auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(
+        0 /* node_id not used */, 0 /* dir_id not used */, patronus);
 
     CHECK(false) << "TODO: rdma adaptor has no reg_allocator. If its correct?";
 
@@ -57,11 +58,12 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_rdma_rh(Patronus::pointer patronus,
     std::vector<std::shared_ptr<RaceHashingHandleT>> rhhs;
     for (size_t i = 0; i < thread_nr; ++i)
     {
+        auto dir_id = i;
         RaceHashingHandleConfig handle_conf;
         handle_conf.auto_expand = auto_expand;
         handle_conf.auto_update_dir = auto_expand;
-        auto handle_rdma_ctx =
-            patronus::RdmaAdaptor::new_instance(kServerNodeId, patronus);
+        auto handle_rdma_ctx = patronus::RdmaAdaptor::new_instance(
+            kServerNodeId, dir_id, patronus);
         auto rhh = std::make_shared<RaceHashingHandleT>(kServerNodeId,
                                                         rh->meta_gaddr(),
                                                         handle_conf,

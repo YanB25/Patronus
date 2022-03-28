@@ -128,13 +128,16 @@ public:
         auto remote = slot_handle.remote_addr();
         uint64_t expect_val = slot_handle.slot_view().val();
         auto clear_view = slot_handle.view_after_clear();
-        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(8));
-        CHECK_EQ(
-            rdma_ctx.rdma_cas(
-                remote, expect_val, clear_view.val(), rdma_buf, st_mem_handle_),
-            kOk);
+        auto rdma_buf = rdma_ctx.get_rdma_buffer(8);
+        DCHECK_GE(rdma_buf.size, 8);
+        CHECK_EQ(rdma_ctx.rdma_cas(remote,
+                                   expect_val,
+                                   clear_view.val(),
+                                   rdma_buf.buffer,
+                                   st_mem_handle_),
+                 kOk);
         CHECK_EQ(rdma_ctx.commit(), kOk);
-        uint64_t read = *(uint64_t *) rdma_buf;
+        uint64_t read = *(uint64_t *) rdma_buf.buffer;
         bool success = read == expect_val;
         if (success)
         {
@@ -273,20 +276,21 @@ public:
             << "[race][trace] init_and_update_bucket_header_nodrain: ld: " << ld
             << ", suffix: " << suffix;
         auto st_size = size_bytes();
-        auto *rdma_buf = rdma_ctx.get_rdma_buffer(st_size);
-        memset(rdma_buf, 0, st_size);
+        auto rdma_buf = rdma_ctx.get_rdma_buffer(st_size);
+        DCHECK_GE(rdma_buf.size, st_size);
+        memset(rdma_buf.buffer, 0, st_size);
         for (size_t i = 0; i < kTotalBucketNr; ++i)
         {
             auto *bucket_buf_addr =
-                (char *) rdma_buf + i * Bucket<kSlotNr>::size_bytes();
+                (char *) rdma_buf.buffer + i * Bucket<kSlotNr>::size_bytes();
             auto bucket = Bucket<kSlotNr>(bucket_buf_addr);
             bucket.header().ld = ld;
             bucket.header().suffix = suffix;
         }
 
-        CHECK_EQ(
-            rdma_ctx.rdma_write(st_gaddr_, rdma_buf, st_size, st_mem_handle_),
-            kOk);
+        CHECK_EQ(rdma_ctx.rdma_write(
+                     st_gaddr_, rdma_buf.buffer, st_size, st_mem_handle_),
+                 kOk);
         CHECK_EQ(rdma_ctx.commit(), kOk);
 
         return kOk;

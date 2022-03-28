@@ -189,7 +189,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         {
             succ_nr++;
             VLOG(4) << "[coro] tid " << tid << " relinquish. coro: " << ctx;
-            patronus->relinquish(lease, relinquish_flag, &ctx);
+            patronus->relinquish(lease, 0 /* hint */, relinquish_flag, &ctx);
             coro_comm.thread_remain_task--;
         }
         else

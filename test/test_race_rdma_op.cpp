@@ -30,13 +30,14 @@ using RaceHandleT = typename RaceHashingT::Handle;
 void client_test_capacity(Patronus::pointer p)
 {
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
+    auto dir_id = 0;
 
     LOG(INFO) << "[bench] got meta of hashtable: " << meta_gaddr;
 
     RaceHashingHandleConfig handle_conf;
 
     auto handle_rdma_ctx =
-        patronus::RdmaAdaptor::new_instance(kServerNodeId, p);
+        patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p);
     RaceHandleT rhh(kServerNodeId,
                     meta_gaddr,
                     handle_conf,
@@ -83,7 +84,6 @@ void client_test_capacity(Patronus::pointer p)
             CHECK(false) << "Unknow return code: " << rc;
         }
     }
-    handle_rdma_ctx->put_all_rdma_buffer();
     LOG(INFO) << "Inserted " << succ_nr << ", failed: " << fail_nr
               << ", success rate: " << 1.0 * succ_nr / (succ_nr + fail_nr);
 
@@ -121,14 +121,14 @@ void server(Patronus::pointer p, size_t initial_subtable)
     conf.g_kvblock_pool_size = kKVBlockReserveSize;
     conf.g_kvblock_pool_addr = malloc(conf.g_kvblock_pool_size);
 
-    auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(0, p);
+    auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(0, 0, p);
 
     RaceHashingT rh(server_rdma_ctx, allocator, conf);
 
     auto meta_gaddr = rh.meta_gaddr();
     p->put("race:meta_gaddr", meta_gaddr, 0ns);
 
-    LOG(INFO) << "[debug] meta gaddr is " << meta_gaddr;
+    LOG(INFO) << "[bench] meta gaddr is " << meta_gaddr;
 
     p->server_serve(tid);
 

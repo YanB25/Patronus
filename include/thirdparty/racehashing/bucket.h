@@ -123,15 +123,16 @@ public:
                       HashContext *dctx)
     {
         uint64_t expect_val = slot_handle.val();
-        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(8));
+        auto rdma_buf = rdma_ctx.get_rdma_buffer(8);
+        DCHECK_GE(rdma_buf.size, 8);
         CHECK_EQ(rdma_ctx.rdma_cas(slot_handle.remote_addr(),
                                    expect_val,
                                    new_slot.val(),
-                                   rdma_buf,
+                                   rdma_buf.buffer,
                                    subtable_mem_handle),
                  kOk);
         CHECK_EQ(rdma_ctx.commit(), kOk);
-        bool success = memcmp(rdma_buf, &expect_val, 8) == 0;
+        bool success = memcmp(rdma_buf.buffer, &expect_val, 8) == 0;
 
         SlotView expect_slot(expect_val);
         if (success)
@@ -173,15 +174,15 @@ public:
             // we don't need the key and value content
             // just the buffered hash.
             auto kvblock_len = sizeof(KVBlock);
-            auto *rdma_buf =
-                DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(kvblock_len));
-            CHECK_EQ(rdma_ctx.rdma_read(rdma_buf,
+            auto rdma_buf = rdma_ctx.get_rdma_buffer(kvblock_len);
+            DCHECK_GE(rdma_buf.size, kvblock_len);
+            CHECK_EQ(rdma_ctx.rdma_read(DCHECK_NOTNULL(rdma_buf.buffer),
                                         kvblock_remote_addr,
                                         kvblock_len,
                                         kvblock_mem_handle),
                      kOk);
             CHECK_EQ(rdma_ctx.commit(), kOk);
-            KVBlock &kv_block = *(KVBlock *) rdma_buf;
+            KVBlock &kv_block = *(KVBlock *) rdma_buf.buffer;
             auto hash = kv_block.hash;
             if (hash & (1 << bit))
             {
@@ -205,13 +206,13 @@ public:
     {
         // header is at the first of the addr.
         std::ignore = dctx;
-        auto *rdma_buf =
-            DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(sizeof(BucketHeader)));
-        auto &header = *(BucketHeader *) rdma_buf;
+        auto rdma_buf = rdma_ctx.get_rdma_buffer(sizeof(BucketHeader));
+        DCHECK_GE(rdma_buf.size, sizeof(BucketHeader));
+        auto &header = *(BucketHeader *) rdma_buf.buffer;
         header.ld = ld;
         header.suffix = suffix;
         return rdma_ctx.rdma_write(
-            gaddr_, rdma_buf, sizeof(BucketHeader), mem_handle);
+            gaddr_, rdma_buf.buffer, sizeof(BucketHeader), mem_handle);
     }
 
     GlobalAddress slot_remote_addr(size_t idx) const

@@ -95,16 +95,18 @@ public:
             ret = CHECK_NOTNULL(it->second->alloc(size));
         }
 
-        remote_allocated_buffers_.insert(ret);
+        remote_allocated_buffers_.emplace(ret, size);
         auto remote_gaddr = to_exposed_gaddr(ret);
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
             << "[rdma][trace] rpc_alloc: " << (void *) ret << "("
             << remote_gaddr << ") for size " << size;
         return remote_gaddr;
     }
-    void rpc_free(GlobalAddress gaddr, hint_t hint)
+    void rpc_free(GlobalAddress gaddr, size_t size, hint_t hint)
     {
         auto *addr = from_exposed_gaddr(gaddr);
+        CHECK_EQ(remote_allocated_buffers_.count(addr), 1);
+        CHECK_EQ(remote_allocated_buffers_[addr], size);
         CHECK_EQ(remote_allocated_buffers_.erase(addr), 1);
         DLOG_IF(INFO, config::kEnableDebug)
             << "[rdma][trace] rpc_free: " << addr;
@@ -127,13 +129,14 @@ public:
         remote_not_freed_buffers_.insert(addr);
     }
     void remote_free(GlobalAddress gaddr,
+                     size_t size,
                      hint_t hint,
                      CoroContext * = nullptr) override
     {
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
             << "[rdma][trace] remote_free: " << gaddr;
         remote_not_freed_buffers_.insert((void *) gaddr.val);
-        server_ep_.lock()->rpc_free(gaddr, hint);
+        server_ep_.lock()->rpc_free(gaddr, size, hint);
     }
     // mock implement
     // no action for permission
@@ -142,7 +145,7 @@ public:
                                      CoroContext *ctx = nullptr) override
     {
         free_handle(handle);
-        return remote_free(handle.gaddr(), hint, ctx);
+        return remote_free(handle.gaddr(), handle.size(), hint, ctx);
     }
     void relinquish_perm(RemoteMemHandle &handle,
                          CoroContext * = nullptr) override
@@ -150,7 +153,7 @@ public:
         free_handle(handle);
         return;
     }
-    char *get_rdma_buffer(size_t size) override
+    Buffer get_rdma_buffer(size_t size) override
     {
         void *ret = malloc(size);
         DCHECK_GT(size, 0) << "Make no sense to alloc size with 0";
@@ -158,14 +161,9 @@ public:
         DLOG_IF(INFO, config::kEnableMemoryDebug && dctx_ != nullptr)
             << "[rdma][trace] get_rdma_buffer: " << (void *) ret << " for size "
             << size;
-        return (char *) ret;
+        return Buffer((char *) ret, size);
     }
-    void put_rdma_buffer(void *rdma_buf) override
-    {
-        DCHECK_EQ(allocated_buffers_.count(rdma_buf), 1);
-        allocated_buffers_.erase(rdma_buf);
-        free(rdma_buf);
-    }
+
     RetCode rdma_read(void *rdma_buf,
                       GlobalAddress gaddr,
                       size_t size,
@@ -365,7 +363,7 @@ private:
     HashContext *dctx_{nullptr};
     std::vector<MockRdmaOp> ops_;
     std::unordered_set<void *> allocated_buffers_;
-    std::unordered_set<void *> remote_allocated_buffers_;
+    std::unordered_map<void *, size_t> remote_allocated_buffers_;
     std::unordered_set<void *> remote_not_freed_buffers_;
 
     std::unordered_set<uint64_t> allocated_handle_;

@@ -49,7 +49,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -158,13 +158,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           0 /* offset */,
                           kReadWriteFlag /* flag */,
                           &ctx);
-        if (unlikely(ec != ErrCode::kSuccess))
+        if (unlikely(ec != RetCode::kOk))
         {
             DVLOG(1) << "[bench] client coro " << ctx
                      << " read FAILED. retry. ";
             bench_infos[tid].fail_nr++;
             // p->relinquish_write(lease, &ctx);
-            p->relinquish(lease, kRelinquishFlag, &ctx);
+            p->relinquish(lease, 0 /* hint */, kRelinquishFlag, &ctx);
             continue;
         }
 
@@ -181,7 +181,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             << ", offset: " << bench_locator(coro_key);
 
         // p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, kRelinquishFlag, &ctx);
+        p->relinquish(lease, 0 /* hint */, kRelinquishFlag, &ctx);
 
         if (unlikely(enable_trace))
         {

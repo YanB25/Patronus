@@ -42,7 +42,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -101,10 +101,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         ns_till_ddl_m.collect(diff_ns);
 
         auto ec = p->extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
-        if (unlikely(ec != ErrCode::kSuccess))
+        if (unlikely(ec != RetCode::kOk))
         {
             extend_failed_m.collect(1);
-            p->relinquish(lease, 0, &ctx);
+            p->relinquish(lease, 0, 0, &ctx);
             p->put_rdma_buffer(rdma_buf);
             DLOG(WARNING) << "[bench] extend failed. retry.";
             continue;
@@ -124,7 +124,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /*offset*/,
                               0 /* flag */,
                               &ctx);
-            if (ec == ErrCode::kSuccess)
+            if (ec == RetCode::kOk)
             {
                 read_loop_succ_cnt++;
             }
@@ -144,7 +144,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         read_loop_nr_m.collect(read_loop_succ_cnt);
 
         // make sure this will take no harm.
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0, 0, &ctx);
         p->put_rdma_buffer(rdma_buf);
     }
 

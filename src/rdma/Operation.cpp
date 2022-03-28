@@ -359,6 +359,8 @@ bool rdmaWrite(ibv_qp *qp,
                bool isSignaled,
                uint64_t wrID)
 {
+    DLOG_IF(INFO, config::kMonitorAddressConversion)
+        << "[addr] rdmaWrite: dest: " << dest << ", or " << (void *) dest;
     struct ibv_sge sg;
     struct ibv_send_wr wr;
     struct ibv_send_wr *wrBad;

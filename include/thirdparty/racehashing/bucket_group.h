@@ -72,7 +72,9 @@ public:
 
     RetCode read(IRdmaAdaptor &rdma_ctx, RemoteMemHandle &handle)
     {
-        buffer_ = CHECK_NOTNULL(rdma_ctx.get_rdma_buffer(size_bytes()));
+        auto rdma_buf = rdma_ctx.get_rdma_buffer(size_bytes());
+        DCHECK_GE(rdma_buf.size, size_bytes());
+        buffer_ = rdma_buf.buffer;
         DLOG_IF(INFO, config::kEnableMemoryDebug)
             << "[race][mem] in bucket_group::read: gaddr_: " << gaddr_
             << ", buffer: " << (void *) buffer_;

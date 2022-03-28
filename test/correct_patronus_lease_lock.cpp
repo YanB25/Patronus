@@ -94,7 +94,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0, 0, &ctx);
 
         DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
         client_comm.still_has_work[coro_id] = true;

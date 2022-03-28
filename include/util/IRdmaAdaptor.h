@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include "Cache.h"
 #include "CoroContext.h"
 #include "GlobalAddress.h"
 #include "patronus/memory/allocator.h"
@@ -82,6 +83,7 @@ public:
                                          CoroContext * = nullptr) = 0;
     // free
     virtual void remote_free(GlobalAddress,
+                             size_t size,
                              hint_t,
                              CoroContext * = nullptr) = 0;
     // free + relinquish
@@ -92,8 +94,9 @@ public:
     virtual void relinquish_perm(RemoteMemHandle &,
                                  CoroContext * = nullptr) = 0;
 
-    virtual char *get_rdma_buffer(size_t size) = 0;
-    virtual void put_rdma_buffer(void *rdma_buf) = 0;
+    virtual Buffer get_rdma_buffer(size_t size) = 0;
+    // use the put_all_rdma_buffer API.
+    // virtual void put_rdma_buffer(void *rdma_buf) = 0;
     virtual RetCode rdma_read(void *rdma_buf,
                               GlobalAddress gaddr,
                               size_t size,

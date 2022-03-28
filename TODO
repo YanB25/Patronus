@@ -222,3 +222,26 @@ Should add some tests.
     - no difference
 [-] bring coroutine into reg_mw cases
     - got x2 performance
+
+
+Current TODOs:
+[-] compilable
+[-] PASS ALL old tests
+[-] PASS correct_patronus_addr (rename to correct_rdma_adaptor_addr)
+- PASS test_race_mock_op
+- Add an abstract that manage resource memory! call put_all_rdma_buffer on exit!
+- work on test_race_rdma_op! pass the very baby test!
+- PASS correct_race_rdma_op
+- Add bench_race_rdma_op and see how it works!
+
+Bench (drafts, basic ideas)
+
+I'd like to test more about race hashing, because I take lots of time implementing it, and it is REAL.
+Race hashing:
+- No-mig, rw: If KVBlock is also protected: patronus v.s. MR v.s. pooled MR v.s. unprotected
+- The effectness of auto time out (i.e. lease) (in an art way).
+- The fast recovering of access fault under shrink. patronus v.s. MR v.s. unprotected
+- Mig, ro: The total latency of expansion (and the performance during the whole procedure): patronus v.s. break connection v.s. MR.
+
+Serverless (mock):
+Just take a couple of data. do like quick sort, summing, etc.

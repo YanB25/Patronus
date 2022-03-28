@@ -35,7 +35,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -112,7 +112,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           0 /* offset */,
                           0 /* flag */,
                           &ctx);
-        CHECK_EQ(ec, ErrCode::kSuccess)
+        CHECK_EQ(ec, RetCode::kOk)
             << "[bench] client coro " << ctx
             << " read FAILED. This should not happen, because we "
                "filter out the invalid mws.";
@@ -128,7 +128,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
         p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0, 0, &ctx);
 
         p->put_rdma_buffer(rdma_buf);
 

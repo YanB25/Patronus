@@ -108,6 +108,49 @@ inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
     return os;
 }
 
+template <size_t kCoroCnt_>
+class CoroExecutionContext
+{
+public:
+    constexpr static size_t kCoroCnt = kCoroCnt_;
+
+    void worker_finished(size_t wid)
+    {
+        finish_all_[wid] = true;
+    }
+    bool is_finished_all() const
+    {
+        return std::all_of(
+            finish_all_.begin(), finish_all_.end(), [](bool i) { return i; });
+    }
+    CoroCall *workers()
+    {
+        return workers_.data();
+    }
+    const CoroCall *workers() const
+    {
+        return workers_.data();
+    }
+    CoroCall *master() const
+    {
+        return master_;
+    }
+    CoroCall &worker(size_t wid)
+    {
+        CHECK_LT(wid, kCoroCnt);
+        return workers_[wid];
+    }
+    CoroCall &master()
+    {
+        return master_;
+    }
+
+private:
+    std::array<CoroCall, kCoroCnt> workers_;
+    CoroCall master_;
+    std::array<bool, kCoroCnt> finish_all_{};
+};
+
 class pre_coro_ctx
 {
 public:

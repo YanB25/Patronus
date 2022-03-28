@@ -95,10 +95,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto w_flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
         auto ec =
             p->write(lease, rdma_buf.buffer, kAllocBufferSize, 0, w_flag, &ctx);
-        CHECK_EQ(ec, ErrCode::kSuccess);
+        CHECK_EQ(ec, kOk);
 
         auto rel_flag = (uint8_t) 0;
-        p->relinquish(lease, rel_flag, &ctx);
+        p->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
     }
     p->put_rdma_buffer(rdma_buf);
 

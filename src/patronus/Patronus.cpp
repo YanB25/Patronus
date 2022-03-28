@@ -223,8 +223,6 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     char *rdma_buf = get_rdma_message_buffer();
     auto *rpc_context = get_rpc_context();
     uint16_t rpc_ctx_id = get_rpc_context_id(rpc_context);
-    // DVLOG(3) << "[debug] allocating rpc_context " << (void *) rpc_context
-    //          << " at id " << rpc_ctx_id;
 
     Lease ret_lease;
     ret_lease.node_id_ = node_id;
@@ -308,7 +306,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     return ret_lease;
 }
 
-ErrCode Patronus::read_write_impl(char *iobuf,
+RetCode Patronus::read_write_impl(char *iobuf,
                                   size_t size,
                                   size_t node_id,
                                   size_t dir_id,
@@ -379,10 +377,10 @@ ErrCode Patronus::read_write_impl(char *iobuf,
     }
 
     put_rw_context(rw_context);
-    return ret ? ErrCode::kSuccess : ErrCode::kOpProtectionErr;
+    return ret ? RetCode::kOk : RetCode::kRdmaProtectionErr;
 }
 
-ErrCode Patronus::buffer_rw_impl(Lease &lease,
+RetCode Patronus::buffer_rw_impl(Lease &lease,
                                  char *iobuf,
                                  size_t size,
                                  size_t offset,
@@ -400,6 +398,10 @@ ErrCode Patronus::buffer_rw_impl(Lease &lease,
     }
     uint32_t rkey = lease.cur_rkey_;
     uint64_t remote_addr = lease.base_addr_ + offset;
+    DLOG_IF(INFO, config::kMonitorAddressConversion)
+        << "[addr] patronus remote_addr: " << (void *) remote_addr
+        << " (base: " << (void *) lease.base_addr_
+        << ", offset: " << (void *) offset << ")";
 
     return read_write_impl(iobuf,
                            size,
@@ -412,7 +414,7 @@ ErrCode Patronus::buffer_rw_impl(Lease &lease,
                            ctx);
 }
 
-ErrCode Patronus::protection_region_rw_impl(Lease &lease,
+RetCode Patronus::protection_region_rw_impl(Lease &lease,
                                             char *io_buf,
                                             size_t size,
                                             size_t offset,
@@ -436,7 +438,7 @@ ErrCode Patronus::protection_region_rw_impl(Lease &lease,
                            WRID_PREFIX_PATRONUS_PR_RW,
                            ctx);
 }
-ErrCode Patronus::buffer_cas_impl(Lease &lease,
+RetCode Patronus::buffer_cas_impl(Lease &lease,
                                   char *iobuf,
                                   size_t offset,
                                   uint64_t compare,
@@ -460,7 +462,7 @@ ErrCode Patronus::buffer_cas_impl(Lease &lease,
                     WRID_PREFIX_PATRONUS_CAS,
                     ctx);
 }
-ErrCode Patronus::protection_region_cas_impl(Lease &lease,
+RetCode Patronus::protection_region_cas_impl(Lease &lease,
                                              char *iobuf,
                                              size_t offset,
                                              uint64_t compare,
@@ -485,7 +487,7 @@ ErrCode Patronus::protection_region_cas_impl(Lease &lease,
                     ctx);
 }
 
-ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
+RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
                            size_t node_id,
                            size_t dir_id,
                            uint32_t rkey,
@@ -550,7 +552,7 @@ ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
     {
         DVLOG(4) << "[patronus] CAS failed by protection. wr_id: " << wrid
                  << "coro: " << (ctx ? *ctx : nullctx);
-        return ErrCode::kOpProtectionErr;
+        return RetCode::kRdmaProtectionErr;
     }
     // see if cas can success
     auto read_remote = *(uint64_t *) iobuf;
@@ -561,7 +563,7 @@ ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
                  << ", read: " << compound_uint64_t(read_remote)
                  << ", compare: " << compound_uint64_t(compare)
                  << ", new: " << compound_uint64_t(swap);
-        return ErrCode::kSuccess;
+        return RetCode::kOk;
     }
     DVLOG(4) << "[patronus] CAS failed by mismatch @compare. wr_id: " << wrid
              << ", coro: " << (ctx ? *ctx : nullctx)
@@ -569,7 +571,7 @@ ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
              << ", compare: " << compound_uint64_t(compare)
              << ", swap: " << compound_uint64_t(swap);
 
-    return ErrCode::kOpExecutionErr;
+    return RetCode::kRdmaExecutionErr;
 }
 /**
  * @brief the actual implementation to modify a lease (especially relinquish
@@ -827,8 +829,7 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
 {
     auto rpc_ctx_id = resp->cid.rpc_ctx_id;
     auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
-    // DVLOG(5) << "[debug] getting rpc_context " << (void *) rpc_context
-    //          << " at id " << rpc_ctx_id;
+
     auto *request = (AcquireRequest *) rpc_context->request;
 
     DCHECK(resp->type == RequestType::kAcquireRLease ||
@@ -894,7 +895,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 
     AcquireRequestStatus status = AcquireRequestStatus::kSuccess;
 
-    size_t object_buffer_offset = 0;
+    uint64_t object_buffer_offset = 0;
     uint64_t object_dsm_offset = 0;
     void *object_addr = nullptr;
     void *header_addr = nullptr;
@@ -978,6 +979,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     {
         // acquire permission from existing memory
         object_buffer_offset = req->key;
+
         if (unlikely(!valid_total_buffer_offset(object_buffer_offset)))
         {
             status = AcquireRequestStatus::kAddressOutOfRangeErr;
@@ -2433,7 +2435,7 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
     ctx.yield_to_master();
 }
 
-ErrCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
+RetCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
 {
     using namespace std::chrono_literals;
 
@@ -2454,7 +2456,7 @@ ErrCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
                  << time::TimeSyncer::kCommunicationLatencyNs
                  << "). coro: " << (ctx ? *ctx : nullctx)
                  << ". Now lease: " << lease;
-        return ErrCode::kLeaseLocalExpiredErr;
+        return RetCode::kLeaseLocalExpiredErr;
     }
     // assume one-sided write will not take longer than this
     constexpr static auto kMinMarginDuration = 100us;
@@ -2476,7 +2478,7 @@ ErrCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
              << ", diff_ns: " << diff_ns << ", > margin_duration_ns("
              << margin_duration_ns << "). coro: " << (ctx ? *ctx : nullctx)
              << ". Now lease: " << lease;
-    return ErrCode::kSuccess;
+    return RetCode::kOk;
 }
 
 void Patronus::thread_explain() const

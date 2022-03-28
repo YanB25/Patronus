@@ -237,7 +237,7 @@ void DSMKeeper::connectReliableMsg(ReliableConnection &cond,
                             &ctx));
         CHECK(modifyQPtoRTS(qp));
 
-        DVLOG(3) << "[debug] Send connect to remote " << remoteID
+        DVLOG(5) << "[debug] Send connect to remote " << remoteID
                  << ", mid: " << i << ", hash(rrecv): " << std::hex
                  << djb2_digest((char *) &exMeta.ex_reliable,
                                 sizeof(exMeta.ex_reliable));
@@ -383,11 +383,6 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
                        &dirCon[k]->ctx);
             remote.dirToAppAh[k][i] = DCHECK_NOTNULL(
                 ibv_create_ah(CHECK_NOTNULL(dirCon[k]->ctx.pd), &ahAttr));
-            // LOG(INFO) << "[debug] creating dirToAppAh[" << k << "][" << i
-            //           << "] val " << (void *) remote.dirToAppAh[k][i]
-            //           << " for node " << remoteID << ". bind with ctx "
-            //           << (void *) &dirCon[k]->ctx << ", with pd "
-            //   << (void *) dirCon[k]->ctx.pd;
         }
     }
 }
