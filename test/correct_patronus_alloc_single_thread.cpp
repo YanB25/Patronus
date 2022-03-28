@@ -5,6 +5,7 @@
 
 #include "Timer.h"
 #include "patronus/Patronus.h"
+#include "util/Rand.h"
 #include "util/monitor.h"
 
 using namespace std::chrono_literals;
@@ -28,7 +29,8 @@ constexpr static size_t kDirID = 0;
 
 // constexpr static size_t kTestTime =
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
-constexpr static size_t kTestTime = 10_K;
+constexpr static size_t kTestTime = 100_K;
+// constexpr static size_t kTestTime = 1000;
 
 using namespace std::chrono_literals;
 
@@ -45,7 +47,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
     CoroContext ctx(tid, &yield, &master, coro_id);
 
-    std::vector<uint64_t> allocated_addrs;
+    std::vector<GlobalAddress> allocated_gaddrs;
 
     for (size_t time = 0; time < kTestTime; ++time)
     {
@@ -63,21 +65,47 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto rdma_buf = p->get_rdma_buffer();
         memset(rdma_buf.buffer, 0, kAllocBufferSize);
 
-        CHECK_NE(lease.base_addr(), 0);
-        allocated_addrs.push_back(lease.base_addr());
+        auto gaddr = p->get_gaddr(lease);
+        CHECK(!gaddr.is_null());
+        allocated_gaddrs.push_back(gaddr);
 
         p->put_rdma_buffer(rdma_buf.buffer);
     }
 
-    for (auto addr : allocated_addrs)
+    auto rdma_buf = p->get_rdma_buffer();
+    for (size_t time = 0; time < kTestTime; ++time)
     {
-        CHECK_NE(addr, 0);
-        p->dealloc(GlobalAddress(kServerNodeId, addr),
-                   kDirID,
-                   kAllocBufferSize /* size */,
-                   0 /* hint */,
-                   &ctx);
-        // std::this_thread::sleep_for(10ms);
+        auto addr_idx = fast_pseudo_rand_int(0, allocated_gaddrs.size() - 1);
+        auto gaddr = allocated_gaddrs[addr_idx];
+
+        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        auto lease =
+            p->get_wlease(gaddr, kDirID, kAllocBufferSize, 0ns, ac_flag, &ctx);
+        if (!lease.success())
+        {
+            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr)
+                << "** lease failed. Unexpected failure: " << lease.ec()
+                << ". Lease: " << lease;
+            continue;
+        }
+
+        CHECK_GE(rdma_buf.size, kAllocBufferSize);
+        memset(CHECK_NOTNULL(rdma_buf.buffer), 0, kAllocBufferSize);
+        auto w_flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+        auto ec =
+            p->write(lease, rdma_buf.buffer, kAllocBufferSize, 0, w_flag, &ctx);
+        CHECK_EQ(ec, ErrCode::kSuccess);
+
+        auto rel_flag = (uint8_t) 0;
+        p->relinquish(lease, rel_flag, &ctx);
+    }
+    p->put_rdma_buffer(rdma_buf.buffer);
+
+    for (auto gaddr : allocated_gaddrs)
+    {
+        CHECK(!gaddr.is_null());
+        p->dealloc(
+            gaddr, kDirID, kAllocBufferSize /* size */, 0 /* hint */, &ctx);
     }
 
     LOG(WARNING) << "worker coro " << (int) coro_id

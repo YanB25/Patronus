@@ -234,9 +234,10 @@ Current TODOs:
 
 what you get back: IMPORTANT:
 [0] *** PASS ALL TESTS
-1. Change the API of get_[rw]lease. Remove the @key(and yes, locator_). Change it to GlobalAddress. Some tests may have problem, plz fix them. Remember to fix the bench*.cpp.
-2. correct_patronus_alloc_single_thread add more tests
+[1] Change the API of get_[rw]lease. Remove the @key(and yes, locator_). Change it to GlobalAddress. Some tests may have problem, plz fix them. Remember to fix the bench*.cpp.
+[2] correct_patronus_alloc_single_thread add more tests
 keep going and checks whether acquire_perm works well.
+3. patronus->get_rdma_buffer() should have size_t as parameter.
 
 MUST DO BEFORE MERGING:
 1. PASS ALL TESTS

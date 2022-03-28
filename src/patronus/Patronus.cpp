@@ -974,7 +974,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     {
         // acquire permission from existing memory
         object_buffer_offset = req->key;
-        if (unlikely(!valid_lease_buffer_offset(object_buffer_offset)))
+        if (unlikely(!valid_total_buffer_offset(object_buffer_offset)))
         {
             status = AcquireRequestStatus::kAddressOutOfRangeErr;
             goto handle_response;

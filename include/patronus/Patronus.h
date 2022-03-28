@@ -273,8 +273,12 @@ public:
 
     Buffer get_rdma_buffer()
     {
-        return Buffer((char *) rdma_client_buffer_->get(),
-                      kClientRdmaBufferSize);
+        auto *buf = (char *) rdma_client_buffer_->get();
+        if (likely(buf != nullptr))
+        {
+            return Buffer(buf, kClientRdmaBufferSize);
+        }
+        return Buffer(nullptr, 0);
     }
     void put_rdma_buffer(void *buf)
     {
@@ -320,6 +324,7 @@ public:
         return conf_.alloc_buffer_size;
     }
     void thread_explain() const;
+    inline GlobalAddress get_gaddr(const Lease &lease) const;
 
 private:
     PatronusConfig conf_;
@@ -710,6 +715,7 @@ Lease Patronus::alloc(uint16_t node_id,
                           ctx);
 }
 
+// gaddr is buffer offset
 Lease Patronus::get_rlease(GlobalAddress gaddr,
                            uint16_t dir_id,
                            size_t size,
@@ -734,6 +740,8 @@ Lease Patronus::get_rlease(GlobalAddress gaddr,
                           flag,
                           ctx);
 }
+
+// gaddr is buffer offset
 Lease Patronus::get_wlease(GlobalAddress gaddr,
                            uint16_t dir_id,
                            size_t size,
@@ -832,6 +840,8 @@ ErrCode Patronus::extend(Lease &lease,
 
     return extend_impl(lease, extend_unit_nr, flag, ctx);
 }
+
+// gaddr is buffer offset
 void Patronus::dealloc(GlobalAddress gaddr,
                        uint16_t dir_id,
                        size_t size,
@@ -841,11 +851,15 @@ void Patronus::dealloc(GlobalAddress gaddr,
     // construct a lease to make lease_modify_impl happy
     auto node_id = gaddr.nodeID;
 
+    // a little bit hacky:
+    // convert from buffer offset (gaddr) to dsm offset
+    auto buffer_offset = gaddr.offset;
+    auto dsm_offset = dsm_->buffer_offset_to_dsm_offset(buffer_offset);
     Lease lease;
     using LeaseIDT = decltype(lease.id_);
     lease.node_id_ = node_id;
     lease.dir_id_ = dir_id;
-    lease.base_addr_ = gaddr.offset;
+    lease.base_addr_ = dsm_offset;
     lease.buffer_size_ = size;
     lease.id_ = std::numeric_limits<LeaseIDT>::max();
 
@@ -1066,6 +1080,15 @@ bool Patronus::valid_lease_buffer_offset(size_t buffer_offset) const
 bool Patronus::valid_total_buffer_offset(size_t offset) const
 {
     return dsm_->valid_buffer_offset(offset);
+}
+
+// convert to the buffer offset (which client should hold)
+// from the dsm offset (which the lease holds)
+GlobalAddress Patronus::get_gaddr(const Lease &lease) const
+{
+    auto dsm_offset = lease.base_addr();
+    auto buffer_offset = dsm_->dsm_offset_to_buffer_offset(dsm_offset);
+    return GlobalAddress(lease.node_id_, buffer_offset);
 }
 
 }  // namespace patronus
