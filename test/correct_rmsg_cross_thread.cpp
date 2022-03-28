@@ -328,15 +328,7 @@ static_assert(RMSG_MULTIPLEXING > 3);
 
 void client(std::shared_ptr<DSM> dsm)
 {
-    // client_pingpong_correct(dsm);
     LOG(INFO) << "Begin burn";
-    // for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
-    // {
-    //     client_pingpong_correct(dsm, i);
-
-    //     client_varsize_correct(dsm, i);
-    // }
-
     client_multithread(dsm, kClientThreadNr);
 
     client_wait(dsm);
@@ -345,16 +337,6 @@ void client(std::shared_ptr<DSM> dsm)
 
 void server(std::shared_ptr<DSM> dsm)
 {
-    // server_pingpong_correct(dsm);
-
-    // LOG(INFO) << "Begin burn";
-    // for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
-    // {
-    //     server_pingpong_correct(dsm, i);
-
-    //     server_varsize_correct(dsm, i);
-    // }
-
     size_t expect_work = kClientThreadNr * kBurnCnt;
     server_multithread(dsm, expect_work, kServerThreadNr);
 

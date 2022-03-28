@@ -81,7 +81,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         if (unlikely(!lease.success()))
         {
             LOG(WARNING) << "[bench] client coro " << ctx
-                         << " get_rlease failed. retry.";
+                         << " get_rlease failed. retry. ec: " << lease.ec();
             lease_success_m.collect(0);
             continue;
         }
@@ -207,15 +207,13 @@ int main(int argc, char *argv[])
     {
         for (size_t i = 0; i < kThreadNr - 1; ++i)
         {
-            threads.emplace_back(
-                [patronus, &bar]()
-                {
-                    patronus->registerClientThread();
-                    auto tid = patronus->get_thread_id();
-                    client(patronus);
-                    LOG(INFO) << "[bench] thread " << tid << " finish it work";
-                    bar.wait();
-                });
+            threads.emplace_back([patronus, &bar]() {
+                patronus->registerClientThread();
+                auto tid = patronus->get_thread_id();
+                client(patronus);
+                LOG(INFO) << "[bench] thread " << tid << " finish it work";
+                bar.wait();
+            });
         }
         patronus->registerClientThread();
         auto tid = patronus->get_thread_id();
@@ -229,12 +227,11 @@ int main(int argc, char *argv[])
     {
         for (size_t i = 0; i < kThreadNr - 1; ++i)
         {
-            threads.emplace_back(
-                [patronus]()
-                {
-                    patronus->registerServerThread();
-                    server(patronus);
-                });
+            threads.emplace_back([patronus]() {
+                patronus->registerServerThread();
+                server(patronus);
+                patronus->thread_explain();
+            });
         }
         patronus->registerServerThread();
         patronus->finished();

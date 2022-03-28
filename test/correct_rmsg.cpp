@@ -219,6 +219,7 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
 
             auto tid = dsm->get_thread_id();
             auto from_mid = (tid + kMidOffset) % RMSG_MULTIPLEXING;
+            CHECK_EQ(tid, from_mid) << "Currently we ensure that tid == mid";
             // CHECK_NE(from_mid, 0);
 
             size_t sent = 0;
@@ -285,12 +286,11 @@ void client(std::shared_ptr<DSM> dsm)
 {
     // client_pingpong_correct(dsm);
     LOG(INFO) << "Begin burn";
-    for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
-    {
-        client_pingpong_correct(dsm, i);
+    auto tid = dsm->get_thread_id();
 
-        client_varsize_correct(dsm, i);
-    }
+    client_pingpong_correct(dsm, tid);
+
+    client_varsize_correct(dsm, tid);
 
     client_multithread(dsm, kClientThreadNr);
 
@@ -310,12 +310,11 @@ void server(std::shared_ptr<DSM> dsm)
     // server_pingpong_correct(dsm);
 
     LOG(INFO) << "Begin burn";
-    for (size_t i = 0; i < RMSG_MULTIPLEXING; ++i)
-    {
-        server_pingpong_correct(dsm, i);
+    auto tid = dsm->get_thread_id();
 
-        server_varsize_correct(dsm, i);
-    }
+    server_pingpong_correct(dsm, tid);
+
+    server_varsize_correct(dsm, tid);
 
     size_t expect_work = kClientThreadNr * kBurnCnt;
     server_multithread(dsm, expect_work, kServerThreadNr);

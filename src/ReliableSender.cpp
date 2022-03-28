@@ -22,17 +22,10 @@ void ReliableSendMessageConnection::send(size_t threadID,
     DCHECK_LT(threadID, kMaxAppThread);
     DCHECK_LE(size, kMessageSize) << "[rmsg] message size exceed limits";
 
-    DCHECK_EQ(threadID, targetID)
-        << "TODO: This assertion is added very later, until I realize that we "
-           "don't actual need the star-like reliable channel. What we need is "
-           "actual a one-to-one channel for client thread and server directory "
-           "(or many-to-one to be more specifically). Currently, I assume that "
-           "threadID always equal to targetID";
-
     static thread_local bool thread_second_{false};
     static thread_local size_t msg_send_index_{0};
-    static thread_local size_t polled_{0};
-    static thread_local size_t send_signaled_{0};
+    static thread_local size_t polleds_[RMSG_MULTIPLEXING]{};
+    static thread_local size_t send_signaleds_[RMSG_MULTIPLEXING]{};
 
     // TODO: should be calculated carefully.
     constexpr static size_t kCqeAllowedSize = 32;
@@ -40,22 +33,29 @@ void ReliableSendMessageConnection::send(size_t threadID,
     msg_send_index_++;
     bool signal = false;
 
+    // Not exactly correct, because each threads does NOT sharing how many
+    // signal they sent and how many polled they finished.
+    // I have an idea: track the *last* targetID. If targetID changed (detected)
+    // poll to let the ongoing signals under a threshold before going on. That
+    // would be a *perfect* solution.
+    // But just don't want to fix until I really need.
     if (unlikely(msg_send_index_ % kSendBatch == 0))
     {
         if (likely(thread_second_))
         {
             DVLOG(3) << "[rmsg] Thread " << threadID << " triggers one poll"
                      << ", current targetID " << targetID;
-            if (unlikely(send_signaled_ - polled_ >= kCqeAllowedSize))
+            auto sent = send_signaleds_[targetID];
+            auto polled = polleds_[targetID];
+            if (unlikely(sent - polled >= kCqeAllowedSize))
             {
                 // two more
-                auto expect_poll =
-                    send_signaled_ - polled_ - kCqeAllowedSize + 2;
-                polled_ += poll_cq_at_least(targetID, expect_poll);
+                auto expect_poll = sent - polled - kCqeAllowedSize + 2;
+                polleds_[targetID] += poll_cq_at_least(targetID, expect_poll);
             }
             else
             {
-                polled_ += poll_cq(targetID);
+                polleds_[targetID] += poll_cq(targetID);
             }
         }
         signal = true;
@@ -79,15 +79,16 @@ void ReliableSendMessageConnection::send(size_t threadID,
                          size);
     if (signal)
     {
-        send_signaled_++;
+        send_signaleds_[targetID]++;
     }
 
     PLOG_IF(FATAL, !succ) << "** Send with RDMA_SEND failed. wrid: " << wrid
-                          << ", issued_signaled: " << send_signaled_
-                          << " (effectively " << send_signaled_ * kSendBatch
-                          << ") "
-                          << ", polled: " << polled_
-                          << ", ongoing: " << (send_signaled_ - polled_);
+                          << ". At targetID: " << targetID
+                          << ", issued_signaled: " << send_signaleds_[targetID]
+                          << " (effectively "
+                          << send_signaleds_[targetID] * kSendBatch << ") "
+                          << ", polled: " << polleds_[targetID] << ", ongoing: "
+                          << (send_signaleds_[targetID] - polleds_[targetID]);
 }
 
 ssize_t ReliableSendMessageConnection::poll_cq(size_t mid)

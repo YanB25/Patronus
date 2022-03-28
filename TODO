@@ -232,16 +232,10 @@ Current TODOs:
 
 
 
-when you get back:
-
-let patronus support alloc and free ONLY...
-- let task_gc_lease works well: handle all the cases!
-- read task_gc_lease carefully
-add correct_patronus_alloc to test the correctness.
-let slab allocator work in strict mode: CHECK all the freed address! make sure it is allocated by me!
-make sure all the tests not fail by test_all.sh
-
-correct_patronus_alloc_single_thread:
+what you get back: IMPORTANT:
+[0] *** PASS ALL TESTS
+1. Change the API of get_[rw]lease. Remove the @key(and yes, locator_). Change it to GlobalAddress. Some tests may have problem, plz fix them. Remember to fix the bench*.cpp.
+2. correct_patronus_alloc_single_thread add more tests
 keep going and checks whether acquire_perm works well.
 
 MUST DO BEFORE MERGING:

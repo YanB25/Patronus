@@ -57,14 +57,19 @@ struct ClientID
         } __attribute__((packed));
         uint64_t cid;
     };
-    bool operator==(const ClientID &rhs) const
+    /**
+     * only the node_id, thread_id and coro_id is the identity.
+     */
+    bool is_same(const ClientID &rhs) const
     {
-        return cid == rhs.cid;
+        return node_id == rhs.node_id && thread_id == rhs.thread_id &&
+               coro_id == rhs.coro_id;
     }
-    bool operator!=(const ClientID &rhs) const
-    {
-        return !(cid == rhs.cid);
-    }
+
+    // to be safe. use is_same instead
+    bool operator==(const ClientID &rhs) const = delete;
+    bool operator!=(const ClientID &rhs) const = delete;
+
 } __attribute__((packed));
 static_assert(sizeof(ClientID) == sizeof(uint64_t));
 std::ostream &operator<<(std::ostream &os, const ClientID &cid);

@@ -327,6 +327,7 @@ public:
     {
         return conf_.alloc_buffer_size;
     }
+    void thread_explain() const;
 
 private:
     PatronusConfig conf_;

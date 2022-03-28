@@ -123,7 +123,8 @@ void server(Patronus::pointer p)
         << "** Time reverse detected. possible time epsilon >= "
         << m.min() / 1000 << " us";
     CHECK(m.abs_average() <= kTimeDriftLimit)
-        << "** Time drift larget than allowed";
+        << "** Time drift larget than allowed. Averagly drift "
+        << m.abs_average() << ", limit: " << kTimeDriftLimit << ". m: " << m;
 }
 
 int main(int argc, char *argv[])

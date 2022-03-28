@@ -1370,8 +1370,11 @@ void Patronus::handle_request_lease_upgrade(LeaseModifyRequest *req,
     DCHECK_EQ(req->type, RequestType::kUpgrade);
     auto lease_id = req->lease_id;
     auto *lease_ctx = CHECK_NOTNULL(get_lease_context(lease_id));
-    CHECK_EQ(lease_ctx->client_cid, req->cid)
-        << "if cid not match, should return false";
+
+    CHECK(lease_ctx->client_cid.is_same(req->cid))
+        << "if cid not match, should return false. " << lease_ctx->client_cid
+        << " v.s. " << req->cid;
+
     CHECK(false) << "TODO:";
     auto dir_id = lease_ctx->dir_id;
     // TODO(patronus): rethink about it.
@@ -1452,8 +1455,9 @@ void Patronus::handle_request_lease_extend(LeaseModifyRequest *req,
     DCHECK_EQ(req->type, RequestType::kExtend);
     auto lease_id = req->lease_id;
     auto *lease_ctx = CHECK_NOTNULL(get_lease_context(lease_id));
-    CHECK_EQ(lease_ctx->client_cid, req->cid)
-        << "If cid not match, should return error the client.";
+    CHECK(lease_ctx->client_cid.is_same(req->cid))
+        << "if cid not match, should return false. " << lease_ctx->client_cid
+        << " v.s. " << req->cid;
     CHECK(false) << "TODO:";
     auto dir_id = lease_ctx->dir_id;
     // TODO(patronus): rethink about it
@@ -2135,11 +2139,12 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         return;
     }
     DCHECK(lease_ctx->valid);
-    if (unlikely(lease_ctx->client_cid != cid))
+    if (unlikely(!lease_ctx->client_cid.is_same(cid)))
     {
         DVLOG(4) << "[patronus][gc_lease] skip relinquish. cid mismatch: "
                     "expect: "
-                 << lease_ctx->client_cid << ", got: " << cid;
+                 << lease_ctx->client_cid << ", got: " << cid
+                 << ". lease_ctx at " << (void *) lease_ctx;
         return;
     }
 
@@ -2453,6 +2458,18 @@ ErrCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
              << margin_duration_ns << "). coro: " << (ctx ? *ctx : nullctx)
              << ". Now lease: " << lease;
     return ErrCode::kSuccess;
+}
+
+void Patronus::thread_explain() const
+{
+    LOG(INFO) << "[patronus] tid: " << get_thread_id()
+              << ", rdma_message_buffer_pool: "
+              << rdma_message_buffer_pool_.get()
+              << ", rdma_client_buffer: " << rdma_client_buffer_.get()
+              << ", rpc_context: " << (void *) &rpc_context_
+              << ", rw_context: " << (void *) &rw_context_
+              << ", lease_context: " << (void *) &lease_context_
+              << ", protection_region_pool: " << protection_region_pool_.get();
 }
 
 }  // namespace patronus
