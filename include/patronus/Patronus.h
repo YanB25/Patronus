@@ -23,16 +23,11 @@ namespace patronus
 {
 using namespace define::literals;
 class Patronus;
-using KeyLocator = std::function<uint64_t(key_t)>;
-static KeyLocator identity_locator = [](key_t key) -> uint64_t {
-    return (uint64_t) key;
-};
 struct PatronusConfig
 {
     size_t machine_nr{0};
     size_t lease_buffer_size{kDSMCacheSize / 2};
     size_t alloc_buffer_size{kDSMCacheSize / 2};
-    KeyLocator key_locator{identity_locator};
     // for sync time
     size_t time_parent_node_id{0};
     // for allocator
@@ -165,9 +160,8 @@ public:
      * @param ctx sync call if ctx is nullptr. Otherwise coroutine context.
      * @return Read Lease
      */
-    inline Lease get_rlease(uint16_t node_id,
+    inline Lease get_rlease(GlobalAddress buffer_gaddr,
                             uint16_t dir_id,
-                            id_t key,
                             size_t size,
                             std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
@@ -177,9 +171,8 @@ public:
                        size_t size,
                        uint64_t hint,
                        CoroContext *ctx = nullptr);
-    inline Lease get_wlease(uint16_t node_id,
+    inline Lease get_wlease(GlobalAddress buffer_gaddr,
                             uint16_t dir_id,
-                            id_t key,
                             size_t size,
                             std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
@@ -197,9 +190,8 @@ public:
     inline void relinquish(Lease &lease,
                            uint8_t flag /* LeaseModifyFlag */,
                            CoroContext *ctx = nullptr);
-    inline void dealloc(uint16_t node_id,
+    inline void dealloc(GlobalAddress gaddr,
                         uint16_t dir_id,
-                        uint64_t address,
                         size_t size,
                         uint64_t hint,
                         CoroContext *ctx = nullptr);
@@ -350,10 +342,6 @@ private:
         kProtectionRegionPerThreadNr * kMaxAppThread;
 
     void explain(const PatronusConfig &);
-    void reg_locator(const KeyLocator &locator = identity_locator)
-    {
-        locator_ = locator;
-    }
 
     constexpr static id_t key_hash(id_t key)
     {
@@ -687,9 +675,6 @@ private:
     std::array<std::atomic<bool>, MAX_MACHINE> exits_;
     std::atomic<bool> should_exit_{false};
 
-    // for user interfaces
-    KeyLocator locator_;
-
     // for barrier
     std::unordered_map<uint64_t, std::set<uint64_t>> barrier_;
     std::mutex barrier_mu_;
@@ -725,9 +710,8 @@ Lease Patronus::alloc(uint16_t node_id,
                           ctx);
 }
 
-Lease Patronus::get_rlease(uint16_t node_id,
+Lease Patronus::get_rlease(GlobalAddress gaddr,
                            uint16_t dir_id,
-                           id_t key,
                            size_t size,
                            std::chrono::nanoseconds chrono_ns,
                            uint8_t flag,
@@ -737,24 +721,39 @@ Lease Patronus::get_rlease(uint16_t node_id,
     bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
     DCHECK(!only_alloc) << "Please use Patronus::alloc";
 
+    auto node_id = gaddr.nodeID;
+
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
-    return get_lease_impl(
-        node_id, dir_id, key, size, ns, RequestType::kAcquireRLease, flag, ctx);
+    return get_lease_impl(node_id,
+                          dir_id,
+                          gaddr.offset,
+                          size,
+                          ns,
+                          RequestType::kAcquireRLease,
+                          flag,
+                          ctx);
 }
-Lease Patronus::get_wlease(uint16_t node_id,
+Lease Patronus::get_wlease(GlobalAddress gaddr,
                            uint16_t dir_id,
-                           id_t key,
                            size_t size,
                            std::chrono::nanoseconds chrono_ns,
                            uint8_t flag,
                            CoroContext *ctx)
 {
     debug_validate_acquire_request_flag(flag);
+    auto node_id = gaddr.nodeID;
+
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
-    return get_lease_impl(
-        node_id, dir_id, key, size, ns, RequestType::kAcquireWLease, flag, ctx);
+    return get_lease_impl(node_id,
+                          dir_id,
+                          gaddr.offset,
+                          size,
+                          ns,
+                          RequestType::kAcquireWLease,
+                          flag,
+                          ctx);
 }
 
 Lease Patronus::upgrade(Lease &lease, uint8_t flag, CoroContext *ctx)
@@ -833,19 +832,20 @@ ErrCode Patronus::extend(Lease &lease,
 
     return extend_impl(lease, extend_unit_nr, flag, ctx);
 }
-void Patronus::dealloc(uint16_t node_id,
+void Patronus::dealloc(GlobalAddress gaddr,
                        uint16_t dir_id,
-                       uint64_t address,
                        size_t size,
                        uint64_t hint,
                        CoroContext *ctx)
 {
     // construct a lease to make lease_modify_impl happy
+    auto node_id = gaddr.nodeID;
+
     Lease lease;
     using LeaseIDT = decltype(lease.id_);
     lease.node_id_ = node_id;
     lease.dir_id_ = dir_id;
-    lease.base_addr_ = address;
+    lease.base_addr_ = gaddr.offset;
     lease.buffer_size_ = size;
     lease.id_ = std::numeric_limits<LeaseIDT>::max();
 

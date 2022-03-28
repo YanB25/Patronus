@@ -78,9 +78,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto max_key = p->lease_buffer_size() / sizeof(Object);
         auto key = rand() % (max_key - 1);
         auto before_get_rlease = std::chrono::steady_clock::now();
-        Lease lease = p->get_rlease(kServerNodeId,
+
+        auto bench_offset = bench_locator(key);
+        Lease lease = p->get_rlease(GlobalAddress(kServerNodeId, bench_offset),
                                     dir_id,
-                                    key,
                                     sizeof(Object),
                                     kInitialLeasePeriod,
                                     0 /* no flag */,
@@ -287,7 +288,6 @@ int main(int argc, char *argv[])
 
     PatronusConfig config;
     config.machine_nr = kMachineNr;
-    config.key_locator = bench_locator;
 
     auto patronus = Patronus::ins(config);
 

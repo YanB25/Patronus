@@ -177,8 +177,12 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
     {
         bool succ = true;
         VLOG(4) << "[coro] tid " << tid << " get_rlease. coro: " << ctx;
-        auto lease = patronus->get_rlease(
-            kServerNodeId, dir_id, 0, alloc_size, 0ns, acquire_flag, &ctx);
+        auto lease = patronus->get_rlease(GlobalAddress(kServerNodeId, 0),
+                                          dir_id,
+                                          alloc_size,
+                                          0ns,
+                                          acquire_flag,
+                                          &ctx);
         succ = lease.success();
 
         if (succ)

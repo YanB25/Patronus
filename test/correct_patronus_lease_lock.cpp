@@ -70,9 +70,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         Lease lease =
-            p->get_rlease(kServerNodeId,
+            p->get_rlease(GlobalAddress(kServerNodeId, key),
                           dir_id,
-                          key,
                           sizeof(Object),
                           0ns,
                           (uint8_t) AcquireRequestFlag::kNoGc |

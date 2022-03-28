@@ -72,7 +72,6 @@ Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
     time_syncer_->sync();
     finish_time_sync_now_ = std::chrono::steady_clock::now();
 
-    reg_locator(conf.key_locator);
     explain(conf);
 }
 Patronus::~Patronus()
@@ -181,7 +180,7 @@ void Patronus::internal_barrier()
  */
 Lease Patronus::get_lease_impl(uint16_t node_id,
                                uint16_t dir_id,
-                               id_t key,
+                               uint64_t key_or_hint,
                                size_t size,
                                time::ns_t ns,
                                RequestType type,
@@ -236,7 +235,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     msg->cid.coro_id = ctx ? ctx->coro_id() : kNotACoro;
     msg->cid.rpc_ctx_id = rpc_ctx_id;
     msg->dir_id = dir_id;
-    msg->key = key;
+    msg->key = key_or_hint;
     msg->size = size;
     msg->required_ns = ns;
     msg->trace = trace;
@@ -260,7 +259,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     }
 
     DVLOG(4) << "[patronus] get_lease for coro: " << (ctx ? *ctx : nullctx)
-             << ", for key " << key << ", ns: " << ns
+             << ", for key(or hint) " << key_or_hint << ", ns: " << ns
              << ", patronus_now: " << time_syncer_->patronus_now();
     dsm_->reliable_send(rdma_buf, sizeof(AcquireRequest), node_id, to_mid);
 
@@ -974,7 +973,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     else
     {
         // acquire permission from existing memory
-        object_buffer_offset = locator_(req->key);
+        object_buffer_offset = req->key;
         if (unlikely(!valid_lease_buffer_offset(object_buffer_offset)))
         {
             status = AcquireRequestStatus::kAddressOutOfRangeErr;

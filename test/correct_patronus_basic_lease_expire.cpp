@@ -76,9 +76,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     {
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto before_get_rlease = std::chrono::steady_clock::now();
-        Lease lease = p->get_rlease(kServerNodeId,
+        auto locate_offset = bench_locator(key);
+        Lease lease = p->get_rlease(GlobalAddress(kServerNodeId, locate_offset),
                                     dir_id,
-                                    key,
                                     sizeof(Object),
                                     100us,
                                     0 /* no flag */,
@@ -277,7 +277,6 @@ int main(int argc, char *argv[])
 
     PatronusConfig config;
     config.machine_nr = kMachineNr;
-    config.key_locator = bench_locator;
 
     auto patronus = Patronus::ins(config);
 

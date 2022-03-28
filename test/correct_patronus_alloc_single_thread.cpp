@@ -72,9 +72,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     for (auto addr : allocated_addrs)
     {
         CHECK_NE(addr, 0);
-        p->dealloc(kServerNodeId,
+        p->dealloc(GlobalAddress(kServerNodeId, addr),
                    kDirID,
-                   addr,
                    kAllocBufferSize /* size */,
                    0 /* hint */,
                    &ctx);
