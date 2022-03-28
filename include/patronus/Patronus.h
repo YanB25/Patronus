@@ -270,21 +270,50 @@ public:
     {
         return dsm_->reliable_try_recv(from_mid, ibuf, limit);
     }
-
-    Buffer get_rdma_buffer()
+    Buffer get_rdma_buffer_8B()
     {
+        auto *ret = (char *) rdma_client_buffer_8B_->get();
+        if (likely(ret != nullptr))
+        {
+            return Buffer(ret, 8);
+        }
+        return Buffer(nullptr, 0);
+    }
+    void put_rdma_buffer_8B(Buffer buffer)
+    {
+        if (buffer.buffer)
+        {
+            DCHECK_EQ(buffer.size, 8);
+            rdma_client_buffer_8B_->put(buffer.buffer);
+        }
+    }
+
+    Buffer get_rdma_buffer(size_t size)
+    {
+        if (size <= 8)
+        {
+            return get_rdma_buffer_8B();
+        }
         auto *buf = (char *) rdma_client_buffer_->get();
+        DCHECK_GE(kClientRdmaBufferSize, size);
         if (likely(buf != nullptr))
         {
             return Buffer(buf, kClientRdmaBufferSize);
         }
         return Buffer(nullptr, 0);
     }
-    void put_rdma_buffer(void *buf)
+    void put_rdma_buffer(Buffer buffer)
     {
-        if (buf != nullptr)
+        if (buffer.buffer)
         {
-            rdma_client_buffer_->put(buf);
+            if (buffer.size <= 8)
+            {
+                put_rdma_buffer_8B(buffer);
+            }
+            else
+            {
+                rdma_client_buffer_->put(buffer.buffer);
+            }
         }
     }
 
@@ -373,7 +402,12 @@ private:
     }
     void debug_valid_rdma_buffer(const void *buf)
     {
-        rdma_client_buffer_->debug_validity_check(buf);
+        if constexpr (debug())
+        {
+            CHECK_GE((uint64_t) buf, (uint64_t) client_rdma_buffer_);
+            CHECK_LT((uint64_t) buf,
+                     (uint64_t) client_rdma_buffer_ + client_rdma_buffer_size_);
+        }
     }
     void put_rdma_message_buffer(char *buf)
     {
@@ -659,6 +693,10 @@ private:
     static thread_local std::unique_ptr<
         ThreadUnsafeBufferPool<kClientRdmaBufferSize>>
         rdma_client_buffer_;
+    static thread_local std::unique_ptr<ThreadUnsafeBufferPool<8>>
+        rdma_client_buffer_8B_;
+    static thread_local char *client_rdma_buffer_;
+    static thread_local size_t client_rdma_buffer_size_;
 
     // owned by server threads
     // [NR_DIRECTORY]
@@ -782,9 +820,9 @@ ErrCode Patronus::extend_impl(Lease &lease,
              << "original lease: " << lease;
 
     auto offset = offsetof(ProtectionRegion, aba_unit_nr_to_ddl);
-    auto rdma_buffer = get_rdma_buffer();
-    DCHECK_LT(sizeof(decltype(ProtectionRegion::aba_unit_nr_to_ddl)),
-              rdma_buffer.size);
+    using ABAT = decltype(ProtectionRegion::aba_unit_nr_to_ddl);
+    auto rdma_buffer = get_rdma_buffer(sizeof(ABAT));
+    DCHECK_LE(sizeof(ABAT), rdma_buffer.size);
 
     auto aba_unit_nr_to_ddl = lease.aba_unit_nr_to_ddl_;
     auto compare = aba_unit_nr_to_ddl.val;
@@ -800,7 +838,7 @@ ErrCode Patronus::extend_impl(Lease &lease,
         lease.aba_unit_nr_to_ddl_.u32_2 += extend_unit_nr;
         lease.update_ddl_term();
     }
-    put_rdma_buffer(rdma_buffer.buffer);
+    put_rdma_buffer(rdma_buffer);
     DVLOG(4) << "[patronus][extend-impl] Done extend. coro: "
              << (ctx ? *ctx : nullctx) << ". cas_ec: " << cas_ec
              << ". Now lease: " << lease;
@@ -1023,8 +1061,8 @@ void Patronus::relinquish_write(Lease &lease, CoroContext *ctx)
 {
     auto offset = offsetof(ProtectionRegion, meta) +
                   offsetof(ProtectionRegionMeta, relinquished);
-    auto rdma_buffer = get_rdma_buffer();
-    DCHECK_LT(sizeof(small_bit_t), rdma_buffer.size);
+    auto rdma_buffer = get_rdma_buffer(sizeof(small_bit_t));
+    DCHECK_LE(sizeof(small_bit_t), rdma_buffer.size);
     *(small_bit_t *) rdma_buffer.buffer = 1;
 
     DVLOG(4) << "[patronus] relinquish write. write to "
@@ -1038,7 +1076,7 @@ void Patronus::relinquish_write(Lease &lease, CoroContext *ctx)
                               false /* is_read */,
                               ctx);
 
-    put_rdma_buffer(rdma_buffer.buffer);
+    put_rdma_buffer(rdma_buffer);
 }
 void *Patronus::patronus_alloc(size_t size, uint64_t hint)
 {

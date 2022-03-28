@@ -82,7 +82,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
-        auto rdma_buf = p->get_rdma_buffer();
+        auto rdma_buf = p->get_rdma_buffer(sizeof(Object));
+        CHECK_GE(rdma_buf.size, sizeof(Object));
         memset(rdma_buf.buffer, 0, sizeof(Object));
 
         VLOG(2) << "[bench] client coro " << ctx << " start to read";
@@ -124,7 +125,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         // make sure this will take no harm.
         p->relinquish(lease, 0, &ctx);
 
-        p->put_rdma_buffer(rdma_buf.buffer);
+        p->put_rdma_buffer(rdma_buf);
     }
 
     LOG(INFO) << "[bench] read_loop_succ_nr: " << read_loop_nr_m

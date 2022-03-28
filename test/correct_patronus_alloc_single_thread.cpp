@@ -62,17 +62,18 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
-        auto rdma_buf = p->get_rdma_buffer();
+        auto rdma_buf = p->get_rdma_buffer(kAllocBufferSize);
         memset(rdma_buf.buffer, 0, kAllocBufferSize);
 
         auto gaddr = p->get_gaddr(lease);
         CHECK(!gaddr.is_null());
         allocated_gaddrs.push_back(gaddr);
 
-        p->put_rdma_buffer(rdma_buf.buffer);
+        p->put_rdma_buffer(rdma_buf);
     }
 
-    auto rdma_buf = p->get_rdma_buffer();
+    auto rdma_buf = p->get_rdma_buffer(kAllocBufferSize);
+    CHECK_GE(rdma_buf.size, kAllocBufferSize);
     for (size_t time = 0; time < kTestTime; ++time)
     {
         auto addr_idx = fast_pseudo_rand_int(0, allocated_gaddrs.size() - 1);
@@ -99,7 +100,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto rel_flag = (uint8_t) 0;
         p->relinquish(lease, rel_flag, &ctx);
     }
-    p->put_rdma_buffer(rdma_buf.buffer);
+    p->put_rdma_buffer(rdma_buf);
 
     for (auto gaddr : allocated_gaddrs)
     {

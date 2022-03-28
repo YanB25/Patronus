@@ -11,6 +11,8 @@ thread_local std::unique_ptr<ThreadUnsafeBufferPool<Patronus::kMessageSize>>
 thread_local std::unique_ptr<
     ThreadUnsafeBufferPool<Patronus::kClientRdmaBufferSize>>
     Patronus::rdma_client_buffer_;
+thread_local std::unique_ptr<ThreadUnsafeBufferPool<8>>
+    Patronus::rdma_client_buffer_8B_;
 thread_local ThreadUnsafePool<RpcContext, Patronus::kMaxCoroNr>
     Patronus::rpc_context_;
 thread_local ThreadUnsafePool<RWContext, Patronus::kMaxCoroNr>
@@ -24,6 +26,8 @@ thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
 thread_local DDLManager Patronus::ddl_manager_;
 thread_local size_t Patronus::allocated_mw_nr_;
 thread_local std::shared_ptr<mem::SlabAllocator> Patronus::allocator_;
+thread_local char *Patronus::client_rdma_buffer_{nullptr};
+thread_local size_t Patronus::client_rdma_buffer_size_{0};
 
 // clang-format off
 /**
@@ -1787,26 +1791,42 @@ void Patronus::registerClientThread()
     // - reserve other 12 MB for client's usage. If coro_nr == 8, could
     // get 1.5 MB each coro.
 
+    // dsm_->get_rdma_buffer() is per-thread
     auto rdma_buffer = dsm_->get_rdma_buffer();
     auto *dsm_rdma_buffer = rdma_buffer.buffer;
 
     size_t message_pool_size = 4 * define::MB;
     CHECK_GT(rdma_buffer.size, message_pool_size);
-    size_t rdma_buffer_size = rdma_buffer.size - message_pool_size;
     CHECK_GE(message_pool_size / kMessageSize, 65536)
         << "Consider to tune up message pool size? Less than 64436 "
            "possible messages";
-    CHECK_GE(rdma_buffer_size, kMaxCoroNr * kClientRdmaBufferSize)
-        << "rdma_buffer not enough for maximum coroutine";
-
-    auto *client_rdma_buffer = dsm_rdma_buffer + message_pool_size;
 
     rdma_message_buffer_pool_ =
         std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
             dsm_rdma_buffer, message_pool_size);
+
+    // the remaining buffer is given to client rdma buffers
+    // 8B and non-8B
+    auto *client_rdma_buffer = dsm_rdma_buffer + message_pool_size;
+    size_t rdma_buffer_size = rdma_buffer.size - message_pool_size;
+    CHECK_GE(rdma_buffer_size, kMaxCoroNr * kClientRdmaBufferSize)
+        << "rdma_buffer not enough for maximum coroutine";
+
+    // remember that, so that we could validate when debugging
+    client_rdma_buffer_ = client_rdma_buffer;
+    client_rdma_buffer_size_ = rdma_buffer_size;
+
+    auto rdma_buffer_size_8B = 8 * 1024;
+    CHECK_GE(rdma_buffer_size, rdma_buffer_size_8B);
+    auto rdma_buffer_size_non_8B = rdma_buffer_size - rdma_buffer_size_8B;
+    auto *client_rdma_buffer_8B = client_rdma_buffer;
+    auto *client_rdma_buffer_non_8B = client_rdma_buffer + rdma_buffer_size_8B;
+
+    rdma_client_buffer_8B_ = std::make_unique<ThreadUnsafeBufferPool<8>>(
+        client_rdma_buffer_8B, rdma_buffer_size_8B);
     rdma_client_buffer_ =
         std::make_unique<ThreadUnsafeBufferPool<kClientRdmaBufferSize>>(
-            client_rdma_buffer, rdma_buffer_size);
+            client_rdma_buffer_non_8B, rdma_buffer_size_non_8B);
 }
 
 size_t Patronus::try_get_client_continue_coros(size_t mid,
@@ -2465,6 +2485,7 @@ void Patronus::thread_explain() const
               << ", rdma_message_buffer_pool: "
               << rdma_message_buffer_pool_.get()
               << ", rdma_client_buffer: " << rdma_client_buffer_.get()
+              << ", rdma_client_buffer_8B: " << rdma_client_buffer_8B_.get()
               << ", rpc_context: " << (void *) &rpc_context_
               << ", rw_context: " << (void *) &rw_context_
               << ", lease_context: " << (void *) &lease_context_

@@ -65,7 +65,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     size_t coro_key = kCoroStartKey + coro_id;
     size_t coro_magic = kMagic + coro_id;
 
-    auto rdma_buf = p->get_rdma_buffer();
+    auto rdma_buf = p->get_rdma_buffer(sizeof(Object));
+    DCHECK_GE(rdma_buf.size, sizeof(Object));
     memset(rdma_buf.buffer, 0, sizeof(Object));
 
     for (size_t time = 0; time < kTestTime; ++time)
@@ -177,7 +178,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     client_comm.finish_cur_task[coro_id] = true;
     client_comm.finish_all_task[coro_id] = true;
 
-    p->put_rdma_buffer(rdma_buf.buffer);
+    p->put_rdma_buffer(rdma_buf);
 
     LOG(WARNING) << "worker coro " << (int) coro_id
                  << " finished ALL THE TASK. yield to master.";
