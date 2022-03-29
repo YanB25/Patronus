@@ -7,6 +7,7 @@
 #include <memory>
 #include <unordered_set>
 
+#include "Common.h"
 #include "Pool.h"
 #include "allocator.h"
 
@@ -194,11 +195,12 @@ public:
         {
             auto cur_class = config.block_class[i];
             auto cur_ratio = config.block_ratio[i];
-            auto cur_len = aligned_len * cur_ratio;
+            auto cur_len = 1.0 * aligned_len * cur_ratio;
             auto cur_addr = begin_addr;
             auto [a, l] =
                 align_address(cur_addr, cur_len, std::min(cur_class, 4_KB));
             blocks_[cur_class] = std::make_unique<Pool>(a, l, cur_class);
+
             end_addr_to_class_[(void *) ((uint64_t) a + l)] = cur_class;
 
             begin_addr = (void *) ((uint64_t) a + l);
@@ -206,6 +208,10 @@ public:
             class_info_.emplace(cur_class,
                                 ClassInformation(a, l, l / cur_class));
             wasted_len_ += ((uint64_t) a - (uint64_t) cur_addr);
+
+            LOG(INFO) << "[debug] !! blocks class: " << cur_class << " have "
+                      << blocks_[cur_class]->size()
+                      << ", given length: " << cur_len;
         }
     }
 
@@ -216,6 +222,7 @@ public:
         if (it == blocks_.end())
         {
             // no such large block
+            DCHECK(false) << "[debug] no such large block. Requested: " << size;
             return nullptr;
         }
         auto *ret = it->second->get();
@@ -224,7 +231,7 @@ public:
             if (ret)
             {
                 debug_class_allocated_nr_[it->first]++;
-                if constexpr (config::kEnableSlabAllocatorStrictChecking)
+                if constexpr (::config::kEnableSlabAllocatorStrictChecking)
                 {
                     CHECK(debug_ongoing_bufs_.insert(ret).second)
                         << "The returned pair.second denotes whether insertion "
@@ -232,8 +239,12 @@ public:
                 }
             }
         }
-        DVLOG(20) << "[slab-alloc] allocating size " << size << " from class "
-                  << it->first << ". ret: " << ret;
+
+        DLOG(INFO) << "[debug] !! allocating size " << size << " from class "
+                   << it->first << ". ret: " << ret;
+        DLOG_IF(FATAL, ret == nullptr)
+            << "Failed to allocate size " << size << ". class empty";
+
         return ret;
     }
     void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
@@ -249,7 +260,7 @@ public:
         if constexpr (debug())
         {
             debug_class_freed_nr_[ptr_class]++;
-            if constexpr (config::kEnableSlabAllocatorStrictChecking)
+            if constexpr (::config::kEnableSlabAllocatorStrictChecking)
             {
                 CHECK_EQ(debug_ongoing_bufs_.erase(addr), 1)
                     << "Expect addr " << (void *) addr << " found in the set";

@@ -16,34 +16,44 @@ using namespace patronus::hash;
 using namespace define::literals;
 using namespace patronus;
 
-constexpr static size_t kKVBlockReserveSize = 512_MB;
+constexpr static size_t kKVBlockReserveSize = 4_MB;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 [[maybe_unused]] constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
+constexpr static size_t kCoroCnt = 1;
 
 using RaceHashingT = RaceHashing<1, 2, 2>;
 using RaceHandleT = typename RaceHashingT::Handle;
 
-void client_test_capacity(Patronus::pointer p)
+RaceHandleT::pointer gen_rhh(Patronus::pointer p, CoroContext *ctx)
 {
+    auto tid = p->get_thread_id();
+    auto dir_id = tid;
+
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
-    auto dir_id = 0;
-
     LOG(INFO) << "[bench] got meta of hashtable: " << meta_gaddr;
-
     RaceHashingHandleConfig handle_conf;
-
     auto handle_rdma_ctx =
-        patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p);
-    RaceHandleT rhh(kServerNodeId,
-                    meta_gaddr,
-                    handle_conf,
-                    handle_rdma_ctx,
-                    nullptr /* coro */);
-    rhh.init();
+        patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, ctx);
+    RaceHandleT rhh(kServerNodeId, meta_gaddr, handle_conf, handle_rdma_ctx);
+    auto prhh = std::make_shared<RaceHandleT>(
+        kServerNodeId, meta_gaddr, handle_conf, handle_rdma_ctx);
+    prhh->init();
+    return prhh;
+}
+
+void client_worker(Patronus::pointer p,
+                   size_t coro_id,
+                   CoroYield &yield,
+                   CoroExecutionContext<kCoroCnt> &exe)
+{
+    CoroContext ctx(0, &yield, &exe.master(), coro_id);
+
+    auto prhh = gen_rhh(p, &ctx);
+    auto &rhh = *prhh;
 
     std::string key;
     std::string value;
@@ -53,7 +63,7 @@ void client_test_capacity(Patronus::pointer p)
     char key_buf[128];
     char value_buf[128];
 
-    HashContext ctx(0);
+    HashContext dctx(0);
 
     for (size_t i = 0; i < 16; ++i)
     {
@@ -63,10 +73,10 @@ void client_test_capacity(Patronus::pointer p)
         value = std::string(value_buf, 8);
         LOG(INFO) << "Trying to push " << key << ", " << value;
 
-        ctx.key = key;
-        ctx.value = value;
-        ctx.op = "put";
-        auto rc = rhh.put(key, value, &ctx);
+        dctx.key = key;
+        dctx.value = value;
+        dctx.op = "put";
+        auto rc = rhh.put(key, value, &dctx);
         if (rc == kOk)
         {
             inserted.emplace(key, value);
@@ -91,11 +101,11 @@ void client_test_capacity(Patronus::pointer p)
 
     for (const auto &[key, expect_value] : inserted)
     {
-        ctx.key = key;
-        ctx.value = expect_value;
-        ctx.op = "get";
+        dctx.key = key;
+        dctx.value = expect_value;
+        dctx.op = "get";
         std::string get_val;
-        CHECK_EQ(rhh.get(key, get_val, &ctx), kOk);
+        CHECK_EQ(rhh.get(key, get_val, &dctx), kOk);
         CHECK_EQ(get_val, expect_value);
     }
 
@@ -103,11 +113,70 @@ void client_test_capacity(Patronus::pointer p)
 
     for (const auto &[key, expect_value] : inserted)
     {
-        ctx.key = key;
-        ctx.value = expect_value;
-        ctx.op = "del";
-        CHECK_EQ(rhh.del(key, &ctx), kOk);
+        dctx.key = key;
+        dctx.value = expect_value;
+        dctx.op = "del";
+        CHECK_EQ(rhh.del(key, &dctx), kOk);
     }
+}
+
+void client_master(Patronus::pointer p,
+                   CoroYield &yield,
+                   CoroExecutionContext<kCoroCnt> &exe)
+{
+    auto tid = p->get_thread_id();
+    auto mid = tid;
+
+    CoroContext mctx(tid, &yield, exe.workers());
+    CHECK(mctx.is_master());
+
+    for (size_t i = 0; i < kCoroCnt; ++i)
+    {
+        mctx.yield_to_worker(i);
+    }
+
+    LOG(INFO) << "Return back to master. start to recv messages";
+    coro_t coro_buf[2 * kCoroCnt];
+    while (!exe.is_finished_all())
+    {
+        auto nr = p->try_get_client_continue_coros(mid, coro_buf, 2 * kCoroCnt);
+        for (size_t i = 0; i < nr; ++i)
+        {
+            auto coro_id = coro_buf[i];
+            DVLOG(1) << "[bench] yielding due to CQE: " << (int) coro_id;
+            mctx.yield_to_worker(coro_id);
+        }
+    }
+
+    p->finished();
+    LOG(WARNING) << "[bench] all worker finish their work. exiting...";
+}
+
+void client_test_capacity(Patronus::pointer p)
+{
+    CoroExecutionContext<kCoroCnt> coro_exe_ctx;
+    auto tid = p->get_thread_id();
+    LOG(INFO) << "I am client. tid " << tid;
+
+    auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
+    LOG(INFO) << "[bench] got meta of hashtable: " << meta_gaddr;
+    RaceHashingHandleConfig handle_conf;
+    handle_conf.auto_expand = false;
+    handle_conf.auto_update_dir = false;
+
+    for (size_t i = 0; i < kCoroCnt; ++i)
+    {
+        coro_exe_ctx.worker(i) =
+            CoroCall([p, coro_id = i, &coro_exe_ctx](CoroYield &yield) {
+                client_worker(p, coro_id, yield, coro_exe_ctx);
+            });
+    }
+    auto &master = coro_exe_ctx.master();
+    master = CoroCall([p, &coro_exe_ctx](CoroYield &yield) {
+        client_master(p, yield, coro_exe_ctx);
+    });
+
+    master();
 }
 
 void server(Patronus::pointer p, size_t initial_subtable)
@@ -115,15 +184,16 @@ void server(Patronus::pointer p, size_t initial_subtable)
     auto tid = p->get_thread_id();
     LOG(INFO) << "[bench] server starts to work. tid " << tid;
 
-    auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
     conf.g_kvblock_pool_size = kKVBlockReserveSize;
-    conf.g_kvblock_pool_addr = malloc(conf.g_kvblock_pool_size);
+    conf.g_kvblock_pool_addr = CHECK_NOTNULL(
+        p->patronus_alloc(conf.g_kvblock_pool_size, 0 /* hint */));
 
-    auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(0, 0, p);
+    auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(p);
 
-    RaceHashingT rh(server_rdma_ctx, allocator, conf);
+    CHECK(false) << "The allocator. Use the reserved one";
+    RaceHashingT rh(server_rdma_ctx, nullptr /* TODO: here */, conf);
 
     auto meta_gaddr = rh.meta_gaddr();
     p->put("race:meta_gaddr", meta_gaddr, 0ns);
@@ -132,7 +202,8 @@ void server(Patronus::pointer p, size_t initial_subtable)
 
     p->server_serve(tid);
 
-    free(conf.g_kvblock_pool_addr);
+    p->patronus_free(
+        conf.g_kvblock_pool_addr, conf.g_kvblock_pool_size, 0 /* hint */);
 }
 
 int main(int argc, char *argv[])
@@ -142,6 +213,8 @@ int main(int argc, char *argv[])
 
     PatronusConfig config;
     config.machine_nr = kMachineNr;
+    config.block_class = {kKVBlockReserveSize, 4_KB};
+    config.block_ratio = {0.05, 0.95};
 
     auto patronus = Patronus::ins(config);
     auto nid = patronus->get_node_id();

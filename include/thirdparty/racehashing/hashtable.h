@@ -70,6 +70,8 @@ inline std::ostream &operator<<(std::ostream &os,
 
 template <size_t kA, size_t kB, size_t kC>
 class RaceHashingHandleImpl;
+template <size_t kA, size_t kB, size_t kC>
+class RaceHashingHandleWrapperImpl;
 
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>
 class RaceHashing
@@ -78,7 +80,8 @@ public:
     using SubTableT = SubTable<kBucketGroupNr, kSlotNr>;
     using pointer = std::shared_ptr<RaceHashing>;
     using MetaT = RaceHashingMeta<kDEntryNr, kBucketGroupNr, kSlotNr>;
-    using Handle = RaceHashingHandleImpl<kDEntryNr, kBucketGroupNr, kSlotNr>;
+    using Handle =
+        RaceHashingHandleWrapperImpl<kDEntryNr, kBucketGroupNr, kSlotNr>;
 
     static_assert(is_power_of_two(kDEntryNr));
 
@@ -87,10 +90,10 @@ public:
         return sizeof(RaceHashingMeta<kDEntryNr, kBucketGroupNr, kSlotNr>);
     }
 
-    RaceHashing(IRdmaAdaptor::pointer rdma_ctx,
+    RaceHashing(IRdmaAdaptor::pointer rdma_adpt,
                 std::shared_ptr<patronus::mem::IAllocator> allocator,
                 const RaceHashingConfig &conf)
-        : rdma_ctx_(rdma_ctx), conf_(conf), allocator_(allocator)
+        : rdma_adpt_(rdma_adpt), conf_(conf), allocator_(allocator)
     {
         init_meta();
         init_kvblock();
@@ -115,7 +118,9 @@ public:
         for (size_t i = 0; i < initial_subtable_nr; ++i)
         {
             auto alloc_size = SubTableT::size_bytes();
-            void *alloc_mem = CHECK_NOTNULL(allocator_->alloc(alloc_size));
+            void *alloc_mem = DCHECK_NOTNULL(allocator_)->alloc(alloc_size);
+            LOG_IF(FATAL, alloc_mem == nullptr)
+                << "** failed to alloc size " << alloc_size;
             memset(alloc_mem, 0, alloc_size);
 
             DVLOG(1) << "[race] allocating subtable " << i << " at "
@@ -136,7 +141,9 @@ public:
         auto initial_subtable_nr = conf_.initial_subtable;
         size_t alloc_size = meta_size();
         CHECK_LE(initial_subtable_nr, kDEntryNr);
-        void *alloc_addr = CHECK_NOTNULL(allocator_->alloc(alloc_size));
+        void *alloc_addr = DCHECK_NOTNULL(allocator_)->alloc(alloc_size);
+        LOG_IF(FATAL, alloc_addr == nullptr)
+            << "** failed to alloc size " << alloc_size;
         memset(alloc_addr, 0, alloc_size);
         meta_ = (MetaT *) alloc_addr;
 
@@ -148,17 +155,17 @@ public:
         CHECK_GT(conf_.g_kvblock_pool_size, 0);
 
         meta_->kvblock_pool_gaddr =
-            rdma_ctx_->to_exposed_gaddr(conf_.g_kvblock_pool_addr);
+            rdma_adpt_->to_exposed_gaddr(conf_.g_kvblock_pool_addr);
         meta_->kvblock_pool_size = conf_.g_kvblock_pool_size;
     }
     GlobalAddress to_exposed_remote_mem(void *mem) const
     {
-        return rdma_ctx_->to_exposed_gaddr(DCHECK_NOTNULL(mem));
+        return rdma_adpt_->to_exposed_gaddr(DCHECK_NOTNULL(mem));
     }
     void *from_exposed_remote_mem(GlobalAddress gaddr) const
     {
         DCHECK(!gaddr.is_null());
-        return rdma_ctx_->from_exposed_gaddr(gaddr);
+        return rdma_adpt_->from_exposed_gaddr(gaddr);
     }
     void refresh_subtables()
     {
@@ -224,12 +231,12 @@ public:
             DVLOG(1) << "Freeing subtable[" << i
                      << "].addr(): " << (void *) entry_addr << " with size "
                      << alloc_size;
-            allocator_->free(entry_addr, alloc_size);
+            DCHECK_NOTNULL(allocator_)->free(entry_addr, alloc_size);
         }
         auto size = meta_size();
         DVLOG(1) << "Freeing meta region: " << (void *) meta_ << " with size "
                  << size;
-        allocator_->free(meta_, size);
+        DCHECK_NOTNULL(allocator_)->free(meta_, size);
     }
 
     static constexpr size_t max_capacity()
@@ -264,7 +271,7 @@ public:
     }
 
 private:
-    IRdmaAdaptor::pointer rdma_ctx_;
+    IRdmaAdaptor::pointer rdma_adpt_;
     RaceHashingConfig conf_;
     // TODO: this expanding variable should be RDMA globally-visable
     std::shared_ptr<patronus::mem::IAllocator> allocator_;

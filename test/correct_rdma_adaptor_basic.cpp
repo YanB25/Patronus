@@ -39,28 +39,27 @@ void client_worker(Patronus::pointer p,
 
     LOG(INFO) << "Client get gaddr: " << gaddr;
 
-    auto rdma_ctx =
-        patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p);
+    auto rdma_adpt =
+        patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, &ctx);
 
     {
-        auto handle = rdma_ctx->acquire_perm(gaddr, 64, &ctx);
-        auto rdma_buf = rdma_ctx->get_rdma_buffer(128);
+        auto handle = rdma_adpt->acquire_perm(gaddr, 64);
+        auto rdma_buf = rdma_adpt->get_rdma_buffer(128);
         DCHECK_GE(rdma_buf.size, 128);
         // expect okay
         {
-            auto rc =
-                rdma_ctx->rdma_write(gaddr, rdma_buf.buffer, 64, handle, &ctx);
+            auto rc = rdma_adpt->rdma_write(gaddr, rdma_buf.buffer, 64, handle);
             CHECK_EQ(rc, kOk);
-            rc = rdma_ctx->commit(&ctx);
+            rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
         }
         // expect okay
         // write with offset 32 and length 32 (till the end)
         {
-            auto rc = rdma_ctx->rdma_write(
-                gaddr + 32, rdma_buf.buffer + 32, 32, handle, &ctx);
+            auto rc = rdma_adpt->rdma_write(
+                gaddr + 32, rdma_buf.buffer + 32, 32, handle);
             CHECK_EQ(rc, kOk);
-            rc = rdma_ctx->commit(&ctx);
+            rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
         }
 
@@ -68,8 +67,8 @@ void client_worker(Patronus::pointer p,
         // write one more byte than protected
         {
             auto rc1 =
-                rdma_ctx->rdma_write(gaddr, rdma_buf.buffer, 65, handle, &ctx);
-            auto rc2 = rdma_ctx->commit(&ctx);
+                rdma_adpt->rdma_write(gaddr, rdma_buf.buffer, 65, handle);
+            auto rc2 = rdma_adpt->commit();
             if (rc1 == kOk && rc2 == kOk)
             {
                 CHECK(false) << "Failed to generate protection error.";
@@ -84,9 +83,9 @@ void client_worker(Patronus::pointer p,
         // this will generate protection error
         // write 64 byte but with one byte offset
         {
-            auto rc1 = rdma_ctx->rdma_write(
-                gaddr + 1, rdma_buf.buffer, 64, handle, &ctx);
-            auto rc2 = rdma_ctx->commit(&ctx);
+            auto rc1 =
+                rdma_adpt->rdma_write(gaddr + 1, rdma_buf.buffer, 64, handle);
+            auto rc2 = rdma_adpt->commit();
             if (rc1 == kOk && rc2 == kOk)
             {
                 CHECK(false) << "Failed to generate protection error.";
@@ -99,42 +98,41 @@ void client_worker(Patronus::pointer p,
             }
         }
 
-        rdma_ctx->relinquish_perm(handle, &ctx);
+        rdma_adpt->relinquish_perm(handle);
 
-        auto rc = rdma_ctx->put_all_rdma_buffer();
+        auto rc = rdma_adpt->put_all_rdma_buffer();
         CHECK_EQ(rc, kOk);
     }
 
     {
-        auto handle =
-            rdma_ctx->remote_alloc_acquire_perm(64, 0 /* hint */, &ctx);
+        auto handle = rdma_adpt->remote_alloc_acquire_perm(64, 0 /* hint */);
 
-        auto rdma_buf = rdma_ctx->get_rdma_buffer(128);
+        auto rdma_buf = rdma_adpt->get_rdma_buffer(128);
         DCHECK_GE(rdma_buf.size, 128);
         // expect okay
         {
-            auto rc = rdma_ctx->rdma_write(
-                handle.gaddr(), rdma_buf.buffer, 64, handle, &ctx);
+            auto rc = rdma_adpt->rdma_write(
+                handle.gaddr(), rdma_buf.buffer, 64, handle);
             CHECK_EQ(rc, kOk);
-            rc = rdma_ctx->commit(&ctx);
+            rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
         }
         // expact okay again
         {
             // write with offset 32 and length 32 (till the end)
-            auto rc = rdma_ctx->rdma_write(
-                handle.gaddr() + 32, rdma_buf.buffer + 32, 32, handle, &ctx);
+            auto rc = rdma_adpt->rdma_write(
+                handle.gaddr() + 32, rdma_buf.buffer + 32, 32, handle);
             CHECK_EQ(rc, kOk);
-            rc = rdma_ctx->commit(&ctx);
+            rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
         }
 
         // expect protection error
         // write one more byte
         {
-            auto rc1 = rdma_ctx->rdma_write(
-                handle.gaddr(), rdma_buf.buffer, 65, handle, &ctx);
-            auto rc2 = rdma_ctx->commit(&ctx);
+            auto rc1 = rdma_adpt->rdma_write(
+                handle.gaddr(), rdma_buf.buffer, 65, handle);
+            auto rc2 = rdma_adpt->commit();
             if (rc1 == kOk && rc2 == kOk)
             {
                 CHECK(false) << "** Expect to get rdma protection error";
@@ -149,9 +147,9 @@ void client_worker(Patronus::pointer p,
         // expect protection error
         // write one 64 byte but with additional offset 1
         {
-            auto rc1 = rdma_ctx->rdma_write(
-                handle.gaddr() + 1, rdma_buf.buffer, 64, handle, &ctx);
-            auto rc2 = rdma_ctx->commit(&ctx);
+            auto rc1 = rdma_adpt->rdma_write(
+                handle.gaddr() + 1, rdma_buf.buffer, 64, handle);
+            auto rc2 = rdma_adpt->commit();
             if (rc1 == kOk && rc2 == kOk)
             {
                 CHECK(false) << "** Expect to get rdma protection error";
@@ -164,9 +162,9 @@ void client_worker(Patronus::pointer p,
             }
         }
 
-        rdma_ctx->remote_free_relinquish_perm(handle, 0 /* hint */, &ctx);
+        rdma_adpt->remote_free_relinquish_perm(handle, 0 /* hint */);
 
-        auto rc = rdma_ctx->put_all_rdma_buffer();
+        auto rc = rdma_adpt->put_all_rdma_buffer();
         CHECK_EQ(rc, kOk);
     }
 

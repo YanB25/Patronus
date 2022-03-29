@@ -228,9 +228,12 @@ Current TODOs:
 [-] compilable
 [-] PASS ALL old tests
 [-] PASS correct_patronus_addr (rename to correct_rdma_adaptor_addr)
-- PASS test_race_mock_op
 - Add an abstract that manage resource memory! call put_all_rdma_buffer on exit!
-- work on test_race_rdma_op! pass the very baby test!
+- PASS test_race_mock_op: pass the very baby test!
+    [-] hashtable_handle does not pass any CoroCtx. Try to fix the code. To avoid potential bugs, remove the default value of coro_ctx = nullptr.
+    [-] add a wrapper to hashtable_handle. What it does is to call put_all_rdma_buffer() and/or monitor when op finish.
+    - Kinda recursive, but yes, I need it. Patronus API: client can require patronus to reserve a piece of memory for them. This is shared across thread.
+    - Add tracing (with probability) to rdma_ctx. Add the retrieve_metrics API. So that we know what happened during rdma ops.
 - PASS correct_race_rdma_op
 - Add bench_race_rdma_op and see how it works!
 

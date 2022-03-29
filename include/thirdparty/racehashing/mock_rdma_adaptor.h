@@ -55,9 +55,7 @@ public:
     {
         return std::make_shared<MockRdmaAdaptor>(server_endpoint, dctx);
     }
-    RemoteMemHandle remote_alloc_acquire_perm(size_t size,
-                                              hint_t hint,
-                                              CoroContext * = nullptr) override
+    RemoteMemHandle remote_alloc_acquire_perm(size_t size, hint_t hint) override
     {
         auto ret = server_ep_.lock()->rpc_alloc(size, hint);
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
@@ -65,9 +63,7 @@ public:
             << " for size " << size;
         return alloc_handle(ret, size);
     }
-    RemoteMemHandle acquire_perm(GlobalAddress gaddr,
-                                 size_t size,
-                                 CoroContext * = nullptr) override
+    RemoteMemHandle acquire_perm(GlobalAddress gaddr, size_t size) override
     {
         return alloc_handle(gaddr, size);
     }
@@ -128,10 +124,7 @@ public:
 
         remote_not_freed_buffers_.insert(addr);
     }
-    void remote_free(GlobalAddress gaddr,
-                     size_t size,
-                     hint_t hint,
-                     CoroContext * = nullptr) override
+    void remote_free(GlobalAddress gaddr, size_t size, hint_t hint) override
     {
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
             << "[rdma][trace] remote_free: " << gaddr;
@@ -141,14 +134,12 @@ public:
     // mock implement
     // no action for permission
     void remote_free_relinquish_perm(RemoteMemHandle &handle,
-                                     hint_t hint,
-                                     CoroContext *ctx = nullptr) override
+                                     hint_t hint) override
     {
         free_handle(handle);
-        return remote_free(handle.gaddr(), handle.size(), hint, ctx);
+        return remote_free(handle.gaddr(), handle.size(), hint);
     }
-    void relinquish_perm(RemoteMemHandle &handle,
-                         CoroContext * = nullptr) override
+    void relinquish_perm(RemoteMemHandle &handle) override
     {
         free_handle(handle);
         return;
@@ -167,8 +158,7 @@ public:
     RetCode rdma_read(void *rdma_buf,
                       GlobalAddress gaddr,
                       size_t size,
-                      RemoteMemHandle &handle,
-                      CoroContext * = nullptr) override
+                      RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
         MockRdmaOp op;
@@ -184,8 +174,7 @@ public:
     RetCode rdma_write(GlobalAddress gaddr,
                        void *rdma_buf,
                        size_t size,
-                       RemoteMemHandle &handle,
-                       CoroContext *) override
+                       RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
         MockRdmaOp op;
@@ -203,8 +192,7 @@ public:
                      uint64_t expect,
                      uint64_t desired,
                      void *rdma_buf,
-                     RemoteMemHandle &handle,
-                     CoroContext * = nullptr) override
+                     RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
         MockRdmaOp op;
@@ -257,7 +245,7 @@ public:
             << remote_allocated_buffers_.size();
     }
 
-    RetCode commit(CoroContext * = nullptr) override
+    RetCode commit() override
     {
         for (const auto &op : ops_)
         {

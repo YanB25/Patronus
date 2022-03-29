@@ -157,10 +157,10 @@ void test_combined_bucket_handle(const CombinedBucketHandle<kSlotNr> &cb)
 void test_bucket_group_not_overlapped_handle()
 {
     void *addr = hugePageAlloc(kMemoryLimit);
-    auto rdma_ctx = MockRdmaAdaptor::new_instance({});
-    auto exposed_gaddr = rdma_ctx->to_exposed_gaddr(addr);
-    auto handle = rdma_ctx->acquire_perm(exposed_gaddr,
-                                         std::numeric_limits<size_t>::max());
+    auto rdma_adpt = MockRdmaAdaptor::new_instance({});
+    auto exposed_gaddr = rdma_adpt->to_exposed_gaddr(addr);
+    auto handle = rdma_adpt->acquire_perm(exposed_gaddr,
+                                          std::numeric_limits<size_t>::max());
 
     SubTableHandle<kBucketGroupNr, kSlotNr> sub_table(exposed_gaddr, handle);
     size_t expect_size = SubTable<kBucketGroupNr, kSlotNr>::size_bytes();
@@ -218,10 +218,10 @@ void test_bucket_group_not_overlapped_handle2()
     using SubTableHandleT = typename SubTableT::Handle;
 
     void *addr = hugePageAlloc(kMemoryLimit);
-    auto rdma_ctx = MockRdmaAdaptor::new_instance({});
-    auto exposed_gaddr = rdma_ctx->to_exposed_gaddr(addr);
+    auto rdma_adpt = MockRdmaAdaptor::new_instance({});
+    auto exposed_gaddr = rdma_adpt->to_exposed_gaddr(addr);
     auto handle =
-        rdma_ctx->acquire_perm(exposed_gaddr, SubTableT::size_bytes());
+        rdma_adpt->acquire_perm(exposed_gaddr, SubTableT::size_bytes());
     DVLOG(1)
         << "[bench] test_bucket_group_not_overlapped_handle2: handle.gaddr "
         << exposed_gaddr << ", size: " << SubTableT::size_bytes();
@@ -235,8 +235,8 @@ void test_bucket_group_not_overlapped_handle2()
         auto cb = sub_table.combined_bucket_handle(i);
         DVLOG(1) << "combined_bucket[" << i
                  << "].gaddr(): " << cb.remote_addr();
-        CHECK_EQ(cb.read(*rdma_ctx, handle), kOk);
-        CHECK_EQ(rdma_ctx->commit(), kOk);
+        CHECK_EQ(cb.read(*rdma_adpt, handle), kOk);
+        CHECK_EQ(rdma_adpt->commit(), kOk);
         addrs.push_back((void *) cb.remote_addr().val);
         test_combined_bucket_handle(cb);
     }

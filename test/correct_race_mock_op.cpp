@@ -22,11 +22,10 @@ constexpr static size_t kKVBlockPoolReserveSize = 512_MB;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
-using TablePair = std::pair<
-    typename RaceHashing<kDEntry, kBucketNr, kSlotNr>::pointer,
-    std::vector<
-        typename RaceHashingHandleImpl<kDEntry, kBucketNr, kSlotNr>::pointer>>;
+template <size_t kA, size_t kB, size_t kC>
+using TablePair =
+    std::pair<typename RaceHashing<kA, kB, kC>::pointer,
+              std::vector<typename RaceHashing<kA, kB, kC>::Handle::pointer>>;
 
 template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
 TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
@@ -65,23 +64,18 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
         handle_conf.auto_expand = auto_expand;
         handle_conf.auto_update_dir = auto_expand;
         auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
-        auto rhh = std::make_shared<RaceHashingHandleT>(0 /* node_id */,
-                                                        rh->meta_gaddr(),
-                                                        handle_conf,
-                                                        handle_rdma_ctx,
-                                                        nullptr /* coro */);
+        auto rhh = std::make_shared<RaceHashingHandleT>(
+            0 /* node_id */, rh->meta_gaddr(), handle_conf, handle_rdma_ctx);
         rhh->init();
         rhhs.push_back(rhh);
     }
     return {rh, rhhs};
 }
 
-template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
+template <size_t kE, size_t kB, size_t kS>
 void tear_down_mock_rdma_rh(
-    typename RaceHashing<kDEntry, kBucketNr, kSlotNr>::pointer rh,
-    std::vector<
-        typename RaceHashingHandleImpl<kDEntry, kBucketNr, kSlotNr>::pointer>
-        rhhs)
+    typename RaceHashing<kE, kB, kS>::pointer rh,
+    std::vector<typename RaceHashing<kE, kB, kS>::Handle::pointer> rhhs)
 {
     const auto &rh_conf = rh->config();
     free(rh_conf.g_kvblock_pool_addr);

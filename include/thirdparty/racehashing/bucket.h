@@ -117,21 +117,21 @@ public:
     }
     RetCode do_insert(SlotHandle slot_handle,
                       SlotView new_slot,
-                      IRdmaAdaptor &rdma_ctx,
+                      IRdmaAdaptor &rdma_adpt,
                       RemoteMemHandle &subtable_mem_handle,
                       SlotHandle *ret_slot,
                       HashContext *dctx)
     {
         uint64_t expect_val = slot_handle.val();
-        auto rdma_buf = rdma_ctx.get_rdma_buffer(8);
+        auto rdma_buf = rdma_adpt.get_rdma_buffer(8);
         DCHECK_GE(rdma_buf.size, 8);
-        CHECK_EQ(rdma_ctx.rdma_cas(slot_handle.remote_addr(),
-                                   expect_val,
-                                   new_slot.val(),
-                                   rdma_buf.buffer,
-                                   subtable_mem_handle),
+        CHECK_EQ(rdma_adpt.rdma_cas(slot_handle.remote_addr(),
+                                    expect_val,
+                                    new_slot.val(),
+                                    rdma_buf.buffer,
+                                    subtable_mem_handle),
                  kOk);
-        CHECK_EQ(rdma_ctx.commit(), kOk);
+        CHECK_EQ(rdma_adpt.commit(), kOk);
         bool success = memcmp(rdma_buf.buffer, &expect_val, 8) == 0;
 
         SlotView expect_slot(expect_val);
@@ -158,7 +158,7 @@ public:
         return kRetry;
     }
     RetCode should_migrate(size_t bit,
-                           IRdmaAdaptor &rdma_ctx,
+                           IRdmaAdaptor &rdma_adpt,
                            RemoteMemHandle &kvblock_mem_handle,
                            std::unordered_set<SlotMigrateHandle> &ret,
                            HashContext *dctx)
@@ -174,14 +174,14 @@ public:
             // we don't need the key and value content
             // just the buffered hash.
             auto kvblock_len = sizeof(KVBlock);
-            auto rdma_buf = rdma_ctx.get_rdma_buffer(kvblock_len);
+            auto rdma_buf = rdma_adpt.get_rdma_buffer(kvblock_len);
             DCHECK_GE(rdma_buf.size, kvblock_len);
-            CHECK_EQ(rdma_ctx.rdma_read(DCHECK_NOTNULL(rdma_buf.buffer),
-                                        kvblock_remote_addr,
-                                        kvblock_len,
-                                        kvblock_mem_handle),
+            CHECK_EQ(rdma_adpt.rdma_read(DCHECK_NOTNULL(rdma_buf.buffer),
+                                         kvblock_remote_addr,
+                                         kvblock_len,
+                                         kvblock_mem_handle),
                      kOk);
-            CHECK_EQ(rdma_ctx.commit(), kOk);
+            CHECK_EQ(rdma_adpt.commit(), kOk);
             KVBlock &kv_block = *(KVBlock *) rdma_buf.buffer;
             auto hash = kv_block.hash;
             if (hash & (1 << bit))
@@ -200,18 +200,18 @@ public:
     }
     RetCode update_header_nodrain(uint32_t ld,
                                   uint32_t suffix,
-                                  IRdmaAdaptor &rdma_ctx,
+                                  IRdmaAdaptor &rdma_adpt,
                                   RemoteMemHandle &mem_handle,
                                   HashContext *dctx)
     {
         // header is at the first of the addr.
         std::ignore = dctx;
-        auto rdma_buf = rdma_ctx.get_rdma_buffer(sizeof(BucketHeader));
+        auto rdma_buf = rdma_adpt.get_rdma_buffer(sizeof(BucketHeader));
         DCHECK_GE(rdma_buf.size, sizeof(BucketHeader));
         auto &header = *(BucketHeader *) rdma_buf.buffer;
         header.ld = ld;
         header.suffix = suffix;
-        return rdma_ctx.rdma_write(
+        return rdma_adpt.rdma_write(
             gaddr_, rdma_buf.buffer, sizeof(BucketHeader), mem_handle);
     }
 

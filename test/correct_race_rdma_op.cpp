@@ -24,19 +24,18 @@ constexpr static size_t kKVBlockPoolReserveSize = 512_MB;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
-using TablePair = std::pair<
-    typename RaceHashing<kDEntry, kBucketNr, kSlotNr>::pointer,
-    std::vector<
-        typename RaceHashingHandleImpl<kDEntry, kBucketNr, kSlotNr>::pointer>>;
+template <size_t kE, size_t kB, size_t kS>
+using TablePair =
+    std::pair<typename RaceHashing<kE, kB, kS>::pointer,
+              std::vector<typename RaceHashing<kE, kB, kS>::Handle::pointer>>;
 
-template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
-TablePair<kDEntry, kBucketNr, kSlotNr> gen_rdma_rh(Patronus::pointer patronus,
-                                                   size_t initial_subtable,
-                                                   size_t thread_nr,
-                                                   bool auto_expand)
+template <size_t kE, size_t kB, size_t kS>
+TablePair<kE, kB, kS> gen_rdma_rh(Patronus::pointer patronus,
+                                  size_t initial_subtable,
+                                  size_t thread_nr,
+                                  bool auto_expand)
 {
-    using RaceHashingT = RaceHashing<kDEntry, kBucketNr, kSlotNr>;
+    using RaceHashingT = RaceHashing<kE, kB, kS>;
     using RaceHashingHandleT = typename RaceHashingT::Handle;
 
     // generate rh here
@@ -47,8 +46,9 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_rdma_rh(Patronus::pointer patronus,
     // let the memory leak, I don't care
     conf.g_kvblock_pool_addr = malloc(conf.g_kvblock_pool_size);
 
-    auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(
-        0 /* node_id not used */, 0 /* dir_id not used */, patronus);
+    CHECK(false) << "consider corotine and bring into this function";
+    CHECK(false) << "corotine here";
+    auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(patronus);
 
     CHECK(false) << "TODO: rdma adaptor has no reg_allocator. If its correct?";
 
@@ -62,25 +62,21 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_rdma_rh(Patronus::pointer patronus,
         RaceHashingHandleConfig handle_conf;
         handle_conf.auto_expand = auto_expand;
         handle_conf.auto_update_dir = auto_expand;
+        CHECK(false) << "corotine here";
         auto handle_rdma_ctx = patronus::RdmaAdaptor::new_instance(
-            kServerNodeId, dir_id, patronus);
-        auto rhh = std::make_shared<RaceHashingHandleT>(kServerNodeId,
-                                                        rh->meta_gaddr(),
-                                                        handle_conf,
-                                                        handle_rdma_ctx,
-                                                        nullptr /* coro */);
+            kServerNodeId, dir_id, patronus, nullptr);
+        auto rhh = std::make_shared<RaceHashingHandleT>(
+            kServerNodeId, rh->meta_gaddr(), handle_conf, handle_rdma_ctx);
         rhh->init();
         rhhs.push_back(rhh);
     }
     return {rh, rhhs};
 }
 
-template <size_t kDEntry, size_t kBucketNr, size_t kSlotNr>
+template <size_t kE, size_t kB, size_t kS>
 void tear_down_rdma_rh(
-    typename RaceHashing<kDEntry, kBucketNr, kSlotNr>::pointer rh,
-    std::vector<
-        typename RaceHashingHandleImpl<kDEntry, kBucketNr, kSlotNr>::pointer>
-        rhhs)
+    typename RaceHashing<kE, kB, kS>::pointer rh,
+    std::vector<typename RaceHashing<kE, kB, kS>::Handle::pointer> rhhs)
 {
     const auto &rh_conf = rh->config();
     free(rh_conf.g_kvblock_pool_addr);
