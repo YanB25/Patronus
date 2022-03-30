@@ -291,6 +291,9 @@ constexpr static bool kMonitorAllocationDistribution = true;
 constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
 
+constexpr static bool kEnableRdmaTrace = true;
+constexpr static double kRdmaTraceRate = 1;
+
 // about opening a feature
 constexpr static bool kEnableReliableMessage = true;
 
@@ -301,7 +304,6 @@ constexpr static uint64_t kTraceRate =
     100000;  // (1.0 / kTraceRate) possibility
 // slab allocator checks whether each free is valid.
 constexpr static bool kEnableSlabAllocatorStrictChecking = true;
-
 // other settings
 constexpr static size_t kLeaseCacheItemLimitNr = 3;
 }  // namespace config

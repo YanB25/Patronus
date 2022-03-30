@@ -1384,10 +1384,14 @@ public:
 
     RetCode update_directory_cache(HashContext *dctx)
     {
+        maybe_start_trace("update cache");
         rhh_.update_directory_cache(dctx);
+        maybe_start_trace();
     }
     RetCode del(const Key &key, HashContext *dctx = nullptr)
     {
+        maybe_start_trace("del");
+
         auto rc = rhh_.del(key, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Deleted key `" << key << "`. "
@@ -1395,10 +1399,14 @@ public:
 
         auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
         CHECK_EQ(gc_rc, kOk);
+
+        maybe_end_trace();
         return rc;
     }
     RetCode put(const Key &key, const Value &value, HashContext *dctx = nullptr)
     {
+        maybe_start_trace("put");
+
         auto rc = rhh_.put(key, value, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Put key `" << key << "`. "
@@ -1406,20 +1414,28 @@ public:
 
         auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
         CHECK_EQ(gc_rc, kOk);
+
+        maybe_end_trace();
         return rc;
     }
     RetCode get(const Key &key, Value &value, HashContext *dctx = nullptr)
     {
+        maybe_start_trace("get");
+
         auto rc = rhh_.get(key, value, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Get key `" << key << "`. "
             << pre_rdma_adaptor(rdma_adpt_);
         auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
         CHECK_EQ(gc_rc, kOk);
+
+        maybe_end_trace();
         return rc;
     }
     RetCode expand(size_t subtable_idx, HashContext *dctx)
     {
+        maybe_start_trace("expand");
+
         auto rc = rhh_.expand(subtable_idx, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] expand subtable[" << subtable_idx << "] "
@@ -1427,6 +1443,8 @@ public:
 
         auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
         CHECK_EQ(gc_rc, kOk);
+
+        maybe_end_trace();
         return rc;
     }
 
@@ -1437,6 +1455,28 @@ public:
 private:
     RaceHashingHandleT rhh_;
     IRdmaAdaptor::pointer rdma_adpt_;
+
+    void maybe_start_trace(const char *name)
+    {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (unlikely(true_with_prob(::config::kRdmaTraceRate)))
+            {
+                rdma_adpt_->enable_trace(name);
+            }
+        }
+    }
+    void maybe_end_trace()
+    {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (unlikely(rdma_adpt_->trace_enabled()))
+            {
+                rdma_adpt_->end_trace(nullptr /* give u nothing */);
+                LOG(INFO) << "[trace]" << pre_rdma_adaptor_trace(rdma_adpt_);
+            }
+        }
+    }
 };
 
 template <size_t kDEntryNr, size_t kBucketGroupNr, size_t kSlotNr>

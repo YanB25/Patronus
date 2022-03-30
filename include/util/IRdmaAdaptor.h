@@ -104,6 +104,19 @@ public:
     // called by server side
     virtual GlobalAddress to_exposed_gaddr(void *addr) = 0;
     virtual void *from_exposed_gaddr(GlobalAddress gaddr) = 0;
+
+    virtual void enable_trace(const void *any_data)
+    {
+        std::ignore = any_data;
+    }
+    virtual void end_trace(const void *any_data)
+    {
+        std::ignore = any_data;
+    }
+    virtual bool trace_enabled() const
+    {
+        return false;
+    }
 };
 
 #endif

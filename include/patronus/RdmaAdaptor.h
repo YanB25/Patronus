@@ -9,6 +9,62 @@
 
 namespace patronus
 {
+struct RdmaTraceRecord
+{
+    std::string name;
+    size_t rwcas_nr;
+    size_t alloc_only_nr;
+    size_t acquire_nr;
+    size_t alloc_acquire_nr;
+    size_t free_only_nr;
+    size_t free_rel_nr;
+    size_t rel_nr;
+    size_t read_nr;
+    size_t read_bytes;
+    size_t write_nr;
+    size_t write_bytes;
+    size_t cas_nr;
+    size_t allocated_rdma_buf_nr = 0;
+    size_t commit_nr = 0;
+    size_t indv_one_sided = 0;
+    size_t indv_two_sided = 0;
+    uint64_t latency_ns;
+    ChronoTimer timer;
+
+    void clear()
+    {
+        name = "";
+        rwcas_nr = 0;
+        alloc_only_nr = 0;
+        acquire_nr = 0;
+        alloc_acquire_nr = 0;
+        free_only_nr = 0;
+        free_rel_nr = 0;
+        read_nr = 0;
+        read_bytes = 0;
+        rel_nr = 0;
+        write_nr = 0;
+        write_bytes = 0;
+        cas_nr = 0;
+        latency_ns = 0;
+        commit_nr = 0;
+        indv_one_sided = 0;
+        indv_two_sided = 0;
+        allocated_rdma_buf_nr = 0;
+    }
+};
+inline std::ostream &operator<<(std::ostream &os, const RdmaTraceRecord &r)
+{
+    os << "{Rdma " << r.name << ", read: " << r.read_nr << " (" << r.read_bytes
+       << " B), write: " << r.write_nr << " (" << r.write_bytes
+       << " B), cas: " << r.cas_nr << ". alloc: " << r.alloc_only_nr
+       << ", acquire: " << r.acquire_nr
+       << ", alloc_acquire: " << r.alloc_acquire_nr
+       << ", free: " << r.free_only_nr << ", rel: " << r.rel_nr
+       << ", free_rel: " << r.free_rel_nr
+       << ", used rdma buffer: " << r.allocated_rdma_buf_nr << "}";
+    return os;
+}
 class RdmaAdaptor : public IRdmaAdaptor
 {
 public:
@@ -60,6 +116,15 @@ public:
      */
     RemoteMemHandle remote_alloc_acquire_perm(size_t size, hint_t hint) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.alloc_acquire_nr++;
+                rdma_trace_record_.indv_two_sided++;
+            }
+        }
+
         DCHECK(!is_server_);
         auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
                     (uint8_t) AcquireRequestFlag::kWithAllocation;
@@ -77,6 +142,15 @@ public:
     // yes
     RemoteMemHandle acquire_perm(GlobalAddress vaddr, size_t size) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.acquire_nr++;
+                rdma_trace_record_.indv_two_sided++;
+            }
+        }
+
         auto gaddr = vaddr_to_gaddr(vaddr);
         auto flag = (uint8_t) AcquireRequestFlag::kNoGc;
         DCHECK_EQ(gaddr.nodeID, node_id_);
@@ -84,7 +158,7 @@ public:
             patronus_->get_wlease(gaddr, dir_id_, size, 0ns, flag, coro_ctx_);
         CHECK(lease.success()) << "lease: " << lease << ", ec: " << lease.ec();
 
-        DLOG_IF(INFO, config::kMonitorAddressConversion)
+        DLOG_IF(INFO, ::config::kMonitorAddressConversion)
             << "[addr] acquire_perm: gaddr: " << gaddr
             << " (from vaddr: " << vaddr << "), got lease.base_addr() "
             << (void *) lease.base_addr() << ")";
@@ -94,12 +168,29 @@ public:
     // TODO:
     void remote_free(GlobalAddress vaddr, size_t size, hint_t hint) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.free_only_nr++;
+                rdma_trace_record_.indv_two_sided++;
+            }
+        }
+
         auto gaddr = vaddr_to_gaddr(vaddr);
         patronus_->dealloc(gaddr, dir_id_, size, hint, coro_ctx_);
     }
     void remote_free_relinquish_perm(RemoteMemHandle &handle,
                                      hint_t hint) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.free_rel_nr++;
+                rdma_trace_record_.indv_two_sided++;
+            }
+        }
         auto &lease = *(Lease *) handle.private_data();
         auto flag = (uint8_t) LeaseModifyFlag::kWithDeallocation;
         patronus_->relinquish(lease, hint, flag, coro_ctx_);
@@ -107,6 +198,14 @@ public:
     }
     void relinquish_perm(RemoteMemHandle &handle) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.rel_nr++;
+                rdma_trace_record_.indv_two_sided++;
+            }
+        }
         auto &lease = *(Lease *) handle.private_data();
         auto flag = 0;
         patronus_->relinquish(lease, 0 /* hint */, flag, coro_ctx_);
@@ -115,6 +214,14 @@ public:
     // yes
     Buffer get_rdma_buffer(size_t size) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.allocated_rdma_buf_nr++;
+            }
+        }
+
         auto ret = patronus_->get_rdma_buffer(size);
         if (ret.buffer == nullptr)
         {
@@ -141,6 +248,15 @@ public:
                       size_t size,
                       RemoteMemHandle &handle) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.read_nr++;
+                rdma_trace_record_.read_bytes += size;
+                rdma_trace_record_.indv_one_sided++;
+            }
+        }
         auto gaddr = vaddr_to_gaddr(vaddr);
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
@@ -158,6 +274,15 @@ public:
                        size_t size,
                        RemoteMemHandle &handle) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.write_nr++;
+                rdma_trace_record_.write_bytes += size;
+                rdma_trace_record_.indv_one_sided++;
+            }
+        }
         auto gaddr = vaddr_to_gaddr(vaddr);
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
@@ -173,6 +298,14 @@ public:
                      void *rdma_buf,
                      RemoteMemHandle &handle) override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.cas_nr++;
+                rdma_trace_record_.indv_one_sided++;
+            }
+        }
         auto gaddr = vaddr_to_gaddr(vaddr);
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
@@ -183,6 +316,13 @@ public:
     }
     RetCode commit() override
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.commit_nr++;
+            }
+        }
         LOG_FIRST_N(WARNING, 1)
             << "[rdma-adaptor] commit() not use. not batching r/w here. "
             << pre_coro_ctx(coro_ctx_);
@@ -199,6 +339,29 @@ public:
 
     friend std::ostream &operator<<(std::ostream &os, const RdmaAdaptor &rdma);
 
+    void enable_trace(const void *name) override
+    {
+        rdma_trace_record_.clear();
+
+        enable_trace_ = true;
+        rdma_trace_record_.name = std::string((const char *) name);
+        rdma_trace_record_.timer.pin();
+    }
+    void end_trace(const void *) override
+    {
+        auto ns = rdma_trace_record_.timer.pin();
+        rdma_trace_record_.latency_ns = ns;
+        enable_trace_ = false;
+    }
+    bool trace_enabled() const override
+    {
+        return enable_trace_;
+    }
+    const RdmaTraceRecord &trace_record() const
+    {
+        return rdma_trace_record_;
+    }
+
 private:
     uint16_t node_id_;
     uint32_t dir_id_;
@@ -207,6 +370,10 @@ private:
     CoroContext *coro_ctx_{nullptr};
     std::vector<Buffer> ongoing_rdma_bufs_;
     bool is_server_;
+    bool enable_trace_{false};
+    std::string trace_name_;
+
+    RdmaTraceRecord rdma_trace_record_;
 
     /**
      * The global address returned to the caller (vaddr) is guaranteed to leave
@@ -270,8 +437,43 @@ private:
 };
 inline std::ostream &operator<<(std::ostream &os, const pre_rdma_adaptor &p)
 {
-    patronus::RdmaAdaptor *ptr = (patronus::RdmaAdaptor *) p.p_.get();
-    os << *ptr;
+    auto *ptr = dynamic_cast<patronus::RdmaAdaptor *>(p.p_.get());
+    if (ptr)
+    {
+        os << *ptr;
+    }
+    else
+    {
+        os << "{not an rdma adaptor}";
+    }
+    return os;
+}
+
+class pre_rdma_adaptor_trace
+{
+public:
+    pre_rdma_adaptor_trace(IRdmaAdaptor::pointer p) : p_(p)
+    {
+    }
+
+    friend std::ostream &operator<<(std::ostream &os,
+                                    const pre_rdma_adaptor_trace &p);
+
+private:
+    IRdmaAdaptor::pointer p_;
+};
+inline std::ostream &operator<<(std::ostream &os,
+                                const pre_rdma_adaptor_trace &p)
+{
+    auto *ptr = dynamic_cast<patronus::RdmaAdaptor *>(p.p_.get());
+    if (ptr)
+    {
+        os << ptr->trace_record();
+    }
+    else
+    {
+        os << "{not an rdma adaptor}";
+    }
     return os;
 }
 

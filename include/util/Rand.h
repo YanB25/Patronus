@@ -169,9 +169,7 @@ inline void fast_pseudo_fill_buf(char *s, size_t len)
 
 inline bool true_with_prob(double prob)
 {
-    size_t r = rand() % 1000;
-    size_t okay = 1.0 * 1000 * prob;
-    return r < okay;
+    return fast_pseudo_rand_dbl(0, 1) <= prob;
 }
 
 template <typename T>
