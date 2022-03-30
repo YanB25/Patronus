@@ -16,7 +16,7 @@ constexpr static bool kMonitorRdma = true;
 
 constexpr static uint64_t kAllocHintDefault = 0;
 constexpr static uint64_t kAllocHintKVBlock = 1;
-constexpr static uint64_t kAllocHintSubtable = 2;
+constexpr static uint64_t kAllocHintSubtable = 0;  // subtable uses default
 
 constexpr static size_t kKVBlockAllocBatchSize = 16_MB;
 constexpr static size_t kKVBlockExpectSize = 64;

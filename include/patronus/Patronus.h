@@ -27,24 +27,29 @@ class Patronus;
 struct PatronusConfig
 {
     size_t machine_nr{0};
-    size_t lease_buffer_size{kDSMCacheSize / 2};
-    size_t alloc_buffer_size{kDSMCacheSize / 2};
+    size_t lease_buffer_size{(kDSMCacheSize - 1_GB) / 2};
+    size_t alloc_buffer_size{(kDSMCacheSize - 1_GB) / 2};
+    size_t reserved_buffer_size{1_GB};
     // for sync time
     size_t time_parent_node_id{0};
-    // for allocator
+    // for default allocator
+    // see also @alloc_buffer_size
     std::vector<size_t> block_class{2_MB};
     std::vector<double> block_ratio{1};
 
     size_t total_buffer_size() const
     {
-        return lease_buffer_size + alloc_buffer_size;
+        return lease_buffer_size + alloc_buffer_size + reserved_buffer_size;
     }
 };
 inline std::ostream &operator<<(std::ostream &os, const PatronusConfig &conf)
 {
     os << "{PatronusConfig machine_nr: " << conf.machine_nr
        << ", lease_buffer_size: " << conf.lease_buffer_size
-       << ", alloc_buffer_size: " << conf.alloc_buffer_size << "}";
+       << ", alloc_buffer_size: " << conf.alloc_buffer_size
+       << ", reserved_buffer_size: " << conf.reserved_buffer_size
+       << ". (Total: " << conf.total_buffer_size() << ")"
+       << "}";
     return os;
 }
 
@@ -97,6 +102,7 @@ public:
     constexpr static size_t kMessageSize = ReliableConnection::kMessageSize;
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
+    constexpr static uint64_t kDefaultHint = 0;
 
     static pointer ins(const PatronusConfig &conf)
     {
@@ -383,6 +389,36 @@ public:
     {
         return conf_.alloc_buffer_size;
     }
+    size_t user_reserved_buffer_size() const
+    {
+        return conf_.reserved_buffer_size;
+    }
+    Buffer get_lease_buffer() const
+    {
+        auto server_buf = dsm_->get_server_buffer();
+        auto *buf_addr = server_buf.buffer;
+        auto buf_size = lease_buffer_size();
+        DCHECK_GE(server_buf.size, buf_size);
+        return Buffer(buf_addr, buf_size);
+    }
+    Buffer get_alloc_buffer() const
+    {
+        auto server_buf = dsm_->get_server_buffer();
+        auto *buf_addr = server_buf.buffer + lease_buffer_size();
+        auto buf_size = alloc_buffer_size();
+        DCHECK_GE(server_buf.size, lease_buffer_size() + alloc_buffer_size());
+        return Buffer(buf_addr, buf_size);
+    }
+    Buffer get_user_reserved_buffer() const
+    {
+        auto server_buffer = dsm_->get_server_buffer();
+        auto *buf_addr =
+            server_buffer.buffer + lease_buffer_size() + alloc_buffer_size();
+        auto buf_size = user_reserved_buffer_size();
+        DCHECK_GE(lease_buffer_size() + alloc_buffer_size() + buf_size,
+                  server_buffer.size);
+        return Buffer(buf_addr, buf_size);
+    }
 
     void thread_explain() const;
     inline GlobalAddress get_gaddr(const Lease &lease) const;
@@ -401,14 +437,15 @@ public:
     inline void *patronus_alloc(size_t size, uint64_t hint);
     inline void patronus_free(void *addr, size_t size, uint64_t hint);
 
-    size_t reserved_buffer_size() const
-    {
-        return required_dsm_reserve_size();
-    }
+    void reg_allocator(uint64_t hint, mem::IAllocator::pointer allocator);
 
 private:
     PatronusConfig conf_;
-    static thread_local std::shared_ptr<mem::SlabAllocator> allocator_;
+    // the default_allocator_ is set on registering server thread.
+    // With the config from PatronusConfig.
+    static thread_local mem::SlabAllocator::pointer default_allocator_;
+    static thread_local std::unordered_map<uint64_t, mem::IAllocator::pointer>
+        reg_allocators_;
     void *allocator_buf_addr_{nullptr};
     size_t allocator_buf_size_{0};
     // How many leases on average may a tenant hold?
@@ -561,14 +598,21 @@ private:
 
     // clang-format off
     /**
-     * The layout of dsm_->uget_server_reserve_buffer():
+     * The layout of dsm_->get_server_reserve_buffer():
      * [required_time_sync_size()] [required_protection_region_size()]
      * 
      * ^-- get_time_sync_buffer()
      *                             ^-- get_protection_region_buffer()
+     *                                                                
+     * Total of them: reserved_buffer_size();
      */
     // clang-format on
-    static size_t required_dsm_reserve_size()
+
+    size_t reserved_buffer_size() const
+    {
+        return required_dsm_reserve_size();
+    }
+    size_t required_dsm_reserve_size() const
     {
         return required_protection_region_size() + required_time_sync_size();
     }
@@ -597,7 +641,6 @@ private:
         auto buf_size = required_time_sync_size();
         return Buffer(buf_addr, buf_size);
     }
-
     // for clients
     size_t handle_response_messages(const char *msg_buf,
                                     size_t msg_nr,
@@ -722,6 +765,8 @@ private:
     inline bool valid_lease_buffer_offset(size_t buffer_offset) const;
     inline bool valid_total_buffer_offset(size_t buffer_offset) const;
 
+    void validate_buffers();
+
     /**
      * @brief call me only if u know what u are doing.
      * Do not call out of ctor of Patronus
@@ -745,6 +790,9 @@ private:
         rdma_client_buffer_8B_;
     static thread_local char *client_rdma_buffer_;
     static thread_local size_t client_rdma_buffer_size_;
+
+    static thread_local bool is_server_;
+    static thread_local bool is_client_;
 
     // owned by server threads
     // [NR_DIRECTORY]
@@ -1131,16 +1179,17 @@ void Patronus::relinquish_write(Lease &lease, CoroContext *ctx)
 }
 void *Patronus::patronus_alloc(size_t size, uint64_t hint)
 {
-    // auto it = allocators_.find(hint);
-    // if (it == allocators_.end())
-    // {
-    //     // miss, use default
-    //     return allocators_[0]->alloc(size);
-    // }
-    // return it->second->alloc(size);
-    std::ignore = hint;
-    auto *ret = allocator_->alloc(size);
-    return ret;
+    if (hint == kDefaultHint)
+    {
+        return default_allocator_->alloc(size);
+    }
+    auto it = reg_allocators_.find(hint);
+    if (it == reg_allocators_.end())
+    {
+        DCHECK(false) << "** Unknown hint " << hint;
+        return nullptr;
+    }
+    return it->second->alloc(size);
 }
 void Patronus::patronus_free(void *addr, size_t size, uint64_t hint)
 {
@@ -1148,16 +1197,18 @@ void Patronus::patronus_free(void *addr, size_t size, uint64_t hint)
     {
         return;
     }
+    if (hint == 0)
+    {
+        return default_allocator_->free(addr, size);
+    }
 
-    // auto it = allocators_.find(hint);
-    // if (it == allocators_.end())
-    // {
-    //     return allocators_[0]->free(addr, size);
-    // }
-    // return it->second->free(addr, size);
-
-    std::ignore = hint;
-    allocator_->free(addr, size);
+    auto it = reg_allocators_.find(hint);
+    if (it == reg_allocators_.end())
+    {
+        CHECK(false) << "** Failed to free with hint " << hint
+                     << ": not found. addr: " << addr << ", size: " << size;
+    }
+    return it->second->free(addr, size);
 }
 
 bool Patronus::valid_lease_buffer_offset(size_t buffer_offset) const

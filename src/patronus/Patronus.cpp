@@ -1,5 +1,6 @@
 #include "patronus/Patronus.h"
 
+#include "Util.h"
 #include "patronus/IBOut.h"
 #include "patronus/Time.h"
 #include "util/Debug.h"
@@ -25,14 +26,19 @@ thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
     Patronus::protection_region_pool_;
 thread_local DDLManager Patronus::ddl_manager_;
 thread_local size_t Patronus::allocated_mw_nr_;
-thread_local std::shared_ptr<mem::SlabAllocator> Patronus::allocator_;
+thread_local mem::SlabAllocator::pointer Patronus::default_allocator_;
+thread_local std::unordered_map<uint64_t, mem::IAllocator::pointer>
+    Patronus::reg_allocators_;
 thread_local char *Patronus::client_rdma_buffer_{nullptr};
 thread_local size_t Patronus::client_rdma_buffer_size_{0};
+thread_local bool Patronus::is_server_{false};
+thread_local bool Patronus::is_client_{false};
 
 // clang-format off
 /**
  * The layout of dsm_->get_server_buffer():
- * [conf_.lease_buffer_size] [conf_.alloc_buffer_size]
+ * [conf_.lease_buffer_size] [conf_.alloc_buffer_size] [conf_.reserved_buffer_size]
+ *                                                     ^-- get_user_reserved_buffer()
  * 
  * The layout of dsm_->get_server_reserved_buffer():
  * @see required_dsm_reserve_size()
@@ -77,6 +83,10 @@ Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
     finish_time_sync_now_ = std::chrono::steady_clock::now();
 
     explain(conf);
+    if constexpr (debug())
+    {
+        validate_buffers();
+    }
 }
 Patronus::~Patronus()
 {
@@ -1782,8 +1792,12 @@ void Patronus::registerServerThread()
     size_t allocator_buf_size_thread = allocator_buf_size_ / NR_DIRECTORY;
     void *allocator_buf_addr_thread =
         (char *) allocator_buf_addr_ + allocator_buf_size_thread * tid;
-    allocator_ = std::make_shared<mem::SlabAllocator>(
+    default_allocator_ = std::make_shared<mem::SlabAllocator>(
         allocator_buf_addr_thread, allocator_buf_size_thread, slab_alloc_conf);
+
+    CHECK(!is_server_) << "** already registered";
+    CHECK(!is_client_) << "** already registered as client thread.";
+    is_server_ = true;
 }
 
 void Patronus::registerClientThread()
@@ -1829,6 +1843,10 @@ void Patronus::registerClientThread()
     rdma_client_buffer_ =
         std::make_unique<ThreadUnsafeBufferPool<kClientRdmaBufferSize>>(
             client_rdma_buffer_non_8B, rdma_buffer_size_non_8B);
+
+    CHECK(!is_client_) << "** already registered";
+    CHECK(!is_server_) << "** already registered as server thread.";
+    is_client_ = true;
 }
 
 size_t Patronus::try_get_client_continue_coros(size_t mid,
@@ -2492,6 +2510,25 @@ void Patronus::thread_explain() const
               << ", rw_context: " << (void *) &rw_context_
               << ", lease_context: " << (void *) &lease_context_
               << ", protection_region_pool: " << protection_region_pool_.get();
+}
+
+void Patronus::validate_buffers()
+{
+    std::vector<Buffer> buffers;
+    buffers.push_back(get_time_sync_buffer());
+    buffers.push_back(get_protection_region_buffer());
+    buffers.push_back(get_alloc_buffer());
+    buffers.push_back(get_lease_buffer());
+    buffers.push_back(get_user_reserved_buffer());
+
+    validate_buffer_not_overlapped(buffers);
+}
+
+void Patronus::reg_allocator(uint64_t hint, mem::IAllocator::pointer allocator)
+{
+    DCHECK(is_server_)
+        << "** not registered thread, or registered client thread.";
+    reg_allocators_[hint] = allocator;
 }
 
 }  // namespace patronus

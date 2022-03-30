@@ -170,9 +170,58 @@ inline std::ostream &operator<<(std::ostream &os, const ClassInformation &info)
     return os;
 }
 
+class pre_class_info
+{
+public:
+    pre_class_info(const std::map<size_t, ClassInformation> &ci) : ci_(ci)
+    {
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const pre_class_info &p);
+
+private:
+    const std::map<size_t, ClassInformation> &ci_;
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_class_info &p)
+{
+    for (const auto &[size, class_info] : p.ci_)
+    {
+        os << "size: " << size << " info: " << class_info << std::endl;
+    }
+    return os;
+}
+class pre_alloc_dist
+{
+public:
+    pre_alloc_dist(const std::unordered_map<size_t, size_t> &dist) : dist_(dist)
+    {
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const pre_alloc_dist &p);
+
+private:
+    const std::unordered_map<size_t, size_t> &dist_;
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_alloc_dist &p)
+{
+    for (const auto &[size, times] : p.dist_)
+    {
+        os << "Size " << size << " allocated " << times << " times"
+           << std::endl;
+    }
+    return os;
+}
+
 class SlabAllocator : public IAllocator
 {
 public:
+    using pointer = std::shared_ptr<SlabAllocator>;
+    static pointer new_instance(void *addr,
+                                size_t len,
+                                SlabAllocatorConfig config)
+    {
+        return std::make_shared<SlabAllocator>(addr, len, config);
+    }
     SlabAllocator(void *addr, size_t len, SlabAllocatorConfig config)
     {
         auto [aligned_addr, aligned_len] = align_address(addr, len, 4_KB);
@@ -208,10 +257,14 @@ public:
             class_info_.emplace(cur_class,
                                 ClassInformation(a, l, l / cur_class));
             wasted_len_ += ((uint64_t) a - (uint64_t) cur_addr);
-
-            LOG(INFO) << "[debug] !! blocks class: " << cur_class << " have "
-                      << blocks_[cur_class]->size()
-                      << ", given length: " << cur_len;
+        }
+    }
+    ~SlabAllocator()
+    {
+        if constexpr (::config::kMonitorAllocationDistribution)
+        {
+            LOG(INFO) << "[slab] Allocation distribution: "
+                      << pre_alloc_dist(allocated_distribution.get());
         }
     }
 
@@ -222,7 +275,8 @@ public:
         if (it == blocks_.end())
         {
             // no such large block
-            DCHECK(false) << "[debug] no such large block. Requested: " << size;
+            DCHECK(false) << "[slab] no such large block. Requested: " << size
+                          << ". Class: " << pre_class_info(class_info_);
             return nullptr;
         }
         auto *ret = it->second->get();
@@ -238,10 +292,13 @@ public:
                            "succeeds. Expect to insert a new element";
                 }
             }
+
+            if constexpr (::config::kMonitorAllocationDistribution)
+            {
+                allocated_distribution.get()[size]++;
+            }
         }
 
-        DLOG(INFO) << "[debug] !! allocating size " << size << " from class "
-                   << it->first << ". ret: " << ret;
         DLOG_IF(FATAL, ret == nullptr)
             << "Failed to allocate size " << size << ". class empty";
 
@@ -312,6 +369,9 @@ private:
     std::unordered_map<size_t, size_t> debug_class_allocated_nr_;
     std::unordered_map<size_t, size_t> debug_class_freed_nr_;
     std::unordered_set<void *> debug_ongoing_bufs_;
+
+    // alloc_size => alloc_num
+    Debug<std::unordered_map<size_t, size_t>> allocated_distribution;
 };
 
 inline std::ostream &operator<<(std::ostream &os,

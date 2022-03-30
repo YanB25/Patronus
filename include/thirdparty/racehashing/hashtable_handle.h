@@ -81,6 +81,11 @@ public:
         return kOk;
     }
 
+    static size_t max_capacity()
+    {
+        return RaceHashingT::max_capacity();
+    }
+
     template <size_t kA, size_t kB, size_t kC>
     friend std::ostream &operator<<(
         std::ostream &os, const RaceHashingHandleImpl<kA, kB, kC> &rhh);
@@ -1364,6 +1369,10 @@ public:
                                  IRdmaAdaptor::pointer rdma_adpt)
         : rhh_(node_id, table_meta_addr, conf, rdma_adpt), rdma_adpt_(rdma_adpt)
     {
+    }
+    static size_t max_capacity()
+    {
+        return RaceHashingHandleT::max_capacity();
     }
 
     void init(HashContext *dctx = nullptr)

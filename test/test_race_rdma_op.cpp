@@ -16,12 +16,12 @@ using namespace patronus::hash;
 using namespace define::literals;
 using namespace patronus;
 
-constexpr static size_t kKVBlockReserveSize = 4_MB;
+constexpr static size_t kKVBlockReserveSize = 512_MB;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-[[maybe_unused]] constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
+[[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
+[[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
 constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kCoroCnt = 1;
 
@@ -96,6 +96,11 @@ void client_worker(Patronus::pointer p,
     }
     LOG(INFO) << "Inserted " << succ_nr << ", failed: " << fail_nr
               << ", success rate: " << 1.0 * succ_nr / (succ_nr + fail_nr);
+
+    double utilization = 1.0 * succ_nr / rhh.max_capacity();
+    LOG(INFO) << "[bench] inserted: " << succ_nr
+              << ", capacity: " << rhh.max_capacity();
+    CHECK_DOUBLE_EQ(utilization, 1);
 
     LOG(INFO) << "Checking integrity";
 
@@ -184,16 +189,36 @@ void server(Patronus::pointer p, size_t initial_subtable)
     auto tid = p->get_thread_id();
     LOG(INFO) << "[bench] server starts to work. tid " << tid;
 
+    auto rh_buffer = p->get_user_reserved_buffer();
+    CHECK_GE(rh_buffer.size, kKVBlockReserveSize);
+
+    auto rh_allocator_buffer = Buffer(rh_buffer.buffer + kKVBlockReserveSize,
+                                      rh_buffer.size - kKVBlockReserveSize);
+    char *kvblock_pool_addr = rh_buffer.buffer;
+    size_t kvblock_pool_size = kKVBlockReserveSize;
+
+    // for server to handle kv block allocation requests
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
     conf.g_kvblock_pool_size = kKVBlockReserveSize;
-    conf.g_kvblock_pool_addr = CHECK_NOTNULL(
-        p->patronus_alloc(conf.g_kvblock_pool_size, 0 /* hint */));
+    conf.g_kvblock_pool_addr = kvblock_pool_addr;
+    mem::SlabAllocatorConfig kvblock_slab_config;
+    kvblock_slab_config.block_class = {hash::config::kKVBlockAllocBatchSize};
+    kvblock_slab_config.block_ratio = {1.0};
+    auto kvblock_allocator = mem::SlabAllocator::new_instance(
+        kvblock_pool_addr, kvblock_pool_size, kvblock_slab_config);
+    p->reg_allocator(hash::config::kAllocHintKVBlock, kvblock_allocator);
 
     auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(p);
 
-    CHECK(false) << "The allocator. Use the reserved one";
-    RaceHashingT rh(server_rdma_ctx, nullptr /* TODO: here */, conf);
+    // for server to init the begining directory, subtables
+    mem::SlabAllocatorConfig rh_slab_conf;
+    rh_slab_conf.block_class = {2_MB};
+    rh_slab_conf.block_ratio = {1.0};
+    auto rh_slab_allocator = mem::SlabAllocator::new_instance(
+        rh_allocator_buffer.buffer, rh_allocator_buffer.size, rh_slab_conf);
+
+    RaceHashingT rh(server_rdma_ctx, rh_slab_allocator, conf);
 
     auto meta_gaddr = rh.meta_gaddr();
     p->put("race:meta_gaddr", meta_gaddr, 0ns);
@@ -213,8 +238,8 @@ int main(int argc, char *argv[])
 
     PatronusConfig config;
     config.machine_nr = kMachineNr;
-    config.block_class = {kKVBlockReserveSize, 4_KB};
-    config.block_ratio = {0.05, 0.95};
+    config.block_class = {2_MB, 4_KB};
+    config.block_ratio = {0.5, 0.5};
 
     auto patronus = Patronus::ins(config);
     auto nid = patronus->get_node_id();

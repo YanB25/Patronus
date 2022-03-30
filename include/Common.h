@@ -285,7 +285,8 @@ namespace config
 constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
 constexpr static bool kMonitorFailureRecovery = false;
-constexpr static bool kMonitorAddressConversion = true;
+constexpr static bool kMonitorAddressConversion = false;
+constexpr static bool kMonitorAllocationDistribution = true;
 
 constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
