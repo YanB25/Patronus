@@ -1046,7 +1046,8 @@ int main(int argc, char *argv[])
 
     // for (size_t thread_nr : {1, 8})
     // for (size_t thread_nr : {8, 16})
-    for (size_t thread_nr : {1, 8, 16, 24, 31})
+    // for (size_t thread_nr : {1, 8, 16, 24, 31})
+    for (size_t thread_nr : {1, 8, 16, 24})
     // for (size_t thread_nr : {1, 2, 4, 8})
     {
         // for (size_t block_size : {2_MB, 128_MB})
@@ -1057,33 +1058,35 @@ int main(int argc, char *argv[])
             // LOG(INFO) << "[bench] bench_alloc()";
             // bench_alloc(1_M, block_size, kMemoryLimit, thread_nr);
 
-            // LOG(INFO) << "[bench] bench_alloc_reg_mw_signal_batching()";
-            // bench_alloc_reg_mw_signal_batching(
-            //     1_M / 20, block_size, kMemoryLimit, thread_nr, dsm);
+            LOG(INFO) << "[bench] bench_alloc_reg_mw_signal_batching()";
+            bench_alloc_reg_mw_signal_batching(
+                1_M / 20, block_size, kMemoryLimit, thread_nr, dsm, false);
+            bench_alloc_reg_mw_signal_batching(
+                1_M / 20, block_size, kMemoryLimit, thread_nr, dsm, true);
 
             // LOG(INFO) << "[bench] bench_alloc_reg_mw_with_mw_allocator()";
             // bench_alloc_reg_mw_with_mw_allocator(
             //     1_M, block_size, kMemoryLimit, thread_nr, dsm);
 
-            // LOG(INFO) << "[bench] bench_alloc_reg_mr()";
-            // bench_alloc_reg_mr(1_K, block_size, kMemoryLimit, thread_nr);
+            LOG(INFO) << "[bench] bench_alloc_reg_mr()";
+            bench_alloc_reg_mr(1_K, block_size, kMemoryLimit, thread_nr, false);
+            bench_alloc_reg_mr(1_K, block_size, kMemoryLimit, thread_nr, true);
 
             // LOG(INFO) << "[bench] skipping bench_ngx_allocator()";
             // // bench_ngx_alloc(1_M, block_size, kMemoryLimit, thread_nr);
 
-            // LOG(INFO) << "[bench] bench slab_allocator()";
-            // bench_slab_alloc(
-            //     10_M * thread_nr, block_size, kMemoryLimit, thread_nr,
-            //     false);
+            LOG(INFO) << "[bench] bench slab_allocator()";
+            bench_slab_alloc(
+                10_M * thread_nr, block_size, kMemoryLimit, thread_nr, false);
 
-            // bench_slab_alloc(
-            //     10_M * thread_nr, block_size, kMemoryLimit, thread_nr, true);
+            bench_slab_alloc(
+                10_M * thread_nr, block_size, kMemoryLimit, thread_nr, true);
 
-            // LOG(INFO) << "[bench] bench_alloc_slab_reg_mr()";
-            // bench_slab_alloc_reg_mr(
-            //     1_M / 100, block_size, kMemoryLimit, thread_nr, false);
-            // bench_slab_alloc_reg_mr(
-            //     1_M / 100, block_size, kMemoryLimit, thread_nr, true);
+            LOG(INFO) << "[bench] bench_alloc_slab_reg_mr()";
+            bench_slab_alloc_reg_mr(
+                1_M / 100, block_size, kMemoryLimit, thread_nr, false);
+            bench_slab_alloc_reg_mr(
+                1_M / 100, block_size, kMemoryLimit, thread_nr, true);
 
             LOG(INFO) << "[bench] bench_alloc_slab_reg_mw()";
             bench_slab_alloc_reg_mw(1_M * thread_nr,
@@ -1134,11 +1137,11 @@ int main(int argc, char *argv[])
                                                      true);
             }
 
-            // LOG(INFO) << "[bench] bench nothing_allocator()";
-            // bench_nothing_alloc(
-            //     1_M * thread_nr, block_size, kMemoryLimit, thread_nr, false);
-            // bench_nothing_alloc(
-            //     1_M * thread_nr, block_size, kMemoryLimit, thread_nr, true);
+            LOG(INFO) << "[bench] bench nothing_allocator()";
+            bench_nothing_alloc(
+                1_M * thread_nr, block_size, kMemoryLimit, thread_nr, false);
+            bench_nothing_alloc(
+                1_M * thread_nr, block_size, kMemoryLimit, thread_nr, true);
         }
     }
 
