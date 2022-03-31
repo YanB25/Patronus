@@ -23,8 +23,6 @@ constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kThreadNr = 8;
 constexpr static size_t kMaxCoroNr = 16;
 
-constexpr static size_t kKVBlockReserveSize = 512_MB;
-
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 template <size_t kE, size_t kB, size_t kS>
@@ -51,39 +49,43 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     return prhh;
 }
 
+void init_allocator(Patronus::pointer p, size_t thread_nr)
+{
+    // for server to handle kv block allocation requests
+    // give all to kv blocks
+    auto tid = p->get_thread_id();
+    CHECK_LT(tid, thread_nr);
+
+    auto rh_buffer = p->get_user_reserved_buffer();
+
+    auto thread_kvblock_pool_size = rh_buffer.size / thread_nr;
+    void *thread_kvblock_pool_addr =
+        rh_buffer.buffer + tid * thread_kvblock_pool_size;
+
+    mem::SlabAllocatorConfig kvblock_slab_config;
+    kvblock_slab_config.block_class = {hash::config::kKVBlockAllocBatchSize};
+    kvblock_slab_config.block_ratio = {1.0};
+    auto kvblock_allocator =
+        mem::SlabAllocator::new_instance(thread_kvblock_pool_addr,
+                                         thread_kvblock_pool_size,
+                                         kvblock_slab_config);
+    p->reg_allocator(hash::config::kAllocHintKVBlock, kvblock_allocator);
+}
+
 template <size_t kE, size_t kB, size_t kS>
 typename RaceHashing<kE, kB, kS>::pointer gen_rdma_rh(Patronus::pointer p,
                                                       size_t initial_subtable)
 {
     using RaceHashingT = RaceHashing<kE, kB, kS>;
     auto rh_buffer = p->get_user_reserved_buffer();
-    CHECK_GE(rh_buffer.size, kKVBlockReserveSize);
 
-    auto rh_allocator_buffer = Buffer(rh_buffer.buffer + kKVBlockReserveSize,
-                                      rh_buffer.size - kKVBlockReserveSize);
-    char *kvblock_pool_addr = rh_buffer.buffer;
-    size_t kvblock_pool_size = kKVBlockReserveSize;
-
-    // for server to handle kv block allocation requests
     RaceHashingConfig conf;
     conf.initial_subtable = initial_subtable;
-    conf.g_kvblock_pool_size = kKVBlockReserveSize;
-    conf.g_kvblock_pool_addr = kvblock_pool_addr;
-    mem::SlabAllocatorConfig kvblock_slab_config;
-    kvblock_slab_config.block_class = {hash::config::kKVBlockAllocBatchSize};
-    kvblock_slab_config.block_ratio = {1.0};
-    auto kvblock_allocator = mem::SlabAllocator::new_instance(
-        kvblock_pool_addr, kvblock_pool_size, kvblock_slab_config);
-    p->reg_allocator(hash::config::kAllocHintKVBlock, kvblock_allocator);
-
+    conf.g_kvblock_pool_size = rh_buffer.size;
+    conf.g_kvblock_pool_addr = rh_buffer.buffer;
     auto server_rdma_ctx = patronus::RdmaAdaptor::new_instance(p);
 
-    // for server to init the begining directory, subtables
-    // mem::SlabAllocatorConfig rh_slab_conf;
-    // rh_slab_conf.block_class = {2_MB};
-    // rh_slab_conf.block_ratio = {1.0};
-    // auto rh_slab_allocator = mem::SlabAllocator::new_instance(
-    //     rh_allocator_buffer.buffer, rh_allocator_buffer.size, rh_slab_conf);
+    // borrow from the master's kAllocHintDirSubtable allocator
     auto rh_allocator = p->get_allocator(hash::config::kAllocHintDirSubtable);
 
     auto rh = RaceHashingT::new_instance(server_rdma_ctx, rh_allocator, conf);
@@ -267,8 +269,7 @@ void test_basic_client_worker(Patronus::pointer p,
                               CoroYield &yield,
                               bool auto_expand,
                               size_t test_nr,
-                              CoroExecutionContext<kMaxCoroNr> &ex,
-                              bool check_integrity)
+                              CoroExecutionContext<kMaxCoroNr> &ex)
 {
     auto tid = p->get_thread_id();
     CoroContext ctx(0, &yield, &ex.master(), coro_id);
@@ -340,16 +341,8 @@ void test_basic_client_worker(Patronus::pointer p,
             dctx.value = value;
             dctx.op = "d";
             auto rc = rhh->del(key, &dctx);
-            if (check_integrity)
-            {
-                CHECK_EQ(rc, kOk) << "tid " << tid << " deleting key `" << key
-                                  << "` expect to succeed.";
-            }
-            else
-            {
-                CHECK(rc == kOk || rc == kNotFound)
-                    << "** unexpected rc: " << rc;
-            }
+            CHECK_EQ(rc, kOk) << "tid " << tid << " deleting key `" << key
+                              << "` expect to succeed.";
             inserted.erase(key);
             keys.erase(key);
             del_succ_nr++;
@@ -364,14 +357,7 @@ void test_basic_client_worker(Patronus::pointer p,
                 dctx.value = value;
                 dctx.op = "d";
                 auto rc = rhh->del(key, &dctx);
-                if (check_integrity)
-                {
-                    CHECK_EQ(rc, kOk) << dctx;
-                }
-                else
-                {
-                    CHECK(rc == kOk || rc == kNotFound);
-                }
+                CHECK_EQ(rc, kOk) << dctx;
                 inserted.erase(key);
                 keys.erase(key);
                 del_succ_nr++;
@@ -382,14 +368,7 @@ void test_basic_client_worker(Patronus::pointer p,
                 dctx.value = value;
                 dctx.op = "d";
                 auto rc = rhh->del(key, &dctx);
-                if (check_integrity)
-                {
-                    CHECK_EQ(rc, kNotFound) << dctx;
-                }
-                else
-                {
-                    CHECK(rc == kOk || rc == kNotFound);
-                }
+                CHECK_EQ(rc, kNotFound) << dctx;
                 del_fail_nr++;
             }
         }
@@ -407,15 +386,8 @@ void test_basic_client_worker(Patronus::pointer p,
             dctx.value = value;
             dctx.op = "g";
             auto rc = rhh->get(key, got_value, &dctx);
-            if (check_integrity)
-            {
-                CHECK_EQ(rc, kOk) << "Tid: " << tid << " getting key `" << key
-                                  << "` expect to succeed";
-            }
-            else
-            {
-                CHECK(rc == kOk || rc == kNotFound);
-            }
+            CHECK_EQ(rc, kOk) << "Tid: " << tid << " getting key `" << key
+                              << "` expect to succeed";
             CHECK_EQ(got_value, inserted[key]) << dctx;
             get_succ_nr++;
         }
@@ -435,15 +407,8 @@ void test_basic_client_worker(Patronus::pointer p,
                 dctx.value = value;
                 dctx.op = "g";
                 auto rc = rhh->get(key, got_value, &dctx);
-                if (check_integrity)
-                {
-                    CHECK_EQ(rc, kOk) << dctx;
-                    CHECK_EQ(got_value, inserted[key]) << dctx;
-                }
-                else
-                {
-                    CHECK(rc == kOk || rc == kNotFound);
-                }
+                CHECK_EQ(rc, kOk) << dctx;
+                CHECK_EQ(got_value, inserted[key]) << dctx;
                 get_succ_nr++;
             }
             else
@@ -453,32 +418,22 @@ void test_basic_client_worker(Patronus::pointer p,
                 dctx.value = value;
                 dctx.op = "g";
                 auto rc = rhh->get(key, got_value, &dctx);
-                if (check_integrity)
-                {
-                    CHECK_EQ(rc, kNotFound) << dctx;
-                }
-                else
-                {
-                    CHECK(rc == kOk || rc == kNotFound);
-                }
+                CHECK_EQ(rc, kNotFound) << dctx;
                 get_fail_nr++;
             }
         }
     }
 
-    if (check_integrity)
+    for (const auto &[k, v] : inserted)
     {
-        for (const auto &[k, v] : inserted)
-        {
-            std::string get_v;
-            dctx.key = k;
-            dctx.value = v;
-            CHECK_EQ(rhh->get(k, get_v, &dctx), kOk) << dctx;
-            CHECK_EQ(get_v, v) << dctx;
-            dctx.key = k;
-            dctx.value = v;
-            CHECK_EQ(rhh->del(k, &dctx), kOk) << dctx;
-        }
+        std::string get_v;
+        dctx.key = k;
+        dctx.value = v;
+        CHECK_EQ(rhh->get(k, get_v, &dctx), kOk) << dctx;
+        CHECK_EQ(get_v, v) << dctx;
+        dctx.key = k;
+        dctx.value = v;
+        CHECK_EQ(rhh->del(k, &dctx), kOk) << dctx;
     }
 
     // coro finished
@@ -526,7 +481,6 @@ void test_basic_client(Patronus::pointer p,
                        bool is_master,
                        bool auto_expand,
                        size_t test_nr,
-                       bool check_integrity,
                        uint64_t key)
 {
     CHECK_LE(coro_nr, kMaxCoroNr);
@@ -550,15 +504,9 @@ void test_basic_client(Patronus::pointer p,
         for (size_t i = 0; i < coro_nr; ++i)
         {
             ex.worker(i) = CoroCall(
-                [p, coro_id = i, auto_expand, test_nr, &ex, check_integrity](
-                    CoroYield &yield) {
-                    test_basic_client_worker<kE, kB, kS>(p,
-                                                         coro_id,
-                                                         yield,
-                                                         auto_expand,
-                                                         test_nr,
-                                                         ex,
-                                                         check_integrity);
+                [p, coro_id = i, auto_expand, test_nr, &ex](CoroYield &yield) {
+                    test_basic_client_worker<kE, kB, kS>(
+                        p, coro_id, yield, auto_expand, test_nr, ex);
                 });
         }
         auto &master = ex.master();
@@ -580,6 +528,7 @@ void test_basic_client(Patronus::pointer p,
 template <size_t kE, size_t kB, size_t kS>
 void test_basic_server(Patronus::pointer p,
                        boost::barrier &bar,
+                       size_t thread_nr,
                        bool is_master,
                        size_t initial_subtable,
                        uint64_t key)
@@ -589,6 +538,14 @@ void test_basic_server(Patronus::pointer p,
     auto mid = tid;
 
     typename RaceHashingT::pointer rh;
+    if (tid < thread_nr)
+    {
+        init_allocator(p, thread_nr);
+    }
+    else
+    {
+        CHECK(!is_master) << "** master not initing allocator";
+    }
     if (is_master)
     {
         p->finished(key);
@@ -619,7 +576,6 @@ void client(Patronus::pointer p, boost::barrier &bar)
                                  master,
                                  false /* auto_expand */,
                                  100 /* test_nr */,
-                                 true /* check integrity */,
                                  0 /* key */);
     LOG(INFO) << "[bench] Burn basic single thread";
     test_basic_client<4, 64, 64>(p,
@@ -629,7 +585,6 @@ void client(Patronus::pointer p, boost::barrier &bar)
                                  master,
                                  false /* auto_expand */,
                                  10_K /* test_nr */,
-                                 true /* check integrity */,
                                  1 /* key */);
 
     LOG(INFO) << "[bench] test expand single thread";
@@ -640,8 +595,25 @@ void client(Patronus::pointer p, boost::barrier &bar)
                                  master,
                                  true /* auto_expand */,
                                  100_K /* test_nr */,
-                                 true /* check integrity */,
                                  2 /* key */);
+    LOG(INFO) << "[bench] Test basic multiple thread";
+    test_basic_client<4, 64, 64>(p,
+                                 bar,
+                                 kThreadNr /* thread_nr */,
+                                 kMaxCoroNr /* coro_nr */,
+                                 master,
+                                 false /* auto_expand */,
+                                 100 /* test_nr */,
+                                 3 /* key */);
+    LOG(INFO) << "[bench] Burn basic multiple thread";
+    test_basic_client<32, 64, 64>(p,
+                                  bar,
+                                  kThreadNr /* thread_nr */,
+                                  kMaxCoroNr /* coro_nr */,
+                                  master,
+                                  false /* auto_expand */,
+                                  1_K /* test_nr */,
+                                  4 /* key */);
 }
 
 void server(Patronus::pointer p, boost::barrier &bar)
@@ -650,11 +622,15 @@ void server(Patronus::pointer p, boost::barrier &bar)
     is_master = battle_master.fetch_add(1) == 0;
 
     test_basic_server<4, 64, 64>(
-        p, bar, is_master, 1 /* subtable_nr */, 0 /* key */);
+        p, bar, 1, is_master, 1 /* subtable_nr */, 0 /* key */);
     test_basic_server<4, 64, 64>(
-        p, bar, is_master, 1 /* subtable_nr */, 1 /* key */);
+        p, bar, 1, is_master, 1 /* subtable_nr */, 1 /* key */);
     test_basic_server<128, 4, 4>(
-        p, bar, is_master, 1 /* subtable_nr */, 2 /* key */);
+        p, bar, 1, is_master, 1 /* subtable_nr */, 2 /* key */);
+    test_basic_server<4, 64, 64>(
+        p, bar, kThreadNr, is_master, 1 /* subtable_nr */, 3 /* key */);
+    test_basic_server<32, 64, 64>(
+        p, bar, kThreadNr, is_master, 1 /* subtable_nr */, 4 /* key */);
 }
 
 int main(int argc, char *argv[])
@@ -666,6 +642,9 @@ int main(int argc, char *argv[])
     pconfig.machine_nr = kMachineNr;
     pconfig.block_class = {2_MB, 4_KB};
     pconfig.block_ratio = {0.5, 0.5};
+    pconfig.reserved_buffer_size = 2_GB;
+    pconfig.lease_buffer_size = (kDSMCacheSize - 2_GB) / 2;
+    pconfig.alloc_buffer_size = (kDSMCacheSize - 2_GB) / 2;
 
     auto patronus = Patronus::ins(pconfig);
 

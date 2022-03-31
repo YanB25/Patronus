@@ -212,37 +212,40 @@ public:
 
     ~RaceHashing()
     {
-        // TODO(patronus): The allocation may from the client, which uses
-        // various allocation strategy. Just avoid freeing them here.
-        std::set<void *> freed_entries_addr;
-        for (size_t i = 0; i < kDEntryNr; ++i)
-        {
-            // the address space is from allocator
-            auto alloc_size = SubTableT::size_bytes();
-            auto entry_gaddr = meta_->entries[i];
-            if (entry_gaddr.is_null())
-            {
-                continue;
-            }
-            auto *entry_addr =
-                DCHECK_NOTNULL(from_exposed_remote_mem(meta_->entries[i]));
+        LOG(WARNING)
+            << "Skip deallocation for race hash. Because the allocation may "
+               "from different clients. Unable to detect that";
+        // std::set<void *> freed_entries_addr;
+        // for (size_t i = 0; i < kDEntryNr; ++i)
+        // {
+        //     // the address space is from allocator
+        //     auto alloc_size = SubTableT::size_bytes();
+        //     auto entry_gaddr = meta_->entries[i];
+        //     if (entry_gaddr.is_null())
+        //     {
+        //         continue;
+        //     }
+        //     auto *entry_addr =
+        //         DCHECK_NOTNULL(from_exposed_remote_mem(meta_->entries[i]));
 
-            if (freed_entries_addr.count(entry_addr) == 1)
-            {
-                DVLOG(1) << "Skip freeing already freed (or nullptr) entries_["
-                         << i << "] entry_addr " << (void *) entry_addr;
-                continue;
-            }
-            freed_entries_addr.insert(entry_addr);
-            DVLOG(1) << "Freeing subtable[" << i
-                     << "].addr(): " << (void *) entry_addr << " with size "
-                     << alloc_size;
-            DCHECK_NOTNULL(allocator_)->free(entry_addr, alloc_size);
-        }
-        auto size = meta_size();
-        DVLOG(1) << "Freeing meta region: " << (void *) meta_ << " with size "
-                 << size;
-        DCHECK_NOTNULL(allocator_)->free(meta_, size);
+        //     if (freed_entries_addr.count(entry_addr) == 1)
+        //     {
+        //         DVLOG(1) << "Skip freeing already freed (or nullptr)
+        //         entries_["
+        //                  << i << "] entry_addr " << (void *) entry_addr;
+        //         continue;
+        //     }
+        //     freed_entries_addr.insert(entry_addr);
+        //     DVLOG(1) << "Freeing subtable[" << i
+        //              << "].addr(): " << (void *) entry_addr << " with size "
+        //              << alloc_size;
+        //     DCHECK_NOTNULL(allocator_)->free(entry_addr, alloc_size);
+        // }
+        // auto size = meta_size();
+        // DVLOG(1) << "Freeing meta region: " << (void *) meta_ << " with size
+        // "
+        //          << size;
+        // DCHECK_NOTNULL(allocator_)->free(meta_, size);
     }
 
     static constexpr size_t max_capacity()
