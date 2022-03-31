@@ -30,6 +30,8 @@ constexpr static size_t kDirID = 0;
 constexpr static size_t kTestTime =
     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
 
+constexpr static uint64_t kWaitFlag = 0;
+
 using namespace std::chrono_literals;
 
 struct Object
@@ -169,7 +171,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitFlag);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -209,7 +211,7 @@ void server(Patronus::pointer p)
                  << " for coro " << i;
     }
 
-    p->server_serve(tid);
+    p->server_serve(tid, kWaitFlag);
 }
 
 int main(int argc, char *argv[])
@@ -239,7 +241,7 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitFlag);
         server(patronus);
     }
 

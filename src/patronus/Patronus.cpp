@@ -1599,11 +1599,9 @@ size_t Patronus::handle_rdma_finishes(
     return fail_nr;
 }
 
-void Patronus::finished(CoroContext *ctx)
+void Patronus::finished(uint64_t key)
 {
-    DLOG_IF(WARNING, ctx && (ctx->coro_id() != kMasterCoro))
-        << "[Patronus] Admin request better be sent by master coroutine.";
-    exits_[dsm_->get_node_id()] = true;
+    finished_[key][dsm_->get_node_id()] = true;
 
     auto tid = get_thread_id();
     // does not require replies
@@ -1617,7 +1615,8 @@ void Patronus::finished(CoroContext *ctx)
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = tid;
     msg->cid.mid = from_mid;
-    msg->cid.coro_id = ctx ? ctx->coro_id() : kMasterCoro;
+    msg->cid.coro_id = kMasterCoro;
+    msg->data = key;
 
     if constexpr (debug())
     {
@@ -1689,20 +1688,24 @@ void Patronus::handle_admin_exit(AdminRequest *req,
     }
 
     auto from_node = req->cid.node_id;
-    exits_[from_node].store(true);
+    auto key = req->data;
+    DCHECK_LT(key, finished_.size());
+    DCHECK_LT(from_node, finished_[key].size());
+    finished_[key][from_node].store(true);
 
     for (size_t i = 0; i < dsm_->getClusterSize(); ++i)
     {
-        if (!exits_[i])
+        if (!finished_[key][i])
         {
             DVLOG(1) << "[patronus] receive exit request by " << from_node
-                     << ". but node " << i << " not finished yet.";
+                     << ". but node " << i << " not finished yet. key: " << key;
             return;
         }
     }
 
     DVLOG(1) << "[patronus] set should_exit to true";
-    should_exit_.store(true, std::memory_order_release);
+    DCHECK_LT(key, should_exit_.size());
+    should_exit_[key].store(true, std::memory_order_release);
 }
 void Patronus::signal_server_to_recover_qp(size_t node_id, size_t dir_id)
 {
@@ -2022,23 +2025,27 @@ void Patronus::handle_response_lease_modify(LeaseModifyResponse *resp)
     }
 }
 
-void Patronus::server_serve(size_t mid)
+void Patronus::server_serve(size_t mid, uint64_t key)
 {
     auto &server_workers = server_coro_ctx_.server_workers;
     auto &server_master = server_coro_ctx_.server_master;
 
     for (size_t i = 0; i < kServerCoroNr; ++i)
     {
-        server_workers[i] = CoroCall(
-            [this, i](CoroYield &yield) { server_coro_worker(i, yield); });
+        server_workers[i] = CoroCall([this, i, key](CoroYield &yield) {
+            server_coro_worker(i, yield, key);
+        });
     }
-    server_master = CoroCall(
-        [this, mid](CoroYield &yield) { server_coro_master(yield, mid); });
+    server_master = CoroCall([this, mid, key](CoroYield &yield) {
+        server_coro_master(yield, mid, key);
+    });
 
     server_master();
 }
 
-void Patronus::server_coro_master(CoroYield &yield, size_t mid)
+void Patronus::server_coro_master(CoroYield &yield,
+                                  size_t mid,
+                                  uint64_t wait_key)
 {
     auto tid = get_thread_id();
     auto dir_id = mid;
@@ -2068,7 +2075,7 @@ void Patronus::server_coro_master(CoroYield &yield, size_t mid)
         __buffer.data(), ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
-    while (likely(!should_exit() || !task_queue.empty()))
+    while (likely(!should_exit(wait_key) || !task_queue.empty()))
     {
         // handle received messages
         char *buffer = (char *) CHECK_NOTNULL(buffer_pool.get());
@@ -2406,7 +2413,9 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     put_lease_context(lease_ctx);
 }
 
-void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
+void Patronus::server_coro_worker(coro_t coro_id,
+                                  CoroYield &yield,
+                                  uint64_t wait_key)
 {
     auto tid = get_thread_id();
     CoroContext ctx(tid, &yield, &server_coro_ctx_.server_master, coro_id);
@@ -2415,7 +2424,7 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
     auto &task_pool = server_coro_ctx_.task_pool;
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
-    while (likely(!should_exit() || !task_queue.empty()))
+    while (likely(!should_exit(wait_key) || !task_queue.empty()))
     {
         DCHECK(!task_queue.empty());
         auto task = task_queue.front();
@@ -2529,6 +2538,19 @@ void Patronus::reg_allocator(uint64_t hint, mem::IAllocator::pointer allocator)
     DCHECK(is_server_)
         << "** not registered thread, or registered client thread.";
     reg_allocators_[hint] = allocator;
+}
+mem::IAllocator::pointer Patronus::get_allocator(uint64_t hint)
+{
+    if (hint == kDefaultHint)
+    {
+        return default_allocator_;
+    }
+    auto it = reg_allocators_.find(hint);
+    if (unlikely(it == reg_allocators_.end()))
+    {
+        return nullptr;
+    }
+    return it->second;
 }
 
 }  // namespace patronus

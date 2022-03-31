@@ -23,6 +23,7 @@ thread_local CoroCall master;
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kDirID = 0;
+constexpr static uint64_t kWaitKey = 0;
 
 // constexpr static size_t kTestTime =
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
@@ -226,7 +227,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -293,7 +294,7 @@ void server(Patronus::pointer p)
                  << " for coro " << i;
     }
 
-    p->server_serve(tid);
+    p->server_serve(tid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -321,7 +322,7 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

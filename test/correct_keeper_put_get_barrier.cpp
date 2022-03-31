@@ -19,6 +19,7 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
+constexpr static uint64_t kWaitKey = 0;
 
 using namespace patronus;
 
@@ -134,12 +135,12 @@ int main(int argc, char *argv[])
     {
         patronus->registerClientThread();
         client(patronus);
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

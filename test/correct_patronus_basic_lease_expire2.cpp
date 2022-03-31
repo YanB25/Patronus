@@ -28,6 +28,7 @@ thread_local CoroCall master;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
+constexpr static uint64_t kWaitKey = 0;
 
 constexpr static auto kInitialLeasePeriod = 100us;
 constexpr static auto kExtendLeasePeriod = 10ms;
@@ -246,7 +247,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -275,7 +276,7 @@ void server(Patronus::pointer p)
     object.target = kMagic;
 
     LOG(INFO) << "[bench] server starts to serve";
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -298,12 +299,12 @@ int main(int argc, char *argv[])
     {
         patronus->registerClientThread();
         client(patronus);
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

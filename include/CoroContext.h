@@ -114,9 +114,9 @@ class CoroExecutionContext
 public:
     constexpr static size_t kCoroCnt = kCoroCnt_;
 
-    void worker_finished(size_t wid)
+    void worker_finished(size_t coro_id)
     {
-        finish_all_[wid] = true;
+        finish_all_[coro_id] = true;
     }
     bool is_finished_all() const
     {

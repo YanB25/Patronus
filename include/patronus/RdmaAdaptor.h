@@ -68,7 +68,8 @@ inline std::ostream &operator<<(std::ostream &os, const RdmaTraceRecord &r)
 class RdmaAdaptor : public IRdmaAdaptor
 {
 public:
-    constexpr static size_t kMaxOngoingRdmaBuf = 16;
+    constexpr static size_t kMaxOngoingRdmaBuf = 1024;
+    constexpr static size_t kWarningOngoingRdmaBuf = 16;
     /**
      * @brief Construct a new Rdma Adaptor object
      *
@@ -229,7 +230,14 @@ public:
         }
         DCHECK_GE(ret.size, size);
         ongoing_rdma_bufs_.push_back(ret);
-        CHECK_LT(ongoing_rdma_bufs_.size(), kMaxOngoingRdmaBuf);
+        CHECK_LT(ongoing_rdma_bufs_.size(), kMaxOngoingRdmaBuf)
+            << rdma_trace_record_;
+        if (unlikely(ongoing_rdma_bufs_.size() == kWarningOngoingRdmaBuf))
+        {
+            LOG(WARNING)
+                << "** Got too much rdma buffer. Only log once for this."
+                << rdma_trace_record_;
+        }
 
         return ret;
     }
@@ -311,8 +319,15 @@ public:
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
         auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
-        return patronus_->cas(
+        auto rc = patronus_->cas(
             lease, (char *) rdma_buf, offset, expect, desired, flag, coro_ctx_);
+        if (rc == kRdmaExecutionErr)
+        {
+            // execution err is also okay.
+            // meaning cas failed by mismatch
+            return kOk;
+        }
+        return kOk;
     }
     RetCode commit() override
     {

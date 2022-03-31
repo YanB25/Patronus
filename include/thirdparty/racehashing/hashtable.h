@@ -91,13 +91,19 @@ public:
     }
 
     RaceHashing(IRdmaAdaptor::pointer rdma_adpt,
-                std::shared_ptr<patronus::mem::IAllocator> allocator,
+                patronus::mem::IAllocator::pointer allocator,
                 const RaceHashingConfig &conf)
         : rdma_adpt_(rdma_adpt), conf_(conf), allocator_(allocator)
     {
         init_meta();
         init_kvblock();
         init_directory();
+    }
+    static pointer new_instance(IRdmaAdaptor::pointer rdma_adpt,
+                                patronus::mem::IAllocator::pointer allocator,
+                                const RaceHashingConfig &conf)
+    {
+        return std::make_shared<RaceHashing>(rdma_adpt, allocator, conf);
     }
     const RaceHashingConfig &config() const
     {

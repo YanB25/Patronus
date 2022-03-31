@@ -25,6 +25,8 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kCoroCnt = 1;
 
+constexpr static size_t kWaitKey = 0;
+
 using RaceHashingT = RaceHashing<1, 2, 2>;
 using RaceHandleT = typename RaceHashingT::Handle;
 
@@ -153,7 +155,7 @@ void client_master(Patronus::pointer p,
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -225,7 +227,7 @@ void server(Patronus::pointer p, size_t initial_subtable)
 
     LOG(INFO) << "[bench] meta gaddr is " << meta_gaddr;
 
-    p->server_serve(tid);
+    p->server_serve(tid, kWaitKey);
 
     p->patronus_free(
         conf.g_kvblock_pool_addr, conf.g_kvblock_pool_size, 0 /* hint */);
@@ -251,7 +253,7 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus, 1 /* subtable */);
     }
     LOG(INFO) << "finished. ctrl+C to quit.";

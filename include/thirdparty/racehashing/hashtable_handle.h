@@ -102,8 +102,7 @@ public:
         auto m = hash_m(hash);
         auto fp = hash_fp(hash);
         auto rounded_m = round_to_bits(m, gd());
-        auto h1 = hash_1(hash);
-        auto h2 = hash_2(hash);
+        auto [h1, h2] = hash_h1_h2(hash);
 
         DVLOG(3) << "[race] DEL key " << pre(key) << ", got hash "
                  << pre_hash(hash) << ", m: " << m << ", rounded to "
@@ -162,8 +161,7 @@ public:
         DCHECK(inited_);
 
         auto hash = hash_impl(key.data(), key.size());
-        auto h1 = hash_1(hash);
-        auto h2 = hash_2(hash);
+        auto [h1, h2] = hash_h1_h2(hash);
         auto fp = hash_fp(hash);
         auto m = hash_m(hash);
         auto cached_gd = gd();
@@ -391,6 +389,14 @@ public:
         }
 
         // TODO: rethink about how batching can boost performance
+        auto capacity = SubTableT::max_capacity();
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] should migrate " << should_migrate.size()
+            << " entries. subtable capacity: " << capacity;
+        CHECK_LE(should_migrate.size(), capacity)
+            << "Should migrate got " << should_migrate.size()
+            << ", exceeded subtable capacity " << capacity;
+
         for (auto slot_handle : should_migrate)
         {
             SlotHandle ret_slot(nullgaddr, SlotView(0));
@@ -509,8 +515,8 @@ public:
         // 3) allocate subtable here
         auto alloc_size = SubTableT::size_bytes();
         subtable_mem_handles_[next_subtable_idx] =
-            rdma_adpt_->remote_alloc_acquire_perm(alloc_size,
-                                                  config::kAllocHintSubtable);
+            rdma_adpt_->remote_alloc_acquire_perm(
+                alloc_size, config::kAllocHintDirSubtable);
         auto new_remote_subtable =
             subtable_mem_handles_[next_subtable_idx].gaddr();
         LOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
@@ -731,8 +737,7 @@ public:
     {
         auto m = hash_m(hash);
         auto rounded_m = round_to_bits(m, gd());
-        auto h1 = hash_1(hash);
-        auto h2 = hash_2(hash);
+        auto [h1, h2] = hash_h1_h2(hash);
         auto fp = hash_fp(hash);
 
         auto subtable_idx = rounded_m;
@@ -746,6 +751,12 @@ public:
 
         std::unordered_set<SlotHandle> slot_handles;
         auto rc = cbs.locate(fp, cached_ld, m, slot_handles, dctx);
+        DLOG_IF(WARNING, slot_handles.size() >= 5)
+            << "** Got a lots of real match. m: " << m
+            << ", rounded_m: " << rounded_m << ", h1: " << pre_hash(h1)
+            << ", h2: " << pre_hash(h2) << ", fp: " << pre_hash(fp)
+            << ". key: " << key
+            << ". Got possible match nr: " << slot_handles.size();
         if (rc == kCacheStale && conf_.auto_update_dir)
         {
             // update cache and retry
@@ -844,8 +855,7 @@ public:
         RetCode rc = kOk;
         auto m = hash_m(hash);
         auto fp = hash_fp(hash);
-        auto h1 = hash_1(hash);
-        auto h2 = hash_2(hash);
+        auto [h1, h2] = hash_h1_h2(hash);
         auto rounded_m = round_to_bits(m, gd());
         auto ld = cached_ld(rounded_m);
         DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
@@ -1061,8 +1071,7 @@ public:
         auto fp = hash_fp(hash);
         auto cached_gd = gd();
         auto rounded_m = round_to_bits(m, cached_gd);
-        auto h1 = hash_1(hash);
-        auto h2 = hash_2(hash);
+        auto [h1, h2] = hash_h1_h2(hash);
 
         DVLOG(3) << "[race] GET key " << pre(key) << ", got hash "
                  << pre_hash(hash) << ", m: " << m << ", rounded to "
@@ -1369,6 +1378,14 @@ public:
                                  IRdmaAdaptor::pointer rdma_adpt)
         : rhh_(node_id, table_meta_addr, conf, rdma_adpt), rdma_adpt_(rdma_adpt)
     {
+    }
+    static pointer new_instance(uint16_t node_id,
+                                GlobalAddress table_meta_addr,
+                                const RaceHashingHandleConfig &conf,
+                                IRdmaAdaptor::pointer rdma_adpt)
+    {
+        return std::make_shared<RaceHashingHandleWrapperImpl>(
+            node_id, table_meta_addr, conf, rdma_adpt);
     }
     static size_t max_capacity()
     {

@@ -103,6 +103,7 @@ public:
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
     constexpr static uint64_t kDefaultHint = 0;
+    constexpr static size_t kMaxSyncKey = 16;
 
     static pointer ins(const PatronusConfig &conf)
     {
@@ -216,6 +217,7 @@ public:
               std::enable_if_t<!std::is_array_v<V>, bool> = true>
     void put(const std::string &key, const V &v, const T &sleep_time)
     {
+        DLOG(INFO) << "[keeper] PUT key: `" << key << "` value: `" << v;
         auto value = std::string((const char *) &v, sizeof(V));
         return dsm_->put(key, value, sleep_time);
     }
@@ -224,6 +226,7 @@ public:
              const std::string &value,
              const T &sleep_time)
     {
+        DLOG(INFO) << "[keeper] PUT key: `" << key << "` value: `" << value;
         return dsm_->put(key, value, sleep_time);
     }
     template <typename T>
@@ -234,7 +237,9 @@ public:
     template <typename T>
     std::string get(const std::string &key, const T &sleep_time)
     {
-        return dsm_->get(key, sleep_time);
+        auto value = dsm_->get(key, sleep_time);
+        DLOG(INFO) << "[keeper] GET key: `" << key << "` value: `" << value;
+        return value;
     }
     template <typename V, typename T>
     V get_object(const std::string &key, const T &sleep_time)
@@ -243,6 +248,7 @@ public:
         V ret;
         CHECK_GE(v.size(), sizeof(V));
         memcpy((char *) &ret, v.data(), sizeof(V));
+        DLOG(INFO) << "[keeper] GET_OBJ key: " << key << ", obj: " << ret;
         return ret;
     }
 
@@ -258,17 +264,17 @@ public:
      *
      * @param ctx
      */
-    void finished([[maybe_unused]] CoroContext *ctx = nullptr);
-    bool should_exit() const
+    void finished(uint64_t key);
+    bool should_exit(uint64_t key) const
     {
-        return should_exit_.load(std::memory_order_relaxed);
+        return should_exit_[key].load(std::memory_order_relaxed);
     }
 
     /**
      * @brief give the server thread to Patronus.
      *
      */
-    void server_serve(size_t mid);
+    void server_serve(size_t mid, uint64_t key);
 
     size_t try_get_client_continue_coros(size_t mid,
                                          coro_t *coro_buf,
@@ -438,6 +444,7 @@ public:
     inline void patronus_free(void *addr, size_t size, uint64_t hint);
 
     void reg_allocator(uint64_t hint, mem::IAllocator::pointer allocator);
+    mem::IAllocator::pointer get_allocator(uint64_t hint);
 
 private:
     PatronusConfig conf_;
@@ -683,8 +690,8 @@ private:
                        CoroContext *ctx = nullptr);
 
     // server coroutines
-    void server_coro_master(CoroYield &yield, size_t mid);
-    void server_coro_worker(coro_t coro_id, CoroYield &yield);
+    void server_coro_master(CoroYield &yield, size_t mid, uint64_t key);
+    void server_coro_worker(coro_t coro_id, CoroYield &yield, uint64_t key);
 
     // helpers, actual impls
     Lease get_lease_impl(uint16_t node_id,
@@ -811,8 +818,9 @@ private:
     constexpr static uint16_t mask = 0b1111111111;
 
     // for admin management
-    std::array<std::atomic<bool>, MAX_MACHINE> exits_;
-    std::atomic<bool> should_exit_{false};
+    std::array<std::array<std::atomic<bool>, MAX_MACHINE>, kMaxSyncKey>
+        finished_;
+    std::array<std::atomic<bool>, kMaxSyncKey> should_exit_{false};
 
     // for barrier
     std::unordered_map<uint64_t, std::set<uint64_t>> barrier_;

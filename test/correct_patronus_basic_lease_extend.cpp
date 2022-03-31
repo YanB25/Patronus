@@ -19,6 +19,7 @@ constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kTestTime = 1_K;
+constexpr static uint64_t kWaitKey = 0;
 
 using namespace patronus;
 // should be one, because one coroutine fails will affect the others
@@ -216,7 +217,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -244,7 +245,7 @@ void server(Patronus::pointer p)
     auto &object = *(Object *) &buffer[offset];
     object.target = kMagic;
 
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -270,12 +271,12 @@ int main(int argc, char *argv[])
         patronus->registerClientThread();
         sleep(2);
         client(patronus);
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

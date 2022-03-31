@@ -38,6 +38,7 @@ constexpr static uint8_t kRelinquishFlag =
 // constexpr static uint8_t kRelinquishFlag = 0;
 
 constexpr static uint8_t kReadWriteFlag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+constexpr static uint64_t kWaitKey = 0;
 
 using namespace std::chrono_literals;
 
@@ -319,7 +320,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "[bench] server thread tid " << tid << " for mid " << mid;
 
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -358,7 +359,7 @@ int main(int argc, char *argv[])
         client(patronus);
         DLOG(INFO) << "[bench] thread " << tid << " finish it work";
         bar.wait();
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
@@ -397,7 +398,7 @@ int main(int argc, char *argv[])
         auto dsm = patronus->get_dsm();
         // sync
         dsm->reliable_send(nullptr, 0, kClientNodeId, 0);
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

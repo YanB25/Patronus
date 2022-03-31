@@ -25,6 +25,8 @@ constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kTestTime =
     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
 
+constexpr static size_t kWaitKey = 0;
+
 using namespace std::chrono_literals;
 
 struct Object
@@ -213,7 +215,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "I am server. tid " << tid << " handling mid " << mid;
 
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -254,7 +256,7 @@ int main(int argc, char *argv[])
         LOG(INFO) << "[bench] thread " << tid << " finish its work";
         bar.wait();
         LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
@@ -296,7 +298,7 @@ int main(int argc, char *argv[])
         // sync
         dsm->reliable_send(nullptr, 0, kClientNodeId, 0);
 
-        patronus->finished();
+        patronus->finished(kWaitKey);
 
         server(patronus);
     }

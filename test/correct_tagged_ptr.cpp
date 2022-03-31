@@ -139,8 +139,7 @@ int main(int argc, char *argv[])
     auto hash = fast_pseudo_rand_int();
     auto m = hash_m(hash);
     auto fp = hash_fp(hash);
-    auto h1 = hash_1(hash);
-    auto h2 = hash_2(hash);
+    auto [h1, h2] = hash_h1_h2(hash);
     LOG(INFO) << std::hex << "hash: " << hash << ", m: " << m << ", fp: " << fp
               << ", h1: " << h1 << ", h2: " << h2;
 

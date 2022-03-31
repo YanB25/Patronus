@@ -156,8 +156,7 @@ public:
                      HashContext *dctx)
     {
         auto hash = slot_handle.hash();
-        auto h1 = hash_1(hash);
-        auto h2 = hash_2(hash);
+        auto [h1, h2] = hash_h1_h2(hash);
 
         auto cbs = get_two_combined_bucket_handle(h1, h2, rdma_adpt);
         CHECK_EQ(rdma_adpt.commit(), kOk);
@@ -196,7 +195,8 @@ public:
                                 config::kEnableMemoryDebug && dctx != nullptr)
                         << "[race][trace] Subtable::put_slot: failed to insert "
                            "to slot "
-                        << view << ": slot not empty. At slot_idx " << i << ". "
+                        << bucket.slot_handle(idx)
+                        << ": slot not empty. At slot_idx " << idx << ". "
                         << *dctx;
                 }
             }
@@ -214,10 +214,32 @@ public:
     TwoCombinedBucketHandle<kSlotNr> get_two_combined_bucket_handle(
         uint64_t h1, uint64_t h2, IRdmaAdaptor &rdma_adpt)
     {
+        auto cb1_idx = to_combined_bucket_idx(h1);
+        auto cb2_idx = to_combined_bucket_idx(h2);
+        if (unlikely(cb1_idx == cb2_idx))
+        {
+            // don't want to colocate to the same combined grous
+            // otherwise, resizing will fail to insert by no enough slots
+
+            // this will definately make them different cbs.
+            h2++;
+        }
         auto cb1 = combined_bucket_handle(h1);
         auto cb2 = combined_bucket_handle(h2);
         return TwoCombinedBucketHandle<kSlotNr>(
             h1, h2, std::move(cb1), std::move(cb2), rdma_adpt, st_mem_handle_);
+    }
+    static uint64_t to_combined_bucket_idx(uint64_t i)
+    {
+        i = i % kCombinedBucketNr;
+        if (i % 2 == 0)
+        {
+            return i / 2;
+        }
+        else
+        {
+            return (i - 1) / 2;
+        }
     }
     constexpr static size_t max_item_nr()
     {

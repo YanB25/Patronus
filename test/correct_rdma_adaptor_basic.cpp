@@ -16,6 +16,8 @@ using namespace patronus::hash;
 using namespace define::literals;
 using namespace patronus;
 
+constexpr static size_t kWaitKey = 0;
+
 constexpr static size_t kCoroCnt = 1;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
@@ -200,7 +202,7 @@ void client_master(Patronus::pointer p,
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -237,7 +239,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "Allocated " << (void *) addr << ". gaddr: " << gaddr;
 
-    p->server_serve(tid);
+    p->server_serve(tid, kWaitKey);
 
     p->patronus_free(addr, 4_KB, 0 /* hint */);
 }
@@ -259,12 +261,12 @@ int main(int argc, char *argv[])
     {
         patronus->registerClientThread();
         client(patronus);
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
     LOG(INFO) << "finished. ctrl+C to quit.";

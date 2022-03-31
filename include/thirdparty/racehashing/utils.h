@@ -11,6 +11,7 @@
 #include <cstdint>
 
 #include "Common.h"
+#include "city.h"
 #include "util/Debug.h"
 #include "util/RetCode.h"
 
@@ -171,12 +172,13 @@ constexpr static uint64_t kRaceHashingHashSeed = 5381;
 
 inline uint64_t hash_impl(const char *buf, size_t size)
 {
-    uint64_t hash = kRaceHashingHashSeed;
-    for (size_t i = 0; i < size; ++i)
-    {
-        hash = ((hash << 5) + hash) + buf[i]; /* hash * 33 + c */
-    }
-    return hash;
+    // uint64_t hash = kRaceHashingHashSeed;
+    // for (size_t i = 0; i < size; ++i)
+    // {
+    //     hash = ((hash << 5) + hash) + buf[i]; /* hash * 33 + c */
+    // }
+    // return hash;
+    return CityHash64(buf, size);
 }
 
 // NOTE: make FP next to M
@@ -204,13 +206,19 @@ inline uint64_t hash_fp(uint64_t h)
 {
     return hash_from(h, M, FP + M);
 }
-inline uint64_t hash_1(uint64_t h)
+inline uint64_t __hash_1(uint64_t h)
 {
     return hash_from(h, FP + M, FP + M + H);
 }
-inline uint64_t hash_2(uint64_t h)
+inline uint64_t __hash_2(uint64_t h)
 {
     return hash_from(h, FP + M + H, FP + M + H + H);
+}
+inline std::pair<uint64_t, uint64_t> hash_h1_h2(uint64_t hash)
+{
+    auto h1 = __hash_1(hash);
+    auto h2 = __hash_2(hash);
+    return {h1, h2};
 }
 
 constexpr bool is_power_of_two(uint64_t x)

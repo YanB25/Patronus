@@ -188,7 +188,7 @@ public:
             {
                 DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
                     << "[race][trace] should_migrate: slot " << h
-                    << " should migrate for tested bit " << bit;
+                    << " should migrate for tested bit (base 0) " << bit;
                 ret.insert(SlotMigrateHandle(h, hash));
             }
         }

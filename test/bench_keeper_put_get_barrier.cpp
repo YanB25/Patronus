@@ -25,6 +25,8 @@ using namespace patronus;
 
 using namespace std::chrono_literals;
 
+constexpr static uint64_t kWaitKey = 0;
+
 void bench_barrier(Patronus::pointer p)
 {
     ChronoTimer timer;
@@ -98,12 +100,12 @@ int main(int argc, char *argv[])
     {
         patronus->registerClientThread();
         client(patronus);
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 
