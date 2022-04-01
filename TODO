@@ -248,12 +248,3 @@ Race hashing:
 
 Serverless (mock):
 Just take a couple of data. do like quick sort, summing, etc.
-
-
-
-when you go back:
-1. correct_race_rdma_op has been refactored to enable "config" and "config factory" The reason is to support multithread + expansion (complex and multiple sub-test runing through the same rh). Try to enable that.
-
-If you succeeded
-merge to master.
-bench_race_rdma_op!
