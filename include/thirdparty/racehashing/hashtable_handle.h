@@ -893,9 +893,17 @@ public:
         }
 
         rc = update_if_exists(rounded_m, slot_handles, key, new_slot, dctx);
+
         if (rc == kOk)
         {
             return rc;
+        }
+        else if (rc == kRetry)
+        {
+            // can not re-execute update_if_exists
+            // because the @slot_handles needs to be re-read
+            // just tell the client and let it retries
+            goto handle_err;
         }
         else
         {
@@ -989,6 +997,9 @@ public:
         memcpy(kv_block.buf + key.size(), value.data(), value.size());
 
         auto remote_buf = remote_alloc_kvblock(kvblock_size);
+        CHECK(!remote_buf.is_null())
+            << "** failed to remote_alloc_kvblock for size: " << kvblock_size
+            << ". Possibly run out of memory.";
         auto &kvblock_mem_handle = get_kvblock_mem_handle();
         CHECK_EQ(rdma_adpt.rdma_write(remote_buf,
                                       (char *) rdma_buf.buffer,

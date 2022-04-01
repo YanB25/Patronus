@@ -248,3 +248,19 @@ Race hashing:
 
 Serverless (mock):
 Just take a couple of data. do like quick sort, summing, etc.
+
+when you go back:
+
+[-] try to run a simple case for bench_race_rmda_op
+- try to run a simple case for multiple threads
+    - NOTE!!!!!! carefully check "should_report", "first_enter", "server_leave" for the multi-threads cases. There are not justified.
+- try to add API rh::explain(), to print the number of slots, bucket, groups, subtables, ...
+[-] try to let the export excel work.
+- try to let the trace report latency
+- maybe rdma_ctx add API to enable more specific trace point? (and time)
+- double check did I bind core?
+
+try to review the code: did release mode include unnecessary overhead?
+Is race hashing impl optimized? i.e. use std::vector with reserved instead of unordered_set
+Enable patronus::batch_write/batch_read/batch_cas, etc
+See how resizing perform

@@ -108,8 +108,12 @@ inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
     return os;
 }
 
-template <size_t kCoroCnt_>
-class CoroExecutionContext
+struct Void
+{
+};
+
+template <size_t kCoroCnt_, typename T>
+class CoroExecutionContextWith
 {
 public:
     constexpr static size_t kCoroCnt = kCoroCnt_;
@@ -144,12 +148,23 @@ public:
     {
         return master_;
     }
+    T &get_private_data()
+    {
+        return t_;
+    }
+    const T &get_private_data() const
+    {
+        return t_;
+    }
 
 private:
     std::array<CoroCall, kCoroCnt> workers_;
     CoroCall master_;
     std::array<bool, kCoroCnt> finish_all_{};
+    T t_;
 };
+template <size_t size>
+using CoroExecutionContext = CoroExecutionContextWith<size, Void>;
 
 class pre_coro_ctx
 {
