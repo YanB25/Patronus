@@ -26,6 +26,7 @@ thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
 
 constexpr static size_t kDirID = 0;
+constexpr static uint64_t kWaitKey = 0;
 
 // constexpr static size_t kTestTime =
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
@@ -95,10 +96,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto w_flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
         auto ec =
             p->write(lease, rdma_buf.buffer, kAllocBufferSize, 0, w_flag, &ctx);
-        CHECK_EQ(ec, ErrCode::kSuccess);
+        CHECK_EQ(ec, kOk);
 
         auto rel_flag = (uint8_t) 0;
-        p->relinquish(lease, rel_flag, &ctx);
+        p->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
     }
     p->put_rdma_buffer(rdma_buf);
 
@@ -144,7 +145,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -167,7 +168,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "I am server. tid " << tid;
 
-    p->server_serve(tid);
+    p->server_serve(tid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -199,7 +200,7 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

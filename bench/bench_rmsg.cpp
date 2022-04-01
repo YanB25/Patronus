@@ -259,7 +259,7 @@ void client(std::shared_ptr<DSM> dsm)
     client_burn(dsm, kThreadNr);
 
     client_wait(dsm);
-    LOG(INFO) << "Exiting!!!";
+    LOG(INFO) << "Exiting...";
 }
 
 void server_wait(std::shared_ptr<DSM> dsm)
@@ -278,7 +278,7 @@ void server(std::shared_ptr<DSM> dsm)
     server_burn(dsm, expect_msg_nr, kThreadNr);
 
     server_wait(dsm);
-    LOG(INFO) << "Exiting!!!";
+    LOG(INFO) << "Exiting...";
 }
 
 int main(int argc, char *argv[])

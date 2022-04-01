@@ -28,6 +28,7 @@ thread_local CoroCall master;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
+constexpr static uint64_t kWaitKey = 0;
 
 constexpr static auto kInitialLeasePeriod = 100us;
 constexpr static auto kExtendLeasePeriod = 10ms;
@@ -42,7 +43,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -123,12 +124,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         memset(rdma_buf.buffer, 0, sizeof(Object));
 
         auto extend_ec = p->extend(lease, kExtendLeasePeriod, 0, &ctx);
-        if (unlikely(extend_ec != ErrCode::kSuccess))
+        if (unlikely(extend_ec != RetCode::kOk))
         {
             LOG(WARNING) << "[bench] extend failed for key: " << key
                          << ", ec: " << extend_ec << ", lease: " << lease;
             extend_fail_m.collect(1);
-            p->relinquish(lease, 0, &ctx);
+            p->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);
             continue;
         }
         else
@@ -139,12 +140,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         // to make sure that the extend really work!
         std::this_thread::sleep_for(kInitialLeasePeriod);
         auto ec = p->read(lease, rdma_buf.buffer, sizeof(Object), 0, 0, &ctx);
-        if (unlikely(ec != ErrCode::kSuccess))
+        if (unlikely(ec != RetCode::kOk))
         {
             DVLOG(3) << "[bench] extend_fail_to_work for key = " << key
                      << ", ec: " << ec << ", lease: " << lease;
             extend_fail_to_work_m.collect(1);
-            p->relinquish(lease, 0, &ctx);
+            p->relinquish(lease, 0, 0, &ctx);
             continue;
         }
         else
@@ -161,7 +162,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                      0,
                      (uint8_t) RWFlag::kNoLocalExpireCheck,
                      &ctx);
-        if (unlikely(ec == ErrCode::kSuccess))
+        if (unlikely(ec == RetCode::kOk))
         {
             DVLOG(3) << "[bench] server failed to unbind for key = " << key
                      << ", ec: " << ec << ", lease: " << lease;
@@ -176,7 +177,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                  << " start to relinquish lease ";
 
         // make sure this will take no harm.
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0, 0, &ctx);
 
         p->put_rdma_buffer(rdma_buf);
     }
@@ -246,7 +247,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -275,7 +276,7 @@ void server(Patronus::pointer p)
     object.target = kMagic;
 
     LOG(INFO) << "[bench] server starts to serve";
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -298,12 +299,12 @@ int main(int argc, char *argv[])
     {
         patronus->registerClientThread();
         client(patronus);
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

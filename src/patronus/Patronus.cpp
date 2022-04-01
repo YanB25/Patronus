@@ -1,5 +1,6 @@
 #include "patronus/Patronus.h"
 
+#include "Util.h"
 #include "patronus/IBOut.h"
 #include "patronus/Time.h"
 #include "util/Debug.h"
@@ -25,14 +26,19 @@ thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
     Patronus::protection_region_pool_;
 thread_local DDLManager Patronus::ddl_manager_;
 thread_local size_t Patronus::allocated_mw_nr_;
-thread_local std::shared_ptr<mem::SlabAllocator> Patronus::allocator_;
+thread_local mem::SlabAllocator::pointer Patronus::default_allocator_;
+thread_local std::unordered_map<uint64_t, mem::IAllocator::pointer>
+    Patronus::reg_allocators_;
 thread_local char *Patronus::client_rdma_buffer_{nullptr};
 thread_local size_t Patronus::client_rdma_buffer_size_{0};
+thread_local bool Patronus::is_server_{false};
+thread_local bool Patronus::is_client_{false};
 
 // clang-format off
 /**
  * The layout of dsm_->get_server_buffer():
- * [conf_.lease_buffer_size] [conf_.alloc_buffer_size]
+ * [conf_.lease_buffer_size] [conf_.alloc_buffer_size] [conf_.reserved_buffer_size]
+ *                                                     ^-- get_user_reserved_buffer()
  * 
  * The layout of dsm_->get_server_reserved_buffer():
  * @see required_dsm_reserve_size()
@@ -77,6 +83,10 @@ Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
     finish_time_sync_now_ = std::chrono::steady_clock::now();
 
     explain(conf);
+    if constexpr (debug())
+    {
+        validate_buffers();
+    }
 }
 Patronus::~Patronus()
 {
@@ -223,8 +233,6 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     char *rdma_buf = get_rdma_message_buffer();
     auto *rpc_context = get_rpc_context();
     uint16_t rpc_ctx_id = get_rpc_context_id(rpc_context);
-    // DVLOG(3) << "[debug] allocating rpc_context " << (void *) rpc_context
-    //          << " at id " << rpc_ctx_id;
 
     Lease ret_lease;
     ret_lease.node_id_ = node_id;
@@ -308,7 +316,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     return ret_lease;
 }
 
-ErrCode Patronus::read_write_impl(char *iobuf,
+RetCode Patronus::read_write_impl(char *iobuf,
                                   size_t size,
                                   size_t node_id,
                                   size_t dir_id,
@@ -379,10 +387,10 @@ ErrCode Patronus::read_write_impl(char *iobuf,
     }
 
     put_rw_context(rw_context);
-    return ret ? ErrCode::kSuccess : ErrCode::kOpProtectionErr;
+    return ret ? RetCode::kOk : RetCode::kRdmaProtectionErr;
 }
 
-ErrCode Patronus::buffer_rw_impl(Lease &lease,
+RetCode Patronus::buffer_rw_impl(Lease &lease,
                                  char *iobuf,
                                  size_t size,
                                  size_t offset,
@@ -400,6 +408,10 @@ ErrCode Patronus::buffer_rw_impl(Lease &lease,
     }
     uint32_t rkey = lease.cur_rkey_;
     uint64_t remote_addr = lease.base_addr_ + offset;
+    DLOG_IF(INFO, config::kMonitorAddressConversion)
+        << "[addr] patronus remote_addr: " << (void *) remote_addr
+        << " (base: " << (void *) lease.base_addr_
+        << ", offset: " << (void *) offset << ")";
 
     return read_write_impl(iobuf,
                            size,
@@ -412,7 +424,7 @@ ErrCode Patronus::buffer_rw_impl(Lease &lease,
                            ctx);
 }
 
-ErrCode Patronus::protection_region_rw_impl(Lease &lease,
+RetCode Patronus::protection_region_rw_impl(Lease &lease,
                                             char *io_buf,
                                             size_t size,
                                             size_t offset,
@@ -436,7 +448,7 @@ ErrCode Patronus::protection_region_rw_impl(Lease &lease,
                            WRID_PREFIX_PATRONUS_PR_RW,
                            ctx);
 }
-ErrCode Patronus::buffer_cas_impl(Lease &lease,
+RetCode Patronus::buffer_cas_impl(Lease &lease,
                                   char *iobuf,
                                   size_t offset,
                                   uint64_t compare,
@@ -460,7 +472,7 @@ ErrCode Patronus::buffer_cas_impl(Lease &lease,
                     WRID_PREFIX_PATRONUS_CAS,
                     ctx);
 }
-ErrCode Patronus::protection_region_cas_impl(Lease &lease,
+RetCode Patronus::protection_region_cas_impl(Lease &lease,
                                              char *iobuf,
                                              size_t offset,
                                              uint64_t compare,
@@ -485,7 +497,7 @@ ErrCode Patronus::protection_region_cas_impl(Lease &lease,
                     ctx);
 }
 
-ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
+RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
                            size_t node_id,
                            size_t dir_id,
                            uint32_t rkey,
@@ -550,7 +562,7 @@ ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
     {
         DVLOG(4) << "[patronus] CAS failed by protection. wr_id: " << wrid
                  << "coro: " << (ctx ? *ctx : nullctx);
-        return ErrCode::kOpProtectionErr;
+        return RetCode::kRdmaProtectionErr;
     }
     // see if cas can success
     auto read_remote = *(uint64_t *) iobuf;
@@ -561,7 +573,7 @@ ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
                  << ", read: " << compound_uint64_t(read_remote)
                  << ", compare: " << compound_uint64_t(compare)
                  << ", new: " << compound_uint64_t(swap);
-        return ErrCode::kSuccess;
+        return RetCode::kOk;
     }
     DVLOG(4) << "[patronus] CAS failed by mismatch @compare. wr_id: " << wrid
              << ", coro: " << (ctx ? *ctx : nullctx)
@@ -569,7 +581,7 @@ ErrCode Patronus::cas_impl(char *iobuf /* old value fill here */,
              << ", compare: " << compound_uint64_t(compare)
              << ", swap: " << compound_uint64_t(swap);
 
-    return ErrCode::kOpExecutionErr;
+    return RetCode::kRdmaExecutionErr;
 }
 /**
  * @brief the actual implementation to modify a lease (especially relinquish
@@ -827,8 +839,7 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
 {
     auto rpc_ctx_id = resp->cid.rpc_ctx_id;
     auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
-    // DVLOG(5) << "[debug] getting rpc_context " << (void *) rpc_context
-    //          << " at id " << rpc_ctx_id;
+
     auto *request = (AcquireRequest *) rpc_context->request;
 
     DCHECK(resp->type == RequestType::kAcquireRLease ||
@@ -894,7 +905,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 
     AcquireRequestStatus status = AcquireRequestStatus::kSuccess;
 
-    size_t object_buffer_offset = 0;
+    uint64_t object_buffer_offset = 0;
     uint64_t object_dsm_offset = 0;
     void *object_addr = nullptr;
     void *header_addr = nullptr;
@@ -978,6 +989,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     {
         // acquire permission from existing memory
         object_buffer_offset = req->key;
+
         if (unlikely(!valid_total_buffer_offset(object_buffer_offset)))
         {
             status = AcquireRequestStatus::kAddressOutOfRangeErr;
@@ -1587,11 +1599,9 @@ size_t Patronus::handle_rdma_finishes(
     return fail_nr;
 }
 
-void Patronus::finished(CoroContext *ctx)
+void Patronus::finished(uint64_t key)
 {
-    DLOG_IF(WARNING, ctx && (ctx->coro_id() != kMasterCoro))
-        << "[Patronus] Admin request better be sent by master coroutine.";
-    exits_[dsm_->get_node_id()] = true;
+    finished_[key][dsm_->get_node_id()] = true;
 
     auto tid = get_thread_id();
     // does not require replies
@@ -1605,7 +1615,8 @@ void Patronus::finished(CoroContext *ctx)
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = tid;
     msg->cid.mid = from_mid;
-    msg->cid.coro_id = ctx ? ctx->coro_id() : kMasterCoro;
+    msg->cid.coro_id = kMasterCoro;
+    msg->data = key;
 
     if constexpr (debug())
     {
@@ -1677,20 +1688,24 @@ void Patronus::handle_admin_exit(AdminRequest *req,
     }
 
     auto from_node = req->cid.node_id;
-    exits_[from_node].store(true);
+    auto key = req->data;
+    DCHECK_LT(key, finished_.size());
+    DCHECK_LT(from_node, finished_[key].size());
+    finished_[key][from_node].store(true);
 
     for (size_t i = 0; i < dsm_->getClusterSize(); ++i)
     {
-        if (!exits_[i])
+        if (!finished_[key][i])
         {
             DVLOG(1) << "[patronus] receive exit request by " << from_node
-                     << ". but node " << i << " not finished yet.";
+                     << ". but node " << i << " not finished yet. key: " << key;
             return;
         }
     }
 
     DVLOG(1) << "[patronus] set should_exit to true";
-    should_exit_.store(true, std::memory_order_release);
+    DCHECK_LT(key, should_exit_.size());
+    should_exit_[key].store(true, std::memory_order_release);
 }
 void Patronus::signal_server_to_recover_qp(size_t node_id, size_t dir_id)
 {
@@ -1780,8 +1795,12 @@ void Patronus::registerServerThread()
     size_t allocator_buf_size_thread = allocator_buf_size_ / NR_DIRECTORY;
     void *allocator_buf_addr_thread =
         (char *) allocator_buf_addr_ + allocator_buf_size_thread * tid;
-    allocator_ = std::make_shared<mem::SlabAllocator>(
+    default_allocator_ = std::make_shared<mem::SlabAllocator>(
         allocator_buf_addr_thread, allocator_buf_size_thread, slab_alloc_conf);
+
+    CHECK(!is_server_) << "** already registered";
+    CHECK(!is_client_) << "** already registered as client thread.";
+    is_server_ = true;
 }
 
 void Patronus::registerClientThread()
@@ -1827,6 +1846,10 @@ void Patronus::registerClientThread()
     rdma_client_buffer_ =
         std::make_unique<ThreadUnsafeBufferPool<kClientRdmaBufferSize>>(
             client_rdma_buffer_non_8B, rdma_buffer_size_non_8B);
+
+    CHECK(!is_client_) << "** already registered";
+    CHECK(!is_server_) << "** already registered as server thread.";
+    is_client_ = true;
 }
 
 size_t Patronus::try_get_client_continue_coros(size_t mid,
@@ -2002,23 +2025,27 @@ void Patronus::handle_response_lease_modify(LeaseModifyResponse *resp)
     }
 }
 
-void Patronus::server_serve(size_t mid)
+void Patronus::server_serve(size_t mid, uint64_t key)
 {
     auto &server_workers = server_coro_ctx_.server_workers;
     auto &server_master = server_coro_ctx_.server_master;
 
     for (size_t i = 0; i < kServerCoroNr; ++i)
     {
-        server_workers[i] = CoroCall(
-            [this, i](CoroYield &yield) { server_coro_worker(i, yield); });
+        server_workers[i] = CoroCall([this, i, key](CoroYield &yield) {
+            server_coro_worker(i, yield, key);
+        });
     }
-    server_master = CoroCall(
-        [this, mid](CoroYield &yield) { server_coro_master(yield, mid); });
+    server_master = CoroCall([this, mid, key](CoroYield &yield) {
+        server_coro_master(yield, mid, key);
+    });
 
     server_master();
 }
 
-void Patronus::server_coro_master(CoroYield &yield, size_t mid)
+void Patronus::server_coro_master(CoroYield &yield,
+                                  size_t mid,
+                                  uint64_t wait_key)
 {
     auto tid = get_thread_id();
     auto dir_id = mid;
@@ -2048,7 +2075,7 @@ void Patronus::server_coro_master(CoroYield &yield, size_t mid)
         __buffer.data(), ReliableConnection::kMaxRecvBuffer * kServerBufferNr);
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
-    while (likely(!should_exit() || !task_queue.empty()))
+    while (likely(!should_exit(wait_key) || !task_queue.empty()))
     {
         // handle received messages
         char *buffer = (char *) CHECK_NOTNULL(buffer_pool.get());
@@ -2099,8 +2126,9 @@ void Patronus::server_coro_master(CoroYield &yield, size_t mid)
         {
             auto &wc = wc_buffer[i];
             auto wrid = WRID(wc.wr_id);
-            DCHECK_EQ(wrid.prefix, WRID_PREFIX_PATRONUS_BIND_MW)
-                << "** unexpected wrid: " << wrid;
+            DCHECK(wrid.prefix == WRID_PREFIX_PATRONUS_BIND_MW ||
+                   wrid.prefix == WRID_PREFIX_PATRONUS_UNBIND_MW)
+                << "** unexpexted prefix from wrid: " << wrid;
             auto rw_ctx_id = wrid.id;
             auto *rw_ctx = rw_context_.id_to_obj(rw_ctx_id);
             auto coro_id = rw_ctx->coro_id;
@@ -2146,6 +2174,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
              << ", expect cid " << cid << ", coro: " << (ctx ? *ctx : nullctx)
              << ", at patronus time: " << time_syncer_->patronus_now();
 
+    bool wait_success = flag & (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
     bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
     bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
     DCHECK(!only_dealloc) << "This case should have been handled. "
@@ -2274,6 +2303,19 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         protection_region->aba_unit_nr_to_ddl.store(next_aba_unit_nr_to_ddl);
     }
 
+    RWContext *rw_ctx = nullptr;
+    uint64_t rw_ctx_id = 0;
+    bool ctx_success = false;
+    if (unlikely(wait_success))
+    {
+        rw_ctx = DCHECK_NOTNULL(get_rw_context());
+        rw_ctx_id = rw_context_.obj_to_id(rw_ctx);
+        rw_ctx->coro_id = ctx ? ctx->coro_id() : kNotACoro;
+        rw_ctx->dir_id = lease_ctx->dir_id;
+        rw_ctx->ready = false;
+        rw_ctx->success = &ctx_success;
+    }
+
     bool no_unbind = flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
     if (only_dealloc)
     {
@@ -2306,11 +2348,13 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                             1,
                             IBV_ACCESS_CUSTOM_REMOTE_NORW);
 
-            // never signal
             wrs[0].send_flags = 0;
+            if (unlikely(wait_success))
+            {
+                wrs[0].send_flags |= IBV_SEND_SIGNALED;
+            }
             // but want to detect failure
-            wrs[0].wr_id = wrs[1].wr_id =
-                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
+            wrs[0].wr_id = WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, rw_ctx_id).val;
         }
         else if (with_buf && with_pr)
         {
@@ -2331,12 +2375,15 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                             1,
                             IBV_ACCESS_CUSTOM_REMOTE_NORW);
 
-            // never signal
             wrs[0].send_flags = 0;
             wrs[1].send_flags = 0;
+            if (unlikely(wait_success))
+            {
+                wrs[1].send_flags = IBV_SEND_SIGNALED;
+            }
             // but want to detect failure
             wrs[0].wr_id = wrs[1].wr_id =
-                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
+                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, rw_ctx_id).val;
         }
         else
         {
@@ -2346,12 +2393,20 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         }
         if (with_buf || with_pr)
         {
+            // these are unsignaled requests
+            // if going to fast, will overwhelm the QP
+            // so limit the rate.
             ibv_send_wr *bad_wr;
             int ret = ibv_post_send(qp, wrs, &bad_wr);
             PLOG_IF(ERROR, ret != 0)
                 << "[patronus][gc_lease] failed to "
                    "ibv_post_send to unbind memory window. "
                 << *bad_wr;
+            DCHECK(ctx != nullptr);
+            if (unlikely(wait_success))
+            {
+                ctx->yield_to_master();
+            }
         }
         if constexpr (config::kEnableSkipMagicMw)
         {
@@ -2378,15 +2433,25 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
     // TODO(patronus): not considering any checks here
     // for example, the pr->meta.relinquished bits.
-
     if (with_pr)
     {
         put_protection_region(protection_region);
     }
+
+    if (unlikely(wait_success))
+    {
+        DCHECK(rw_ctx->ready) << "** go back to coro " << pre_coro_ctx(ctx)
+                              << ", but rw_ctx not ready";
+        DCHECK(ctx_success) << "Don't know why this op failed";
+        put_rw_context(DCHECK_NOTNULL(rw_ctx));
+    }
+
     put_lease_context(lease_ctx);
 }
 
-void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
+void Patronus::server_coro_worker(coro_t coro_id,
+                                  CoroYield &yield,
+                                  uint64_t wait_key)
 {
     auto tid = get_thread_id();
     CoroContext ctx(tid, &yield, &server_coro_ctx_.server_master, coro_id);
@@ -2395,7 +2460,7 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
     auto &task_pool = server_coro_ctx_.task_pool;
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
-    while (likely(!should_exit() || !task_queue.empty()))
+    while (likely(!should_exit(wait_key) || !task_queue.empty()))
     {
         DCHECK(!task_queue.empty());
         auto task = task_queue.front();
@@ -2433,7 +2498,7 @@ void Patronus::server_coro_worker(coro_t coro_id, CoroYield &yield)
     ctx.yield_to_master();
 }
 
-ErrCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
+RetCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
 {
     using namespace std::chrono_literals;
 
@@ -2454,7 +2519,7 @@ ErrCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
                  << time::TimeSyncer::kCommunicationLatencyNs
                  << "). coro: " << (ctx ? *ctx : nullctx)
                  << ". Now lease: " << lease;
-        return ErrCode::kLeaseLocalExpiredErr;
+        return RetCode::kLeaseLocalExpiredErr;
     }
     // assume one-sided write will not take longer than this
     constexpr static auto kMinMarginDuration = 100us;
@@ -2476,7 +2541,7 @@ ErrCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
              << ", diff_ns: " << diff_ns << ", > margin_duration_ns("
              << margin_duration_ns << "). coro: " << (ctx ? *ctx : nullctx)
              << ". Now lease: " << lease;
-    return ErrCode::kSuccess;
+    return RetCode::kOk;
 }
 
 void Patronus::thread_explain() const
@@ -2490,6 +2555,38 @@ void Patronus::thread_explain() const
               << ", rw_context: " << (void *) &rw_context_
               << ", lease_context: " << (void *) &lease_context_
               << ", protection_region_pool: " << protection_region_pool_.get();
+}
+
+void Patronus::validate_buffers()
+{
+    std::vector<Buffer> buffers;
+    buffers.push_back(get_time_sync_buffer());
+    buffers.push_back(get_protection_region_buffer());
+    buffers.push_back(get_alloc_buffer());
+    buffers.push_back(get_lease_buffer());
+    buffers.push_back(get_user_reserved_buffer());
+
+    validate_buffer_not_overlapped(buffers);
+}
+
+void Patronus::reg_allocator(uint64_t hint, mem::IAllocator::pointer allocator)
+{
+    DCHECK(is_server_)
+        << "** not registered thread, or registered client thread.";
+    reg_allocators_[hint] = allocator;
+}
+mem::IAllocator::pointer Patronus::get_allocator(uint64_t hint)
+{
+    if (hint == kDefaultHint)
+    {
+        return default_allocator_;
+    }
+    auto it = reg_allocators_.find(hint);
+    if (unlikely(it == reg_allocators_.end()))
+    {
+        return nullptr;
+    }
+    return it->second;
 }
 
 }  // namespace patronus

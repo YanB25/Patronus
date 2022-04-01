@@ -27,6 +27,8 @@ constexpr static size_t kThreadNr = 4;
 static_assert(kThreadNr <= kMaxAppThread);
 static_assert(kThreadNr <= RMSG_MULTIPLEXING);
 
+constexpr static size_t kWaitKey = 0;
+
 using namespace std::chrono_literals;
 
 struct Object
@@ -37,7 +39,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -152,7 +154,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         // p->relinquish_write(lease, &ctx);
         // p->relinquish(
         //     lease, (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind, &ctx);
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0, 0, &ctx);
 
         if (unlikely(enable_trace))
         {
@@ -290,7 +292,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "I am server. tid " << tid;
 
-    p->server_serve(tid);
+    p->server_serve(tid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -329,7 +331,7 @@ int main(int argc, char *argv[])
         client(patronus);
         DLOG(INFO) << "[bench] thread " << tid << " finish it work";
         bar.wait();
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
@@ -365,7 +367,7 @@ int main(int argc, char *argv[])
         }
         auto dsm = patronus->get_dsm();
         dsm->reliable_send(nullptr, 0, kClientNodeId, 0);
-        patronus->finished();
+        patronus->finished(kWaitKey);
 
         server(patronus);
     }

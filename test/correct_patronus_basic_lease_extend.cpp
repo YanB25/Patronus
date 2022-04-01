@@ -19,6 +19,7 @@ constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kTestTime = 1_K;
+constexpr static uint64_t kWaitKey = 0;
 
 using namespace patronus;
 // should be one, because one coroutine fails will affect the others
@@ -42,7 +43,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -101,10 +102,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         ns_till_ddl_m.collect(diff_ns);
 
         auto ec = p->extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
-        if (unlikely(ec != ErrCode::kSuccess))
+        if (unlikely(ec != RetCode::kOk))
         {
             extend_failed_m.collect(1);
-            p->relinquish(lease, 0, &ctx);
+            p->relinquish(lease, 0, 0, &ctx);
             p->put_rdma_buffer(rdma_buf);
             DLOG(WARNING) << "[bench] extend failed. retry.";
             continue;
@@ -124,7 +125,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /*offset*/,
                               0 /* flag */,
                               &ctx);
-            if (ec == ErrCode::kSuccess)
+            if (ec == RetCode::kOk)
             {
                 read_loop_succ_cnt++;
             }
@@ -144,7 +145,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         read_loop_nr_m.collect(read_loop_succ_cnt);
 
         // make sure this will take no harm.
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0, 0, &ctx);
         p->put_rdma_buffer(rdma_buf);
     }
 
@@ -216,7 +217,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -244,7 +245,7 @@ void server(Patronus::pointer p)
     auto &object = *(Object *) &buffer[offset];
     object.target = kMagic;
 
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -270,12 +271,12 @@ int main(int argc, char *argv[])
         patronus->registerClientThread();
         sleep(2);
         client(patronus);
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

@@ -22,6 +22,11 @@ class Lease
 {
 public:
     Lease() = default;
+    Lease(Lease &&rhs) = default;
+    Lease &operator=(Lease &&rhs) = default;
+
+    // It is the dsm offset
+    // @see DSM
     uint64_t base_addr() const
     {
         return base_addr_;

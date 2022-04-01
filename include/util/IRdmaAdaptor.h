@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include "Cache.h"
 #include "CoroContext.h"
 #include "GlobalAddress.h"
 #include "patronus/memory/allocator.h"
@@ -46,6 +47,13 @@ public:
     {
         private_data_ = p;
     }
+    // use it with care!
+    // not include valid_
+    bool operator==(const RemoteMemHandle &rhs) const
+    {
+        return gaddr_ == rhs.gaddr_ && size_ == rhs.size_ &&
+               private_data_ == rhs.private_data_;
+    }
 
 private:
     GlobalAddress gaddr_;
@@ -57,9 +65,22 @@ private:
 inline std::ostream &operator<<(std::ostream &os, const RemoteMemHandle &handle)
 {
     os << "{RemoteMemHandle: gaddr: " << handle.gaddr()
-       << ", size: " << handle.size() << ", valid: " << handle.valid() << "}";
+       << ", size: " << handle.size() << ", valid: " << handle.valid()
+       << ", private_data: " << (void *) handle.private_data() << "}";
     return os;
 }
+
+namespace std
+{
+template <>
+struct hash<RemoteMemHandle>
+{
+    std::size_t operator()(const RemoteMemHandle &rhs) const
+    {
+        return rhs.gaddr().val;
+    }
+};
+}  // namespace std
 
 class IRdmaAdaptor
 {
@@ -70,52 +91,55 @@ public:
     IRdmaAdaptor() = default;
     virtual ~IRdmaAdaptor() = default;
 
-    // virtual void reg_default_allocator(IAllocator::pointer) = 0;
-    // virtual void reg_allocator(hint_t hint, IAllocator::pointer) = 0;
-
     // alloc and grant permission
-    virtual RemoteMemHandle remote_alloc_acquire_perm(
-        size_t, hint_t, CoroContext * = nullptr) = 0;
+    virtual RemoteMemHandle remote_alloc_acquire_perm(size_t, hint_t) = 0;
     // only acquire
-    virtual RemoteMemHandle acquire_perm(GlobalAddress gaddr,
-                                         size_t,
-                                         CoroContext * = nullptr) = 0;
+    virtual RemoteMemHandle acquire_perm(GlobalAddress gaddr, size_t) = 0;
     // free
-    virtual void remote_free(GlobalAddress,
-                             hint_t,
-                             CoroContext * = nullptr) = 0;
+    virtual void remote_free(GlobalAddress, size_t size, hint_t) = 0;
     // free + relinquish
-    virtual void remote_free_relinquish_perm(RemoteMemHandle &,
-                                             hint_t,
-                                             CoroContext * = nullptr) = 0;
+    virtual void remote_free_relinquish_perm(RemoteMemHandle &, hint_t) = 0;
+    virtual void remote_free_relinquish_perm_sync(RemoteMemHandle &,
+                                                  hint_t) = 0;
     // only relinquish
-    virtual void relinquish_perm(RemoteMemHandle &,
-                                 CoroContext * = nullptr) = 0;
+    virtual void relinquish_perm(RemoteMemHandle &) = 0;
+    virtual void relinquish_perm_sync(RemoteMemHandle &) = 0;
 
-    virtual char *get_rdma_buffer(size_t size) = 0;
-    virtual void put_rdma_buffer(void *rdma_buf) = 0;
+    virtual Buffer get_rdma_buffer(size_t size) = 0;
+    // use the put_all_rdma_buffer API.
+    // virtual void put_rdma_buffer(void *rdma_buf) = 0;
     virtual RetCode rdma_read(void *rdma_buf,
                               GlobalAddress gaddr,
                               size_t size,
-                              RemoteMemHandle &,
-                              CoroContext * = nullptr) = 0;
+                              RemoteMemHandle &) = 0;
     virtual RetCode rdma_write(GlobalAddress gaddr,
                                void *rdma_buf,
                                size_t size,
-                               RemoteMemHandle &,
-                               CoroContext * = nullptr) = 0;
+                               RemoteMemHandle &) = 0;
     virtual RetCode rdma_cas(GlobalAddress gaddr,
                              uint64_t expect,
                              uint64_t desired,
                              void *rdma_buf,
-                             RemoteMemHandle &,
-                             CoroContext * = nullptr) = 0;
-    virtual RetCode commit(CoroContext * = nullptr) = 0;
+                             RemoteMemHandle &) = 0;
+    virtual RetCode commit() = 0;
     virtual RetCode put_all_rdma_buffer() = 0;
 
     // called by server side
     virtual GlobalAddress to_exposed_gaddr(void *addr) = 0;
     virtual void *from_exposed_gaddr(GlobalAddress gaddr) = 0;
+
+    virtual void enable_trace(const void *any_data)
+    {
+        std::ignore = any_data;
+    }
+    virtual void end_trace(const void *any_data)
+    {
+        std::ignore = any_data;
+    }
+    virtual bool trace_enabled() const
+    {
+        return false;
+    }
 };
 
 #endif

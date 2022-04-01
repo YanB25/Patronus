@@ -24,6 +24,7 @@ constexpr uint16_t kServerNodeId = 0;
 // constexpr static size_t kMwPoolTotalSize = 8192;
 constexpr static size_t kThreadNr = 16;
 static_assert(kThreadNr <= kMaxAppThread);
+constexpr static uint64_t kWaitKey = 0;
 
 std::vector<std::string> col_idx;
 std::vector<size_t> col_x_alloc_size;
@@ -189,7 +190,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         {
             succ_nr++;
             VLOG(4) << "[coro] tid " << tid << " relinquish. coro: " << ctx;
-            patronus->relinquish(lease, relinquish_flag, &ctx);
+            patronus->relinquish(lease, 0 /* hint */, relinquish_flag, &ctx);
             coro_comm.thread_remain_task--;
         }
         else
@@ -520,14 +521,14 @@ void server(Patronus::pointer patronus, bool is_master)
     patronus->registerServerThread();
     if (is_master)
     {
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
 
     auto tid = patronus->get_thread_id();
     auto mid = tid;
     LOG(INFO) << "[coro] server thread tid " << tid << " for mid " << mid;
 
-    patronus->server_serve(mid);
+    patronus->server_serve(mid, kWaitKey);
 }
 
 void client(Patronus::pointer patronus,
@@ -658,7 +659,7 @@ int main(int argc, char *argv[])
 
         auto tid = patronus->get_thread_id();
         LOG(INFO) << "Client calling finished with tid " << tid;
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {

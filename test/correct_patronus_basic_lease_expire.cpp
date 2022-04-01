@@ -27,6 +27,7 @@ thread_local CoroCall master;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
+constexpr static uint64_t kWaitKey = 0;
 // constexpr static size_t kCoroStartKey = 1024;
 // constexpr static size_t kDirID = 0;
 
@@ -43,7 +44,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -116,7 +117,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /* offset */,
                               0 /* flag */,
                               &ctx);
-            if (ec != ErrCode::kSuccess)
+            if (ec != RetCode::kOk)
             {
                 auto patronus_now = syncer.patronus_now();
                 time::ns_t ns_diff = lease.ddl_term() - patronus_now;
@@ -126,7 +127,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                 }
                 else
                 {
-                    CHECK_EQ(ec, ErrCode::kSuccess)
+                    CHECK_EQ(ec, RetCode::kOk)
                         << "[bench] " << i << "-th, read " << t
                         << "-th failed. lease until DDL: " << ns_diff
                         << ", patronus_now: " << patronus_now;
@@ -159,7 +160,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           (uint8_t) RWFlag::kNoLocalExpireCheck,
                           &ctx);
 
-        if (ec == ErrCode::kSuccess)
+        if (ec == RetCode::kOk)
         {
             fail_to_unbind_m.collect(1);
         }
@@ -172,7 +173,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                  << " start to relinquish lease ";
 
         // make sure this will take no harm.
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);
 
         p->put_rdma_buffer(rdma_buf);
     }
@@ -236,7 +237,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -264,7 +265,7 @@ void server(Patronus::pointer p)
     auto &object = *(Object *) &buffer[offset];
     object.target = kMagic;
 
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -290,12 +291,12 @@ int main(int argc, char *argv[])
         patronus->registerClientThread();
         sleep(2);
         client(patronus);
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

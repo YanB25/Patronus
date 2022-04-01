@@ -7,6 +7,7 @@
 #include <memory>
 #include <unordered_set>
 
+#include "Common.h"
 #include "Pool.h"
 #include "allocator.h"
 
@@ -169,9 +170,58 @@ inline std::ostream &operator<<(std::ostream &os, const ClassInformation &info)
     return os;
 }
 
+class pre_class_info
+{
+public:
+    pre_class_info(const std::map<size_t, ClassInformation> &ci) : ci_(ci)
+    {
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const pre_class_info &p);
+
+private:
+    const std::map<size_t, ClassInformation> &ci_;
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_class_info &p)
+{
+    for (const auto &[size, class_info] : p.ci_)
+    {
+        os << "size: " << size << " info: " << class_info << std::endl;
+    }
+    return os;
+}
+class pre_alloc_dist
+{
+public:
+    pre_alloc_dist(const std::unordered_map<size_t, size_t> &dist) : dist_(dist)
+    {
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const pre_alloc_dist &p);
+
+private:
+    const std::unordered_map<size_t, size_t> &dist_;
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_alloc_dist &p)
+{
+    for (const auto &[size, times] : p.dist_)
+    {
+        os << "Size " << size << " allocated " << times << " times"
+           << std::endl;
+    }
+    return os;
+}
+
 class SlabAllocator : public IAllocator
 {
 public:
+    using pointer = std::shared_ptr<SlabAllocator>;
+    static pointer new_instance(void *addr,
+                                size_t len,
+                                SlabAllocatorConfig config)
+    {
+        return std::make_shared<SlabAllocator>(addr, len, config);
+    }
     SlabAllocator(void *addr, size_t len, SlabAllocatorConfig config)
     {
         auto [aligned_addr, aligned_len] = align_address(addr, len, 4_KB);
@@ -194,11 +244,12 @@ public:
         {
             auto cur_class = config.block_class[i];
             auto cur_ratio = config.block_ratio[i];
-            auto cur_len = aligned_len * cur_ratio;
+            auto cur_len = 1.0 * aligned_len * cur_ratio;
             auto cur_addr = begin_addr;
             auto [a, l] =
                 align_address(cur_addr, cur_len, std::min(cur_class, 4_KB));
             blocks_[cur_class] = std::make_unique<Pool>(a, l, cur_class);
+
             end_addr_to_class_[(void *) ((uint64_t) a + l)] = cur_class;
 
             begin_addr = (void *) ((uint64_t) a + l);
@@ -206,6 +257,15 @@ public:
             class_info_.emplace(cur_class,
                                 ClassInformation(a, l, l / cur_class));
             wasted_len_ += ((uint64_t) a - (uint64_t) cur_addr);
+        }
+    }
+    ~SlabAllocator()
+    {
+        if constexpr (::config::kMonitorAllocationDistribution)
+        {
+            DLOG_IF(INFO, !allocated_distribution.get().empty())
+                << "[slab] Allocation distribution: "
+                << pre_alloc_dist(allocated_distribution.get());
         }
     }
 
@@ -216,6 +276,8 @@ public:
         if (it == blocks_.end())
         {
             // no such large block
+            DCHECK(false) << "[slab] no such large block. Requested: " << size
+                          << ". Class: " << pre_class_info(class_info_);
             return nullptr;
         }
         auto *ret = it->second->get();
@@ -224,16 +286,23 @@ public:
             if (ret)
             {
                 debug_class_allocated_nr_[it->first]++;
-                if constexpr (config::kEnableSlabAllocatorStrictChecking)
+                if constexpr (::config::kEnableSlabAllocatorStrictChecking)
                 {
                     CHECK(debug_ongoing_bufs_.insert(ret).second)
                         << "The returned pair.second denotes whether insertion "
                            "succeeds. Expect to insert a new element";
                 }
             }
+
+            if constexpr (::config::kMonitorAllocationDistribution)
+            {
+                allocated_distribution.get()[size]++;
+            }
         }
-        DVLOG(20) << "[slab-alloc] allocating size " << size << " from class "
-                  << it->first << ". ret: " << ret;
+
+        DLOG_IF(FATAL, ret == nullptr) << "Failed to allocate size " << size
+                                       << ": " << pre_class_info(class_info_);
+
         return ret;
     }
     void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
@@ -249,7 +318,7 @@ public:
         if constexpr (debug())
         {
             debug_class_freed_nr_[ptr_class]++;
-            if constexpr (config::kEnableSlabAllocatorStrictChecking)
+            if constexpr (::config::kEnableSlabAllocatorStrictChecking)
             {
                 CHECK_EQ(debug_ongoing_bufs_.erase(addr), 1)
                     << "Expect addr " << (void *) addr << " found in the set";
@@ -301,6 +370,9 @@ private:
     std::unordered_map<size_t, size_t> debug_class_allocated_nr_;
     std::unordered_map<size_t, size_t> debug_class_freed_nr_;
     std::unordered_set<void *> debug_ongoing_bufs_;
+
+    // alloc_size => alloc_num
+    Debug<std::unordered_map<size_t, size_t>> allocated_distribution;
 };
 
 inline std::ostream &operator<<(std::ostream &os,

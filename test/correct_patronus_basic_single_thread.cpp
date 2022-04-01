@@ -30,6 +30,8 @@ constexpr static size_t kDirID = 0;
 constexpr static size_t kTestTime =
     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
 
+constexpr static uint64_t kWaitFlag = 0;
+
 using namespace std::chrono_literals;
 
 struct Object
@@ -40,7 +42,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -96,7 +98,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           0 /* offset */,
                           0 /* flag */,
                           &ctx);
-        CHECK_EQ(ec, ErrCode::kSuccess)
+        CHECK_EQ(ec, RetCode::kOk)
             << "[bench] client coro " << ctx
             << " read FAILED. This should not happen, because we "
                "filter out the invalid mws.";
@@ -110,7 +112,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
         p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);
 
         p->put_rdma_buffer(rdma_buf);
 
@@ -169,7 +171,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitFlag);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -209,7 +211,7 @@ void server(Patronus::pointer p)
                  << " for coro " << i;
     }
 
-    p->server_serve(tid);
+    p->server_serve(tid, kWaitFlag);
 }
 
 int main(int argc, char *argv[])
@@ -239,7 +241,7 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitFlag);
         server(patronus);
     }
 

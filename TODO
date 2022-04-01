@@ -222,3 +222,29 @@ Should add some tests.
     - no difference
 [-] bring coroutine into reg_mw cases
     - got x2 performance
+
+
+Current TODOs:
+[-] compilable
+[-] PASS ALL old tests
+[-] PASS correct_patronus_addr (rename to correct_rdma_adaptor_addr)
+[-] Add an abstract that manage resource memory! call put_all_rdma_buffer on exit!
+[-] PASS test_race_mock_op: pass the very baby test!
+    [-] hashtable_handle does not pass any CoroCtx. Try to fix the code. To avoid potential bugs, remove the default value of coro_ctx = nullptr.
+    [-] add a wrapper to hashtable_handle. What it does is to call put_all_rdma_buffer() and/or monitor when op finish.
+    [-] Kinda recursive, but yes, I need it. Patronus API: client can require patronus to reserve a piece of memory for them. This is shared across thread.
+- Add tracing (with probability) to rdma_ctx. Add the retrieve_metrics API. So that we know what happened during rdma ops.
+- PASS correct_race_rdma_op
+- Add bench_race_rdma_op and see how it works!
+
+Bench (drafts, basic ideas)
+
+I'd like to test more about race hashing, because I take lots of time implementing it, and it is REAL.
+Race hashing:
+- No-mig, rw: If KVBlock is also protected: patronus v.s. MR v.s. pooled MR v.s. unprotected
+- The effectness of auto time out (i.e. lease) (in an art way).
+- The fast recovering of access fault under shrink. patronus v.s. MR v.s. unprotected
+- Mig, ro: The total latency of expansion (and the performance during the whole procedure): patronus v.s. break connection v.s. MR.
+
+Serverless (mock):
+Just take a couple of data. do like quick sort, summing, etc.

@@ -2,11 +2,16 @@
 
 #include <glog/logging.h>
 
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <random>
 
+using namespace std::chrono_literals;
+
 char *getIP();
+
+thread_local PerThreadMemcachedSt Keeper::thread_memc;
 
 std::string trim(const std::string &s)
 {
@@ -21,7 +26,7 @@ std::string trim(const std::string &s)
 
 const char *Keeper::SERVER_NUM_KEY = "serverNum";
 
-Keeper::Keeper(uint32_t maxServer) : maxServer(maxServer), memc(NULL)
+Keeper::Keeper(uint32_t maxServer) : maxServer(maxServer), global_memc(NULL)
 {
 }
 
@@ -52,30 +57,31 @@ bool Keeper::connectMemcached()
     std::getline(conf, addr);
     std::getline(conf, port);
 
-    memc = memcached_create(NULL);
+    global_memc = memcached_create(NULL);
     servers = memcached_server_list_append(
         servers, trim(addr).c_str(), std::stoi(trim(port)), &rc);
-    rc = memcached_server_push(memc, servers);
+    rc = memcached_server_push(global_memc, servers);
 
     free(servers);
 
     if (rc != MEMCACHED_SUCCESS)
     {
-        LOG(ERROR) << "Can't add server:" << memcached_strerror(memc, rc);
+        LOG(ERROR) << "Can't add server:"
+                   << memcached_strerror(global_memc, rc);
         return false;
     }
 
-    memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_BINARY_PROTOCOL, 1);
+    memcached_behavior_set(global_memc, MEMCACHED_BEHAVIOR_BINARY_PROTOCOL, 1);
     return true;
 }
 
 bool Keeper::disconnectMemcached()
 {
-    if (memc)
+    if (global_memc)
     {
-        memcached_quit(memc);
-        memcached_free(memc);
-        memc = NULL;
+        memcached_quit(global_memc);
+        memcached_free(global_memc);
+        global_memc = NULL;
     }
     return true;
 }
@@ -88,7 +94,7 @@ void Keeper::serverEnter()
     while (true)
     {
         rc = memcached_increment(
-            memc, SERVER_NUM_KEY, strlen(SERVER_NUM_KEY), 1, &serverNum);
+            global_memc, SERVER_NUM_KEY, strlen(SERVER_NUM_KEY), 1, &serverNum);
         if (rc == MEMCACHED_SUCCESS)
         {
             myNodeID = serverNum - 1;
@@ -99,7 +105,7 @@ void Keeper::serverEnter()
         }
         LOG(ERROR) << "Server " << myNodeID
                    << " Counld't incr value and get ID: "
-                   << memcached_strerror(memc, rc) << ". retry. ";
+                   << memcached_strerror(global_memc, rc) << ". retry. ";
         sleep(1);
     }
 }
@@ -113,12 +119,16 @@ void Keeper::serverConnect()
 
     while (curServer < maxServer)
     {
-        char *serverNumStr = memcached_get(
-            memc, SERVER_NUM_KEY, strlen(SERVER_NUM_KEY), &l, &flags, &rc);
+        char *serverNumStr = memcached_get(global_memc,
+                                           SERVER_NUM_KEY,
+                                           strlen(SERVER_NUM_KEY),
+                                           &l,
+                                           &flags,
+                                           &rc);
         if (rc != MEMCACHED_SUCCESS)
         {
             LOG(ERROR) << "Server " << myNodeID << " Counld't get serverNum:"
-                       << memcached_strerror(memc, rc) << ". retry. ";
+                       << memcached_strerror(global_memc, rc) << ". retry. ";
             sleep(1);
             continue;
         }
@@ -135,64 +145,5 @@ void Keeper::serverConnect()
             }
         }
         curServer = serverNum;
-    }
-}
-
-void Keeper::memSet(const char *key,
-                    uint32_t klen,
-                    const char *val,
-                    uint32_t vlen)
-{
-    memcached_return rc;
-    while (true)
-    {
-        rc =
-            memcached_set(memc, key, klen, val, vlen, (time_t) 0, (uint32_t) 0);
-        if (rc == MEMCACHED_SUCCESS)
-        {
-            break;
-        }
-        sleep(400);
-        std::this_thread::yield();
-    }
-}
-
-char *Keeper::memGet(const char *key, uint32_t klen, size_t *v_size)
-{
-    size_t l;
-    char *res;
-    uint32_t flags;
-    memcached_return rc;
-
-    while (true)
-    {
-        res = memcached_get(memc, key, klen, &l, &flags, &rc);
-        if (rc == MEMCACHED_SUCCESS)
-        {
-            break;
-        }
-        usleep(400 * myNodeID);
-    }
-
-    if (v_size != nullptr)
-    {
-        *v_size = l;
-    }
-
-    return res;
-}
-
-uint64_t Keeper::memFetchAndAdd(const char *key, uint32_t klen)
-{
-    uint64_t res;
-    while (true)
-    {
-        memcached_return rc = memcached_increment(memc, key, klen, 1, &res);
-        if (rc == MEMCACHED_SUCCESS)
-        {
-            return res;
-        }
-        usleep(10000);
-        std::this_thread::yield();
     }
 }

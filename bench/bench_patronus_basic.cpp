@@ -38,6 +38,7 @@ constexpr static uint8_t kRelinquishFlag =
 // constexpr static uint8_t kRelinquishFlag = 0;
 
 constexpr static uint8_t kReadWriteFlag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+constexpr static uint64_t kWaitKey = 0;
 
 using namespace std::chrono_literals;
 
@@ -49,7 +50,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -158,13 +159,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           0 /* offset */,
                           kReadWriteFlag /* flag */,
                           &ctx);
-        if (unlikely(ec != ErrCode::kSuccess))
+        if (unlikely(ec != RetCode::kOk))
         {
             DVLOG(1) << "[bench] client coro " << ctx
                      << " read FAILED. retry. ";
             bench_infos[tid].fail_nr++;
             // p->relinquish_write(lease, &ctx);
-            p->relinquish(lease, kRelinquishFlag, &ctx);
+            p->relinquish(lease, 0 /* hint */, kRelinquishFlag, &ctx);
             continue;
         }
 
@@ -181,7 +182,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             << ", offset: " << bench_locator(coro_key);
 
         // p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, kRelinquishFlag, &ctx);
+        p->relinquish(lease, 0 /* hint */, kRelinquishFlag, &ctx);
 
         if (unlikely(enable_trace))
         {
@@ -319,7 +320,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "[bench] server thread tid " << tid << " for mid " << mid;
 
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -358,7 +359,7 @@ int main(int argc, char *argv[])
         client(patronus);
         DLOG(INFO) << "[bench] thread " << tid << " finish it work";
         bar.wait();
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
@@ -397,7 +398,7 @@ int main(int argc, char *argv[])
         auto dsm = patronus->get_dsm();
         // sync
         dsm->reliable_send(nullptr, 0, kClientNodeId, 0);
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

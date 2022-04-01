@@ -25,6 +25,8 @@ constexpr static size_t kKeyLimit = 100;
 constexpr static size_t kTestTime =
     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
 
+constexpr static size_t kWaitKey = 0;
+
 using namespace std::chrono_literals;
 
 struct Object
@@ -94,7 +96,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0, 0, &ctx);
 
         DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
         client_comm.still_has_work[coro_id] = true;
@@ -180,7 +182,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "I am server. tid " << tid;
 
-    p->server_serve(mid);
+    p->server_serve(mid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -220,7 +222,7 @@ int main(int argc, char *argv[])
         LOG(INFO) << "[bench] thread " << tid << " finish its work";
         bar.wait();
         LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
-        patronus->finished();
+        patronus->finished(kWaitKey);
     }
     else
     {
@@ -233,7 +235,7 @@ int main(int argc, char *argv[])
             });
         }
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

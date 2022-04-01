@@ -9,11 +9,12 @@ enum RetCode
     kOk,
     kNotFound,
     kNoMem,
-    // failed by multithread conflict.
-    kRetry,
+    kRetry,  // failed by multithread conflict.
     kCacheStale,
     kInvalid,
-    kRdmaErr
+    kRdmaProtectionErr,
+    kRdmaExecutionErr,
+    kLeaseLocalExpiredErr,
 };
 inline std::ostream &operator<<(std::ostream &os, RetCode rc)
 {
@@ -37,8 +38,14 @@ inline std::ostream &operator<<(std::ostream &os, RetCode rc)
     case kInvalid:
         os << "kInvalid";
         break;
-    case kRdmaErr:
-        os << "kRdmaErr";
+    case kRdmaProtectionErr:
+        os << "kRdmaProtectionErr";
+        break;
+    case kRdmaExecutionErr:
+        os << "kRdmaExecutionErr";
+        break;
+    case kLeaseLocalExpiredErr:
+        os << "kLeaseLocalExpiredErr";
         break;
     default:
         LOG(FATAL) << "Unknown return code " << (int) rc;

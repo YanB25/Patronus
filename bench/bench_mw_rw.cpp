@@ -313,7 +313,7 @@ void client(std::shared_ptr<DSM> dsm,
     if (tid == master_tid)
     {
         uint8_t ig = 0xfc;
-        DLOG(INFO) << "!!!! client 0 sending 0xfc";
+        DLOG(INFO) << "client 0 sending 0xfc ...";
         dsm->send((char *) &ig, sizeof(ig), kServerNodeId);
     }
 }

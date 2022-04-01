@@ -46,7 +46,7 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
     // way).
     initExchangeMetadataBootstrap();
 
-    keeper->barrier("DSM-init");
+    keeper->barrier("DSM-init", 1ms);
 
     LOG(WARNING) << "[system] DSM ready. node_id: " << get_node_id();
 

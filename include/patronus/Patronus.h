@@ -18,6 +18,7 @@
 #include "patronus/memory/allocator.h"
 #include "patronus/memory/slab_allocator.h"
 #include "util/Debug.h"
+#include "util/RetCode.h"
 
 namespace patronus
 {
@@ -26,63 +27,29 @@ class Patronus;
 struct PatronusConfig
 {
     size_t machine_nr{0};
-    size_t lease_buffer_size{kDSMCacheSize / 2};
-    size_t alloc_buffer_size{kDSMCacheSize / 2};
+    size_t lease_buffer_size{(kDSMCacheSize - 1_GB) / 2};
+    size_t alloc_buffer_size{(kDSMCacheSize - 1_GB) / 2};
+    size_t reserved_buffer_size{1_GB};
     // for sync time
     size_t time_parent_node_id{0};
-    // for allocator
+    // for default allocator
+    // see also @alloc_buffer_size
     std::vector<size_t> block_class{2_MB};
     std::vector<double> block_ratio{1};
 
     size_t total_buffer_size() const
     {
-        return lease_buffer_size + alloc_buffer_size;
+        return lease_buffer_size + alloc_buffer_size + reserved_buffer_size;
     }
 };
 inline std::ostream &operator<<(std::ostream &os, const PatronusConfig &conf)
 {
     os << "{PatronusConfig machine_nr: " << conf.machine_nr
        << ", lease_buffer_size: " << conf.lease_buffer_size
-       << ", alloc_buffer_size: " << conf.alloc_buffer_size << "}";
-    return os;
-}
-
-enum class ErrCode
-{
-    kSuccess,
-    kLeaseLocalExpiredErr,
-    kOpProtectionErr,  // failed by remote protection err
-    kOpExecutionErr,   // cas failed
-};
-inline std::ostream &operator<<(std::ostream &os, ErrCode ec)
-{
-    switch (ec)
-    {
-    case ErrCode::kSuccess:
-    {
-        os << "kSuccess";
-        break;
-    }
-    case ErrCode::kLeaseLocalExpiredErr:
-    {
-        os << "kLeaseLocalExpiredErr";
-        break;
-    }
-    case ErrCode::kOpExecutionErr:
-    {
-        os << "kOpExecutionErr";
-        break;
-    }
-    case ErrCode::kOpProtectionErr:
-    {
-        os << "kOpProtectionErr";
-        break;
-    }
-    default:
-    {
-        CHECK(false) << "** Unknown err code: " << (int) ec;
-    }
-    }
+       << ", alloc_buffer_size: " << conf.alloc_buffer_size
+       << ", reserved_buffer_size: " << conf.reserved_buffer_size
+       << ". (Total: " << conf.total_buffer_size() << ")"
+       << "}";
     return os;
 }
 
@@ -135,6 +102,8 @@ public:
     constexpr static size_t kMessageSize = ReliableConnection::kMessageSize;
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
+    constexpr static uint64_t kDefaultHint = 0;
+    constexpr static size_t kMaxSyncKey = 16;
 
     static pointer ins(const PatronusConfig &conf)
     {
@@ -150,13 +119,15 @@ public:
     /**
      * @brief Get the rlease object
      *
-     * @param node_id the id of target node
+     * @param buffer_gaddr
+     * - If with_alloc OR only_alloc is ON, buffer_gaddr.offset is a hint for
+     * the allocator.
+     * - Otherwise, buffer_gaddr.offset is the address (offset, actually) you
+     * want to bind
      * @param dir_id  the dir_id.
-     * @param key the unique key to identify the object / address you want
-     * to access. Call @reg_locator to tell Patronus how to map the key to
-     * the address
      * @param size the length of the object / address
-     * @param term the length of term requesting for protection
+     * @param ns the length of term requesting for protection
+     * @param flag @see AcquireRequestFlag
      * @param ctx sync call if ctx is nullptr. Otherwise coroutine context.
      * @return Read Lease
      */
@@ -166,6 +137,16 @@ public:
                             std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
+    /**
+     * @brief Alloc a piece of remote memory, without any permission binded
+     *
+     * @param node_id the target node id
+     * @param dir_id the directory id
+     * @param size the requested size
+     * @param hint the hint to the allocator
+     * @param ctx
+     * @return Lease
+     */
     inline Lease alloc(uint16_t node_id,
                        uint16_t dir_id,
                        size_t size,
@@ -183,55 +164,117 @@ public:
     /**
      * @brief extend the lifecycle of lease for another more ns.
      */
-    inline ErrCode extend(Lease &lease,
+    inline RetCode extend(Lease &lease,
                           std::chrono::nanoseconds ns,
                           uint8_t flag /* LeaseModifyFlag */,
                           CoroContext *ctx = nullptr);
+    /**
+     * when allocation is ON, hint is sent to the server
+     */
     inline void relinquish(Lease &lease,
+                           uint64_t hint,
                            uint8_t flag /* LeaseModifyFlag */,
                            CoroContext *ctx = nullptr);
+    /**
+     * @brief Deallocate to a piece of remote memory, without any permission
+     * modification
+     *
+     * @param gaddr the address got from p->get_gaddr(lease)
+     * @param dir_id the directory id
+     * @param size the size of that piece of memory
+     * @param hint a hint to the allocator
+     * @param ctx
+     */
     inline void dealloc(GlobalAddress gaddr,
                         uint16_t dir_id,
                         size_t size,
                         uint64_t hint,
                         CoroContext *ctx = nullptr);
     inline void relinquish_write(Lease &lease, CoroContext *ctx = nullptr);
-    inline ErrCode read(Lease &lease,
+    inline RetCode read(Lease &lease,
                         char *obuf,
                         size_t size,
                         size_t offset,
                         uint8_t flag /* RWFlag */,
                         CoroContext *ctx = nullptr);
-    inline ErrCode write(Lease &lease,
+    inline RetCode write(Lease &lease,
                          const char *ibuf,
                          size_t size,
                          size_t offset,
                          uint8_t flag /* RWFlag */,
                          CoroContext *ctx = nullptr);
-    inline ErrCode cas(Lease &lease,
+    inline RetCode cas(Lease &lease,
                        char *iobuf,
                        size_t offset,
                        uint64_t compare,
                        uint64_t swap,
                        uint8_t flag /* RWFlag */,
                        CoroContext *ctx = nullptr);
+    // handy cluster-wide put/get. Not very performance, but convenient
+    template <typename V,
+              typename T,
+              std::enable_if_t<std::is_trivially_copyable_v<V>, bool> = true,
+              std::enable_if_t<!std::is_array_v<V>, bool> = true>
+    void put(const std::string &key, const V &v, const T &sleep_time)
+    {
+        DLOG(INFO) << "[keeper] PUT key: `" << key << "` value: `" << v;
+        auto value = std::string((const char *) &v, sizeof(V));
+        return dsm_->put(key, value, sleep_time);
+    }
+    template <typename T>
+    void put(const std::string &key,
+             const std::string &value,
+             const T &sleep_time)
+    {
+        DLOG(INFO) << "[keeper] PUT key: `" << key << "` value: `" << value;
+        return dsm_->put(key, value, sleep_time);
+    }
+    template <typename T>
+    std::string try_get(const std::string &key, const T &sleep_time)
+    {
+        return dsm_->try_get(key, sleep_time);
+    }
+    template <typename T>
+    std::string get(const std::string &key, const T &sleep_time)
+    {
+        auto value = dsm_->get(key, sleep_time);
+        DLOG(INFO) << "[keeper] GET key: `" << key << "` value: `" << value;
+        return value;
+    }
+    template <typename V, typename T>
+    V get_object(const std::string &key, const T &sleep_time)
+    {
+        auto v = dsm_->get(key, sleep_time);
+        V ret;
+        CHECK_GE(v.size(), sizeof(V));
+        memcpy((char *) &ret, v.data(), sizeof(V));
+        DLOG(INFO) << "[keeper] GET_OBJ key: " << key << ", obj: " << ret;
+        return ret;
+    }
+
+    template <typename T>
+    void keeper_barrier(const std::string &key, const T &sleep_time)
+    {
+        return dsm_->barrier(key, sleep_time);
+    }
+
     /**
      * @brief After all the node call this function, @should_exit() will
      * return true
      *
      * @param ctx
      */
-    void finished([[maybe_unused]] CoroContext *ctx = nullptr);
-    bool should_exit() const
+    void finished(uint64_t key);
+    bool should_exit(uint64_t key) const
     {
-        return should_exit_.load(std::memory_order_relaxed);
+        return should_exit_[key].load(std::memory_order_relaxed);
     }
 
     /**
      * @brief give the server thread to Patronus.
      *
      */
-    void server_serve(size_t mid);
+    void server_serve(size_t mid, uint64_t key);
 
     size_t try_get_client_continue_coros(size_t mid,
                                          coro_t *coro_buf,
@@ -352,17 +395,69 @@ public:
     {
         return conf_.alloc_buffer_size;
     }
+    size_t user_reserved_buffer_size() const
+    {
+        return conf_.reserved_buffer_size;
+    }
+    Buffer get_lease_buffer() const
+    {
+        auto server_buf = dsm_->get_server_buffer();
+        auto *buf_addr = server_buf.buffer;
+        auto buf_size = lease_buffer_size();
+        DCHECK_GE(server_buf.size, buf_size);
+        return Buffer(buf_addr, buf_size);
+    }
+    Buffer get_alloc_buffer() const
+    {
+        auto server_buf = dsm_->get_server_buffer();
+        auto *buf_addr = server_buf.buffer + lease_buffer_size();
+        auto buf_size = alloc_buffer_size();
+        DCHECK_GE(server_buf.size, lease_buffer_size() + alloc_buffer_size());
+        return Buffer(buf_addr, buf_size);
+    }
+    Buffer get_user_reserved_buffer() const
+    {
+        auto server_buffer = dsm_->get_server_buffer();
+        auto *buf_addr =
+            server_buffer.buffer + lease_buffer_size() + alloc_buffer_size();
+        auto buf_size = user_reserved_buffer_size();
+        DCHECK_GE(lease_buffer_size() + alloc_buffer_size() + buf_size,
+                  server_buffer.size);
+        return Buffer(buf_addr, buf_size);
+    }
+
     void thread_explain() const;
     inline GlobalAddress get_gaddr(const Lease &lease) const;
 
+    // exposed buffer offset
+    GlobalAddress to_exposed_gaddr(void *addr)
+    {
+        return GlobalAddress(0 /* node_id */,
+                             dsm_->addr_to_buffer_offset(addr));
+    }
+    void *from_exposed_gaddr(GlobalAddress gaddr)
+    {
+        return dsm_->buffer_offset_to_addr(gaddr.offset);
+    }
+
+    inline void *patronus_alloc(size_t size, uint64_t hint);
+    inline void patronus_free(void *addr, size_t size, uint64_t hint);
+
+    void reg_allocator(uint64_t hint, mem::IAllocator::pointer allocator);
+    mem::IAllocator::pointer get_allocator(uint64_t hint);
+
 private:
     PatronusConfig conf_;
-    static thread_local std::shared_ptr<mem::SlabAllocator> allocator_;
+    // the default_allocator_ is set on registering server thread.
+    // With the config from PatronusConfig.
+    static thread_local mem::SlabAllocator::pointer default_allocator_;
+    static thread_local std::unordered_map<uint64_t, mem::IAllocator::pointer>
+        reg_allocators_;
     void *allocator_buf_addr_{nullptr};
     size_t allocator_buf_size_{0};
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
-    constexpr static size_t kGuessActiveLeasePerCoro = 16;
+    constexpr static size_t kGuessActiveLeasePerCoro = 64;
     constexpr static size_t kClientRdmaBufferSize = 4 * define::KB;
     constexpr static size_t kLeaseContextNr =
         kMaxCoroNr * kGuessActiveLeasePerCoro;
@@ -510,14 +605,21 @@ private:
 
     // clang-format off
     /**
-     * The layout of dsm_->uget_server_reserve_buffer():
+     * The layout of dsm_->get_server_reserve_buffer():
      * [required_time_sync_size()] [required_protection_region_size()]
      * 
      * ^-- get_time_sync_buffer()
      *                             ^-- get_protection_region_buffer()
+     *                                                                
+     * Total of them: reserved_buffer_size();
      */
     // clang-format on
-    static size_t required_dsm_reserve_size()
+
+    size_t reserved_buffer_size() const
+    {
+        return required_dsm_reserve_size();
+    }
+    size_t required_dsm_reserve_size() const
     {
         return required_protection_region_size() + required_time_sync_size();
     }
@@ -546,7 +648,6 @@ private:
         auto buf_size = required_time_sync_size();
         return Buffer(buf_addr, buf_size);
     }
-
     // for clients
     size_t handle_response_messages(const char *msg_buf,
                                     size_t msg_nr,
@@ -589,8 +690,8 @@ private:
                        CoroContext *ctx = nullptr);
 
     // server coroutines
-    void server_coro_master(CoroYield &yield, size_t mid);
-    void server_coro_worker(coro_t coro_id, CoroYield &yield);
+    void server_coro_master(CoroYield &yield, size_t mid, uint64_t key);
+    void server_coro_worker(coro_t coro_id, CoroYield &yield, uint64_t key);
 
     // helpers, actual impls
     Lease get_lease_impl(uint16_t node_id,
@@ -601,7 +702,7 @@ private:
                          RequestType type,
                          uint8_t flag,
                          CoroContext *ctx = nullptr);
-    ErrCode buffer_rw_impl(Lease &lease,
+    RetCode buffer_rw_impl(Lease &lease,
                            char *iobuf,
                            size_t size,
                            size_t offset,
@@ -609,29 +710,29 @@ private:
                            CoroContext *ctx = nullptr);
     inline bool already_passed_ddl(time::PatronusTime time) const;
     // flag should be RWFlag
-    inline ErrCode handle_rwcas_flag(Lease &lease,
+    inline RetCode handle_rwcas_flag(Lease &lease,
                                      uint8_t flag,
                                      CoroContext *ctx);
-    inline ErrCode validate_lease(const Lease &lease);
-    ErrCode protection_region_rw_impl(Lease &lease,
+    inline RetCode validate_lease(const Lease &lease);
+    RetCode protection_region_rw_impl(Lease &lease,
                                       char *io_buf,
                                       size_t size,
                                       size_t offset,
                                       bool is_read,
                                       CoroContext *ctx = nullptr);
-    ErrCode protection_region_cas_impl(Lease &lease,
+    RetCode protection_region_cas_impl(Lease &lease,
                                        char *iobuf,
                                        size_t offset,
                                        uint64_t compare,
                                        uint64_t swap,
                                        CoroContext *ctx = nullptr);
-    ErrCode buffer_cas_impl(Lease &lease,
+    RetCode buffer_cas_impl(Lease &lease,
                             char *iobuf,
                             size_t offset,
                             uint64_t compare,
                             uint64_t swap,
                             CoroContext *ctx);
-    ErrCode read_write_impl(char *iobuf,
+    RetCode read_write_impl(char *iobuf,
                             size_t size,
                             size_t node_id,
                             size_t dir_id,
@@ -640,11 +741,11 @@ private:
                             bool is_read,
                             uint16_t wrid_prefix,
                             CoroContext *ctx = nullptr);
-    inline ErrCode extend_impl(Lease &lease,
+    inline RetCode extend_impl(Lease &lease,
                                size_t extend_unit_nr,
                                uint8_t flag,
                                CoroContext *ctx);
-    ErrCode cas_impl(char *iobuf,
+    RetCode cas_impl(char *iobuf,
                      size_t node_id,
                      size_t dir_id,
                      uint32_t rkey,
@@ -666,13 +767,12 @@ private:
                                 uint64_t addr,
                                 size_t length,
                                 int access_flag);
-    ErrCode maybe_auto_extend(Lease &lease, CoroContext *ctx = nullptr);
-
-    inline void *patronus_alloc(size_t size, uint64_t hint);
-    inline void patronus_free(void *addr, size_t size, uint64_t hint);
+    RetCode maybe_auto_extend(Lease &lease, CoroContext *ctx = nullptr);
 
     inline bool valid_lease_buffer_offset(size_t buffer_offset) const;
     inline bool valid_total_buffer_offset(size_t buffer_offset) const;
+
+    void validate_buffers();
 
     /**
      * @brief call me only if u know what u are doing.
@@ -698,6 +798,9 @@ private:
     static thread_local char *client_rdma_buffer_;
     static thread_local size_t client_rdma_buffer_size_;
 
+    static thread_local bool is_server_;
+    static thread_local bool is_client_;
+
     // owned by server threads
     // [NR_DIRECTORY]
     static thread_local std::queue<ibv_mw *> mw_pool_[NR_DIRECTORY];
@@ -715,8 +818,9 @@ private:
     constexpr static uint16_t mask = 0b1111111111;
 
     // for admin management
-    std::array<std::atomic<bool>, MAX_MACHINE> exits_;
-    std::atomic<bool> should_exit_{false};
+    std::array<std::array<std::atomic<bool>, MAX_MACHINE>, kMaxSyncKey>
+        finished_;
+    std::array<std::atomic<bool>, kMaxSyncKey> should_exit_{false};
 
     // for barrier
     std::unordered_map<uint64_t, std::set<uint64_t>> barrier_;
@@ -809,7 +913,7 @@ Lease Patronus::upgrade(Lease &lease, uint8_t flag, CoroContext *ctx)
     //     lease, RequestType::kUpgrade, 0 /* term */, flag, ctx);
     CHECK(false) << "deprecated " << lease << flag << pre_coro_ctx(ctx);
 }
-ErrCode Patronus::extend_impl(Lease &lease,
+RetCode Patronus::extend_impl(Lease &lease,
                               size_t extend_unit_nr,
                               uint8_t flag,
                               CoroContext *ctx)
@@ -833,7 +937,7 @@ ErrCode Patronus::extend_impl(Lease &lease,
     auto cas_ec = protection_region_cas_impl(
         lease, rdma_buffer.buffer, offset, compare, swap, ctx);
 
-    if (likely(cas_ec == ErrCode::kSuccess))
+    if (likely(cas_ec == RetCode::kOk))
     {
         lease.aba_unit_nr_to_ddl_.u32_2 += extend_unit_nr;
         lease.update_ddl_term();
@@ -844,7 +948,7 @@ ErrCode Patronus::extend_impl(Lease &lease,
              << ". Now lease: " << lease;
     return cas_ec;
 }
-ErrCode Patronus::extend(Lease &lease,
+RetCode Patronus::extend(Lease &lease,
                          std::chrono::nanoseconds chrono_ns,
                          uint8_t flag,
                          CoroContext *ctx)
@@ -873,7 +977,7 @@ ErrCode Patronus::extend(Lease &lease,
                  << time::TimeSyncer::kCommunicationLatencyNs
                  << "). coro: " << (ctx ? *ctx : nullctx)
                  << ". Now lease: " << lease;
-        return ErrCode::kLeaseLocalExpiredErr;
+        return RetCode::kLeaseLocalExpiredErr;
     }
 
     return extend_impl(lease, extend_unit_nr, flag, ctx);
@@ -906,7 +1010,10 @@ void Patronus::dealloc(GlobalAddress gaddr,
     lease_modify_impl(
         lease, hint, RequestType::kRelinquish, 0 /* term */, flag, ctx);
 }
-void Patronus::relinquish(Lease &lease, uint8_t flag, CoroContext *ctx)
+void Patronus::relinquish(Lease &lease,
+                          uint64_t hint,
+                          uint8_t flag,
+                          CoroContext *ctx)
 {
     bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
     DCHECK(!only_dealloc) << "Please use Patronus::dealloc instead";
@@ -914,26 +1021,26 @@ void Patronus::relinquish(Lease &lease, uint8_t flag, CoroContext *ctx)
     debug_validate_lease_modify_flag(flag);
     // TODO(Patronus): the term is set to 0 here.
     lease_modify_impl(
-        lease, 0 /* hint */, RequestType::kRelinquish, 0 /* term */, flag, ctx);
+        lease, hint, RequestType::kRelinquish, 0 /* term */, flag, ctx);
 }
 
-ErrCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)
+RetCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)
 {
     auto lease_patronus_ddl = lease.ddl_term();
     auto patronus_now = DCHECK_NOTNULL(time_syncer_)->patronus_now();
     auto ret = time_syncer_->definitely_lt(patronus_now, lease_patronus_ddl)
-                   ? ErrCode::kSuccess
-                   : ErrCode::kLeaseLocalExpiredErr;
+                   ? RetCode::kOk
+                   : RetCode::kLeaseLocalExpiredErr;
     DVLOG(5) << "[patronus][validate_lease] patronus_now: " << patronus_now
              << ", ddl: " << lease_patronus_ddl << ", ret: " << ret;
     return ret;
 }
 
-ErrCode Patronus::handle_rwcas_flag(Lease &lease,
+RetCode Patronus::handle_rwcas_flag(Lease &lease,
                                     uint8_t flag,
                                     CoroContext *ctx)
 {
-    ErrCode ec = ErrCode::kSuccess;
+    RetCode ec = RetCode::kOk;
 
     bool no_check;
     if (lease.no_gc_)
@@ -948,7 +1055,7 @@ ErrCode Patronus::handle_rwcas_flag(Lease &lease,
 
     if (likely(!no_check))
     {
-        if ((ec = validate_lease(lease)) != ErrCode::kSuccess)
+        if ((ec = validate_lease(lease)) != RetCode::kOk)
         {
             return ec;
         }
@@ -960,18 +1067,18 @@ ErrCode Patronus::handle_rwcas_flag(Lease &lease,
     }
     bool reserved = flag & (uint8_t) RWFlag::kReserved;
     DCHECK(!reserved);
-    return ErrCode::kSuccess;
+    return RetCode::kOk;
 }
 
-ErrCode Patronus::read(Lease &lease,
+RetCode Patronus::read(Lease &lease,
                        char *obuf,
                        size_t size,
                        size_t offset,
                        uint8_t flag,
                        CoroContext *ctx)
 {
-    ErrCode ec = ErrCode::kSuccess;
-    if ((ec = handle_rwcas_flag(lease, flag, ctx)) != ErrCode::kSuccess)
+    RetCode ec = RetCode::kOk;
+    if ((ec = handle_rwcas_flag(lease, flag, ctx)) != RetCode::kOk)
     {
         return ec;
     }
@@ -982,13 +1089,13 @@ ErrCode Patronus::read(Lease &lease,
         if (lease.cache_query(offset, size, obuf))
         {
             // cache hit
-            return ErrCode::kSuccess;
+            return RetCode::kOk;
         }
     }
 
     return buffer_rw_impl(lease, obuf, size, offset, true /* is_read */, ctx);
 }
-ErrCode Patronus::write(Lease &lease,
+RetCode Patronus::write(Lease &lease,
                         const char *ibuf,
                         size_t size,
                         size_t offset,
@@ -996,7 +1103,7 @@ ErrCode Patronus::write(Lease &lease,
                         CoroContext *ctx)
 {
     auto ec = handle_rwcas_flag(lease, flag, ctx);
-    if (unlikely(ec != ErrCode::kSuccess))
+    if (unlikely(ec != RetCode::kOk))
     {
         return ec;
     }
@@ -1004,14 +1111,14 @@ ErrCode Patronus::write(Lease &lease,
         lease, (char *) ibuf, size, offset, false /* is_read */, ctx);
 
     bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
-    if (ec == ErrCode::kSuccess && with_cache)
+    if (ec == RetCode::kOk && with_cache)
     {
         lease.cache_insert(offset, size, ibuf);
     }
     return ec;
 }
 
-ErrCode Patronus::cas(Lease &lease,
+RetCode Patronus::cas(Lease &lease,
                       char *iobuf,
                       size_t offset,
                       uint64_t compare,
@@ -1020,13 +1127,13 @@ ErrCode Patronus::cas(Lease &lease,
                       CoroContext *ctx)
 {
     auto ec = handle_rwcas_flag(lease, flag, ctx);
-    if (unlikely(ec != ErrCode::kSuccess))
+    if (unlikely(ec != RetCode::kOk))
     {
         return ec;
     }
     ec = buffer_cas_impl(lease, iobuf, offset, compare, swap, ctx);
     bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
-    if (ec == ErrCode::kSuccess && with_cache)
+    if (ec == RetCode::kOk && with_cache)
     {
         DCHECK_GE(sizeof(swap), 8);
         lease.cache_insert(offset, 8 /* size */, (const char *) swap);
@@ -1080,16 +1187,17 @@ void Patronus::relinquish_write(Lease &lease, CoroContext *ctx)
 }
 void *Patronus::patronus_alloc(size_t size, uint64_t hint)
 {
-    // auto it = allocators_.find(hint);
-    // if (it == allocators_.end())
-    // {
-    //     // miss, use default
-    //     return allocators_[0]->alloc(size);
-    // }
-    // return it->second->alloc(size);
-    std::ignore = hint;
-    auto *ret = allocator_->alloc(size);
-    return ret;
+    if (hint == kDefaultHint)
+    {
+        return default_allocator_->alloc(size);
+    }
+    auto it = reg_allocators_.find(hint);
+    if (it == reg_allocators_.end())
+    {
+        DCHECK(false) << "** Unknown hint " << hint;
+        return nullptr;
+    }
+    return it->second->alloc(size);
 }
 void Patronus::patronus_free(void *addr, size_t size, uint64_t hint)
 {
@@ -1097,16 +1205,18 @@ void Patronus::patronus_free(void *addr, size_t size, uint64_t hint)
     {
         return;
     }
+    if (hint == 0)
+    {
+        return default_allocator_->free(addr, size);
+    }
 
-    // auto it = allocators_.find(hint);
-    // if (it == allocators_.end())
-    // {
-    //     return allocators_[0]->free(addr, size);
-    // }
-    // return it->second->free(addr, size);
-
-    std::ignore = hint;
-    allocator_->free(addr, size);
+    auto it = reg_allocators_.find(hint);
+    if (it == reg_allocators_.end())
+    {
+        CHECK(false) << "** Failed to free with hint " << hint
+                     << ": not found. addr: " << addr << ", size: " << size;
+    }
+    return it->second->free(addr, size);
 }
 
 bool Patronus::valid_lease_buffer_offset(size_t buffer_offset) const

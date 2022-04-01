@@ -139,8 +139,8 @@ void ReliableRecvMessageConnection::handle_wc(char *ibuf, const ibv_wc &wc)
 {
     if (unlikely(wc.status != IBV_WC_SUCCESS))
     {
-        LOG(ERROR) << "[rmsg] Failed to handle wc: " << WRID(wc.wr_id)
-                   << ", status: " << wc.status;
+        PLOG(FATAL) << "[rmsg] Failed to handle wc: " << WRID(wc.wr_id)
+                    << ", status: " << wc.status;
         return;
     }
     uint32_t node_id = WRID(wc.wr_id).u16_a;

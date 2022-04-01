@@ -123,18 +123,21 @@ public:
     {
         CHECK(!st_gaddr_.is_null());
     }
-    RetCode try_del_slot(SlotHandle slot_handle, IRdmaAdaptor &rdma_ctx)
+    RetCode try_del_slot(SlotHandle slot_handle, IRdmaAdaptor &rdma_adpt)
     {
         auto remote = slot_handle.remote_addr();
         uint64_t expect_val = slot_handle.slot_view().val();
         auto clear_view = slot_handle.view_after_clear();
-        auto *rdma_buf = DCHECK_NOTNULL(rdma_ctx.get_rdma_buffer(8));
-        CHECK_EQ(
-            rdma_ctx.rdma_cas(
-                remote, expect_val, clear_view.val(), rdma_buf, st_mem_handle_),
-            kOk);
-        CHECK_EQ(rdma_ctx.commit(), kOk);
-        uint64_t read = *(uint64_t *) rdma_buf;
+        auto rdma_buf = rdma_adpt.get_rdma_buffer(8);
+        DCHECK_GE(rdma_buf.size, 8);
+        CHECK_EQ(rdma_adpt.rdma_cas(remote,
+                                    expect_val,
+                                    clear_view.val(),
+                                    rdma_buf.buffer,
+                                    st_mem_handle_),
+                 kOk);
+        CHECK_EQ(rdma_adpt.commit(), kOk);
+        uint64_t read = *(uint64_t *) rdma_buf.buffer;
         bool success = read == expect_val;
         if (success)
         {
@@ -142,22 +145,21 @@ public:
         }
         return kRetry;
     }
-    RetCode del_slot(SlotHandle slot_handle, IRdmaAdaptor &rdma_ctx)
+    RetCode del_slot(SlotHandle slot_handle, IRdmaAdaptor &rdma_adpt)
     {
-        CHECK_EQ(try_del_slot(slot_handle, rdma_ctx), kOk);
+        CHECK_EQ(try_del_slot(slot_handle, rdma_adpt), kOk);
         return kOk;
     }
     RetCode put_slot(SlotMigrateHandle slot_handle,
-                     IRdmaAdaptor &rdma_ctx,
+                     IRdmaAdaptor &rdma_adpt,
                      SlotHandle *ret,
                      HashContext *dctx)
     {
         auto hash = slot_handle.hash();
-        auto h1 = hash_1(hash);
-        auto h2 = hash_2(hash);
+        auto [h1, h2] = hash_h1_h2(hash);
 
-        auto cbs = get_two_combined_bucket_handle(h1, h2, rdma_ctx);
-        CHECK_EQ(rdma_ctx.commit(), kOk);
+        auto cbs = get_two_combined_bucket_handle(h1, h2, rdma_adpt);
+        CHECK_EQ(rdma_adpt.commit(), kOk);
 
         std::vector<BucketHandle<kSlotNr>> buckets;
         buckets.reserve(4);
@@ -176,7 +178,7 @@ public:
                 {
                     auto rc = bucket.do_insert(bucket.slot_handle(idx),
                                                slot_handle.slot_view(),
-                                               rdma_ctx,
+                                               rdma_adpt,
                                                st_mem_handle_,
                                                ret,
                                                dctx);
@@ -193,7 +195,8 @@ public:
                                 config::kEnableMemoryDebug && dctx != nullptr)
                         << "[race][trace] Subtable::put_slot: failed to insert "
                            "to slot "
-                        << view << ": slot not empty. At slot_idx " << i << ". "
+                        << bucket.slot_handle(idx)
+                        << ": slot not empty. At slot_idx " << idx << ". "
                         << *dctx;
                 }
             }
@@ -209,12 +212,34 @@ public:
      * @return TwoCombinedBucketHandle<kSlotNr>
      */
     TwoCombinedBucketHandle<kSlotNr> get_two_combined_bucket_handle(
-        uint64_t h1, uint64_t h2, IRdmaAdaptor &rdma_ctx)
+        uint64_t h1, uint64_t h2, IRdmaAdaptor &rdma_adpt)
     {
+        auto cb1_idx = to_combined_bucket_idx(h1);
+        auto cb2_idx = to_combined_bucket_idx(h2);
+        if (unlikely(cb1_idx == cb2_idx))
+        {
+            // don't want to colocate to the same combined grous
+            // otherwise, resizing will fail to insert by no enough slots
+
+            // this will definately make them different cbs.
+            h2++;
+        }
         auto cb1 = combined_bucket_handle(h1);
         auto cb2 = combined_bucket_handle(h2);
         return TwoCombinedBucketHandle<kSlotNr>(
-            h1, h2, std::move(cb1), std::move(cb2), rdma_ctx, st_mem_handle_);
+            h1, h2, std::move(cb1), std::move(cb2), rdma_adpt, st_mem_handle_);
+    }
+    static uint64_t to_combined_bucket_idx(uint64_t i)
+    {
+        i = i % kCombinedBucketNr;
+        if (i % 2 == 0)
+        {
+            return i / 2;
+        }
+        else
+        {
+            return (i - 1) / 2;
+        }
     }
     constexpr static size_t max_item_nr()
     {
@@ -246,7 +271,7 @@ public:
 
     RetCode update_bucket_header_nodrain(uint32_t ld,
                                          uint32_t suffix,
-                                         IRdmaAdaptor &rdma_ctx,
+                                         IRdmaAdaptor &rdma_adpt,
                                          HashContext *dctx)
     {
         for (size_t i = 0; i < kTotalBucketNr; ++i)
@@ -255,7 +280,7 @@ public:
                 GlobalAddress(st_gaddr_ + i * Bucket<kSlotNr>::size_bytes());
             auto b = BucketHandle<kSlotNr>(bucket_gaddr, nullptr);
             auto rc = b.update_header_nodrain(
-                ld, suffix, rdma_ctx, st_mem_handle_, dctx);
+                ld, suffix, rdma_adpt, st_mem_handle_, dctx);
             if (rc != kOk)
             {
                 return rc;
@@ -266,28 +291,29 @@ public:
 
     RetCode init_and_update_bucket_header_drain(uint32_t ld,
                                                 uint32_t suffix,
-                                                IRdmaAdaptor &rdma_ctx,
+                                                IRdmaAdaptor &rdma_adpt,
                                                 HashContext *dctx)
     {
         DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
             << "[race][trace] init_and_update_bucket_header_nodrain: ld: " << ld
             << ", suffix: " << suffix;
         auto st_size = size_bytes();
-        auto *rdma_buf = rdma_ctx.get_rdma_buffer(st_size);
-        memset(rdma_buf, 0, st_size);
+        auto rdma_buf = rdma_adpt.get_rdma_buffer(st_size);
+        DCHECK_GE(rdma_buf.size, st_size);
+        memset(rdma_buf.buffer, 0, st_size);
         for (size_t i = 0; i < kTotalBucketNr; ++i)
         {
             auto *bucket_buf_addr =
-                (char *) rdma_buf + i * Bucket<kSlotNr>::size_bytes();
+                (char *) rdma_buf.buffer + i * Bucket<kSlotNr>::size_bytes();
             auto bucket = Bucket<kSlotNr>(bucket_buf_addr);
             bucket.header().ld = ld;
             bucket.header().suffix = suffix;
         }
 
-        CHECK_EQ(
-            rdma_ctx.rdma_write(st_gaddr_, rdma_buf, st_size, st_mem_handle_),
-            kOk);
-        CHECK_EQ(rdma_ctx.commit(), kOk);
+        CHECK_EQ(rdma_adpt.rdma_write(
+                     st_gaddr_, rdma_buf.buffer, st_size, st_mem_handle_),
+                 kOk);
+        CHECK_EQ(rdma_adpt.commit(), kOk);
 
         return kOk;
     }

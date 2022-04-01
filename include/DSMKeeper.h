@@ -100,7 +100,28 @@ public:
               uint32_t maxServer = MAX_MACHINE);
 
     virtual ~DSMKeeper();
-    void barrier(const std::string &barrierKey);
+    template <typename T>
+    void barrier(const std::string &barrierKey, const T &sleep_time)
+    {
+        std::string key = std::string("__barrier:") + barrierKey;
+        auto nid = getMyNodeID();
+        if (nid == 0)
+        {
+            memSet(key.c_str(), key.size(), "0", 1, sleep_time);
+        }
+        memFetchAndAdd(key.c_str(), key.size(), sleep_time);
+        while (true)
+        {
+            auto *ret = memGet(
+                key.c_str(), key.size(), nullptr, sleep_time * (nid + 1));
+            uint64_t v = std::stoull(ret);
+            free(ret);
+            if (v == getServerNR())
+            {
+                return;
+            }
+        }
+    }
     uint64_t sum(const std::string &sum_key, uint64_t value);
     void connectDir(DirectoryConnection &,
                     int remoteID,

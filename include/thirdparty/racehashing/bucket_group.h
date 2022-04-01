@@ -70,13 +70,15 @@ public:
     CombinedBucketHandle(CombinedBucketHandle &&) = default;
     CombinedBucketHandle &operator=(CombinedBucketHandle &&) = default;
 
-    RetCode read(IRdmaAdaptor &rdma_ctx, RemoteMemHandle &handle)
+    RetCode read(IRdmaAdaptor &rdma_adpt, RemoteMemHandle &handle)
     {
-        buffer_ = CHECK_NOTNULL(rdma_ctx.get_rdma_buffer(size_bytes()));
+        auto rdma_buf = rdma_adpt.get_rdma_buffer(size_bytes());
+        DCHECK_GE(rdma_buf.size, size_bytes());
+        buffer_ = rdma_buf.buffer;
         DLOG_IF(INFO, config::kEnableMemoryDebug)
             << "[race][mem] in bucket_group::read: gaddr_: " << gaddr_
             << ", buffer: " << (void *) buffer_;
-        return rdma_ctx.rdma_read(
+        return rdma_adpt.rdma_read(
             (char *) buffer_, gaddr_, size_bytes(), handle);
     }
 
@@ -149,12 +151,12 @@ public:
                             uint32_t h2,
                             CombinedBucketHandle<kSlotNr> &&cb1,
                             CombinedBucketHandle<kSlotNr> &&cb2,
-                            IRdmaAdaptor &rdma_ctx,
+                            IRdmaAdaptor &rdma_adpt,
                             RemoteMemHandle &subtable_mem_handle)
         : h1_(h1), h2_(h2), cb1_(std::move(cb1)), cb2_(std::move(cb2))
     {
-        CHECK_EQ(cb1_.read(rdma_ctx, subtable_mem_handle), kOk);
-        CHECK_EQ(cb2_.read(rdma_ctx, subtable_mem_handle), kOk);
+        CHECK_EQ(cb1_.read(rdma_adpt, subtable_mem_handle), kOk);
+        CHECK_EQ(cb2_.read(rdma_adpt, subtable_mem_handle), kOk);
     }
     TwoCombinedBucketHandle(const TwoCombinedBucketHandle &) = delete;
     TwoCombinedBucketHandle &operator=(const TwoCombinedBucketHandle &) =

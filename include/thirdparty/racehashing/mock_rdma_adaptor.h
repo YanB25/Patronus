@@ -8,6 +8,7 @@
 #include <cstring>
 #include <vector>
 
+#include "./conf.h"
 #include "./utils.h"
 #include "Common.h"
 #include "patronus/memory/allocator.h"
@@ -54,9 +55,7 @@ public:
     {
         return std::make_shared<MockRdmaAdaptor>(server_endpoint, dctx);
     }
-    RemoteMemHandle remote_alloc_acquire_perm(size_t size,
-                                              hint_t hint,
-                                              CoroContext * = nullptr) override
+    RemoteMemHandle remote_alloc_acquire_perm(size_t size, hint_t hint) override
     {
         auto ret = server_ep_.lock()->rpc_alloc(size, hint);
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
@@ -64,9 +63,7 @@ public:
             << " for size " << size;
         return alloc_handle(ret, size);
     }
-    RemoteMemHandle acquire_perm(GlobalAddress gaddr,
-                                 size_t size,
-                                 CoroContext * = nullptr) override
+    RemoteMemHandle acquire_perm(GlobalAddress gaddr, size_t size) override
     {
         return alloc_handle(gaddr, size);
     }
@@ -94,16 +91,18 @@ public:
             ret = CHECK_NOTNULL(it->second->alloc(size));
         }
 
-        remote_allocated_buffers_.insert(ret);
+        remote_allocated_buffers_.emplace(ret, size);
         auto remote_gaddr = to_exposed_gaddr(ret);
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
             << "[rdma][trace] rpc_alloc: " << (void *) ret << "("
             << remote_gaddr << ") for size " << size;
         return remote_gaddr;
     }
-    void rpc_free(GlobalAddress gaddr, hint_t hint)
+    void rpc_free(GlobalAddress gaddr, size_t size, hint_t hint)
     {
         auto *addr = from_exposed_gaddr(gaddr);
+        CHECK_EQ(remote_allocated_buffers_.count(addr), 1);
+        CHECK_EQ(remote_allocated_buffers_[addr], size);
         CHECK_EQ(remote_allocated_buffers_.erase(addr), 1);
         DLOG_IF(INFO, config::kEnableDebug)
             << "[rdma][trace] rpc_free: " << addr;
@@ -125,31 +124,36 @@ public:
 
         remote_not_freed_buffers_.insert(addr);
     }
-    void remote_free(GlobalAddress gaddr,
-                     hint_t hint,
-                     CoroContext * = nullptr) override
+    void remote_free(GlobalAddress gaddr, size_t size, hint_t hint) override
     {
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
             << "[rdma][trace] remote_free: " << gaddr;
         remote_not_freed_buffers_.insert((void *) gaddr.val);
-        server_ep_.lock()->rpc_free(gaddr, hint);
+        server_ep_.lock()->rpc_free(gaddr, size, hint);
     }
     // mock implement
     // no action for permission
     void remote_free_relinquish_perm(RemoteMemHandle &handle,
-                                     hint_t hint,
-                                     CoroContext *ctx = nullptr) override
+                                     hint_t hint) override
     {
         free_handle(handle);
-        return remote_free(handle.gaddr(), hint, ctx);
+        return remote_free(handle.gaddr(), handle.size(), hint);
     }
-    void relinquish_perm(RemoteMemHandle &handle,
-                         CoroContext * = nullptr) override
+    void remote_free_relinquish_perm_sync(RemoteMemHandle &handle,
+                                          hint_t hint) override
+    {
+        return remote_free_relinquish_perm(handle, hint);
+    }
+    void relinquish_perm(RemoteMemHandle &handle) override
     {
         free_handle(handle);
         return;
     }
-    char *get_rdma_buffer(size_t size) override
+    void relinquish_perm_sync(RemoteMemHandle &handle) override
+    {
+        return relinquish_perm(handle);
+    }
+    Buffer get_rdma_buffer(size_t size) override
     {
         void *ret = malloc(size);
         DCHECK_GT(size, 0) << "Make no sense to alloc size with 0";
@@ -157,19 +161,13 @@ public:
         DLOG_IF(INFO, config::kEnableMemoryDebug && dctx_ != nullptr)
             << "[rdma][trace] get_rdma_buffer: " << (void *) ret << " for size "
             << size;
-        return (char *) ret;
+        return Buffer((char *) ret, size);
     }
-    void put_rdma_buffer(void *rdma_buf) override
-    {
-        DCHECK_EQ(allocated_buffers_.count(rdma_buf), 1);
-        allocated_buffers_.erase(rdma_buf);
-        free(rdma_buf);
-    }
+
     RetCode rdma_read(void *rdma_buf,
                       GlobalAddress gaddr,
                       size_t size,
-                      RemoteMemHandle &handle,
-                      CoroContext * = nullptr) override
+                      RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
         MockRdmaOp op;
@@ -185,8 +183,7 @@ public:
     RetCode rdma_write(GlobalAddress gaddr,
                        void *rdma_buf,
                        size_t size,
-                       RemoteMemHandle &handle,
-                       CoroContext *) override
+                       RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
         MockRdmaOp op;
@@ -204,8 +201,7 @@ public:
                      uint64_t expect,
                      uint64_t desired,
                      void *rdma_buf,
-                     RemoteMemHandle &handle,
-                     CoroContext * = nullptr) override
+                     RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
         MockRdmaOp op;
@@ -258,7 +254,7 @@ public:
             << remote_allocated_buffers_.size();
     }
 
-    RetCode commit(CoroContext * = nullptr) override
+    RetCode commit() override
     {
         for (const auto &op : ops_)
         {
@@ -364,7 +360,7 @@ private:
     HashContext *dctx_{nullptr};
     std::vector<MockRdmaOp> ops_;
     std::unordered_set<void *> allocated_buffers_;
-    std::unordered_set<void *> remote_allocated_buffers_;
+    std::unordered_map<void *, size_t> remote_allocated_buffers_;
     std::unordered_set<void *> remote_not_freed_buffers_;
 
     std::unordered_set<uint64_t> allocated_handle_;

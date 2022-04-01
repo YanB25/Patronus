@@ -63,7 +63,7 @@ static_assert(sizeof(GlobalAddress) == sizeof(uint64_t), "XXX");
 static inline std::ostream &operator<<(std::ostream &os,
                                        const GlobalAddress &addr)
 {
-    os << "{gaddr nodeId: " << addr.nodeID << ", off: " << addr.offset
+    os << "{gaddr nodeId: " << addr.nodeID << ", off: " << (void *) addr.offset
        << ", local: " << (void *) addr.val << "} ";
     return os;
 }

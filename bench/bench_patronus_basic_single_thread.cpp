@@ -23,6 +23,7 @@ thread_local CoroCall master;
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kDirID = 0;
+constexpr static uint64_t kWaitKey = 0;
 
 // constexpr static size_t kTestTime =
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
@@ -38,7 +39,7 @@ struct Object
     uint64_t unused_3;
 };
 
-uint64_t bench_locator(key_t key)
+uint64_t bench_locator(uint64_t key)
 {
     return key * sizeof(Object);
 }
@@ -127,13 +128,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           0 /* offset */,
                           0 /* flag */,
                           &ctx);
-        if (unlikely(ec != ErrCode::kSuccess))
+        if (unlikely(ec != RetCode::kOk))
         {
             DVLOG(1) << "[bench] client coro " << ctx
                      << " read FAILED. retry. ";
             bench_info.fail_nr++;
             p->relinquish_write(lease, &ctx);
-            p->relinquish(lease, 0, &ctx);
+            p->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);
             continue;
         }
 
@@ -149,7 +150,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             << ", lease.base: " << (void *) lease.base_addr();
 
         p->relinquish_write(lease, &ctx);
-        p->relinquish(lease, 0, &ctx);
+        p->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);
 
         if (unlikely(enable_trace))
         {
@@ -226,7 +227,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
         }
     }
 
-    p->finished();
+    p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
@@ -293,7 +294,7 @@ void server(Patronus::pointer p)
                  << " for coro " << i;
     }
 
-    p->server_serve(tid);
+    p->server_serve(tid, kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -321,7 +322,7 @@ int main(int argc, char *argv[])
     else
     {
         patronus->registerServerThread();
-        patronus->finished();
+        patronus->finished(kWaitKey);
         server(patronus);
     }
 

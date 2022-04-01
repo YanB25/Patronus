@@ -5,6 +5,7 @@
 #include <glog/logging.h>
 
 #include <atomic>
+#include <cstring>
 
 #include "Cache.h"
 #include "ClockManager.h"
@@ -75,7 +76,7 @@ public:
         {
             auto ex = getExchangeMetaBootstrap(i);
             uint64_t digest = djb2_digest((char *) &ex, sizeof(ex));
-            LOG(INFO) << "[debug] node: " << i << " digest: " << std::hex
+            LOG(INFO) << "[boot-meta] node: " << i << " digest: " << std::hex
                       << digest;
         }
     }
@@ -434,21 +435,48 @@ public:
     ExchangeMeta &getExchangeMetaBootstrap(size_t node_id) const;
 
     // Memcached operations for sync
-    size_t Put(uint64_t key, const void *value, size_t count)
+    template <typename T>
+    void put(const std::string &key,
+             const std::string &value,
+             const T &sleep_time)
     {
-        std::string k = std::string("gam-") + std::to_string(key);
-        keeper->memSet(k.c_str(), k.size(), (char *) value, count);
-        return count;
+        auto actual_key = "__DSM:" + key;
+        keeper->memSet(actual_key.c_str(),
+                       actual_key.size(),
+                       value.c_str(),
+                       value.size(),
+                       sleep_time);
     }
-
-    size_t Get(uint64_t key, void *value)
+    template <typename T>
+    std::string try_get(const std::string &key, const T &sleep_time)
     {
-        std::string k = std::string("gam-") + std::to_string(key);
-        size_t size;
-        char *ret = keeper->memGet(k.c_str(), k.size(), &size);
-        memcpy(value, ret, size);
-
-        return size;
+        auto actual_key = "__DSM:" + key;
+        size_t size = 0;
+        auto *ret = keeper->memTryGet(
+            actual_key.c_str(), actual_key.size(), &size, sleep_time);
+        std::string value;
+        value.resize(size);
+        memcpy(value.data(), ret, size);
+        ::free(ret);
+        return value;
+    }
+    template <typename T>
+    std::string get(const std::string &key, const T &sleep_time)
+    {
+        auto actual_key = "__DSM:" + key;
+        size_t size = 0;
+        auto *ret = keeper->memGet(
+            actual_key.c_str(), actual_key.size(), &size, sleep_time);
+        std::string value;
+        value.resize(size);
+        memcpy(value.data(), ret, size);
+        ::free(ret);
+        return value;
+    }
+    template <typename T>
+    void barrier(const std::string &key, const T &sleep_time)
+    {
+        keeper->barrier(key, sleep_time);
     }
 
     // ClockManager &clock_manager()
@@ -559,9 +587,10 @@ public:
     {
         return thread_id != -1;
     }
-    void barrier(const std::string &ss)
+    template <typename T>
+    void keeper_barrier(const std::string &ss, const T &sleep_time)
     {
-        keeper->barrier(ss);
+        keeper->barrier(ss, sleep_time);
     }
     /**
      * @brief The per-thread temporary buffer for client.
