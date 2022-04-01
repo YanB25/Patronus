@@ -47,6 +47,13 @@ public:
     {
         private_data_ = p;
     }
+    // use it with care!
+    // not include valid_
+    bool operator==(const RemoteMemHandle &rhs) const
+    {
+        return gaddr_ == rhs.gaddr_ && size_ == rhs.size_ &&
+               private_data_ == rhs.private_data_;
+    }
 
 private:
     GlobalAddress gaddr_;
@@ -58,9 +65,22 @@ private:
 inline std::ostream &operator<<(std::ostream &os, const RemoteMemHandle &handle)
 {
     os << "{RemoteMemHandle: gaddr: " << handle.gaddr()
-       << ", size: " << handle.size() << ", valid: " << handle.valid() << "}";
+       << ", size: " << handle.size() << ", valid: " << handle.valid()
+       << ", private_data: " << (void *) handle.private_data() << "}";
     return os;
 }
+
+namespace std
+{
+template <>
+struct hash<RemoteMemHandle>
+{
+    std::size_t operator()(const RemoteMemHandle &rhs) const
+    {
+        return rhs.gaddr().val;
+    }
+};
+}  // namespace std
 
 class IRdmaAdaptor
 {
@@ -79,8 +99,11 @@ public:
     virtual void remote_free(GlobalAddress, size_t size, hint_t) = 0;
     // free + relinquish
     virtual void remote_free_relinquish_perm(RemoteMemHandle &, hint_t) = 0;
+    virtual void remote_free_relinquish_perm_sync(RemoteMemHandle &,
+                                                  hint_t) = 0;
     // only relinquish
     virtual void relinquish_perm(RemoteMemHandle &) = 0;
+    virtual void relinquish_perm_sync(RemoteMemHandle &) = 0;
 
     virtual Buffer get_rdma_buffer(size_t size) = 0;
     // use the put_all_rdma_buffer API.

@@ -247,6 +247,7 @@ void debug_validate_lease_modify_flag(uint8_t flag)
         bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
         bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
         bool reserved = flag & (uint8_t) LeaseModifyFlag::kReserved;
+        bool wait_success = flag & (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
         if (only_dealloc)
         {
             DCHECK(!with_dealloc) << "with_dealloc conflict with only_dealloc";
@@ -254,6 +255,12 @@ void debug_validate_lease_modify_flag(uint8_t flag)
         if (with_dealloc)
         {
             DCHECK(!only_dealloc) << "only_dealloc conflict with with_dealloc";
+        }
+        if (wait_success)
+        {
+            DCHECK(!no_relinquish_unbind)
+                << "wait_success conflict with no_relinquish_unbind: If you do "
+                   "not want to unbind, make no sense to wait for nothing.";
         }
         DCHECK(!reserved);
     }
@@ -279,13 +286,19 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
         flag.flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
     if (with_dealloc)
     {
-        os << "with-dealloc";
+        os << "with-dealloc, ";
     }
     bool only_dealloc =
         flag.flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
     if (only_dealloc)
     {
-        os << "only-dealloc";
+        os << "only-dealloc, ";
+    }
+    bool wait_till_succ =
+        flag.flag & (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
+    if (wait_till_succ)
+    {
+        os << "wait-success, ";
     }
     os << "}";
     return os;

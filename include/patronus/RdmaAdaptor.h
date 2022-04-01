@@ -90,6 +90,20 @@ public:
     {
         ongoing_rdma_bufs_.reserve(kMaxOngoingRdmaBuf);
     }
+    ~RdmaAdaptor()
+    {
+        if constexpr (debug())
+        {
+            if (!ongoing_remote_handle_.get().empty())
+            {
+                for (const auto &handle : ongoing_remote_handle_.get())
+                {
+                    CHECK(false)
+                        << "[rdma-adpt] possible handle leak for " << handle;
+                }
+            }
+        }
+    }
     // for client
     static pointer new_instance(uint16_t node_id,
                                 uint32_t dir_id,
@@ -105,7 +119,6 @@ public:
         return std::make_shared<RdmaAdaptor>(0, 0, patronus, true, nullptr);
     }
 
-    virtual ~RdmaAdaptor() = default;
     // yes
     /**
      * The manipulation of address:
@@ -157,7 +170,13 @@ public:
         DCHECK_EQ(gaddr.nodeID, node_id_);
         auto lease =
             patronus_->get_wlease(gaddr, dir_id_, size, 0ns, flag, coro_ctx_);
-        CHECK(lease.success()) << "lease: " << lease << ", ec: " << lease.ec();
+        if (unlikely(!lease.success()))
+        {
+            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr)
+                << "Only allow this kind of failure";
+            return acquire_perm(vaddr, size);
+        }
+        CHECK(lease.success()) << "** get lease failed: " << lease.ec();
 
         DLOG_IF(INFO, ::config::kMonitorAddressConversion)
             << "[addr] acquire_perm: gaddr: " << gaddr
@@ -184,6 +203,20 @@ public:
     void remote_free_relinquish_perm(RemoteMemHandle &handle,
                                      hint_t hint) override
     {
+        auto flag = (uint8_t) LeaseModifyFlag::kWithDeallocation;
+        return do_remote_free_relinquish_perm(handle, hint, flag);
+    }
+    void remote_free_relinquish_perm_sync(RemoteMemHandle &handle,
+                                          hint_t hint) override
+    {
+        auto flag = (uint8_t) LeaseModifyFlag::kWithDeallocation |
+                    (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
+        return do_remote_free_relinquish_perm(handle, hint, flag);
+    }
+    void do_remote_free_relinquish_perm(RemoteMemHandle &handle,
+                                        hint_t hint,
+                                        uint8_t flag)
+    {
         if constexpr (::config::kEnableRdmaTrace)
         {
             if (trace_enabled())
@@ -193,11 +226,20 @@ public:
             }
         }
         auto &lease = *(Lease *) handle.private_data();
-        auto flag = (uint8_t) LeaseModifyFlag::kWithDeallocation;
         patronus_->relinquish(lease, hint, flag, coro_ctx_);
         free_handle(handle);
     }
     void relinquish_perm(RemoteMemHandle &handle) override
+    {
+        auto flag = 0;
+        return do_relinquish_perm(handle, flag);
+    }
+    void relinquish_perm_sync(RemoteMemHandle &handle) override
+    {
+        auto flag = (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
+        return do_relinquish_perm(handle, flag);
+    }
+    void do_relinquish_perm(RemoteMemHandle &handle, uint8_t flag)
     {
         if constexpr (::config::kEnableRdmaTrace)
         {
@@ -208,7 +250,6 @@ public:
             }
         }
         auto &lease = *(Lease *) handle.private_data();
-        auto flag = 0;
         patronus_->relinquish(lease, 0 /* hint */, flag, coro_ctx_);
         free_handle(handle);
     }
@@ -390,6 +431,8 @@ private:
 
     RdmaTraceRecord rdma_trace_record_;
 
+    Debug<std::unordered_set<RemoteMemHandle>> ongoing_remote_handle_;
+
     /**
      * The global address returned to the caller (vaddr) is guaranteed to leave
      * the higher 16 bit unused (zeros). However, the internal global address
@@ -416,6 +459,13 @@ private:
         // free the lease
         auto lease_guard =
             std::unique_ptr<Lease>((Lease *) handle.private_data());
+        if constexpr (debug())
+        {
+            // CHECK_EQ(ongoing_remote_handle_.get().erase(handle), 1);
+            auto ret = ongoing_remote_handle_.get().erase(handle);
+            CHECK_EQ(ret, 1);
+        }
+
         handle.set_invalid();
     }
     RemoteMemHandle alloc_handle(GlobalAddress gaddr, size_t size, Lease &lease)
@@ -425,6 +475,10 @@ private:
         RemoteMemHandle handle(gaddr, size);
         auto stored_lease = std::make_unique<Lease>(std::move(lease));
         handle.set_private_data(stored_lease.release());
+        if constexpr (debug())
+        {
+            CHECK(ongoing_remote_handle_.get().insert(handle).second);
+        }
         return handle;
     }
 };

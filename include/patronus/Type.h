@@ -206,7 +206,10 @@ enum class LeaseModifyFlag : uint8_t
     kForceUnbind = 1 << 1,
     kWithDeallocation = 1 << 2,
     kOnlyDeallocation = 1 << 3,
-    kReserved = 1 << 4,
+    // wait until unbind success before returning
+    // will harm performance
+    kWaitUntilSuccess = 1 << 4,
+    kReserved = 1 << 5,
 };
 void debug_validate_lease_modify_flag(uint8_t flag);
 struct LeaseModifyFlagOut

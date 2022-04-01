@@ -47,6 +47,19 @@ public:
           rdma_adpt_(rdma_adpt)
     {
     }
+    ~RaceHashingHandleImpl()
+    {
+        rdma_adpt_->relinquish_perm_sync(kvblock_mem_handle_);
+        rdma_adpt_->relinquish_perm_sync(cur_kvblock_mem_handle_);
+        rdma_adpt_->relinquish_perm_sync(directory_mem_handle_);
+        for (auto &handle : subtable_mem_handles_)
+        {
+            if (handle.valid())
+            {
+                rdma_adpt_->relinquish_perm_sync(handle);
+            }
+        }
+    }
     constexpr static size_t meta_size()
     {
         return RaceHashingT::meta_size();
@@ -445,9 +458,10 @@ public:
         auto expect_gd = gd();
         if (pow(2, next_depth) > kDEntryNr)
         {
-            DLOG(WARNING) << "[race][expand] (1) trying to expand to gd "
-                          << next_depth << " with entries "
-                          << pow(2, next_depth) << ". Out of directory entry.";
+            // DLOG(WARNING) << "[race][expand] (1) trying to expand to gd "
+            //               << next_depth << " with entries "
+            //               << pow(2, next_depth) << ". Out of directory
+            //               entry.";
             CHECK_EQ(expand_unlock_subtable_nodrain(subtable_idx), kOk);
             CHECK_EQ(rdma_adpt_->commit(), kOk);
             DCHECK_EQ(cached_meta_.expanding[subtable_idx], 1);
@@ -514,9 +528,14 @@ public:
 
         // 3) allocate subtable here
         auto alloc_size = SubTableT::size_bytes();
-        subtable_mem_handles_[next_subtable_idx] =
-            rdma_adpt_->remote_alloc_acquire_perm(
-                alloc_size, config::kAllocHintDirSubtable);
+        if (subtable_mem_handles_[next_subtable_idx].valid())
+        {
+            rdma_adpt_->relinquish_perm(
+                subtable_mem_handles_[next_subtable_idx]);
+        }
+        auto next_subtable_handle = rdma_adpt_->remote_alloc_acquire_perm(
+            alloc_size, config::kAllocHintDirSubtable);
+        subtable_mem_handles_[next_subtable_idx] = next_subtable_handle;
         auto new_remote_subtable =
             subtable_mem_handles_[next_subtable_idx].gaddr();
         LOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
@@ -533,8 +552,8 @@ public:
             << ", suffix: " << next_subtable_idx;
         // should remotely memset the buffer to zero
         // then set up the header.
-        SubTableHandleT new_remote_st_handle(
-            new_remote_subtable, get_subtable_mem_handle(next_subtable_idx));
+        SubTableHandleT new_remote_st_handle(new_remote_subtable,
+                                             next_subtable_handle);
         rc = expand_init_and_update_remote_bucket_header_drain(
             new_remote_st_handle, ld, suffix, dctx);
         CHECK_EQ(rc, kOk);
@@ -603,8 +622,8 @@ public:
         auto bits = ld;
         CHECK_GE(bits, 1) << "Test the " << bits
                           << "-th bits, which index from one.";
-        auto &src_st_mem_handle = get_subtable_mem_handle(subtable_idx);
-        auto &dst_st_mem_handle = get_subtable_mem_handle(next_subtable_idx);
+        auto &src_st_mem_handle = org_st_mem_handle;
+        auto &dst_st_mem_handle = next_subtable_handle;
         SubTableHandleT org_st(origin_subtable_remote_addr, src_st_mem_handle);
         SubTableHandleT dst_st(new_remote_subtable, dst_st_mem_handle);
         CHECK_EQ(expand_migrate_subtable(org_st, dst_st, bits - 1, dctx), kOk);
@@ -641,26 +660,6 @@ public:
         DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
             << "[race][expand][result][debug] The latest remote meta: " << meta
             << ". dctx: " << *dctx;
-        if constexpr (debug())
-        {
-            for (size_t i = 0; i < pow((size_t) 2, (size_t) meta.gd); ++i)
-            {
-                auto ld = meta.lds[i];
-                auto addr = meta.entries[i];
-                size_t ptr_nr = 0;
-                for (size_t t = 0; t < pow((size_t) 2, (size_t) meta.gd); ++t)
-                {
-                    if (meta.entries[t] == addr)
-                    {
-                        ptr_nr++;
-                    }
-                }
-                CHECK_EQ(ptr_nr, pow((ssize_t) 2, (ssize_t) meta.gd - ld))
-                    << "** If multithread, plz comment out me. subtable[" << i
-                    << "]: ld " << ld << ", gd " << meta.gd
-                    << ", number of ptr wrong.";
-            }
-        }
     }
     RetCode expand_cascade_update_entries_drain(
         GlobalAddress next_subtable_addr,
@@ -1244,6 +1243,7 @@ private:
     std::array<RemoteMemHandle, subtable_nr()> subtable_mem_handles_;
     RemoteMemHandle kvblock_mem_handle_;
     RemoteMemHandle directory_mem_handle_;
+    RemoteMemHandle cur_kvblock_mem_handle_;
 
     bool inited_{false};
 
@@ -1262,18 +1262,13 @@ private:
     SubTableHandleT subtable_handle(size_t idx)
     {
         auto &st_mem_handle = get_subtable_mem_handle(idx);
-        auto mem_handle_start_gaddr = st_mem_handle.gaddr();
         auto st_start_gaddr = subtable_addr(idx);
-        if (unlikely(mem_handle_start_gaddr != st_start_gaddr))
-        {
-            // the handle gets stale because of expansion
-            build_subtable_mem_handle(idx);
-            // do again
-            return subtable_handle(idx);
-        }
+        DCHECK_EQ(st_mem_handle.gaddr(), st_start_gaddr)
+            << "call to get_subtable_mem_handle is expected to be consistent";
         SubTableHandleT st(st_start_gaddr, st_mem_handle);
         return st;
     }
+    // guaranteed to be valid and consistent
     RemoteMemHandle &get_subtable_mem_handle(size_t idx)
     {
         DCHECK_LT(idx, subtable_mem_handles_.size());
@@ -1281,14 +1276,26 @@ private:
         if (unlikely(!ret.valid()))
         {
             build_subtable_mem_handle(idx);
-            auto &new_ret = subtable_mem_handles_[idx];
-            DCHECK(new_ret.valid());
-            return new_ret;
+            return get_subtable_mem_handle(idx);
+        }
+        auto mem_handle_start_gaddr = ret.gaddr();
+        auto st_start_gaddr = subtable_addr(idx);
+        if (unlikely(mem_handle_start_gaddr != st_start_gaddr))
+        {
+            // inconsistency detected. rebuild the handle
+            build_subtable_mem_handle(idx);
+            return get_subtable_mem_handle(idx);
         }
         return ret;
     }
     void build_subtable_mem_handle(size_t idx)
     {
+        if (unlikely(subtable_mem_handles_[idx].valid()))
+        {
+            // exist old handle, free it before going on
+            rdma_adpt_->relinquish_perm(subtable_mem_handles_[idx]);
+        }
+        DCHECK(!subtable_mem_handles_[idx].valid());
         subtable_mem_handles_[idx] = rdma_adpt_->acquire_perm(
             cached_meta_.entries[idx], SubTableT::size_bytes());
     }
@@ -1321,20 +1328,21 @@ private:
             rdma_adpt_->acquire_perm(g_kvblock_pool_gaddr, g_kvblock_pool_size);
 
         // init the second-level allocator to the kvblocks
-        auto cur_kvblock_mem_handle = rdma_adpt_->remote_alloc_acquire_perm(
+        CHECK(!cur_kvblock_mem_handle_.valid());
+        cur_kvblock_mem_handle_ = rdma_adpt_->remote_alloc_acquire_perm(
             config::kKVBlockAllocBatchSize, config::kAllocHintKVBlock);
         // each client got a piece of region WITHIN the global region of kvblock
         if constexpr (debug())
         {
             auto g_kvblock_gaddr = kvblock_mem_handle_.gaddr();
-            auto cur_kvblock_gaddr = cur_kvblock_mem_handle.gaddr();
+            auto cur_kvblock_gaddr = cur_kvblock_mem_handle_.gaddr();
             CHECK_EQ(g_kvblock_gaddr.nodeID, cur_kvblock_gaddr.nodeID);
             CHECK_GE(cur_kvblock_gaddr.offset, g_kvblock_gaddr.offset);
             CHECK_LE(cur_kvblock_gaddr.offset + config::kKVBlockAllocBatchSize,
                      g_kvblock_gaddr.offset + kvblock_mem_handle_.size());
         }
 
-        kvblock_pool_gaddr_ = cur_kvblock_mem_handle.gaddr();
+        kvblock_pool_gaddr_ = cur_kvblock_mem_handle_.gaddr();
         patronus::mem::SlabAllocatorConfig slab_conf;
         slab_conf.block_class = {config::kKVBlockExpectSize};
         slab_conf.block_ratio = {1.0};
@@ -1346,6 +1354,7 @@ private:
 
     void init_directory_mem_handle()
     {
+        DCHECK(!directory_mem_handle_.valid());
         directory_mem_handle_ =
             rdma_adpt_->acquire_perm(table_meta_addr_, sizeof(MetaT));
     }

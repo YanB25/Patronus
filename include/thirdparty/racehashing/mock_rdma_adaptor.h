@@ -139,10 +139,19 @@ public:
         free_handle(handle);
         return remote_free(handle.gaddr(), handle.size(), hint);
     }
+    void remote_free_relinquish_perm_sync(RemoteMemHandle &handle,
+                                          hint_t hint) override
+    {
+        return remote_free_relinquish_perm(handle, hint);
+    }
     void relinquish_perm(RemoteMemHandle &handle) override
     {
         free_handle(handle);
         return;
+    }
+    void relinquish_perm_sync(RemoteMemHandle &handle) override
+    {
+        return relinquish_perm(handle);
     }
     Buffer get_rdma_buffer(size_t size) override
     {

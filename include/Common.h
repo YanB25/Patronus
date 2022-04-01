@@ -292,7 +292,7 @@ constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
 
 constexpr static bool kEnableRdmaTrace = true;
-constexpr static double kRdmaTraceRate = 1;
+constexpr static double kRdmaTraceRate = 0.01;
 
 // about opening a feature
 constexpr static bool kEnableReliableMessage = true;

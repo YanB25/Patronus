@@ -25,6 +25,99 @@ constexpr static size_t kMaxCoroNr = 16;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
+struct BenchConfig
+{
+    double insert_prob{0};
+    double delete_exist_prob{0};
+    double delete_unexist_prob{0};
+    double get_exist_prob{0};
+    double get_unexist_prob{0};
+    bool auto_extend{false};
+    bool first_enter{true};
+    bool server_should_leave{true};
+    size_t thread_nr{1};
+    size_t coro_nr{1};
+    size_t test_nr{0};
+    void validate()
+    {
+        double sum = insert_prob + delete_exist_prob + delete_unexist_prob +
+                     get_exist_prob + get_unexist_prob;
+        CHECK_DOUBLE_EQ(sum, 1);
+    }
+    static BenchConfig get_default_conf(size_t test_nr,
+                                        size_t thread_nr,
+                                        size_t coro_nr,
+                                        bool auto_extend,
+                                        bool first_enter,
+                                        bool server_should_leave)
+    {
+        BenchConfig conf;
+        conf.insert_prob = 0.5;
+        conf.delete_exist_prob = 0.125;
+        conf.delete_unexist_prob = 0.125;
+        conf.get_exist_prob = 0.125;
+        conf.get_unexist_prob = 0.125;
+        conf.auto_extend = auto_extend;
+        conf.first_enter = first_enter;
+        conf.server_should_leave = server_should_leave;
+        conf.thread_nr = thread_nr;
+        conf.coro_nr = coro_nr;
+        conf.test_nr = test_nr;
+
+        conf.validate();
+        return conf;
+    }
+};
+
+class BenchConfigFactory
+{
+public:
+    static std::vector<BenchConfig> get_single_round_config(size_t test_nr,
+                                                            size_t thread_nr,
+                                                            size_t coro_nr,
+                                                            bool expand)
+    {
+        if (expand)
+        {
+            CHECK_EQ(thread_nr, 1);
+            CHECK_EQ(coro_nr, 1);
+        }
+        return {BenchConfig::get_default_conf(test_nr,
+                                              thread_nr,
+                                              coro_nr,
+                                              expand /* extend */,
+                                              true /* enter */,
+                                              true /* leave */)};
+    }
+    static std::vector<BenchConfig> get_multi_round_config(size_t fill_nr,
+                                                           size_t test_nr,
+                                                           size_t thread_nr,
+                                                           size_t coro_nr)
+    {
+        BenchConfig insert_conf;
+        insert_conf.thread_nr = 1;
+        insert_conf.coro_nr = 1;
+        insert_conf.insert_prob = 1;
+        insert_conf.auto_extend = true;
+        insert_conf.first_enter = true;
+        insert_conf.server_should_leave = false;
+        insert_conf.test_nr = fill_nr;
+
+        BenchConfig query_conf;
+        query_conf.thread_nr = thread_nr;
+        query_conf.coro_nr = coro_nr;
+        query_conf.get_exist_prob = 0.5;
+        query_conf.get_unexist_prob = 0.5;
+        query_conf.auto_extend = false;
+        query_conf.first_enter = false;
+        query_conf.server_should_leave = true;
+        query_conf.test_nr = test_nr;
+        return {insert_conf, query_conf};
+    }
+
+private:
+};
+
 template <size_t kE, size_t kB, size_t kS>
 typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     Patronus::pointer p, bool auto_expand, CoroContext *ctx)
@@ -101,10 +194,12 @@ template <size_t kE, size_t kB, size_t kS>
 void test_basic_client_worker(Patronus::pointer p,
                               size_t coro_id,
                               CoroYield &yield,
-                              bool auto_expand,
-                              size_t test_nr,
+                              const BenchConfig &conf,
                               CoroExecutionContext<kMaxCoroNr> &ex)
 {
+    auto test_nr = conf.test_nr;
+    auto auto_expand = conf.auto_extend;
+
     auto tid = p->get_thread_id();
     CoroContext ctx(0, &yield, &ex.master(), coro_id);
     auto worker_id = tid * kMaxCoroNr + coro_id;
@@ -129,6 +224,11 @@ void test_basic_client_worker(Patronus::pointer p,
 
     HashContext dctx(tid);
 
+    double insert_prob = conf.insert_prob;
+    double delete_exist_prob = conf.delete_exist_prob;
+    double delete_unexist_prob = conf.delete_unexist_prob;
+    double get_exist_prob = conf.get_exist_prob;
+
     for (size_t i = 0; i < test_nr; ++i)
     {
         if (i % (test_nr / 10) == 0)
@@ -145,7 +245,7 @@ void test_basic_client_worker(Patronus::pointer p,
         char mark = 'a' + worker_id;
         key[0] = mark;
 
-        if (true_with_prob(0.5))
+        if (true_with_prob(insert_prob))
         {
             // insert
             dctx.key = key;
@@ -163,7 +263,7 @@ void test_basic_client_worker(Patronus::pointer p,
                 ins_fail_nr++;
             }
         }
-        else if (true_with_prob(0.125))
+        else if (true_with_prob(delete_exist_prob))
         {
             // delete exist
             if (keys.empty())
@@ -181,7 +281,7 @@ void test_basic_client_worker(Patronus::pointer p,
             keys.erase(key);
             del_succ_nr++;
         }
-        else if (true_with_prob(0.125))
+        else if (true_with_prob(delete_unexist_prob))
         {
             // delete unexist
             bool exist = keys.count(key) == 1;
@@ -206,7 +306,7 @@ void test_basic_client_worker(Patronus::pointer p,
                 del_fail_nr++;
             }
         }
-        else if (true_with_prob(0.125))
+        else if (true_with_prob(get_exist_prob))
         {
             // get exist
             if (keys.empty())
@@ -310,17 +410,18 @@ void test_basic_client_master(Patronus::pointer p,
 template <size_t kE, size_t kB, size_t kS>
 void test_basic_client(Patronus::pointer p,
                        boost::barrier &bar,
-                       size_t thread_nr,
-                       size_t coro_nr,
                        bool is_master,
-                       bool auto_expand,
-                       size_t test_nr,
+                       const BenchConfig &conf,
                        uint64_t key)
 {
+    auto coro_nr = conf.coro_nr;
+    auto thread_nr = conf.thread_nr;
+    bool first_enter = conf.first_enter;
+    bool server_should_leave = conf.server_should_leave;
     CHECK_LE(coro_nr, kMaxCoroNr);
 
     auto tid = p->get_thread_id();
-    if (is_master)
+    if (is_master && first_enter)
     {
         p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
     }
@@ -337,10 +438,10 @@ void test_basic_client(Patronus::pointer p,
         }
         for (size_t i = 0; i < coro_nr; ++i)
         {
-            ex.worker(i) = CoroCall(
-                [p, coro_id = i, auto_expand, test_nr, &ex](CoroYield &yield) {
+            ex.worker(i) =
+                CoroCall([p, coro_id = i, &conf, &ex](CoroYield &yield) {
                     test_basic_client_worker<kE, kB, kS>(
-                        p, coro_id, yield, auto_expand, test_nr, ex);
+                        p, coro_id, yield, conf, ex);
                 });
         }
         auto &master = ex.master();
@@ -352,7 +453,7 @@ void test_basic_client(Patronus::pointer p,
     }
 
     bar.wait();
-    if (is_master)
+    if (is_master && server_should_leave)
     {
         LOG(INFO) << "p->finished(" << key << ")";
         p->finished(key);
@@ -403,51 +504,45 @@ void client(Patronus::pointer p, boost::barrier &bar)
     bar.wait();
 
     LOG(INFO) << "[bench] Test basic single thread";
-    test_basic_client<4, 64, 64>(p,
-                                 bar,
-                                 1 /* thread_nr */,
-                                 1 /* coro_nr */,
-                                 master,
-                                 false /* auto_expand */,
-                                 100 /* test_nr */,
-                                 0 /* key */);
+    // single thread small
+    auto small_conf = BenchConfigFactory::get_single_round_config(
+        100 /* test */, 1 /* thread */, 1 /* coro */, false /* expand */);
+    for (const auto &conf : small_conf)
+    {
+        test_basic_client<4, 64, 64>(p, bar, master, conf, 0 /* key */);
+    }
+
     LOG(INFO) << "[bench] Burn basic single thread";
-    test_basic_client<4, 64, 64>(p,
-                                 bar,
-                                 1 /* thread_nr */,
-                                 1 /* coro_nr */,
-                                 master,
-                                 false /* auto_expand */,
-                                 10_K /* test_nr */,
-                                 1 /* key */);
+    auto burn_conf = BenchConfigFactory::get_single_round_config(
+        10_K /* test */, 1 /* thread */, 1 /* coro */, false /* expand */);
+    for (const auto &conf : burn_conf)
+    {
+        test_basic_client<4, 64, 64>(p, bar, master, conf, 1 /* key */);
+    }
 
     LOG(INFO) << "[bench] test expand single thread";
-    test_basic_client<128, 4, 4>(p,
-                                 bar,
-                                 1 /* thread_nr */,
-                                 1 /* coro_nr */,
-                                 master,
-                                 true /* auto_expand */,
-                                 100_K /* test_nr */,
-                                 2 /* key */);
+    auto expand_conf = BenchConfigFactory::get_single_round_config(
+        100_K, 1 /* thread */, 1 /* coro */, true /* expand */);
+    for (const auto &conf : expand_conf)
+    {
+        test_basic_client<128, 4, 4>(p, bar, master, conf, 2 /* key */);
+    }
+
     LOG(INFO) << "[bench] Test basic multiple thread";
-    test_basic_client<4, 64, 64>(p,
-                                 bar,
-                                 kThreadNr /* thread_nr */,
-                                 kMaxCoroNr /* coro_nr */,
-                                 master,
-                                 false /* auto_expand */,
-                                 100 /* test_nr */,
-                                 3 /* key */);
-    LOG(INFO) << "[bench] Burn basic multiple thread";
-    test_basic_client<32, 64, 64>(p,
-                                  bar,
-                                  kThreadNr /* thread_nr */,
-                                  kMaxCoroNr /* coro_nr */,
-                                  master,
-                                  false /* auto_expand */,
-                                  1_K /* test_nr */,
-                                  4 /* key */);
+    auto multithread_conf = BenchConfigFactory::get_single_round_config(
+        1_K, kThreadNr, kMaxCoroNr, false);
+    for (const auto &conf : multithread_conf)
+    {
+        test_basic_client<4, 64, 64>(p, bar, master, conf, 3 /* key */);
+    }
+
+    LOG(INFO) << "[bench] Test multi-round complex workload";
+    auto multi_round_conf = BenchConfigFactory::get_multi_round_config(
+        100_K /* fill */, 1_K /* test */, kThreadNr, kMaxCoroNr);
+    for (const auto &conf : multi_round_conf)
+    {
+        test_basic_client<32, 4, 4>(p, bar, master, conf, 5 /* key */);
+    }
 }
 
 void server(Patronus::pointer p, boost::barrier &bar)
@@ -458,13 +553,13 @@ void server(Patronus::pointer p, boost::barrier &bar)
     test_basic_server<4, 64, 64>(
         p, bar, 1, is_master, 1 /* subtable_nr */, 0 /* key */);
     test_basic_server<4, 64, 64>(
-        p, bar, 1, is_master, 1 /* subtable_nr */, 1 /* key */);
+        p, bar, 1, is_master, 4 /* subtable_nr */, 1 /* key */);
     test_basic_server<128, 4, 4>(
         p, bar, 1, is_master, 1 /* subtable_nr */, 2 /* key */);
     test_basic_server<4, 64, 64>(
-        p, bar, kThreadNr, is_master, 1 /* subtable_nr */, 3 /* key */);
-    test_basic_server<32, 64, 64>(
-        p, bar, kThreadNr, is_master, 1 /* subtable_nr */, 4 /* key */);
+        p, bar, kThreadNr, is_master, 4 /* subtable_nr */, 3 /* key */);
+    test_basic_server<32, 4, 4>(
+        p, bar, kThreadNr, is_master, 1 /* subtable_nr */, 5 /* key */);
 }
 
 int main(int argc, char *argv[])

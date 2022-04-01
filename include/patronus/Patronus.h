@@ -457,7 +457,7 @@ private:
     size_t allocator_buf_size_{0};
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
-    constexpr static size_t kGuessActiveLeasePerCoro = 16;
+    constexpr static size_t kGuessActiveLeasePerCoro = 64;
     constexpr static size_t kClientRdmaBufferSize = 4 * define::KB;
     constexpr static size_t kLeaseContextNr =
         kMaxCoroNr * kGuessActiveLeasePerCoro;

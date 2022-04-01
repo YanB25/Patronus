@@ -2126,8 +2126,9 @@ void Patronus::server_coro_master(CoroYield &yield,
         {
             auto &wc = wc_buffer[i];
             auto wrid = WRID(wc.wr_id);
-            DCHECK_EQ(wrid.prefix, WRID_PREFIX_PATRONUS_BIND_MW)
-                << "** unexpected wrid: " << wrid;
+            DCHECK(wrid.prefix == WRID_PREFIX_PATRONUS_BIND_MW ||
+                   wrid.prefix == WRID_PREFIX_PATRONUS_UNBIND_MW)
+                << "** unexpexted prefix from wrid: " << wrid;
             auto rw_ctx_id = wrid.id;
             auto *rw_ctx = rw_context_.id_to_obj(rw_ctx_id);
             auto coro_id = rw_ctx->coro_id;
@@ -2173,6 +2174,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
              << ", expect cid " << cid << ", coro: " << (ctx ? *ctx : nullctx)
              << ", at patronus time: " << time_syncer_->patronus_now();
 
+    bool wait_success = flag & (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
     bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
     bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
     DCHECK(!only_dealloc) << "This case should have been handled. "
@@ -2301,6 +2303,19 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         protection_region->aba_unit_nr_to_ddl.store(next_aba_unit_nr_to_ddl);
     }
 
+    RWContext *rw_ctx = nullptr;
+    uint64_t rw_ctx_id = 0;
+    bool ctx_success = false;
+    if (unlikely(wait_success))
+    {
+        rw_ctx = DCHECK_NOTNULL(get_rw_context());
+        rw_ctx_id = rw_context_.obj_to_id(rw_ctx);
+        rw_ctx->coro_id = ctx ? ctx->coro_id() : kNotACoro;
+        rw_ctx->dir_id = lease_ctx->dir_id;
+        rw_ctx->ready = false;
+        rw_ctx->success = &ctx_success;
+    }
+
     bool no_unbind = flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
     if (only_dealloc)
     {
@@ -2333,11 +2348,13 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                             1,
                             IBV_ACCESS_CUSTOM_REMOTE_NORW);
 
-            // never signal
             wrs[0].send_flags = 0;
+            if (unlikely(wait_success))
+            {
+                wrs[0].send_flags |= IBV_SEND_SIGNALED;
+            }
             // but want to detect failure
-            wrs[0].wr_id = wrs[1].wr_id =
-                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
+            wrs[0].wr_id = WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, rw_ctx_id).val;
         }
         else if (with_buf && with_pr)
         {
@@ -2358,12 +2375,15 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                             1,
                             IBV_ACCESS_CUSTOM_REMOTE_NORW);
 
-            // never signal
             wrs[0].send_flags = 0;
             wrs[1].send_flags = 0;
+            if (unlikely(wait_success))
+            {
+                wrs[1].send_flags = IBV_SEND_SIGNALED;
+            }
             // but want to detect failure
             wrs[0].wr_id = wrs[1].wr_id =
-                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, lease_id).val;
+                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, rw_ctx_id).val;
         }
         else
         {
@@ -2373,12 +2393,20 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         }
         if (with_buf || with_pr)
         {
+            // these are unsignaled requests
+            // if going to fast, will overwhelm the QP
+            // so limit the rate.
             ibv_send_wr *bad_wr;
             int ret = ibv_post_send(qp, wrs, &bad_wr);
             PLOG_IF(ERROR, ret != 0)
                 << "[patronus][gc_lease] failed to "
                    "ibv_post_send to unbind memory window. "
                 << *bad_wr;
+            DCHECK(ctx != nullptr);
+            if (unlikely(wait_success))
+            {
+                ctx->yield_to_master();
+            }
         }
         if constexpr (config::kEnableSkipMagicMw)
         {
@@ -2405,11 +2433,19 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
     // TODO(patronus): not considering any checks here
     // for example, the pr->meta.relinquished bits.
-
     if (with_pr)
     {
         put_protection_region(protection_region);
     }
+
+    if (unlikely(wait_success))
+    {
+        DCHECK(rw_ctx->ready) << "** go back to coro " << pre_coro_ctx(ctx)
+                              << ", but rw_ctx not ready";
+        DCHECK(ctx_success) << "Don't know why this op failed";
+        put_rw_context(DCHECK_NOTNULL(rw_ctx));
+    }
+
     put_lease_context(lease_ctx);
 }
 

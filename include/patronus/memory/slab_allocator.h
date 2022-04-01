@@ -263,8 +263,9 @@ public:
     {
         if constexpr (::config::kMonitorAllocationDistribution)
         {
-            LOG(INFO) << "[slab] Allocation distribution: "
-                      << pre_alloc_dist(allocated_distribution.get());
+            DLOG_IF(INFO, !allocated_distribution.get().empty())
+                << "[slab] Allocation distribution: "
+                << pre_alloc_dist(allocated_distribution.get());
         }
     }
 
