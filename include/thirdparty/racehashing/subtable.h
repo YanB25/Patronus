@@ -220,9 +220,7 @@ public:
         {
             // don't want to colocate to the same combined grous
             // otherwise, resizing will fail to insert by no enough slots
-
-            // this will definately make them different cbs.
-            h2++;
+            return get_two_combined_bucket_handle(h1, h2 + 1, rdma_adpt);
         }
         auto cb1 = combined_bucket_handle(h1);
         auto cb2 = combined_bucket_handle(h2);

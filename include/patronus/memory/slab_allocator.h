@@ -300,8 +300,9 @@ public:
             }
         }
 
-        DLOG_IF(FATAL, ret == nullptr) << "Failed to allocate size " << size
-                                       << ": " << pre_class_info(class_info_);
+        // DLOG_IF(FATAL, ret == nullptr) << "Failed to allocate size " << size
+        //                                << ": " <<
+        //                                pre_class_info(class_info_);
 
         return ret;
     }
