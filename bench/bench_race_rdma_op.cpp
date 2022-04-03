@@ -217,9 +217,6 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
                                          thread_kvblock_pool_size,
                                          kvblock_slab_config);
     p->reg_allocator(hash::config::kAllocHintKVBlock, kvblock_allocator);
-    LOG(INFO) << "[debug] !! server tid: " << tid
-              << " registering allocator for hint = "
-              << hash::config::kAllocHintKVBlock;
 }
 
 template <size_t kE, size_t kB, size_t kS>
@@ -288,6 +285,7 @@ void test_basic_client_worker(
     double insert_prob = conf.insert_prob;
     double delete_prob = conf.delete_prob;
 
+    ChronoTimer timer;
     while (ex.get_private_data().thread_remain_task > 0)
     {
         fast_pseudo_fill_buf(key_buf, kKeySize);
@@ -327,12 +325,16 @@ void test_basic_client_worker(
         executed_nr++;
         ex.get_private_data().thread_remain_task--;
     }
-    DLOG(INFO) << "[bench] insert: succ: " << ins_succ_nr
-               << ", retry: " << ins_retry_nr << ", nomem: " << ins_nomem_nr
-               << ", del: succ: " << del_succ_nr << ", retry: " << del_retry_nr
-               << ", not found: " << del_not_found_nr
-               << ", get: succ: " << get_succ_nr
-               << ", not found: " << get_not_found_nr << ". ctx: " << ctx;
+    auto ns = timer.pin();
+
+    LOG(INFO) << "[bench] insert: succ: " << ins_succ_nr
+              << ", retry: " << ins_retry_nr << ", nomem: " << ins_nomem_nr
+              << ", del: succ: " << del_succ_nr << ", retry: " << del_retry_nr
+              << ", not found: " << del_not_found_nr
+              << ", get: succ: " << get_succ_nr
+              << ", not found: " << get_not_found_nr
+              << ". executed: " << executed_nr << ", take: " << ns
+              << " ns. ctx: " << ctx;
 
     ex.worker_finished(coro_id);
     ctx.yield_to_master();
@@ -404,6 +406,8 @@ void test_basic_client_master(
     }
 }
 
+std::atomic<ssize_t> total_test_nr;
+
 template <size_t kE, size_t kB, size_t kS>
 void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
@@ -418,14 +422,18 @@ void benchmark_client(Patronus::pointer p,
     CHECK_LE(coro_nr, kMaxCoroNr);
 
     auto tid = p->get_thread_id();
-    if (is_master && first_enter)
+    if (is_master)
     {
-        p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
+        // init here by master
+        total_test_nr = conf.test_nr;
+        if (first_enter)
+        {
+            p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
+        }
     }
     bar.wait();
 
     ChronoTimer timer;
-    std::atomic<ssize_t> atm_task_nr{(ssize_t) conf.test_nr};
     if (tid < thread_nr)
     {
         CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
@@ -444,11 +452,10 @@ void benchmark_client(Patronus::pointer p,
                 });
         }
         auto &master = ex.master();
-        master =
-            CoroCall([p, &ex, test_nr = conf.test_nr, &atm_task_nr, coro_nr](
-                         CoroYield &yield) {
+        master = CoroCall(
+            [p, &ex, test_nr = conf.test_nr, coro_nr](CoroYield &yield) {
                 test_basic_client_master(
-                    p, yield, test_nr, atm_task_nr, coro_nr, ex);
+                    p, yield, test_nr, total_test_nr, coro_nr, ex);
             });
 
         master();
@@ -458,7 +465,7 @@ void benchmark_client(Patronus::pointer p,
 
     double ops = 1e9 * conf.test_nr / ns;
     double avg_ns = 1.0 * ns / conf.test_nr;
-    DLOG_IF(INFO, is_master)
+    LOG_IF(INFO, is_master)
         << "[bench] total op: " << conf.test_nr << ", ns: " << ns
         << ", ops: " << ops << ", avg " << avg_ns << " ns";
 
@@ -553,7 +560,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     LOG_IF(INFO, is_master) << "[bench] benching multiple threads";
     key++;
     auto multithread_conf = BenchConfigFactory::get_multi_round_config(
-        "multithread_basic", 1_K, 10_K, kThreadNr, kMaxCoroNr);
+        "multithread_basic", 3_K, 5_M, kThreadNr, kMaxCoroNr);
     if (is_client)
     {
         for (const auto &conf : multithread_conf)
@@ -635,14 +642,24 @@ int main(int argc, char *argv[])
     auto div_f2 = gen_F_div<double, size_t, double>();
     auto ops_f = gen_F_ops<size_t, size_t, double>();
     auto mul_f = gen_F_mul<double, size_t, double>();
+    auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
+    df.consolidate<size_t, size_t, size_t>(
+        "x_thread_nr", "x_coro_nr", "client_nr(effective)", mul_f2, false);
+    df.consolidate<size_t, size_t, size_t>("test_ns(total)",
+                                           "client_nr(effective)",
+                                           "test_ns(effective)",
+                                           mul_f2,
+                                           false);
     df.consolidate<size_t, size_t, double>(
-        "test_ns(total)", "test_nr(total)", "test lat", div_f, false);
+        "test_ns(total)", "test_nr(total)", "lat(div)", div_f, false);
     df.consolidate<size_t, size_t, double>(
-        "test_nr(total)", "test_ns(total)", "test ops(total)", ops_f, false);
+        "test_ns(effective)", "test_nr(total)", "lat(avg)", div_f, false);
+    df.consolidate<size_t, size_t, double>(
+        "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
     df.consolidate<double, size_t, double>(
-        "test ops(total)", "x_thread_nr", "test ops(thread)", div_f2, false);
+        "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
     df.consolidate<double, size_t, double>(
-        "test ops(thread)", "x_coro_nr", "test ops(coro)", div_f2, false);
+        "ops(thread)", "x_coro_nr", "ops(coro)", div_f2, false);
 
     auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
     df.write<std::ostream, std::string, size_t, double>(std::cout,

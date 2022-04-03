@@ -281,6 +281,8 @@ constexpr bool debug()
 
 namespace config
 {
+using namespace define::literals;
+
 // about enabling monitors, sacrifying performance
 constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
@@ -291,9 +293,9 @@ constexpr static bool kMonitorAllocationDistribution = true;
 constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
 
-constexpr static bool kEnableRdmaTrace = true;
-constexpr static double kRdmaTraceRate = 0;
-constexpr static bool kRdmaTraceAlwaysTraceExpand = true;
+constexpr static bool kEnableRdmaTrace = false;
+constexpr static double kRdmaTraceRate = 1.0 / 100_K;
+constexpr static bool kRdmaTraceAlwaysTraceExpand = false;
 
 // about opening a feature
 constexpr static bool kEnableReliableMessage = true;
