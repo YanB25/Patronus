@@ -99,3 +99,11 @@ I guess it is switching to rmsg bounded now.
 TODO: Still not perfect results.
 - Expect: patronus->get_rlease(kDebugNoBindPr) can be close to bench_allocator reports (i.e. 26 Mops)
 - Expect: patronus->get_rlease() can be half of bench_allocator reports (i.e. 13 Mops)
+
+# Racehashing
+
+## ReadOnly
+
+The data is preliminary, may get better later.
+Thread = 8, Coco = 16, RO, RH<4, 16, 16>
+Got 4.3 Mops.
