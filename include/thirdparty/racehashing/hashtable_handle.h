@@ -410,6 +410,13 @@ public:
             << "Should migrate got " << should_migrate.size()
             << ", exceeded subtable capacity " << capacity;
 
+        if constexpr (debug())
+        {
+            LOG_FIRST_N(WARNING, 1) << "TODO: expand_migrate_subtable: "
+                                       "put_slot will read cb each time "
+                                       "for one entry migration.";
+        }
+
         for (auto slot_handle : should_migrate)
         {
             SlotHandle ret_slot(nullgaddr, SlotView(0));
@@ -423,6 +430,7 @@ public:
                 DCHECK(!ret_slot.ptr().is_null());
                 dst_st_handle.del_slot(ret_slot, *rdma_adpt_);
             }
+            CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
         }
 
         return kOk;
@@ -434,6 +442,12 @@ public:
     // cache.
     RetCode expand(size_t subtable_idx, HashContext *dctx)
     {
+        if constexpr (::config::kEnableRdmaTrace &&
+                      ::config::kRdmaTraceAlwaysTraceExpand)
+        {
+            rdma_adpt_->enable_trace("put-expand");
+        }
+
         DCHECK(inited_);
         CHECK_LT(subtable_idx, kDEntryNr);
         // 0) try lock
@@ -468,6 +482,9 @@ public:
             cached_meta_.expanding[subtable_idx] = 0;
             return kNoMem;
         }
+
+        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+
         // 2) Expand the directory first
         if (next_depth >= expect_gd)
         {
@@ -525,6 +542,7 @@ public:
                          << ". depth: " << depth
                          << ", (1<<depth): " << (1 << depth);
         }
+        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
 
         // 3) allocate subtable here
         auto alloc_size = SubTableT::size_bytes();
@@ -542,6 +560,7 @@ public:
             << "[race][expand] (3) expanding subtable[" << subtable_idx
             << "] to next subtable[" << next_subtable_idx << "]. Allocated "
             << alloc_size << " at " << new_remote_subtable;
+        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
 
         // 4) init subtable: setup the bucket header
         auto ld = next_depth;
@@ -558,6 +577,8 @@ public:
             new_remote_st_handle, ld, suffix, dctx);
         CHECK_EQ(rc, kOk);
         cached_meta_.lds[next_subtable_idx] = ld;
+
+        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
 
         // 5) insert the subtable into the directory AND lock the subtable.
         DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
@@ -578,6 +599,8 @@ public:
         cached_meta_.lds[subtable_idx] = ld;
         cached_meta_.lds[next_subtable_idx] = ld;
 
+        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+
         // 6) move data.
         // 6.1) update bucket suffix
         DLOG_IF(INFO, config::kEnableExpandDebug)
@@ -593,6 +616,8 @@ public:
                      origin_subtable_handle, ld, subtable_idx, dctx),
                  kOk);
         cached_meta_.lds[subtable_idx] = ld;
+
+        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
         // Before 6.1) Iterate all the entries in @entries_, check for any
         // recursive updates to the entries.
         // For example, when
@@ -613,6 +638,7 @@ public:
                      dir_mem_handle,
                      dctx),
                  kOk);
+        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
 
         // 6.3) insert all items from the old bucket to the new
         DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
@@ -627,6 +653,7 @@ public:
         SubTableHandleT org_st(origin_subtable_remote_addr, src_st_mem_handle);
         SubTableHandleT dst_st(new_remote_subtable, dst_st_mem_handle);
         CHECK_EQ(expand_migrate_subtable(org_st, dst_st, bits - 1, dctx), kOk);
+        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
 
         // 7) unlock
         DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
@@ -1233,10 +1260,16 @@ public:
 private:
     GlobalAddress remote_alloc_kvblock(size_t size)
     {
+        // TODO:
+        // implement refills to kvblock_allocator_
+        // that is, if it runs out of all the buffers, alloc another batch from
+        // the server
         return GlobalAddress(kvblock_allocator_->alloc(size));
     }
     void remote_free_kvblock(GlobalAddress addr)
     {
+        // TODO:
+        // uncomment the below line to enable kvblock re-use
         // kvblock_allocator_->free((void *) addr.val);
         LOG_FIRST_N(WARNING, 1)
             << "TODO: do not actual impl remote_free_kvblock. Can not free it, "
@@ -1421,13 +1454,13 @@ public:
 
     RetCode update_directory_cache(HashContext *dctx)
     {
-        maybe_start_trace("update cache");
+        maybe_start_trace("update cache", false);
         rhh_.update_directory_cache(dctx);
         maybe_start_trace();
     }
     RetCode del(const Key &key, HashContext *dctx = nullptr)
     {
-        maybe_start_trace("del");
+        maybe_start_trace("del", false);
 
         auto rc = rhh_.del(key, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
@@ -1442,7 +1475,7 @@ public:
     }
     RetCode put(const Key &key, const Value &value, HashContext *dctx = nullptr)
     {
-        maybe_start_trace("put");
+        maybe_start_trace("put", false);
 
         auto rc = rhh_.put(key, value, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
@@ -1457,7 +1490,7 @@ public:
     }
     RetCode get(const Key &key, Value &value, HashContext *dctx = nullptr)
     {
-        maybe_start_trace("get");
+        maybe_start_trace("get", false);
 
         auto rc = rhh_.get(key, value, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
@@ -1471,7 +1504,7 @@ public:
     }
     RetCode expand(size_t subtable_idx, HashContext *dctx)
     {
-        maybe_start_trace("expand");
+        maybe_start_trace("expand", ::config::kRdmaTraceAlwaysTraceExpand);
 
         auto rc = rhh_.expand(subtable_idx, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
@@ -1493,11 +1526,11 @@ private:
     RaceHashingHandleT rhh_;
     IRdmaAdaptor::pointer rdma_adpt_;
 
-    void maybe_start_trace(const char *name)
+    void maybe_start_trace(const char *name, bool force_on)
     {
         if constexpr (::config::kEnableRdmaTrace)
         {
-            if (unlikely(true_with_prob(::config::kRdmaTraceRate)))
+            if (unlikely(force_on || true_with_prob(::config::kRdmaTraceRate)))
             {
                 rdma_adpt_->enable_trace(name);
             }

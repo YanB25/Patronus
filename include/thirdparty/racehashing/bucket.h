@@ -29,6 +29,8 @@ template <size_t kSlotNr>
 class Bucket
 {
 public:
+    using SlotT = Slot;
+
     static_assert(kSlotNr > 1);
     constexpr static size_t kDataSlotNr = kSlotNr - 1;
 
@@ -38,6 +40,14 @@ public:
     constexpr static size_t max_item_nr()
     {
         return kDataSlotNr;
+    }
+    constexpr static size_t data_slot_nr()
+    {
+        return kDataSlotNr;
+    }
+    constexpr static size_t size_bytes()
+    {
+        return kSlotNr * SlotT::size_bytes();
     }
 
     Slot &slot(size_t idx) const
@@ -63,10 +73,6 @@ public:
     const void *buffer_addr() const
     {
         return bucket_buf_;
-    }
-    constexpr static size_t size_bytes()
-    {
-        return Slot::size_bytes() * kSlotNr;
     }
 
     static constexpr size_t max_capacity()

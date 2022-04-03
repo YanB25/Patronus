@@ -49,6 +49,7 @@ struct BenchConfig
     size_t coro_nr{1};
     size_t test_nr{0};
     bool should_report{false};
+    size_t initial_subtable_nr{1};
     void validate()
     {
         double sum = insert_prob + delete_prob + get_prob;
@@ -59,36 +60,46 @@ struct BenchConfig
         return name;
     }
     static BenchConfig get_default_conf(const std::string &name,
+                                        size_t initial_subtable_nr,
                                         size_t test_nr,
                                         size_t thread_nr,
                                         size_t coro_nr,
-                                        bool auto_extend,
-                                        bool first_enter,
-                                        bool server_should_leave)
+                                        bool auto_extend)
     {
         BenchConfig conf;
         conf.name = name;
+        conf.initial_subtable_nr = initial_subtable_nr;
         conf.insert_prob = 0.25;
         conf.delete_prob = 0.25;
         conf.get_prob = 0.5;
         conf.auto_extend = auto_extend;
-        conf.first_enter = first_enter;
-        conf.server_should_leave = server_should_leave;
         conf.thread_nr = thread_nr;
         conf.coro_nr = coro_nr;
         conf.test_nr = test_nr;
-        conf.should_report = false;
 
         conf.validate();
         return conf;
     }
 };
+std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
+{
+    os << "{conf: name: " << conf.name << ", ins: " << conf.insert_prob
+       << ", get: " << conf.get_prob << ", del: " << conf.delete_prob
+       << ", expand: " << conf.auto_extend << ", thread: " << conf.thread_nr
+       << ", coro: " << conf.coro_nr << ", test: " << conf.test_nr
+       << ", subtable_nr: " << conf.initial_subtable_nr
+       << ", enter: " << conf.first_enter
+       << ", leave: " << conf.server_should_leave
+       << ", report: " << conf.should_report << "}";
+    return os;
+}
 
 class BenchConfigFactory
 {
 public:
     static std::vector<BenchConfig> get_single_round_config(
         const std::string &name,
+        size_t initial_subtable_nr,
         size_t test_nr,
         size_t thread_nr,
         size_t coro_nr,
@@ -100,20 +111,15 @@ public:
             CHECK_EQ(coro_nr, 1);
         }
         auto warm_conf = BenchConfig::get_default_conf(name,
+                                                       initial_subtable_nr,
                                                        test_nr,
                                                        thread_nr,
                                                        coro_nr,
-                                                       expand /* extend */,
-                                                       true /* enter */,
-                                                       true /* leave */);
-        warm_conf.first_enter = true;
-        warm_conf.server_should_leave = false;
+                                                       expand /* extend */);
         auto eval_conf = warm_conf;
-        eval_conf.first_enter = false;
-        eval_conf.server_should_leave = true;
         eval_conf.should_report = true;
 
-        return {warm_conf, eval_conf};
+        return pipeline({warm_conf, eval_conf});
     }
     static std::vector<BenchConfig> get_multi_round_config(
         const std::string &name,
@@ -122,29 +128,48 @@ public:
         size_t thread_nr,
         size_t coro_nr)
     {
+        // fill the table with KVs
         BenchConfig insert_conf;
-        insert_conf.name = name;
+        insert_conf.name = name + ".insert";
         insert_conf.thread_nr = 1;
         insert_conf.coro_nr = 1;
         insert_conf.insert_prob = 1;
         insert_conf.auto_extend = true;
-        insert_conf.first_enter = true;
-        insert_conf.server_should_leave = false;
         insert_conf.test_nr = fill_nr;
+        insert_conf.should_report = false;
 
-        BenchConfig query_conf;
-        query_conf.name = name;
-        query_conf.thread_nr = thread_nr;
-        query_conf.coro_nr = coro_nr;
-        query_conf.get_prob = 1;
-        query_conf.auto_extend = false;
-        query_conf.first_enter = false;
-        query_conf.server_should_leave = true;
-        query_conf.test_nr = test_nr;
-        return {insert_conf, query_conf};
+        BenchConfig query_warmup_conf;
+        query_warmup_conf.name = name + ".query.warmup";
+        query_warmup_conf.thread_nr = thread_nr;
+        query_warmup_conf.coro_nr = coro_nr;
+        query_warmup_conf.get_prob = 1;
+        query_warmup_conf.auto_extend = false;
+        query_warmup_conf.test_nr = test_nr;
+        query_warmup_conf.should_report = false;
+
+        auto query_report_conf = query_warmup_conf;
+        query_report_conf.name = name + ".query";
+        query_report_conf.should_report = true;
+
+        return pipeline({insert_conf, query_warmup_conf, query_report_conf});
     }
 
 private:
+    static std::vector<BenchConfig> pipeline(std::vector<BenchConfig> &&confs)
+    {
+        for (auto &conf : confs)
+        {
+            conf.first_enter = false;
+            conf.server_should_leave = false;
+        }
+        if (confs.empty())
+        {
+            return confs;
+        }
+        confs.front().first_enter = true;
+        confs.back().server_should_leave = true;
+        return confs;
+    }
 };
 
 template <size_t kE, size_t kB, size_t kS>
@@ -157,7 +182,7 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     auto dir_id = tid;
 
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
-    LOG(INFO) << "Getting from race:meta_gaddr got " << meta_gaddr;
+    DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     RaceHashingHandleConfig handle_conf;
     handle_conf.auto_expand = auto_expand;
@@ -192,6 +217,9 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
                                          thread_kvblock_pool_size,
                                          kvblock_slab_config);
     p->reg_allocator(hash::config::kAllocHintKVBlock, kvblock_allocator);
+    LOG(INFO) << "[debug] !! server tid: " << tid
+              << " registering allocator for hint = "
+              << hash::config::kAllocHintKVBlock;
 }
 
 template <size_t kE, size_t kB, size_t kS>
@@ -304,7 +332,7 @@ void test_basic_client_worker(
                << ", del: succ: " << del_succ_nr << ", retry: " << del_retry_nr
                << ", not found: " << del_not_found_nr
                << ", get: succ: " << get_succ_nr
-               << ", not found: " << get_not_found_nr;
+               << ", not found: " << get_not_found_nr << ". ctx: " << ctx;
 
     ex.worker_finished(coro_id);
     ctx.yield_to_master();
@@ -337,7 +365,6 @@ void test_basic_client_master(
         mctx.yield_to_worker(i);
     }
 
-    LOG(INFO) << "Return back to master. start to recv messages";
     coro_t coro_buf[2 * kMaxCoroNr];
     while (true)
     {
@@ -378,11 +405,11 @@ void test_basic_client_master(
 }
 
 template <size_t kE, size_t kB, size_t kS>
-void test_basic_client(Patronus::pointer p,
-                       boost::barrier &bar,
-                       bool is_master,
-                       const BenchConfig &conf,
-                       uint64_t key)
+void benchmark_client(Patronus::pointer p,
+                      boost::barrier &bar,
+                      bool is_master,
+                      const BenchConfig &conf,
+                      uint64_t key)
 {
     auto coro_nr = conf.coro_nr;
     auto thread_nr = conf.thread_nr;
@@ -431,8 +458,9 @@ void test_basic_client(Patronus::pointer p,
 
     double ops = 1e9 * conf.test_nr / ns;
     double avg_ns = 1.0 * ns / conf.test_nr;
-    LOG(INFO) << "[bench] total op: " << conf.test_nr << ", ns: " << ns
-              << ", ops: " << ops << ", avg " << avg_ns << " ns";
+    DLOG_IF(INFO, is_master)
+        << "[bench] total op: " << conf.test_nr << ", ns: " << ns
+        << ", ops: " << ops << ", avg " << avg_ns << " ns";
 
     if (is_master && server_should_leave)
     {
@@ -454,13 +482,20 @@ void test_basic_client(Patronus::pointer p,
 }
 
 template <size_t kE, size_t kB, size_t kS>
-void test_basic_server(Patronus::pointer p,
-                       boost::barrier &bar,
-                       size_t thread_nr,
-                       bool is_master,
-                       size_t initial_subtable,
-                       uint64_t key)
+void benchmark_server(Patronus::pointer p,
+                      boost::barrier &bar,
+                      bool is_master,
+                      const std::vector<BenchConfig> &confs,
+                      uint64_t key)
 {
+    auto thread_nr = confs[0].thread_nr;
+    auto initial_subtable = confs[0].initial_subtable_nr;
+    for (const auto &conf : confs)
+    {
+        thread_nr = std::max(thread_nr, conf.thread_nr);
+        DCHECK_EQ(initial_subtable, conf.initial_subtable_nr);
+    }
+
     using RaceHashingT = RaceHashing<kE, kB, kS>;
     auto tid = p->get_thread_id();
     auto mid = tid;
@@ -478,85 +513,59 @@ void test_basic_server(Patronus::pointer p,
     {
         p->finished(key);
         rh = gen_rdma_rh<kE, kB, kS>(p, initial_subtable);
+        LOG(INFO) << "[bench] rh: " << pre_rh_explain(*rh);
+    }
+    // wait for everybody to finish preparing
+    bar.wait();
+    if (is_master)
+    {
         p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
     }
-    bar.wait();
 
     p->server_serve(mid, key);
     bar.wait();
 }
 
 std::atomic<size_t> battle_master{0};
-void client(Patronus::pointer p, boost::barrier &bar)
+void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 {
-    bool master = false;
-    if (battle_master.fetch_add(1) == 0)
-    {
-        master = true;
-    }
+    uint64_t key = 0;
+    bool is_master = battle_master.fetch_add(1) == 0;
     bar.wait();
 
-    LOG(INFO) << "[bench] Test basic single thread";
-    // single thread small
-    auto small_conf =
-        BenchConfigFactory::get_single_round_config("debug",
-                                                    10_K /* test */,
-                                                    1 /* thread */,
-                                                    16 /* coro */,
-                                                    false /* expand */);
-    for (const auto &conf : small_conf)
+    LOG_IF(INFO, is_master) << "[bench] benching single thread";
+    key++;
+    auto basic_conf = BenchConfigFactory::get_single_round_config(
+        "single_basic", 1, 10_K, 1, 1, true);
+    if (is_client)
     {
-        test_basic_client<4, 16, 16>(p, bar, master, conf, 0 /* key */);
+        for (const auto &conf : basic_conf)
+        {
+            LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
+            benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+        }
+    }
+    else
+    {
+        benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
     }
 
-    // LOG(INFO) << "[bench] Burn basic single thread";
-    // auto burn_conf = BenchConfigFactory::get_single_round_config(
-    //     10_K /* test */, 1 /* thread */, 1 /* coro */, false /* expand */);
-    // for (const auto &conf : burn_conf)
-    // {
-    //     test_basic_client<4, 64, 64>(p, bar, master, conf, 1 /* key */);
-    // }
-
-    // LOG(INFO) << "[bench] test expand single thread";
-    // auto expand_conf = BenchConfigFactory::get_single_round_config(
-    //     100_K, 1 /* thread */, 1 /* coro */, true /* expand */);
-    // for (const auto &conf : expand_conf)
-    // {
-    //     test_basic_client<128, 4, 4>(p, bar, master, conf, 2 /* key */);
-    // }
-
-    // LOG(INFO) << "[bench] Test basic multiple thread";
-    // auto multithread_conf = BenchConfigFactory::get_single_round_config(
-    //     1_K, kThreadNr, kMaxCoroNr, false);
-    // for (const auto &conf : multithread_conf)
-    // {
-    //     test_basic_client<4, 64, 64>(p, bar, master, conf, 3 /* key */);
-    // }
-
-    // LOG(INFO) << "[bench] Test multi-round complex workload";
-    // auto multi_round_conf = BenchConfigFactory::get_multi_round_config(
-    //     100_K /* fill */, 1_K /* test */, kThreadNr, kMaxCoroNr);
-    // for (const auto &conf : multi_round_conf)
-    // {
-    //     test_basic_client<32, 4, 4>(p, bar, master, conf, 5 /* key */);
-    // }
-}
-
-void server(Patronus::pointer p, boost::barrier &bar)
-{
-    bool is_master = false;
-    is_master = battle_master.fetch_add(1) == 0;
-
-    test_basic_server<4, 16, 16>(
-        p, bar, 1, is_master, 4 /* subtable_nr */, 0 /* key */);
-    // test_basic_server<4, 64, 64>(
-    //     p, bar, 1, is_master, 4 /* subtable_nr */, 1 /* key */);
-    // test_basic_server<128, 4, 4>(
-    //     p, bar, 1, is_master, 1 /* subtable_nr */, 2 /* key */);
-    // test_basic_server<4, 64, 64>(
-    //     p, bar, kThreadNr, is_master, 4 /* subtable_nr */, 3 /* key */);
-    // test_basic_server<32, 4, 4>(
-    //     p, bar, kThreadNr, is_master, 1 /* subtable_nr */, 5 /* key */);
+    LOG_IF(INFO, is_master) << "[bench] benching multiple threads";
+    key++;
+    auto multithread_conf = BenchConfigFactory::get_multi_round_config(
+        "multithread_basic", 1_K, 10_K, kThreadNr, kMaxCoroNr);
+    if (is_client)
+    {
+        for (const auto &conf : multithread_conf)
+        {
+            LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
+            benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+        }
+    }
+    else
+    {
+        benchmark_server<4, 16, 16>(p, bar, is_master, multithread_conf, key);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -578,30 +587,34 @@ int main(int argc, char *argv[])
     boost::barrier bar(kThreadNr);
     auto nid = patronus->get_node_id();
 
-    if (nid == kClientNodeId)
+    bool is_client = nid == kClientNodeId;
+
+    if (is_client)
     {
         patronus->registerClientThread();
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
-        {
-            threads.emplace_back([patronus, &bar]() {
-                patronus->registerClientThread();
-                client(patronus, bar);
-            });
-        }
-        client(patronus, bar);
     }
     else
     {
         patronus->registerServerThread();
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
-        {
-            threads.emplace_back([patronus, &bar]() {
-                patronus->registerServerThread();
-                server(patronus, bar);
-            });
-        }
-        server(patronus, bar);
     }
+
+    LOG(INFO) << "[bench] " << pre_patronus_explain(*patronus);
+
+    for (size_t i = 0; i < kThreadNr - 1; ++i)
+    {
+        threads.emplace_back([patronus, &bar, is_client]() {
+            if (is_client)
+            {
+                patronus->registerClientThread();
+            }
+            else
+            {
+                patronus->registerServerThread();
+            }
+            benchmark(patronus, bar, is_client);
+        });
+    }
+    benchmark(patronus, bar, is_client);
 
     for (auto &t : threads)
     {

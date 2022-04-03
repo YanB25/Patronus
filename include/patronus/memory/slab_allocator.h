@@ -322,7 +322,8 @@ public:
             if constexpr (::config::kEnableSlabAllocatorStrictChecking)
             {
                 CHECK_EQ(debug_ongoing_bufs_.erase(addr), 1)
-                    << "Expect addr " << (void *) addr << " found in the set";
+                    << "Expect addr " << (void *) addr
+                    << " found in the set. It is not allocated by me.";
             }
         }
         DVLOG(20) << "[slab-alloc] freeing " << addr;

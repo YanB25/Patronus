@@ -62,7 +62,8 @@ inline std::ostream &operator<<(std::ostream &os, const RdmaTraceRecord &r)
        << ", alloc_acquire: " << r.alloc_acquire_nr
        << ", free: " << r.free_only_nr << ", rel: " << r.rel_nr
        << ", free_rel: " << r.free_rel_nr
-       << ", used rdma buffer: " << r.allocated_rdma_buf_nr << "}";
+       << ", used rdma buffer: " << r.allocated_rdma_buf_nr
+       << ", latency: " << r.latency_ns << " ns}";
     return os;
 }
 class RdmaAdaptor : public IRdmaAdaptor

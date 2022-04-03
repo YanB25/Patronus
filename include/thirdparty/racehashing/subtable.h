@@ -22,6 +22,7 @@ class SubTable
 {
 public:
     using Handle = SubTableHandle<kBucketGroupNr, kSlotNr>;
+    using BucketT = Bucket<kSlotNr>;
 
     constexpr static size_t kMainBucketNr = 2 * kBucketGroupNr;
     constexpr static size_t kOverflowBucketNr = kBucketGroupNr;
@@ -39,6 +40,10 @@ public:
     SubTable(void *addr, size_t size) : addr_(addr), size_(size)
     {
         CHECK_GE(size_, size_bytes());
+    }
+    constexpr static size_t bucket_nr()
+    {
+        return kTotalBucketNr;
     }
     uint32_t ld() const
     {

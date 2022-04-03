@@ -254,8 +254,9 @@ when you go back:
 [-] try to run a simple case for bench_race_rmda_op
 - try to run a simple case for multiple threads
     - NOTE!!!!!! carefully check "should_report", "first_enter", "server_leave" for the multi-threads cases. There are not justified.
-- try to add API rh::explain(), to print the number of slots, bucket, groups, subtables, ...
+[-] try to add API rh::explain(), to print the number of slots, bucket, groups, subtables, ...
 [-] try to let the export excel work.
+- try to enable lazy_init to slab allocator. i.e. for race hashing kvblocks, only fills the batch when needed. this can greatly waste LESS unused kvblocks.
 - try to let the trace report latency
 - maybe rdma_ctx add API to enable more specific trace point? (and time)
 - double check did I bind core?

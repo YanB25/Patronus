@@ -291,8 +291,9 @@ constexpr static bool kMonitorAllocationDistribution = true;
 constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
 
-constexpr static bool kEnableRdmaTrace = false;
-constexpr static double kRdmaTraceRate = 0.01;
+constexpr static bool kEnableRdmaTrace = true;
+constexpr static double kRdmaTraceRate = 0;
+constexpr static bool kRdmaTraceAlwaysTraceExpand = true;
 
 // about opening a feature
 constexpr static bool kEnableReliableMessage = true;

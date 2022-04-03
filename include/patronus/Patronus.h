@@ -93,6 +93,8 @@ struct LeaseContext
     uint64_t hint{0};
 };
 
+class pre_patronus_explain;
+
 class Patronus
 {
 public:
@@ -217,7 +219,7 @@ public:
               std::enable_if_t<!std::is_array_v<V>, bool> = true>
     void put(const std::string &key, const V &v, const T &sleep_time)
     {
-        DLOG(INFO) << "[keeper] PUT key: `" << key << "` value: `" << v;
+        DVLOG(1) << "[keeper] PUT key: `" << key << "` value: `" << v;
         auto value = std::string((const char *) &v, sizeof(V));
         return dsm_->put(key, value, sleep_time);
     }
@@ -226,7 +228,7 @@ public:
              const std::string &value,
              const T &sleep_time)
     {
-        DLOG(INFO) << "[keeper] PUT key: `" << key << "` value: `" << value;
+        DVLOG(1) << "[keeper] PUT key: `" << key << "` value: `" << value;
         return dsm_->put(key, value, sleep_time);
     }
     template <typename T>
@@ -238,7 +240,7 @@ public:
     std::string get(const std::string &key, const T &sleep_time)
     {
         auto value = dsm_->get(key, sleep_time);
-        DLOG(INFO) << "[keeper] GET key: `" << key << "` value: `" << value;
+        DVLOG(1) << "[keeper] GET key: `" << key << "` value: `" << value;
         return value;
     }
     template <typename V, typename T>
@@ -248,7 +250,7 @@ public:
         V ret;
         CHECK_GE(v.size(), sizeof(V));
         memcpy((char *) &ret, v.data(), sizeof(V));
-        DLOG(INFO) << "[keeper] GET_OBJ key: " << key << ", obj: " << ret;
+        DVLOG(1) << "[keeper] GET_OBJ key: " << key << ", obj: " << ret;
         return ret;
     }
 
@@ -446,6 +448,9 @@ public:
     void reg_allocator(uint64_t hint, mem::IAllocator::pointer allocator);
     mem::IAllocator::pointer get_allocator(uint64_t hint);
 
+    friend std::ostream &operator<<(std::ostream &,
+                                    const pre_patronus_explain &);
+
 private:
     PatronusConfig conf_;
     // the default_allocator_ is set on registering server thread.
@@ -458,7 +463,7 @@ private:
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
     constexpr static size_t kGuessActiveLeasePerCoro = 64;
-    constexpr static size_t kClientRdmaBufferSize = 4 * define::KB;
+    constexpr static size_t kClientRdmaBufferSize = 8 * define::KB;
     constexpr static size_t kLeaseContextNr =
         kMaxCoroNr * kGuessActiveLeasePerCoro;
     static_assert(
@@ -1194,7 +1199,8 @@ void *Patronus::patronus_alloc(size_t size, uint64_t hint)
     auto it = reg_allocators_.find(hint);
     if (it == reg_allocators_.end())
     {
-        DCHECK(false) << "** Unknown hint " << hint;
+        DCHECK(false) << "** Unknown hint " << hint
+                      << ". server thread tid: " << get_thread_id();
         return nullptr;
     }
     return it->second->alloc(size);
@@ -1237,6 +1243,60 @@ GlobalAddress Patronus::get_gaddr(const Lease &lease) const
     auto dsm_offset = lease.base_addr();
     auto buffer_offset = dsm_->dsm_offset_to_buffer_offset(dsm_offset);
     return GlobalAddress(lease.node_id_, buffer_offset);
+}
+
+class pre_patronus_explain
+{
+public:
+    pre_patronus_explain(const Patronus &p) : p_(p)
+    {
+    }
+    friend std::ostream &operator<<(std::ostream &os,
+                                    const pre_patronus_explain &);
+
+private:
+    const Patronus &p_;
+};
+
+inline std::ostream &operator<<(std::ostream &os,
+                                const pre_patronus_explain &pre)
+{
+    const auto &p = pre.p_;
+    CHECK(p.is_client_ || p.is_server_)
+        << "Unable to explain patronus: from un-registered thread. ";
+
+    os << "{Patronus explain: ";
+    if (p.rdma_message_buffer_pool_)
+    {
+        os << "rdma_message_buffer(thread): "
+           << p.rdma_message_buffer_pool_->size() << " nr with size "
+           << Patronus::kMessageSize << " B. ";
+    }
+    if (p.rdma_client_buffer_)
+    {
+        os << "rdma_client_buffer(thread): " << p.rdma_client_buffer_->size()
+           << " nr with size " << Patronus::kClientRdmaBufferSize << " B. ";
+    }
+    if (p.rdma_client_buffer_8B_)
+    {
+        os << "rdma_client_buffer_8B(thread): "
+           << p.rdma_client_buffer_8B_->size() << " nr with size 8 B. ";
+    }
+
+    os << "rpc_context(thread): " << p.rpc_context_.size() << " with "
+       << sizeof(RpcContext) << " B. ";
+    os << "rw_context(thread): " << p.rw_context_.size() << " with "
+       << sizeof(RWContext) << " B. ";
+    os << "lease_context(thread): " << p.lease_context_.size() << " with "
+       << sizeof(LeaseContext) << " B. ";
+    if (p.protection_region_pool_)
+    {
+        os << "pr_pool(thread): " << p.protection_region_pool_->size()
+           << " with " << sizeof(ProtectionRegion) << " B. ";
+    }
+    os << "}";
+
+    return os;
 }
 
 }  // namespace patronus

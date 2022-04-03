@@ -333,6 +333,40 @@ inline std::ostream &operator<<(
     return os;
 }
 
+template <size_t kE, size_t kB, size_t kS>
+class pre_rh_explain
+{
+public:
+    using T = RaceHashing<kE, kB, kS>;
+    pre_rh_explain(const T &rh) : rh_(rh)
+    {
+    }
+    template <size_t kEE, size_t kBB, size_t kSS>
+    friend std::ostream &operator<<(std::ostream &, const pre_rh_explain &);
+
+private:
+    const T &rh_;
+};
+
+template <size_t kE, size_t kB, size_t kS>
+std::ostream &operator<<(std::ostream &os, const pre_rh_explain<kE, kB, kS> &)
+{
+    using SubTableT = typename pre_rh_explain<kE, kB, kS>::T::SubTableT;
+    using BucketT = typename SubTableT::BucketT;
+    using SlotT = typename BucketT::SlotT;
+    auto max_bucket_nr = kE * SubTableT::bucket_nr();
+    auto max_slot_nr = max_bucket_nr * BucketT::data_slot_nr();
+    os << "HashTable explain: max subtable nr: " << kE
+       << ", size: " << SubTableT::size_bytes()
+       << " B. max bucket nr: " << max_bucket_nr
+       << ", bucket in each subtable: " << SubTableT::bucket_nr()
+       << ", size: " << BucketT::size_bytes()
+       << " B. max slot nr: " << max_slot_nr
+       << ", slot in each bucket: " << BucketT::data_slot_nr()
+       << ", size: " << SlotT::size_bytes();
+    return os;
+}
+
 }  // namespace patronus::hash
 
 #endif
