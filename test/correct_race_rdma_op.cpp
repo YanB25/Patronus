@@ -219,6 +219,8 @@ void test_basic_client_worker(Patronus::pointer p,
     size_t get_succ_nr = 0;
     size_t get_fail_nr = 0;
 
+    size_t executed_nr = 0;
+
     std::map<std::string, std::string> inserted;
     std::set<std::string> keys;
 
@@ -356,6 +358,7 @@ void test_basic_client_worker(Patronus::pointer p,
                 get_fail_nr++;
             }
         }
+        executed_nr++;
     }
 
     for (const auto &[k, v] : inserted)
@@ -503,7 +506,7 @@ void client(Patronus::pointer p, boost::barrier &bar)
     }
     bar.wait();
 
-    LOG(INFO) << "[bench] Test basic single thread";
+    LOG_IF(INFO, master) << "[bench] Test basic single thread";
     // single thread small
     auto small_conf = BenchConfigFactory::get_single_round_config(
         100 /* test */, 1 /* thread */, 1 /* coro */, false /* expand */);
@@ -512,7 +515,7 @@ void client(Patronus::pointer p, boost::barrier &bar)
         test_basic_client<4, 64, 64>(p, bar, master, conf, 0 /* key */);
     }
 
-    LOG(INFO) << "[bench] Burn basic single thread";
+    LOG_IF(INFO, master) << "[bench] Burn basic single thread";
     auto burn_conf = BenchConfigFactory::get_single_round_config(
         10_K /* test */, 1 /* thread */, 1 /* coro */, false /* expand */);
     for (const auto &conf : burn_conf)
@@ -520,7 +523,7 @@ void client(Patronus::pointer p, boost::barrier &bar)
         test_basic_client<4, 64, 64>(p, bar, master, conf, 1 /* key */);
     }
 
-    LOG(INFO) << "[bench] test expand single thread";
+    LOG_IF(INFO, master) << "[bench] test expand single thread";
     auto expand_conf = BenchConfigFactory::get_single_round_config(
         100_K, 1 /* thread */, 1 /* coro */, true /* expand */);
     for (const auto &conf : expand_conf)
@@ -528,7 +531,7 @@ void client(Patronus::pointer p, boost::barrier &bar)
         test_basic_client<128, 4, 4>(p, bar, master, conf, 2 /* key */);
     }
 
-    LOG(INFO) << "[bench] Test basic multiple thread";
+    LOG_IF(INFO, master) << "[bench] Test basic multiple thread";
     auto multithread_conf = BenchConfigFactory::get_single_round_config(
         1_K, kThreadNr, kMaxCoroNr, false);
     for (const auto &conf : multithread_conf)
@@ -536,7 +539,7 @@ void client(Patronus::pointer p, boost::barrier &bar)
         test_basic_client<4, 64, 64>(p, bar, master, conf, 3 /* key */);
     }
 
-    LOG(INFO) << "[bench] Test multi-round complex workload";
+    LOG_IF(INFO, master) << "[bench] Test multi-round complex workload";
     auto multi_round_conf = BenchConfigFactory::get_multi_round_config(
         100_K /* fill */, 1_K /* test */, kThreadNr, kMaxCoroNr);
     for (const auto &conf : multi_round_conf)

@@ -156,7 +156,7 @@ public:
     }
     RetCode commit(uint64_t wr_id, CoroContext *ctx)
     {
-        DCHECK_LT(idx_, kMaxOp);
+        DCHECK_LE(idx_, kMaxOp);
         for (size_t i = 0; i < idx_; ++i)
         {
             bool last = (i + 1) == idx_;

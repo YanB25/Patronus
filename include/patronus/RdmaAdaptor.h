@@ -298,6 +298,20 @@ public:
                       size_t size,
                       RemoteMemHandle &handle) override
     {
+        auto gaddr = vaddr_to_gaddr(vaddr);
+        auto &lease = *(Lease *) handle.private_data();
+        CHECK_GE(gaddr.offset, handle.gaddr().offset);
+        auto offset = gaddr.offset - handle.gaddr().offset;
+        auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+        auto ec = patronus_->prepare_read(
+            batch_, lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
+        if (unlikely(ec == kNoMem))
+        {
+            CHECK_EQ(patronus_->commit(batch_, coro_ctx_), kOk);
+            DCHECK(batch_.empty());
+            return rdma_read(rdma_buf, vaddr, size, handle);
+        }
+
         if constexpr (::config::kEnableRdmaTrace)
         {
             if (trace_enabled())
@@ -307,13 +321,6 @@ public:
                 rdma_trace_record_.indv_one_sided++;
             }
         }
-        auto gaddr = vaddr_to_gaddr(vaddr);
-        auto &lease = *(Lease *) handle.private_data();
-        CHECK_GE(gaddr.offset, handle.gaddr().offset);
-        auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
-        auto ec = patronus_->read(
-            lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
         return ec;
     }
     // handle.gaddr() => lease.buffer_base (dsm offset)
@@ -324,6 +331,20 @@ public:
                        size_t size,
                        RemoteMemHandle &handle) override
     {
+        auto gaddr = vaddr_to_gaddr(vaddr);
+        auto &lease = *(Lease *) handle.private_data();
+        CHECK_GE(gaddr.offset, handle.gaddr().offset);
+        auto offset = gaddr.offset - handle.gaddr().offset;
+        auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+        auto ec = patronus_->prepare_write(
+            batch_, lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
+        if (unlikely(ec == kNoMem))
+        {
+            CHECK_EQ(patronus_->commit(batch_, coro_ctx_), kOk);
+            DCHECK(batch_.empty());
+            return rdma_write(vaddr, rdma_buf, size, handle);
+        }
+
         if constexpr (::config::kEnableRdmaTrace)
         {
             if (trace_enabled())
@@ -333,13 +354,7 @@ public:
                 rdma_trace_record_.indv_one_sided++;
             }
         }
-        auto gaddr = vaddr_to_gaddr(vaddr);
-        auto &lease = *(Lease *) handle.private_data();
-        CHECK_GE(gaddr.offset, handle.gaddr().offset);
-        auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
-        auto ec = patronus_->write(
-            lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
+
         return ec;
     }
     RetCode rdma_cas(GlobalAddress vaddr,
@@ -361,15 +376,21 @@ public:
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
         auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
-        auto rc = patronus_->cas(
-            lease, (char *) rdma_buf, offset, expect, desired, flag, coro_ctx_);
-        if (rc == kRdmaExecutionErr)
+        auto rc = patronus_->prepare_cas(batch_,
+                                         lease,
+                                         (char *) rdma_buf,
+                                         offset,
+                                         expect,
+                                         desired,
+                                         flag,
+                                         coro_ctx_);
+        if (unlikely(rc == kNoMem))
         {
-            // execution err is also okay.
-            // meaning cas failed by mismatch
-            return kOk;
+            CHECK_EQ(patronus_->commit(batch_, coro_ctx_), kOk);
+            DCHECK(batch_.empty());
+            return rdma_cas(vaddr, expect, desired, rdma_buf, handle);
         }
-        return kOk;
+        return rc;
     }
     RetCode commit() override
     {
@@ -380,10 +401,7 @@ public:
                 rdma_trace_record_.commit_nr++;
             }
         }
-        LOG_FIRST_N(WARNING, 1)
-            << "[rdma-adaptor] commit() not use. not batching r/w here. "
-            << pre_coro_ctx(coro_ctx_);
-        return kOk;
+        return patronus_->commit(batch_, coro_ctx_);
     }
     GlobalAddress to_exposed_gaddr(void *addr) override
     {
@@ -429,6 +447,8 @@ private:
     bool is_server_;
     bool enable_trace_{false};
     std::string trace_name_;
+
+    PatronusBatchContext batch_;
 
     RdmaTraceRecord rdma_trace_record_;
 

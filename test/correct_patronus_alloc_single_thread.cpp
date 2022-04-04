@@ -5,6 +5,7 @@
 
 #include "Timer.h"
 #include "patronus/Patronus.h"
+#include "patronus/memory/patronus_wrapper_allocator.h"
 #include "util/Rand.h"
 #include "util/monitor.h"
 
@@ -28,23 +29,32 @@ thread_local CoroCall master;
 constexpr static size_t kDirID = 0;
 constexpr static uint64_t kWaitKey = 0;
 
+// for the specific experiments for refill
+constexpr static size_t kReserveBuffersize = 1_GB;
+constexpr static size_t kRefillBlockSize = 4_MB;
+constexpr static size_t kAllocSize = 1_MB;
+
 // constexpr static size_t kTestTime =
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
 constexpr static size_t kTestTime = 100_K;
 // constexpr static size_t kTestTime = 1000;
 
+constexpr static uint64_t kSpecificHint = 3;
+
 using namespace std::chrono_literals;
 
-struct ClientCommunication
-{
-    bool finish_all_task[kCoroCnt];
-} client_comm;
+// struct ClientCommunication
+// {
+//     bool finish_all_task[kCoroCnt];
+// } client_comm;
 
-void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
+void client_worker(Patronus::pointer p,
+                   coro_t coro_id,
+                   CoroExecutionContextWith<kCoroCnt, uint64_t> &ex,
+                   CoroYield &yield)
 {
-    client_comm.finish_all_task[coro_id] = false;
-
     auto tid = p->get_thread_id();
+    auto dir_id = tid;
 
     CoroContext ctx(tid, &yield, &master, coro_id);
 
@@ -110,13 +120,57 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             gaddr, kDirID, kAllocBufferSize /* size */, 0 /* hint */, &ctx);
     }
 
+    // now test the refill allocator
+    {
+        LOG(INFO) << "[bench] begin to test refillable allocator...";
+        mem::RefillableSlabAllocatorConfig refill_slab_conf;
+        refill_slab_conf.block_class = {kAllocSize};
+        refill_slab_conf.block_ratio = {1.0};
+        refill_slab_conf.refill_allocator =
+            mem::PatronusWrapperAllocator::new_instance(
+                p, kServerNodeId, dir_id, kSpecificHint);
+        refill_slab_conf.refill_block_size = kRefillBlockSize;
+        auto refill_allocator =
+            mem::RefillableSlabAllocator::new_instance(refill_slab_conf);
+        size_t allocated_nr = 0;
+        std::unordered_set<void *> allocated_buffers;
+        while (true)
+        {
+            auto *ret = refill_allocator->alloc(kAllocSize, &ctx);
+            if (ret != nullptr)
+            {
+                allocated_nr++;
+                allocated_buffers.insert(ret);
+                LOG_IF(INFO, allocated_nr % 1_K == 0)
+                    << "[bench] allocated 1_K. now: " << allocated_nr
+                    << ". coro: " << ctx;
+            }
+            else
+            {
+                LOG(INFO) << "[bench] refill allocator allocates "
+                          << allocated_nr << " buffers";
+                break;
+            }
+        }
+        LOG(INFO) << "[bench] finish allocation. freeing... coro: " << ctx;
+        ex.get_private_data() += allocated_nr * kAllocSize;
+        LOG(WARNING) << "[bench] not freeing slab allocator. Strict mode does "
+                        "not allowing we to do this.";
+        // for (auto *buf : allocated_buffers)
+        // {
+        //     refill_allocator->free(buf, kAllocSize, &ctx);
+        // }
+        allocated_buffers.clear();
+    }
+
     LOG(WARNING) << "worker coro " << (int) coro_id
                  << " finished ALL THE TASK. yield to master.";
-
-    client_comm.finish_all_task[coro_id] = true;
+    ex.worker_finished(coro_id);
     ctx.yield_to_master();
 }
-void client_master(Patronus::pointer p, CoroYield &yield)
+void client_master(Patronus::pointer p,
+                   CoroExecutionContextWith<kCoroCnt, uint64_t> &ex,
+                   CoroYield &yield)
 {
     auto tid = p->get_thread_id();
     auto mid = tid;
@@ -130,9 +184,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
     }
     LOG(INFO) << "Return back to master. start to recv messages";
     coro_t coro_buf[2 * kCoroCnt];
-    while (!std::all_of(std::begin(client_comm.finish_all_task),
-                        std::end(client_comm.finish_all_task),
-                        [](bool i) { return i; }))
+    while (!ex.is_finished_all())
     {
         // try to see if messages arrived
 
@@ -144,7 +196,13 @@ void client_master(Patronus::pointer p, CoroYield &yield)
             mctx.yield_to_worker(coro_id);
         }
     }
+    auto specific_test_allocated_bytes = ex.get_private_data();
+    LOG(INFO) << "[bench] refillable allocator test finished. allocated bytes: "
+              << specific_test_allocated_bytes;
 
+    CHECK_GE(specific_test_allocated_bytes, kReserveBuffersize)
+        << "** RefillableAllocator does not work well: It does not allocate as "
+           "much as expected.";
     p->finished(kWaitKey);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
@@ -153,12 +211,17 @@ void client(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
     LOG(INFO) << "I am client. tid " << tid;
+
+    CoroExecutionContextWith<kCoroCnt, uint64_t> ex;
+    ex.get_private_data() = 0;
+
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        workers[i] =
-            CoroCall([p, i](CoroYield &yield) { client_worker(p, i, yield); });
+        workers[i] = CoroCall(
+            [p, i, &ex](CoroYield &yield) { client_worker(p, i, ex, yield); });
     }
-    master = CoroCall([p](CoroYield &yield) { client_master(p, yield); });
+    master =
+        CoroCall([p, &ex](CoroYield &yield) { client_master(p, ex, yield); });
     master();
 }
 
@@ -167,6 +230,21 @@ void server(Patronus::pointer p)
     auto tid = p->get_thread_id();
 
     LOG(INFO) << "I am server. tid " << tid;
+
+    // This is a specific experiments to test the correctness of
+    // refill_allocator.
+    // Init at the server side.
+    {
+        auto reserved_buffer = p->get_user_reserved_buffer();
+        CHECK_GE(reserved_buffer.size, kReserveBuffersize);
+
+        mem::SlabAllocatorConfig slab_conf;
+        slab_conf.block_class = {kRefillBlockSize};
+        slab_conf.block_ratio = {1.0};
+        auto slab_allocator = mem::SlabAllocator::new_instance(
+            reserved_buffer.buffer, reserved_buffer.size, slab_conf);
+        p->reg_allocator(kSpecificHint, slab_allocator);
+    }
 
     p->server_serve(tid, kWaitKey);
 }

@@ -307,6 +307,7 @@ constexpr static bool kEnableTrace = false;
 constexpr static uint64_t kTraceRate =
     100000;  // (1.0 / kTraceRate) possibility
 // slab allocator checks whether each free is valid.
+// Turn this off, since patronus allows free-ing buffers across clients
 constexpr static bool kEnableSlabAllocatorStrictChecking = true;
 // other settings
 constexpr static size_t kLeaseCacheItemLimitNr = 3;

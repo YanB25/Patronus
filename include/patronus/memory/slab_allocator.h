@@ -400,6 +400,90 @@ inline std::ostream &operator<<(std::ostream &os,
     os << "}";
     return os;
 }
+
+struct RefillableSlabAllocatorConfig
+{
+    std::vector<size_t> block_class;
+    std::vector<double> block_ratio;
+    IAllocator::pointer refill_allocator;
+    size_t refill_block_size;
+};
+/**
+ * TODO: RefillableSlabAllocator never actual frees anything.
+ *
+ */
+class RefillableSlabAllocator : public IAllocator
+{
+public:
+    using pointer = std::shared_ptr<RefillableSlabAllocator>;
+    RefillableSlabAllocator(const RefillableSlabAllocatorConfig &config)
+        : config_(config)
+    {
+    }
+    static pointer new_instance(const RefillableSlabAllocatorConfig &config)
+    {
+        return std::make_shared<RefillableSlabAllocator>(config);
+    }
+    void *alloc(size_t size, CoroContext *ctx = nullptr) override
+    {
+        return do_alloc(size, true, ctx);
+    }
+    void free(void *addr, CoroContext *ctx = nullptr) override
+    {
+        DCHECK_NOTNULL(allocator_)->free(addr, ctx);
+    }
+    void free(void *addr, size_t size, CoroContext *ctx = nullptr) override
+    {
+        DCHECK_NOTNULL(allocator_)->free(addr, size, ctx);
+    }
+
+private:
+    void *do_alloc(size_t size, bool retry, CoroContext *ctx)
+    {
+        if (unlikely(allocator_ == nullptr))
+        {
+            if (retry)
+            {
+                refill(ctx);
+                return do_alloc(size, false, ctx);
+            }
+            return nullptr;
+        }
+        auto *ret = DCHECK_NOTNULL(allocator_)->alloc(size, ctx);
+        if (unlikely(ret == nullptr))
+        {
+            if (retry)
+            {
+                refill(ctx);
+                return do_alloc(size, false, ctx);
+            }
+            return nullptr;
+        }
+        return ret;
+    }
+    void refill(CoroContext *ctx)
+    {
+        DLOG(INFO) << "[refill-slab] refill: RefillableSlabAllocator triggered "
+                      "refill to allocate size "
+                   << config_.refill_block_size
+                   << ". coro: " << pre_coro_ctx(ctx);
+        SlabAllocatorConfig slab_conf;
+        slab_conf.block_class = config_.block_class;
+        slab_conf.block_ratio = config_.block_ratio;
+        void *alloc_buffer = config_.refill_allocator->alloc(
+            config_.refill_block_size, DCHECK_NOTNULL(ctx));
+        if (unlikely(alloc_buffer == nullptr))
+        {
+            // can not allocate more
+            return;
+        }
+        allocator_ = SlabAllocator::new_instance(
+            alloc_buffer, config_.refill_block_size, slab_conf);
+    }
+    RefillableSlabAllocatorConfig config_;
+    IAllocator::pointer allocator_;
+};
+
 }  // namespace patronus::mem
 
 #endif
