@@ -465,6 +465,78 @@ bool rdmaWriteCas(ibv_qp *qp,
                   bool isSignaled,
                   uint64_t wrID = 0);
 
+/**
+ * @brief fill SGE and WR and links the SGE to the WR
+ */
+static inline void fillSgeWr(
+    ibv_sge &sg, ibv_send_wr &wr, uint64_t source, uint64_t size, uint32_t lkey)
+{
+    memset(&wr, 0, sizeof(wr));
+
+    // optimized for zero-size op, e.g., zero-size SEND
+    if (size == 0)
+    {
+        wr.num_sge = 0;
+    }
+    else
+    {
+        memset(&sg, 0, sizeof(sg));
+        sg.addr = (uintptr_t) source;
+        sg.length = size;
+        sg.lkey = lkey;
+
+        wr.wr_id = 0;
+        wr.sg_list = &sg;
+        wr.num_sge = 1;
+    }
+}
+
+static inline void fillSgeWr(
+    ibv_sge &sg, ibv_recv_wr &wr, uint64_t source, uint64_t size, uint32_t lkey)
+{
+    memset(&wr, 0, sizeof(wr));
+
+    if (size == 0)
+    {
+        wr.num_sge = 0;
+    }
+    else
+    {
+        memset(&sg, 0, sizeof(sg));
+        sg.addr = (uintptr_t) source;
+        sg.length = size;
+        sg.lkey = lkey;
+
+        wr.wr_id = 0;
+        wr.sg_list = &sg;
+        wr.num_sge = 1;
+    }
+}
+
+static inline void fillSgeWr(ibv_sge &sg,
+                             ibv_exp_send_wr &wr,
+                             uint64_t source,
+                             uint64_t size,
+                             uint32_t lkey)
+{
+    memset(&wr, 0, sizeof(wr));
+    if (size == 0)
+    {
+        wr.num_sge = 0;
+    }
+    else
+    {
+        memset(&sg, 0, sizeof(sg));
+        sg.addr = (uintptr_t) source;
+        sg.length = size;
+        sg.lkey = lkey;
+
+        wr.wr_id = 0;
+        wr.sg_list = &sg;
+        wr.num_sge = 1;
+    }
+}
+
 constexpr int IBV_ACCESS_CUSTOM_REMOTE_RW =
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
     IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_MW_BIND;

@@ -8,6 +8,7 @@
 #include "Common.h"
 #include "DSM.h"
 #include "Result.h"
+#include "patronus/Batch.h"
 #include "patronus/Coro.h"
 #include "patronus/DDLManager.h"
 #include "patronus/Lease.h"
@@ -212,6 +213,31 @@ public:
                        uint64_t swap,
                        uint8_t flag /* RWFlag */,
                        CoroContext *ctx = nullptr);
+    // below for batch API
+    RetCode prepare_write(PatronusBatchContext &batch,
+                          Lease &lease,
+                          const char *ibuf,
+                          size_t size,
+                          size_t offset,
+                          uint8_t flag,
+                          CoroContext *ctx = nullptr);
+    RetCode prepare_read(PatronusBatchContext &batch,
+                         Lease &lease,
+                         char *obuf,
+                         size_t size,
+                         size_t offset,
+                         uint8_t flag,
+                         CoroContext *ctx = nullptr);
+    RetCode prepare_cas(PatronusBatchContext &batch,
+                        Lease &lease,
+                        char *iobuf,
+                        size_t offset,
+                        uint64_t compare,
+                        uint64_t swap,
+                        uint8_t flag,
+                        CoroContext *ctx = nullptr);
+    RetCode commit(PatronusBatchContext &batch, CoroContext *ctx = nullptr);
+
     // handy cluster-wide put/get. Not very performance, but convenient
     template <typename V,
               typename T,
@@ -718,6 +744,7 @@ private:
     inline RetCode handle_rwcas_flag(Lease &lease,
                                      uint8_t flag,
                                      CoroContext *ctx);
+    inline RetCode handle_batch_op_flag(uint8_t flag) const;
     inline RetCode validate_lease(const Lease &lease);
     RetCode protection_region_rw_impl(Lease &lease,
                                       char *io_buf,

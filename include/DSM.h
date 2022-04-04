@@ -535,6 +535,7 @@ public:
     {
         return reliable_msg_->try_recv(from_mid, ibuf, limit);
     }
+    inline uint32_t get_icon_lkey();
 
     // below used as lease
 private:
@@ -739,6 +740,11 @@ ibv_mr *DSM::get_dir_mr(size_t dirID)
 {
     DCHECK_LT(dirID, dirCon.size());
     return dirCon[dirID]->dsmMR;
+}
+
+inline uint32_t DSM::get_icon_lkey()
+{
+    return DCHECK_NOTNULL(iCon)->cacheLKey;
 }
 
 void DSM::read(char *buffer,

@@ -1566,7 +1566,8 @@ size_t Patronus::handle_rdma_finishes(
         DCHECK(wr_id.prefix == WRID_PREFIX_PATRONUS_RW ||
                wr_id.prefix == WRID_PREFIX_PATRONUS_PR_RW ||
                wr_id.prefix == WRID_PREFIX_PATRONUS_CAS ||
-               wr_id.prefix == WRID_PREFIX_PATRONUS_PR_CAS)
+               wr_id.prefix == WRID_PREFIX_PATRONUS_PR_CAS ||
+               wr_id.prefix == WRID_PREFIX_PATRONUS_BATCH_RWCAS)
             << "** unexpected prefix " << (int) wr_id.prefix;
         auto *rw_context = rw_context_.id_to_obj(id);
         auto node_id = rw_context->target_node;
@@ -2587,6 +2588,163 @@ mem::IAllocator::pointer Patronus::get_allocator(uint64_t hint)
         return nullptr;
     }
     return it->second;
+}
+
+RetCode Patronus::prepare_write(PatronusBatchContext &batch,
+                                Lease &lease,
+                                const char *ibuf,
+                                size_t size,
+                                size_t offset,
+                                uint8_t flag,
+                                CoroContext *ctx)
+{
+    auto ec = handle_batch_op_flag(flag);
+    if (unlikely(ec != RetCode::kOk))
+    {
+        return ec;
+    }
+    CHECK(lease.success());
+    CHECK(lease.is_writable());
+
+    uint32_t rkey = lease.cur_rkey_;
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    auto node_id = lease.node_id_;
+    auto dir_id = lease.dir_id_;
+
+    GlobalAddress gaddr;
+    gaddr.nodeID = node_id;
+    gaddr.offset = remote_addr;
+    uint64_t source = (uint64_t) ibuf;
+    uint64_t dest = dsm_->gaddr_to_addr(gaddr);
+    uint32_t lkey = dsm_->get_icon_lkey();
+    auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
+    return batch.prepare_write(
+        qp, node_id, dir_id, dest, source, size, lkey, rkey, ctx);
+}
+
+RetCode Patronus::prepare_read(PatronusBatchContext &batch,
+                               Lease &lease,
+                               char *obuf,
+                               size_t size,
+                               size_t offset,
+                               uint8_t flag,
+                               CoroContext *ctx)
+{
+    auto ec = handle_batch_op_flag(flag);
+    if (unlikely(ec != RetCode::kOk))
+    {
+        return ec;
+    }
+    CHECK(lease.success());
+    CHECK(lease.is_readable());
+
+    uint32_t rkey = lease.cur_rkey_;
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    auto node_id = lease.node_id_;
+    auto dir_id = lease.dir_id_;
+
+    GlobalAddress gaddr;
+    gaddr.nodeID = node_id;
+    gaddr.offset = remote_addr;
+    uint64_t source = (uint64_t) obuf;
+    uint64_t dest = dsm_->gaddr_to_addr(gaddr);
+    uint32_t lkey = dsm_->get_icon_lkey();
+    auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
+    return batch.prepare_read(
+        qp, node_id, dir_id, source, dest, size, lkey, rkey, ctx);
+}
+
+RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
+                              Lease &lease,
+                              char *iobuf,
+                              size_t offset,
+                              uint64_t compare,
+                              uint64_t swap,
+                              uint8_t flag,
+                              CoroContext *ctx)
+{
+    auto ec = handle_batch_op_flag(flag);
+    if (unlikely(ec != RetCode::kOk))
+    {
+        return ec;
+    }
+    CHECK(lease.success());
+    CHECK(lease.is_writable());
+
+    uint32_t rkey = lease.cur_rkey_;
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    auto node_id = lease.node_id_;
+    auto dir_id = lease.dir_id_;
+
+    GlobalAddress gaddr;
+    gaddr.nodeID = node_id;
+    gaddr.offset = remote_addr;
+    uint64_t source = (uint64_t) iobuf;
+    uint64_t dest = dsm_->gaddr_to_addr(gaddr);
+    uint32_t lkey = dsm_->get_icon_lkey();
+    auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
+    return batch.prepare_cas(
+        qp, node_id, dir_id, dest, source, compare, swap, lkey, rkey, ctx);
+}
+
+RetCode Patronus::handle_batch_op_flag(uint8_t flag) const
+{
+    bool no_local_check = flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
+    DCHECK(no_local_check) << "** Batch op not support local expire checks";
+    bool with_auto_expend = flag & (uint8_t) RWFlag::kWithAutoExtend;
+    DCHECK(!with_auto_expend)
+        << "** Batch op does not support auto lease extend";
+    bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+    DCHECK(!with_cache) << "** Batch op does not support local caching";
+    bool reserved = flag & (uint8_t) RWFlag::kReserved;
+    DCHECK(!reserved);
+    return kOk;
+}
+
+RetCode Patronus::commit(PatronusBatchContext &batch, CoroContext *ctx)
+{
+    RetCode rc = kOk;
+    RWContext *rw_context = nullptr;
+    uint16_t rw_ctx_id = 0;
+
+    if (unlikely(batch.empty()))
+    {
+        return kOk;
+    }
+    bool ret_success = false;
+    rw_context = DCHECK_NOTNULL(get_rw_context());
+    rw_ctx_id = get_rw_context_id(rw_context);
+    rw_context->success = &ret_success;
+    rw_context->ready = false;
+    rw_context->coro_id = ctx ? ctx->coro_id() : kNotACoro;
+    // We have to fill the below two fields
+    // so we retrieve from the batch
+    rw_context->target_node = batch.node_id();
+    rw_context->dir_id = batch.dir_id();
+
+    WRID wr_id(WRID_PREFIX_PATRONUS_BATCH_RWCAS, rw_ctx_id);
+    rc = batch.commit(wr_id.val, ctx);
+    if (unlikely(rc != kOk))
+    {
+        goto ret;
+    }
+
+    DCHECK(rw_context->ready)
+        << "** When commit finished, should have been ready.";
+
+    if (likely(ret_success))
+    {
+        rc = kOk;
+    }
+    else
+    {
+        // TODO: I believe it is protection error
+        rc = kRdmaProtectionErr;
+    }
+
+ret:
+    put_rw_context(rw_context);
+    return rc;
 }
 
 }  // namespace patronus
