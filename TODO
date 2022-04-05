@@ -262,6 +262,12 @@ Just take a couple of data. do like quick sort, summing, etc.
 [-] Enable patronus::batch_write/batch_read/batch_cas, etc
 - maybe rdma_ctx add API to enable more specific trace point? (and time)
 - See how resizing perform
+- STRANGE: Sometimes the performance is 4.3 Mops, sometimes 5 Mops, and just these two point. Various, but not variout within the range. So I guess it is due to CPU frequency? or RNIC policy? Don't know, but indeed is a problem.
 
 - try to review the code: did release mode include unnecessary overhead?
 - Is race hashing impl optimized? i.e. use std::vector with reserved instead of unordered_set
+
+when u go back:
+[1] don't insert to full, otherwise, all the insert got kNotFound, and the performance is the same as read
+2. try to port MR allocator to the experiments. See how different it is
+3. try to optimize expand. only 6.3) needs my attention.

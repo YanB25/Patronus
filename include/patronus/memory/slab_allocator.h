@@ -45,10 +45,10 @@ public:
     {
         if (pool_.size() != buffer_nr_)
         {
-            LOG(WARNING) << "Possible memory leak for Pool at " << (void *) this
-                         << ", expect " << buffer_nr_ << ", got "
-                         << pool_.size()
-                         << ". Possible leak: " << buffer_nr_ - pool_.size();
+            DLOG(WARNING) << "Possible memory leak for Pool at "
+                          << (void *) this << ", expect " << buffer_nr_
+                          << ", got " << pool_.size()
+                          << ". Possible leak: " << buffer_nr_ - pool_.size();
             //  << pool_.size() << util::stack_trace;
         }
     }

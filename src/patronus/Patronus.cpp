@@ -2689,15 +2689,18 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
 
 RetCode Patronus::handle_batch_op_flag(uint8_t flag) const
 {
-    bool no_local_check = flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
-    DCHECK(no_local_check) << "** Batch op not support local expire checks";
-    bool with_auto_expend = flag & (uint8_t) RWFlag::kWithAutoExtend;
-    DCHECK(!with_auto_expend)
-        << "** Batch op does not support auto lease extend";
-    bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
-    DCHECK(!with_cache) << "** Batch op does not support local caching";
-    bool reserved = flag & (uint8_t) RWFlag::kReserved;
-    DCHECK(!reserved);
+    if constexpr (debug())
+    {
+        bool no_local_check = flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
+        CHECK(no_local_check) << "** Batch op not support local expire checks";
+        bool with_auto_expend = flag & (uint8_t) RWFlag::kWithAutoExtend;
+        CHECK(!with_auto_expend)
+            << "** Batch op does not support auto lease extend";
+        bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+        CHECK(!with_cache) << "** Batch op does not support local caching";
+        bool reserved = flag & (uint8_t) RWFlag::kReserved;
+        CHECK(!reserved);
+    }
     return kOk;
 }
 

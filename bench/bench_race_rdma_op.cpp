@@ -130,7 +130,7 @@ public:
     {
         // fill the table with KVs
         BenchConfig insert_conf;
-        insert_conf.name = name + ".insert";
+        insert_conf.name = name + ".load";
         insert_conf.thread_nr = 1;
         insert_conf.coro_nr = 1;
         insert_conf.insert_prob = 1;
@@ -151,7 +151,19 @@ public:
         query_report_conf.name = name + ".query";
         query_report_conf.should_report = true;
 
-        return pipeline({insert_conf, query_warmup_conf, query_report_conf});
+        BenchConfig mix_conf;
+        mix_conf.name = name + ".mix";
+        mix_conf.thread_nr = thread_nr;
+        mix_conf.coro_nr = coro_nr;
+        mix_conf.get_prob = 0.8;
+        mix_conf.delete_prob = 0.1;
+        mix_conf.insert_prob = 0.1;
+        mix_conf.auto_extend = false;
+        mix_conf.test_nr = test_nr;
+        mix_conf.should_report = true;
+
+        return pipeline(
+            {insert_conf, query_warmup_conf, query_report_conf, mix_conf});
     }
 
 private:
@@ -558,9 +570,10 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     }
 
     LOG_IF(INFO, is_master) << "[bench] benching multiple threads";
+    constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
     key++;
     auto multithread_conf = BenchConfigFactory::get_multi_round_config(
-        "multithread_basic", 3_K, 5_M, kThreadNr, kMaxCoroNr);
+        "multithread_basic", capacity, 10_M, kThreadNr, kMaxCoroNr);
     if (is_client)
     {
         for (const auto &conf : multithread_conf)

@@ -331,7 +331,7 @@ public:
             << rdma_trace_record_;
         if (unlikely(ongoing_rdma_bufs_.size() == kWarningOngoingRdmaBuf))
         {
-            LOG(WARNING)
+            DLOG(WARNING)
                 << "** Got too much rdma buffer. Only log once for this."
                 << rdma_trace_record_;
         }
