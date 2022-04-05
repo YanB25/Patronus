@@ -106,4 +106,8 @@ TODO: Still not perfect results.
 
 The data is preliminary, may get better later.
 Thread = 8, Coco = 16, RO, RH<4, 16, 16>
-Got 4.3 Mops.
+Got 4.3 Mops. ~30us
+
+=> enable batching for r/w/cas
+Thread = 8, Coro = 16, RO, RH<4, 16, 16>
+Got 5 Mops. ~25us

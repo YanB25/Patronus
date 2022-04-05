@@ -192,7 +192,7 @@ public:
         return rc;
     }
     RetCode remove_if_exists(size_t subtable_idx,
-                             const std::unordered_set<SlotHandle> slot_handles,
+                             const std::unordered_set<SlotHandle> &slot_handles,
                              const Key &key,
                              HashContext *dctx)
     {
@@ -896,7 +896,7 @@ public:
     RetCode get_real_match_slots(
         const std::unordered_set<SlotHandle> &slot_handles,
         const Key &key,
-        std::unordered_set<SlotHandle> real_matches,
+        std::unordered_set<SlotHandle> &real_matches,
         HashContext *dctx)
     {
         auto f = [&real_matches](const Key &key,
@@ -1095,6 +1095,7 @@ public:
         const ApplyF &func,
         HashContext *dctx)
     {
+        // TODO: could optimize to one RDMA RTT latency
         std::map<SlotHandle, KVBlockHandle> slots_rdma_buffers;
         for (auto slot_handle : slot_handles)
         {
@@ -1148,21 +1149,27 @@ public:
         auto rounded_m = round_to_bits(m, cached_gd);
         auto [h1, h2] = hash_h1_h2(hash);
 
+        maybe_trace_pin("before ctor subtable_handle");
+
         DVLOG(3) << "[race] GET key " << pre(key) << ", got hash "
                  << pre_hash(hash) << ", m: " << m << ", rounded to "
                  << rounded_m << " by cached_gd: " << cached_gd
                  << ". fp: " << pre_fp(fp);
         auto st = subtable_handle(rounded_m);
 
+        maybe_trace_pin("before get_two_combined_bucket_handle");
         // get the two combined buckets the same time
         // validate staleness at the same time
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
         CHECK_EQ(rdma_adpt_->commit(), kOk);
 
+        maybe_trace_pin("before locate");
+
         std::unordered_set<SlotHandle> slot_handles;
         auto rc = cbs.locate(fp, cached_ld(rounded_m), m, slot_handles, dctx);
         if (rc == kCacheStale && conf_.auto_update_dir)
         {
+            maybe_trace_pin("before update_dcache");
             // update cache and retry
             CHECK_EQ(update_directory_cache(dctx), kOk);
             return get(key, value, dctx);
@@ -1172,6 +1179,7 @@ public:
             << pre_hash(hash) << " and gd " << cached_gd
             << ". Possible match nr: " << slot_handles.size() << ". " << *dctx;
 
+        maybe_trace_pin("before get_from_slot_views");
         return get_from_slot_views(slot_handles, key, value, dctx);
     }
     RetCode get_from_slot_views(
@@ -1327,6 +1335,17 @@ private:
     // for client private kvblock memory
     GlobalAddress kvblock_pool_gaddr_;
     std::shared_ptr<patronus::mem::IAllocator> kvblock_allocator_;
+
+    void maybe_trace_pin(const char *name)
+    {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (unlikely(rdma_adpt_->trace_enabled()))
+            {
+                rdma_adpt_->trace_pin(name);
+            }
+        }
+    }
 
     size_t cached_gd() const
     {
@@ -1512,6 +1531,8 @@ public:
     {
         maybe_start_trace("get", false);
 
+        rdma_adpt_->trace_pin("*get entered");
+
         auto rc = rhh_.get(key, value, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Get key `" << key << "`. "
@@ -1519,6 +1540,7 @@ public:
         auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
         CHECK_EQ(gc_rc, kOk);
 
+        rdma_adpt_->trace_pin("*get finished");
         maybe_end_trace();
         return rc;
     }

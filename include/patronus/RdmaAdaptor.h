@@ -30,6 +30,14 @@ struct RdmaTraceRecord
     size_t indv_two_sided = 0;
     uint64_t latency_ns;
     ChronoTimer timer;
+    ContTimer<::config::kEnableRdmaTrace> trace_timer;
+
+    void init(const std::string &pname)
+    {
+        name = pname;
+        timer.pin();
+        trace_timer.init(pname);
+    }
 
     void clear()
     {
@@ -51,6 +59,11 @@ struct RdmaTraceRecord
         indv_one_sided = 0;
         indv_two_sided = 0;
         allocated_rdma_buf_nr = 0;
+        trace_timer.clear();
+    }
+    void trace_pin(const std::string_view name)
+    {
+        trace_timer.pin(std::string(name));
     }
 };
 inline std::ostream &operator<<(std::ostream &os, const RdmaTraceRecord &r)
@@ -64,6 +77,8 @@ inline std::ostream &operator<<(std::ostream &os, const RdmaTraceRecord &r)
        << ", free_rel: " << r.free_rel_nr
        << ", used rdma buffer: " << r.allocated_rdma_buf_nr
        << ", latency: " << r.latency_ns << " ns}";
+    os << std::endl;
+    os << r.trace_timer;
     return os;
 }
 class RdmaAdaptor : public IRdmaAdaptor
@@ -457,10 +472,9 @@ public:
     void enable_trace(const void *name) override
     {
         rdma_trace_record_.clear();
+        rdma_trace_record_.init(std::string((const char *) name));
 
         enable_trace_ = true;
-        rdma_trace_record_.name = std::string((const char *) name);
-        rdma_trace_record_.timer.pin();
     }
     void end_trace(const void *) override
     {
@@ -471,6 +485,16 @@ public:
     bool trace_enabled() const override
     {
         return enable_trace_;
+    }
+    void trace_pin(const std::string_view name) override
+    {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (unlikely(trace_enabled()))
+            {
+                rdma_trace_record_.trace_pin(name);
+            }
+        }
     }
     const RdmaTraceRecord &trace_record() const
     {

@@ -138,6 +138,10 @@ public:
     {
         std::ignore = any_data;
     }
+    virtual void trace_pin(const std::string_view name)
+    {
+        std::ignore = name;
+    }
     virtual bool trace_enabled() const
     {
         return false;

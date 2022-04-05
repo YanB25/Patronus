@@ -327,14 +327,14 @@ void test_basic_client_worker(
     }
     auto ns = timer.pin();
 
-    LOG(INFO) << "[bench] insert: succ: " << ins_succ_nr
-              << ", retry: " << ins_retry_nr << ", nomem: " << ins_nomem_nr
-              << ", del: succ: " << del_succ_nr << ", retry: " << del_retry_nr
-              << ", not found: " << del_not_found_nr
-              << ", get: succ: " << get_succ_nr
-              << ", not found: " << get_not_found_nr
-              << ". executed: " << executed_nr << ", take: " << ns
-              << " ns. ctx: " << ctx;
+    VLOG(1) << "[bench] insert: succ: " << ins_succ_nr
+            << ", retry: " << ins_retry_nr << ", nomem: " << ins_nomem_nr
+            << ", del: succ: " << del_succ_nr << ", retry: " << del_retry_nr
+            << ", not found: " << del_not_found_nr
+            << ", get: succ: " << get_succ_nr
+            << ", not found: " << get_not_found_nr
+            << ". executed: " << executed_nr << ", take: " << ns
+            << " ns. ctx: " << ctx;
 
     ex.worker_finished(coro_id);
     ctx.yield_to_master();
