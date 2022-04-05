@@ -95,6 +95,8 @@ public:
     virtual RemoteMemHandle remote_alloc_acquire_perm(size_t, hint_t) = 0;
     // only acquire
     virtual RemoteMemHandle acquire_perm(GlobalAddress gaddr, size_t) = 0;
+    // only alloc
+    virtual GlobalAddress remote_alloc(size_t size, hint_t) = 0;
     // free
     virtual void remote_free(GlobalAddress, size_t size, hint_t) = 0;
     // free + relinquish

@@ -20,6 +20,9 @@ constexpr static size_t kWaitKey = 0;
 
 constexpr static size_t kCoroCnt = 1;
 
+constexpr static uint64_t kAllocHintA = 1;
+constexpr static size_t kAllocSize = 4_KB;
+
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 [[maybe_unused]] constexpr uint16_t kClientNodeId = 0;
@@ -44,6 +47,7 @@ void client_worker(Patronus::pointer p,
     auto rdma_adpt =
         patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, &ctx);
 
+    // checking acquire_perm
     {
         auto handle = rdma_adpt->acquire_perm(gaddr, 64);
         auto rdma_buf = rdma_adpt->get_rdma_buffer(128);
@@ -106,6 +110,7 @@ void client_worker(Patronus::pointer p,
         CHECK_EQ(rc, kOk);
     }
 
+    // checking remote_alloc_acquire_perm
     {
         auto handle = rdma_adpt->remote_alloc_acquire_perm(64, 0 /* hint */);
 
@@ -168,6 +173,66 @@ void client_worker(Patronus::pointer p,
 
         auto rc = rdma_adpt->put_all_rdma_buffer();
         CHECK_EQ(rc, kOk);
+    }
+
+    // checking remote_alloc & remote_dealloc
+    {
+        std::vector<GlobalAddress> gaddrs;
+        gaddrs.reserve(10240);  // don't know
+        while (true)
+        {
+            auto gaddr = rdma_adpt->remote_alloc(kAllocSize, kAllocHintA);
+            if (gaddr.is_null())
+            {
+                LOG(INFO) << "[bench] remote_alloc got nullptr: run out of "
+                             "memory. allocated "
+                          << gaddrs.size() << " nr, i.e. "
+                          << gaddrs.size() * kAllocSize << " B.";
+                break;
+            }
+            gaddrs.push_back(gaddr);
+        }
+
+        size_t check_size = 0;
+        for (const auto &gaddr : gaddrs)
+        {
+            // should be writable
+            auto handle = rdma_adpt->acquire_perm(gaddr, kAllocSize);
+            auto rdma_w_buf = rdma_adpt->get_rdma_buffer(kAllocSize);
+            CHECK_GE(rdma_w_buf.size, kAllocSize);
+            fast_pseudo_fill_buf(rdma_w_buf.buffer, kAllocSize);
+            auto rc = rdma_adpt->rdma_write(
+                gaddr, rdma_w_buf.buffer, kAllocSize, handle);
+            CHECK_EQ(rc, kOk);
+            rc = rdma_adpt->commit();
+            CHECK_EQ(rc, kOk);
+
+            // read and see can we read it back
+            auto rdma_r_buf = rdma_adpt->get_rdma_buffer(kAllocSize);
+            CHECK_GE(rdma_r_buf.size, kAllocSize);
+            rc = rdma_adpt->rdma_read(
+                rdma_r_buf.buffer, gaddr, kAllocSize, handle);
+            CHECK_EQ(rc, kOk);
+            rc = rdma_adpt->commit();
+            CHECK_EQ(rc, kOk);
+            CHECK_EQ(memcmp(rdma_w_buf.buffer, rdma_r_buf.buffer, kAllocSize),
+                     0);
+
+            rdma_adpt->relinquish_perm(handle);
+            rdma_adpt->put_all_rdma_buffer();
+
+            if (check_size++ >= 1_K)
+            {
+                // don't check too much
+                // don't have this time.
+                break;
+            }
+        }
+
+        for (const auto &gaddr : gaddrs)
+        {
+            rdma_adpt->remote_free(gaddr, kAllocSize, kAllocHintA);
+        }
     }
 
     exe_ctx.worker_finished(coro_id);
@@ -238,6 +303,15 @@ void server(Patronus::pointer p)
     p->put("p:gaddr", gaddr, 0ns);
 
     LOG(INFO) << "Allocated " << (void *) addr << ". gaddr: " << gaddr;
+
+    // register allocator for kAllocHintA
+    auto user_reserved_buf = p->get_user_reserved_buffer();
+    mem::SlabAllocatorConfig slab_conf;
+    slab_conf.block_class = {kAllocSize};
+    slab_conf.block_ratio = {1};
+    auto slab_allocator = mem::SlabAllocator::new_instance(
+        user_reserved_buf.buffer, user_reserved_buf.size, slab_conf);
+    p->reg_allocator(kAllocHintA, slab_allocator);
 
     p->server_serve(tid, kWaitKey);
 

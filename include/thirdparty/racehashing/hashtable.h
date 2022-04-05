@@ -212,7 +212,7 @@ public:
 
     ~RaceHashing()
     {
-        LOG(WARNING)
+        LOG_FIRST_N(WARNING, 1)
             << "Skip deallocation for race hash. Because the allocation may "
                "from different clients. Unable to detect that";
         // std::set<void *> freed_entries_addr;

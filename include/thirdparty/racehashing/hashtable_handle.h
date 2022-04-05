@@ -11,6 +11,7 @@
 #include "./utils.h"
 #include "Common.h"
 #include "patronus/RdmaAdaptor.h"
+#include "patronus/memory/patronus_wrapper_allocator.h"
 
 using namespace define::literals;
 namespace patronus::hash
@@ -19,6 +20,44 @@ struct RaceHashingHandleConfig
 {
     bool auto_expand{false};
     bool auto_update_dir{false};
+};
+
+class RdmaAdaptorKVBlockWrapperAllocator : public mem::IAllocator
+{
+public:
+    using pointer = std::shared_ptr<RdmaAdaptorKVBlockWrapperAllocator>;
+    RdmaAdaptorKVBlockWrapperAllocator(IRdmaAdaptor::pointer rdma_adpt,
+                                       uint64_t hint)
+        : rdma_adpt_(rdma_adpt), hint_(hint)
+    {
+    }
+    static pointer new_instance(IRdmaAdaptor::pointer rdma_adpt, uint64_t hint)
+    {
+        return std::make_shared<RdmaAdaptorKVBlockWrapperAllocator>(rdma_adpt,
+                                                                    hint);
+    }
+    void *alloc(size_t size, CoroContext *ctx = nullptr) override
+    {
+        std::ignore = ctx;
+        auto gaddr = rdma_adpt_->remote_alloc(size, hint_);
+        gaddr.nodeID = 0;
+        return (void *) gaddr.val;
+    }
+    void free(void *addr, size_t size, CoroContext *ctx = nullptr) override
+    {
+        std::ignore = ctx;
+        GlobalAddress gaddr(0, (uint64_t) addr);
+        rdma_adpt_->remote_free(gaddr, size, hint_);
+    }
+    void free(void *addr, CoroContext *ctx = nullptr) override
+    {
+        CHECK(false) << "Unsupported free without size. addr: " << addr
+                     << ", coro: " << pre_coro_ctx(ctx);
+    }
+
+private:
+    IRdmaAdaptor::pointer rdma_adpt_;
+    uint64_t hint_;
 };
 
 /**
@@ -50,7 +89,6 @@ public:
     ~RaceHashingHandleImpl()
     {
         rdma_adpt_->relinquish_perm_sync(kvblock_mem_handle_);
-        rdma_adpt_->relinquish_perm_sync(cur_kvblock_mem_handle_);
         rdma_adpt_->relinquish_perm_sync(directory_mem_handle_);
         for (auto &handle : subtable_mem_handles_)
         {
@@ -1260,10 +1298,6 @@ public:
 private:
     GlobalAddress remote_alloc_kvblock(size_t size)
     {
-        // TODO:
-        // implement refills to kvblock_allocator_
-        // that is, if it runs out of all the buffers, alloc another batch from
-        // the server
         return GlobalAddress(kvblock_allocator_->alloc(size));
     }
     void remote_free_kvblock(GlobalAddress addr)
@@ -1287,13 +1321,12 @@ private:
     std::array<RemoteMemHandle, subtable_nr()> subtable_mem_handles_;
     RemoteMemHandle kvblock_mem_handle_;
     RemoteMemHandle directory_mem_handle_;
-    RemoteMemHandle cur_kvblock_mem_handle_;
 
     bool inited_{false};
 
     // for client private kvblock memory
     GlobalAddress kvblock_pool_gaddr_;
-    std::shared_ptr<patronus::mem::SlabAllocator> kvblock_allocator_;
+    std::shared_ptr<patronus::mem::IAllocator> kvblock_allocator_;
 
     size_t cached_gd() const
     {
@@ -1371,29 +1404,16 @@ private:
         kvblock_mem_handle_ =
             rdma_adpt_->acquire_perm(g_kvblock_pool_gaddr, g_kvblock_pool_size);
 
-        // init the second-level allocator to the kvblocks
-        CHECK(!cur_kvblock_mem_handle_.valid());
-        cur_kvblock_mem_handle_ = rdma_adpt_->remote_alloc_acquire_perm(
-            config::kKVBlockAllocBatchSize, config::kAllocHintKVBlock);
-        // each client got a piece of region WITHIN the global region of kvblock
-        if constexpr (debug())
-        {
-            auto g_kvblock_gaddr = kvblock_mem_handle_.gaddr();
-            auto cur_kvblock_gaddr = cur_kvblock_mem_handle_.gaddr();
-            CHECK_EQ(g_kvblock_gaddr.nodeID, cur_kvblock_gaddr.nodeID);
-            CHECK_GE(cur_kvblock_gaddr.offset, g_kvblock_gaddr.offset);
-            CHECK_LE(cur_kvblock_gaddr.offset + config::kKVBlockAllocBatchSize,
-                     g_kvblock_gaddr.offset + kvblock_mem_handle_.size());
-        }
-
-        kvblock_pool_gaddr_ = cur_kvblock_mem_handle_.gaddr();
-        patronus::mem::SlabAllocatorConfig slab_conf;
-        slab_conf.block_class = {config::kKVBlockExpectSize};
-        slab_conf.block_ratio = {1.0};
-        kvblock_allocator_ = std::make_shared<patronus::mem::SlabAllocator>(
-            (void *) kvblock_pool_gaddr_.val,
-            config::kKVBlockAllocBatchSize,
-            slab_conf);
+        patronus::mem::RefillableSlabAllocatorConfig refill_slab_conf;
+        refill_slab_conf.block_class = {config::kKVBlockExpectSize};
+        refill_slab_conf.block_ratio = {1.0};
+        refill_slab_conf.refill_block_size = config::kKVBlockAllocBatchSize;
+        refill_slab_conf.refill_allocator =
+            RdmaAdaptorKVBlockWrapperAllocator::new_instance(
+                rdma_adpt_, config::kAllocHintKVBlock);
+        kvblock_allocator_ =
+            patronus::mem::RefillableSlabAllocator::new_instance(
+                refill_slab_conf);
     }
 
     void init_directory_mem_handle()

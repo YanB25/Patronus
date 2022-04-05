@@ -63,6 +63,18 @@ public:
             << " for size " << size;
         return alloc_handle(ret, size);
     }
+    GlobalAddress remote_alloc(size_t size, hint_t hint) override
+    {
+        auto ret = server_ep_.lock()->rpc_alloc(size, hint);
+        DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
+            << "[rdma][trace] remote_alloc_acquire_perm: " << ret
+            << " for size " << size;
+        LOG_FIRST_N(WARNING, 1)
+            << "[rdma] mock_rdma_adaptor: remote_alloc: this function is not "
+               "checked for correctness: don't know the returned gaddr correct "
+               "or not.";
+        return ret;
+    }
     RemoteMemHandle acquire_perm(GlobalAddress gaddr, size_t size) override
     {
         return alloc_handle(gaddr, size);

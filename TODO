@@ -249,16 +249,17 @@ Race hashing:
 Serverless (mock):
 Just take a couple of data. do like quick sort, summing, etc.
 
-when you go back:
+
+=========================
 
 [-] try to run a simple case for bench_race_rmda_op
 [-] try to run a simple case for multiple threads
-    - NOTE!!!!!! carefully check "should_report", "first_enter", "server_leave" for the multi-threads cases. There are not justified.
+    - NOTE! carefully check "should_report", "first_enter", "server_leave" for the multi-threads cases. There are not justified.
 [-] try to add API rh::explain(), to print the number of slots, bucket, groups, subtables, ...
 [-] try to let the export excel work.
-- LATER UNTIL NEEDED: try to enable lazy_init to slab allocator. i.e. for race hashing kvblocks, only fills the batch when needed. this can greatly waste LESS unused kvblocks.
+[-] LATER UNTIL NEEDED: try to enable lazy_init to slab allocator. i.e. for race hashing kvblocks, only fills the batch when needed. this can greatly waste LESS unused kvblocks.
 [-] try to let the trace report latency
-- Enable patronus::batch_write/batch_read/batch_cas, etc
+[-] Enable patronus::batch_write/batch_read/batch_cas, etc
 - maybe rdma_ctx add API to enable more specific trace point? (and time)
 - See how resizing perform
 

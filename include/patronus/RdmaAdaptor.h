@@ -99,8 +99,9 @@ public:
             {
                 for (const auto &handle : ongoing_remote_handle_.get())
                 {
-                    CHECK(false)
-                        << "[rdma-adpt] possible handle leak for " << handle;
+                    CHECK(false) << "[rdma-adpt] possible handle leak for "
+                                 << handle << ". known leak nr: "
+                                 << ongoing_remote_handle_.get().size();
                 }
             }
         }
@@ -146,10 +147,20 @@ public:
 
         auto lease = patronus_->get_wlease(
             GlobalAddress(node_id_, hint), dir_id_, size, 0ns, flag, coro_ctx_);
-        return alloc_handle(lease_to_exposed_gaddr(lease), size, lease);
+        if (likely(lease.success()))
+        {
+            return alloc_handle(lease_to_exposed_gaddr(lease), size, lease);
+        }
+        else
+        {
+            DCHECK_EQ(lease.ec(), AcquireRequestStatus::kNoMem)
+                << "** Unexpected lease failure: " << lease.ec();
+            return alloc_handle(nullgaddr, 0, lease);
+        }
     }
     GlobalAddress lease_to_exposed_gaddr(const Lease &lease) const
     {
+        CHECK(lease.success());
         auto buffer_offset =
             dsm_->dsm_offset_to_buffer_offset(lease.base_addr());
         return GlobalAddress(0, buffer_offset);
@@ -187,8 +198,37 @@ public:
         return alloc_handle(lease_to_exposed_gaddr(lease), size, lease);
     }
     // TODO:
+    GlobalAddress remote_alloc(size_t size, hint_t hint) override
+    {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.alloc_only_nr++;
+                rdma_trace_record_.indv_two_sided++;
+            }
+        }
+
+        DCHECK(!is_server_);
+        auto lease = patronus_->alloc(node_id_, dir_id_, size, hint, coro_ctx_);
+        if (likely(lease.success()))
+        {
+            return lease_to_exposed_gaddr(lease);
+        }
+        else
+        {
+            DCHECK_EQ(lease.ec(), AcquireRequestStatus::kNoMem)
+                << "** Unexpected lease failure: " << lease.ec();
+            return nullgaddr;
+        }
+    }
     void remote_free(GlobalAddress vaddr, size_t size, hint_t hint) override
     {
+        if (vaddr.is_null())
+        {
+            // freeing nullptr is always valid
+            return;
+        }
         if constexpr (::config::kEnableRdmaTrace)
         {
             if (trace_enabled())

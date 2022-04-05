@@ -180,6 +180,10 @@ inline std::ostream &operator<<(std::ostream &os, const pre_coro_ctx &pctx)
     {
         os << *pctx.ctx_;
     }
+    else
+    {
+        os << "{no coro ctx}";
+    }
     return os;
 }
 

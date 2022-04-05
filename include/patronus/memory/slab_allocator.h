@@ -264,7 +264,7 @@ public:
         if constexpr (::config::kMonitorAllocationDistribution)
         {
             DLOG_IF(INFO, !allocated_distribution.get().empty())
-                << "[slab] Allocation distribution: "
+                << "[slab][report] Allocation distribution: "
                 << pre_alloc_dist(allocated_distribution.get());
         }
     }
@@ -436,6 +436,12 @@ public:
     {
         DCHECK_NOTNULL(allocator_)->free(addr, size, ctx);
     }
+    ~RefillableSlabAllocator()
+    {
+        LOG_IF(WARNING, refill_nr_ > 1)
+            << "[refill-slab] RefillableSlabAllocator refilled " << refill_nr_
+            << " times.";
+    }
 
 private:
     void *do_alloc(size_t size, bool retry, CoroContext *ctx)
@@ -470,8 +476,8 @@ private:
         SlabAllocatorConfig slab_conf;
         slab_conf.block_class = config_.block_class;
         slab_conf.block_ratio = config_.block_ratio;
-        void *alloc_buffer = config_.refill_allocator->alloc(
-            config_.refill_block_size, DCHECK_NOTNULL(ctx));
+        void *alloc_buffer =
+            config_.refill_allocator->alloc(config_.refill_block_size, ctx);
         if (unlikely(alloc_buffer == nullptr))
         {
             // can not allocate more
@@ -479,9 +485,11 @@ private:
         }
         allocator_ = SlabAllocator::new_instance(
             alloc_buffer, config_.refill_block_size, slab_conf);
+        refill_nr_++;
     }
     RefillableSlabAllocatorConfig config_;
     IAllocator::pointer allocator_;
+    size_t refill_nr_{0};
 };
 
 }  // namespace patronus::mem
