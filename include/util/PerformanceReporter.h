@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <list>
 #include <string>
 #include <thread>
 
@@ -298,5 +299,173 @@ inline std::ostream &operator<<(std::ostream &os, const PerformanceReporter &r)
        << ", avg-ns(thread): " << r.avg_ns_per_thread();
     return os;
 }
+
+template <typename T>
+class OnePassBucketMonitor
+{
+public:
+    OnePassBucketMonitor(T min, T max, T range)
+        : min_(min), max_(max), range_(range)
+    {
+        range_nr_ = (max_ - min_) / range_;
+        // for less-than-min & larger-then-max
+        range_nr_ = std::max(range_nr_, (size_t) 1);
+        buckets_.resize(range_nr_);
+    }
+    void collect(T t)
+    {
+        collect_min_ = std::min(t, collect_min_);
+        collect_max_ = std::max(t, collect_max_);
+        collected_nr_++;
+
+        if (unlikely(t < min_))
+        {
+            less_than_min_++;
+        }
+        else if (unlikely(t >= max_))
+        {
+            larger_than_max_++;
+        }
+        else
+        {
+            auto range_id = (t - min_) / range_;
+            DCHECK_LT(range_id, buckets_.size());
+            buckets_[range_id]++;
+        }
+    }
+    T min() const
+    {
+        return collect_min_;
+    }
+    T max() const
+    {
+        return collect_max_;
+    }
+    T percentile(double p) const
+    {
+        uint64_t id = 1.0 * collected_nr_ * p;
+        if (unlikely(less_than_min_ >= id))
+        {
+            return collect_min_;
+        }
+        id -= less_than_min_;
+        for (size_t i = 0; i < buckets_.size(); ++i)
+        {
+            auto nr = buckets_[i];
+            if (nr >= id)
+            {
+                return min_ + range_ * i;
+            }
+            id -= nr;
+        }
+        return collect_max_;
+    }
+    size_t data_nr() const
+    {
+        return collected_nr_;
+    }
+
+private:
+    T min_;
+    T max_;
+    T range_;
+    size_t range_nr_{0};
+    T collect_min_{std::numeric_limits<T>::max()};
+    T collect_max_{std::numeric_limits<T>::lowest()};
+    uint64_t less_than_min_{0};
+    uint64_t larger_than_max_{0};
+    size_t collected_nr_{0};
+    std::vector<uint64_t> buckets_;
+};
+
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os,
+                                const OnePassBucketMonitor<T> &m)
+{
+    os << "{min: " << m.min() << ", max: " << m.max()
+       << ", median: " << m.percentile(0.5) << ", p8: " << m.percentile(0.8)
+       << ", p9: " << m.percentile(0.9) << ", p99: " << m.percentile(0.99)
+       << ", p999: " << m.percentile(0.999) << ", max: " << m.max()
+       << ". collected " << m.data_nr() << " data}";
+    return os;
+}
+
+// std::list<std::array<T, kBatchSize>>;
+template <typename T, size_t kBatchSize = 1000>
+class Sequence
+{
+public:
+    bool empty() const
+    {
+        return size_ == 0;
+    }
+    size_t size() const
+    {
+        return size_;
+    }
+    void push_back(const T &value)
+    {
+        auto sid = slot_id();
+        if (unlikely(size_ % kBatchSize == 0))
+        {
+            sequence_.push_back({});
+        }
+        sequence_.back()[sid] = value;
+        size_++;
+    }
+    void emplace_back(T &&value)
+    {
+        auto sid = slot_id();
+        if (unlikely(size_ % kBatchSize == 0))
+        {
+            sequence_.push_back({});
+            sequence_.back()[sid] = std::move(value);
+        }
+        size_++;
+    }
+    T &front()
+    {
+        return sequence_.front()[0];
+    }
+    T &back()
+    {
+        return sequence_.back()[slot_id() - 1];
+    }
+    std::vector<T> to_vector()
+    {
+        std::vector<T> ret;
+        ret.reserve(size_);
+        for (auto it = sequence_.cbegin(); it != sequence_.cend(); ++it)
+        {
+            for (size_t i = 0; i < kBatchSize; ++i)
+            {
+                ret.push_back((*it)[i]);
+                if (ret.size() == size_)
+                {
+                    return ret;
+                }
+            }
+        }
+        return ret;
+    }
+    size_t batch_id() const
+    {
+        return size_ / kBatchSize;
+    }
+    size_t slot_id() const
+    {
+        return size_ % kBatchSize;
+    }
+    void clear()
+    {
+        size_ = 0;
+        sequence_.clear();
+    }
+
+private:
+    using BatchT = std::array<T, kBatchSize>;
+    std::list<BatchT> sequence_;
+    size_t size_{0};
+};
 
 #endif
