@@ -138,31 +138,24 @@ NO MORE. That should be easy.
 2/20 Talk to @WQ and starts to write the paper
 2/21-2/23 Write the basic story, time-sync and impls of the paper.
 
-- 20220322: many test cases from patronus seems to have problems. Fix them.
-- Patronus API modification: Add deallocation API
+[-] 20220322: many test cases from patronus seems to have problems. Fix them.
+[-] Patronus API modification: Add deallocation API
     - alloc only, perm only, alloc + perm
     - free only, rel only, free + rel
     - Yes, alloc only and free only API makes sense.
-- correct_patronus_alloc: do the following tests
+[-] correct_patronus_alloc: do the following tests
     - One client get_rwlease by allocation semantics
     - The client relinquish its lease, but not de-allocating the memory
     - The client get_rwlease the second time: bind the memory directly and RW.
     - The client finally free the memory
 - Make Lease only movable. Copying may be too expensive.
-- Can we remove the gc API of IRdmaAdaptor? Since HashTableHandle is already a state machine, we can store the temporal resource their. We can always keep tracks of all the allocated resources at HashTableHandle, and then clean up the resource at exit.
-- Enable batching API for Patronus: if needed!
+[-] Can we remove the gc API of IRdmaAdaptor? Since HashTableHandle is already a state machine, we can store the temporal resource their. We can always keep tracks of all the allocated resources at HashTableHandle, and then clean up the resource at exit.
+[-] Enable batching API for Patronus: if needed!
     - This feature may boost performance, because each op of hash table may need to call memory deallocation / relinquish when finished.
     - rmsg should tune up the max buffer. I believe it have no performance penalty, just waste memory
     - Patronus API should add *_batch() and commit() API. Maintain the context in a structure. Then the message can be issued at one time.
-- Patronus: add message API.
-- We could do the gc (the gc of kv_block for example) across client. Just let it gc-ed into slab allocator and skip the checking. I believe that will be okay. But this is not urgent, so postpone until really necessary.
-
-If all the things above finish, I can move on to adopt the uPaxos!
-
-- uPaxos
-- some KVs
-- motivation data
-- micro evaluations
+[-] Patronus: add message API.
+[-] We could do the gc (the gc of kv_block for example) across client. Just let it gc-ed into slab allocator and skip the checking. I believe that will be okay. But this is not urgent, so postpone until really necessary.
 
 === about extension ===
 always use one-sided extension of lease.
@@ -217,38 +210,8 @@ It is not acceptable since I want a us-scale synchronization lease impl.
 I'd like to use rdtsc instead, because it is stable.
 Should add some tests.
 
-==== TODO of bench_allocator.cpp ===
-[-] use MW over MR and see if its different
-    - no difference
-[-] bring coroutine into reg_mw cases
-    - got x2 performance
-
-
-Current TODOs:
-[-] compilable
-[-] PASS ALL old tests
-[-] PASS correct_patronus_addr (rename to correct_rdma_adaptor_addr)
-[-] Add an abstract that manage resource memory! call put_all_rdma_buffer on exit!
-[-] PASS test_race_mock_op: pass the very baby test!
-    [-] hashtable_handle does not pass any CoroCtx. Try to fix the code. To avoid potential bugs, remove the default value of coro_ctx = nullptr.
-    [-] add a wrapper to hashtable_handle. What it does is to call put_all_rdma_buffer() and/or monitor when op finish.
-    [-] Kinda recursive, but yes, I need it. Patronus API: client can require patronus to reserve a piece of memory for them. This is shared across thread.
-- Add tracing (with probability) to rdma_ctx. Add the retrieve_metrics API. So that we know what happened during rdma ops.
-- PASS correct_race_rdma_op
-- Add bench_race_rdma_op and see how it works!
-
-Bench (drafts, basic ideas)
-
-I'd like to test more about race hashing, because I take lots of time implementing it, and it is REAL.
-Race hashing:
-- No-mig, rw: If KVBlock is also protected: patronus v.s. MR v.s. pooled MR v.s. unprotected
-- The effectness of auto time out (i.e. lease) (in an art way).
-- The fast recovering of access fault under shrink. patronus v.s. MR v.s. unprotected
-- Mig, ro: The total latency of expansion (and the performance during the whole procedure): patronus v.s. break connection v.s. MR.
-
 Serverless (mock):
 Just take a couple of data. do like quick sort, summing, etc.
-
 
 =========================
 
@@ -260,14 +223,71 @@ Just take a couple of data. do like quick sort, summing, etc.
 [-] LATER UNTIL NEEDED: try to enable lazy_init to slab allocator. i.e. for race hashing kvblocks, only fills the batch when needed. this can greatly waste LESS unused kvblocks.
 [-] try to let the trace report latency
 [-] Enable patronus::batch_write/batch_read/batch_cas, etc
-- maybe rdma_ctx add API to enable more specific trace point? (and time)
-- See how resizing perform
+[-] maybe rdma_ctx add API to enable more specific trace point? (and time)
+[-] See how resizing perform
 - STRANGE: Sometimes the performance is 4.3 Mops, sometimes 5 Mops, and just these two point. Various, but not variout within the range. So I guess it is due to CPU frequency? or RNIC policy? Don't know, but indeed is a problem.
 
-- try to review the code: did release mode include unnecessary overhead?
-- Is race hashing impl optimized? i.e. use std::vector with reserved instead of unordered_set
+[-] try to review the code: did release mode include unnecessary overhead?
+[-] Is race hashing impl optimized? i.e. use std::vector with reserved instead of unordered_set
+
+====================================================================================================
+
+Small TODOs:
+- Track tail latency: add OnePassLatencyMonitor and track with buckets.
+- UNTIL NECESSARY: patronus add API signals to let server handle special signals.
+    - p->send_signals
+    - p->reg_signal_handler
+
+Race Hashing Experiments: (**iPad have detailed discussion**)
+- The r/w throughput of RaceHashing over Patronus:
+    - Don't silently reinit directory. As I remember, if I alloc too many mws, will trigger failure and then reconnects. Print a warning when reinit happens.
+    - Disable migration. RO/WO/RW. Focus on the protection of KV Blocks
+    - The throughput: patronus v.s. MR v.s. unprotected
+    - For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
+    - kvblock_size in {64_B, 4_KB}, rh in {small, large}
+- The latency of RaceHashing over Patronus:
+    - Disable migration, RO/WO/RW. Focus on the protection of KV Blocks
+    - The latency of each op: patronus v.s. MR v.s. unprotected
+    - For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
+    - kvblock_size in {64_B, 4_KB}, rh in {small, large}
+- The latency of special cases:
+    - The latency of client bootstrap (break down)
+        - RHH constructs: bind & read directory, bind & read subtable, then issues a read.
+        - unprotected v.s. MR v.s. patronus
+    {-} Code ready, not generated archived. The latency of expansion: unprotected v.s. MW v.s. MR
+        [-] MR == MW == unprotected: this can be the case arguing patronus not harming performance but providing further safety
+        [-] Considering that MR 2MB takes only 200 us, which is far from enough for expansion
+        [-] This ex is the supplement of the expansion latency (fault tolerance one).
+    - The latency of fault tolerance:
+        - patronus detected (no overhead) v.s. patronus backup switching (low overhead, when, e.g., subtable is freed and client not aware) v.s. QP recovery (high overhead) v.s. Reinit connections.
+- The realtime throughput:
+    - The fast recoverying under shrinking
+        - RDMA protection error triggered
+        - patronus fast switch to backup v.s. wait for recovery (vanilla)
+        - client update dcache
+        - client going on
+    - The tolerance of crashed client under expansion
+        - The fault tolerance of RH: The locking of directory uses lease. When a client failed, the lock is automatically released, and the next client triggers and continues the expansion
+        - raw v.s. patronus
+- The effectness of auto time out: If the relinquish of kvblock is auto-ed (so we save one message RTT for relinquish). Can we boost the performance?
+
+Serverless Experiments
+- Cite some papers, talking about one-sided data structures, e.g. arrays
+- Boot, binds large (e.g. 128_MB), do the SQL (summarize, filter, count_if, ...), returns
+- no protection v.s. patronus v.s. MR
+
+Other possibilities
+- Lock conflict, fairness and lock transfering
+- The effective of caching
+
+========================
 
 when u go back:
 [1] don't insert to full, otherwise, all the insert got kNotFound, and the performance is the same as read
 2. try to port MR allocator to the experiments. See how different it is
 3. try to optimize expand. only 6.3) needs my attention.
+
+not going well: MR is so fast for the subtable at current case: like 100 us. But the expansion itself is 4 ms.
+1. check the bench_allocator statistics, see how large a subtable will lead the MR to ms level.
+2. Can we tune the RH, so that it is reasonable, and MR for expansion is slow?
+3. What if we bring MR/MW to kv blocks?

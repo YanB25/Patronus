@@ -104,6 +104,11 @@ constexpr uint64_t T = 1000ull * G;
 
 namespace literals
 {
+// this is useful for implicite type conversion
+constexpr uint64_t operator""_B(unsigned long long i)
+{
+    return (uint64_t) i;
+}
 constexpr uint64_t operator""_K(unsigned long long i)
 {
     return (uint64_t) i * 1000;
@@ -294,10 +299,13 @@ constexpr static bool kMonitorAllocationDistribution = true;
 constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
 
-constexpr static bool kEnableRdmaTrace = false;
-constexpr static double kRdmaTraceRateGet = 1.0 / 200_K;
-constexpr static double kRdmaTraceRatePut = 1.0 / 20_K;
-constexpr static double kRdmaTraceRateDel = 1.0 / 20_K;
+constexpr static bool kEnableRdmaTrace = true;
+// constexpr static double kRdmaTraceRateGet = 1.0 / 200_K;
+// constexpr static double kRdmaTraceRatePut = 1.0 / 20_K;
+// constexpr static double kRdmaTraceRateDel = 1.0 / 20_K;
+constexpr static double kRdmaTraceRateGet = 0;
+constexpr static double kRdmaTraceRatePut = 0;
+constexpr static double kRdmaTraceRateDel = 0;
 constexpr static double kRdmaTraceRateExpand = 1.0;
 
 // about opening a feature

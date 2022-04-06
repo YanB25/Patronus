@@ -17,8 +17,14 @@ struct MRAllocatorConfig
 class MRAllocator : public IAllocator
 {
 public:
-    MRAllocator(MRAllocatorConfig config) : conf_(config)
+    using pointer = std::shared_ptr<MRAllocator>;
+
+    MRAllocator(const MRAllocatorConfig &config) : conf_(config)
     {
+    }
+    static pointer new_instance(const MRAllocatorConfig &config)
+    {
+        return std::make_shared<MRAllocator>(config);
     }
 
     void *alloc(size_t size,

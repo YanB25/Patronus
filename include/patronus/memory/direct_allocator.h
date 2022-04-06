@@ -93,6 +93,11 @@ private:
 class RawAllocator : public IAllocator
 {
 public:
+    using pointer = std::shared_ptr<RawAllocator>;
+    static pointer new_instance()
+    {
+        return std::make_shared<RawAllocator>();
+    }
     void *alloc(size_t size,
                 [[maybe_unused]] CoroContext *ctx = nullptr) override
     {

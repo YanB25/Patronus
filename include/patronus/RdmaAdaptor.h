@@ -100,7 +100,7 @@ public:
         : node_id_(node_id),
           dir_id_(dir_id),
           patronus_(patronus),
-          dsm_(patronus->get_dsm()),
+          dsm_(patronus ? patronus->get_dsm() : nullptr),
           coro_ctx_(ctx),
           is_server_(is_server)
     {

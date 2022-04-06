@@ -1047,11 +1047,12 @@ int main(int argc, char *argv[])
     // for (size_t thread_nr : {1, 8})
     // for (size_t thread_nr : {8, 16})
     // for (size_t thread_nr : {1, 8, 16, 24, 31})
-    for (size_t thread_nr : {1, 8, 16, 24})
+    // for (size_t thread_nr : {1, 8, 16, 24})
+    for (size_t thread_nr : {1, 8})
     // for (size_t thread_nr : {1, 2, 4, 8})
     {
-        // for (size_t block_size : {2_MB, 128_MB})
-        for (size_t block_size : {2_MB})
+        for (size_t block_size : {64_B, 4_KB, 2_MB, 128_MB})
+        // for (size_t block_size : {2_MB})
         {
             LOG(INFO) << "thread_nr: " << thread_nr
                       << ", block_size: " << block_size;

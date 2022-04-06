@@ -20,6 +20,8 @@ struct RaceHashingHandleConfig
 {
     bool auto_expand{false};
     bool auto_update_dir{false};
+    uint64_t kvblock_hint{hash::config::kAllocHintKVBlock};
+    uint64_t subtable_hint{hash::config::kAllocHintDirSubtable};
 };
 
 class RdmaAdaptorKVBlockWrapperAllocator : public mem::IAllocator
@@ -605,8 +607,8 @@ public:
             rdma_adpt_->relinquish_perm(
                 subtable_mem_handles_[next_subtable_idx]);
         }
-        auto next_subtable_handle = rdma_adpt_->remote_alloc_acquire_perm(
-            alloc_size, config::kAllocHintDirSubtable);
+        auto next_subtable_handle =
+            remote_alloc_acquire_subtable_directory(alloc_size);
         subtable_mem_handles_[next_subtable_idx] = next_subtable_handle;
         auto new_remote_subtable =
             subtable_mem_handles_[next_subtable_idx].gaddr();
@@ -1349,6 +1351,10 @@ private:
                "reuse those memory. "
             << addr;
     }
+    RemoteMemHandle remote_alloc_acquire_subtable_directory(size_t size)
+    {
+        return rdma_adpt_->remote_alloc_acquire_perm(size, conf_.subtable_hint);
+    }
     // the address of hash table at remote side
     uint16_t node_id_;
     GlobalAddress table_meta_addr_;
@@ -1468,7 +1474,7 @@ private:
         refill_slab_conf.refill_block_size = config::kKVBlockAllocBatchSize;
         refill_slab_conf.refill_allocator =
             RdmaAdaptorKVBlockWrapperAllocator::new_instance(
-                rdma_adpt_, config::kAllocHintKVBlock);
+                rdma_adpt_, conf_.kvblock_hint);
         kvblock_allocator_ =
             patronus::mem::RefillableSlabAllocator::new_instance(
                 refill_slab_conf);

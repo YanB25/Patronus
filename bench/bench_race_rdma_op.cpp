@@ -8,6 +8,7 @@
 #include "patronus/Patronus.h"
 #include "patronus/RdmaAdaptor.h"
 #include "patronus/memory/direct_allocator.h"
+#include "patronus/memory/mr_allocator.h"
 #include "thirdparty/racehashing/hashtable.h"
 #include "thirdparty/racehashing/hashtable_handle.h"
 #include "thirdparty/racehashing/utils.h"
@@ -50,6 +51,7 @@ struct BenchConfig
     size_t test_nr{0};
     bool should_report{false};
     size_t initial_subtable_nr{1};
+    bool subtable_use_mr{false};
     void validate()
     {
         double sum = insert_prob + delete_prob + get_prob;
@@ -121,6 +123,23 @@ public:
 
         return pipeline({warm_conf, eval_conf});
     }
+    static std::vector<BenchConfig> get_expand_config(const std::string &name,
+                                                      size_t fill_nr,
+                                                      bool subtable_use_mr)
+    {
+        // fill the table with KVs
+        BenchConfig conf;
+        conf.name = name;
+        conf.thread_nr = 1;
+        conf.coro_nr = 1;
+        conf.insert_prob = 1;
+        conf.auto_extend = true;
+        conf.test_nr = fill_nr;
+        conf.should_report = true;
+        conf.subtable_use_mr = subtable_use_mr;
+
+        return pipeline({conf});
+    }
     static std::vector<BenchConfig> get_multi_round_config(
         const std::string &name,
         size_t fill_nr,
@@ -186,9 +205,11 @@ private:
 
 template <size_t kE, size_t kB, size_t kS>
 typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
-    Patronus::pointer p, bool auto_expand, CoroContext *ctx)
+    Patronus::pointer p, const BenchConfig &conf, CoroContext *ctx)
 {
     using HandleT = typename RaceHashing<kE, kB, kS>::Handle;
+    auto auto_expand = conf.auto_extend;
+    bool subtable_use_mr = conf.subtable_use_mr;
 
     auto tid = p->get_thread_id();
     auto dir_id = tid;
@@ -199,6 +220,10 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     RaceHashingHandleConfig handle_conf;
     handle_conf.auto_expand = auto_expand;
     handle_conf.auto_update_dir = auto_expand;
+    handle_conf.subtable_hint = subtable_use_mr
+                                    ? hash::config::kAllocHintDirSubtableMR
+                                    : hash::config::kAllocHintDirSubtable;
+
     auto handle_rdma_ctx =
         patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, ctx);
 
@@ -213,6 +238,7 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
     // for server to handle kv block allocation requests
     // give all to kv blocks
     auto tid = p->get_thread_id();
+    auto dir_id = tid;
     CHECK_LT(tid, thread_nr);
 
     auto rh_buffer = p->get_user_reserved_buffer();
@@ -229,6 +255,14 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
                                          thread_kvblock_pool_size,
                                          kvblock_slab_config);
     p->reg_allocator(hash::config::kAllocHintKVBlock, kvblock_allocator);
+
+    // register the MR
+    mem::MRAllocatorConfig mr_config;
+    // a little bit tricky here: MR allocator should use the internal ones
+    mr_config.allocator = p->get_allocator(Patronus::kDefaultHint);
+    mr_config.rdma_context = p->get_dsm()->get_rdma_context(dir_id);
+    auto mr_allocator = mem::MRAllocator::new_instance(mr_config);
+    p->reg_allocator(hash::config::kAllocHintDirSubtableMR, mr_allocator);
 }
 
 template <size_t kE, size_t kB, size_t kS>
@@ -269,12 +303,12 @@ void test_basic_client_worker(
     const BenchConfig &conf,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
-    auto auto_expand = conf.auto_extend;
-
     auto tid = p->get_thread_id();
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
-    auto rhh = gen_rdma_rhh<kE, kB, kS>(p, auto_expand, &ctx);
+    // TODO: the dtor of rhh has performance penalty.
+    // dtor out of this function.
+    auto rhh = gen_rdma_rhh<kE, kB, kS>(p, conf, &ctx);
 
     constexpr static size_t kKeySize = 3;
     constexpr static size_t kValueSize = 3;
@@ -552,39 +586,80 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bool is_master = battle_master.fetch_add(1) == 0;
     bar.wait();
 
-    LOG_IF(INFO, is_master) << "[bench] benching single thread";
-    key++;
-    auto basic_conf = BenchConfigFactory::get_single_round_config(
-        "single_basic", 1, 10_K, 1, 1, true);
-    if (is_client)
+    // LOG_IF(INFO, is_master) << "[bench] benching single thread";
+    // key++;
+    // auto basic_conf = BenchConfigFactory::get_single_round_config(
+    //     "single_basic", 1, 10_K, 1, 1, true);
+    // if (is_client)
+    // {
+    //     for (const auto &conf : basic_conf)
+    //     {
+    //         LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
+    //         benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+    //     }
+    // }
+    // else
+    // {
+    //     benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
+    // }
+
+    // LOG_IF(INFO, is_master) << "[bench] benching multiple threads";
+    // constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
+    // key++;
+    // auto multithread_conf = BenchConfigFactory::get_multi_round_config(
+    //     "multithread_basic", capacity, 10_M, kThreadNr, kMaxCoroNr);
+    // if (is_client)
+    // {
+    //     for (const auto &conf : multithread_conf)
+    //     {
+    //         LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
+    //         benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+    //     }
+    // }
+    // else
+    // {
+    //     benchmark_server<4, 16, 16>(p, bar, is_master, multithread_conf,
+    //     key);
+    // }
+
+    LOG_IF(INFO, is_master) << "[bench] benching expansion mw";
     {
-        for (const auto &conf : basic_conf)
+        constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
+        key++;
+        auto expand_mw_conf = BenchConfigFactory::get_expand_config(
+            "expand(mw)", capacity, false /* st use mr */);
+        if (is_client)
         {
-            LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
-            benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+            for (const auto &conf : expand_mw_conf)
+            {
+                LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
+                benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+            }
         }
-    }
-    else
-    {
-        benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
+        else
+        {
+            benchmark_server<4, 16, 16>(p, bar, is_master, expand_mw_conf, key);
+        }
     }
 
-    LOG_IF(INFO, is_master) << "[bench] benching multiple threads";
-    constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
-    key++;
-    auto multithread_conf = BenchConfigFactory::get_multi_round_config(
-        "multithread_basic", capacity, 10_M, kThreadNr, kMaxCoroNr);
-    if (is_client)
+    LOG_IF(INFO, is_master) << "[bench] benching expansion mr";
     {
-        for (const auto &conf : multithread_conf)
+        constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
+        key++;
+        auto expand_mr_conf = BenchConfigFactory::get_expand_config(
+            "expand(mr)", capacity, true /* st use mr*/);
+        if (is_client)
         {
-            LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
-            benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+            for (const auto &conf : expand_mr_conf)
+            {
+                LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
+                benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+            }
         }
-    }
-    else
-    {
-        benchmark_server<4, 16, 16>(p, bar, is_master, multithread_conf, key);
+        else
+        {
+            benchmark_server<4, 16, 16>(p, bar, is_master, expand_mr_conf, key);
+        }
     }
 }
 
