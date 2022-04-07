@@ -81,8 +81,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto before_get_rlease = std::chrono::steady_clock::now();
 
         auto bench_offset = bench_locator(key);
-        Lease lease = p->get_rlease(GlobalAddress(kServerNodeId, bench_offset),
+        Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
+                                    GlobalAddress(0, bench_offset),
+                                    0 /* alloc_hint */,
                                     sizeof(Object),
                                     kInitialLeasePeriod,
                                     0 /* no flag */,

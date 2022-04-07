@@ -71,14 +71,16 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto key = rand() % kKeyLimit;
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
-        Lease lease =
-            p->get_rlease(GlobalAddress(kServerNodeId, key),
-                          dir_id,
-                          sizeof(Object),
-                          0ns,
-                          (uint8_t) AcquireRequestFlag::kNoGc |
-                              (uint8_t) AcquireRequestFlag::kWithConflictDetect,
-                          &ctx);
+        auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
+                    (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+        Lease lease = p->get_rlease(kServerNodeId,
+                                    dir_id,
+                                    GlobalAddress(0, key),
+                                    0 /* alloc_hint */,
+                                    sizeof(Object),
+                                    0ns,
+                                    flag,
+                                    &ctx);
         if (unlikely(!lease.success()))
         {
             LOG(WARNING) << "[bench] client coro " << ctx

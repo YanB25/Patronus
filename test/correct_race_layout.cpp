@@ -4,12 +4,14 @@
 
 #include "Common.h"
 #include "glog/logging.h"
+#include "patronus/Type.h"
 #include "patronus/memory/direct_allocator.h"
 #include "thirdparty/racehashing/hashtable.h"
 #include "util/Rand.h"
 
 using namespace patronus::hash;
 using namespace define::literals;
+using namespace std::chrono_literals;
 
 // constexpr static size_t kTestTime = 1_M;
 constexpr static size_t kBucketGroupNr = 128;
@@ -159,8 +161,12 @@ void test_bucket_group_not_overlapped_handle()
     void *addr = hugePageAlloc(kMemoryLimit);
     auto rdma_adpt = MockRdmaAdaptor::new_instance({});
     auto exposed_gaddr = rdma_adpt->to_exposed_gaddr(addr);
+    auto ac_flag = (uint8_t) patronus::AcquireRequestFlag::kNoGc;
     auto handle = rdma_adpt->acquire_perm(exposed_gaddr,
-                                          std::numeric_limits<size_t>::max());
+                                          0 /* alloc_hint */,
+                                          std::numeric_limits<size_t>::max(),
+                                          0ns,
+                                          ac_flag);
 
     SubTableHandle<kBucketGroupNr, kSlotNr> sub_table(exposed_gaddr, handle);
     size_t expect_size = SubTable<kBucketGroupNr, kSlotNr>::size_bytes();
@@ -220,8 +226,12 @@ void test_bucket_group_not_overlapped_handle2()
     void *addr = hugePageAlloc(kMemoryLimit);
     auto rdma_adpt = MockRdmaAdaptor::new_instance({});
     auto exposed_gaddr = rdma_adpt->to_exposed_gaddr(addr);
-    auto handle =
-        rdma_adpt->acquire_perm(exposed_gaddr, SubTableT::size_bytes());
+    auto ac_flag = (uint8_t) patronus::AcquireRequestFlag::kNoGc;
+    auto handle = rdma_adpt->acquire_perm(exposed_gaddr,
+                                          0 /* alloc_hint */,
+                                          SubTableT::size_bytes(),
+                                          0ns,
+                                          ac_flag);
     DVLOG(1)
         << "[bench] test_bucket_group_not_overlapped_handle2: handle.gaddr "
         << exposed_gaddr << ", size: " << SubTableT::size_bytes();

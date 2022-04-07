@@ -82,6 +82,12 @@ struct hash<RemoteMemHandle>
 };
 }  // namespace std
 
+/**
+ * @brief IRdmaAdaptor has nearly the same API as @see Patronus,
+ * except that it remembers the node_id and dir_id,
+ * and (may) hold the coroutine internally.
+ *
+ */
 class IRdmaAdaptor
 {
 public:
@@ -91,21 +97,18 @@ public:
     IRdmaAdaptor() = default;
     virtual ~IRdmaAdaptor() = default;
 
-    // alloc and grant permission
-    virtual RemoteMemHandle remote_alloc_acquire_perm(size_t, hint_t) = 0;
-    // only acquire
-    virtual RemoteMemHandle acquire_perm(GlobalAddress gaddr, size_t) = 0;
     // only alloc
     virtual GlobalAddress remote_alloc(size_t size, hint_t) = 0;
-    // free
+    // all operations other than only alloc
+    virtual RemoteMemHandle acquire_perm(GlobalAddress gaddr,
+                                         hint_t alloc_hint,
+                                         size_t size,
+                                         std::chrono::nanoseconds ns,
+                                         uint8_t flag) = 0;
+    // free only
     virtual void remote_free(GlobalAddress, size_t size, hint_t) = 0;
-    // free + relinquish
-    virtual void remote_free_relinquish_perm(RemoteMemHandle &, hint_t) = 0;
-    virtual void remote_free_relinquish_perm_sync(RemoteMemHandle &,
-                                                  hint_t) = 0;
-    // only relinquish
-    virtual void relinquish_perm(RemoteMemHandle &) = 0;
-    virtual void relinquish_perm_sync(RemoteMemHandle &) = 0;
+    // all rel operations other than free-only
+    virtual void relinquish_perm(RemoteMemHandle &, hint_t, uint8_t flag) = 0;
 
     virtual Buffer get_rdma_buffer(size_t size) = 0;
     // use the put_all_rdma_buffer API.

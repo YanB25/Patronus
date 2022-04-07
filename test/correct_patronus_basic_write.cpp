@@ -87,8 +87,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto locate_offset = bench_locator(coro_key);
-        Lease lease = p->get_wlease(GlobalAddress(kServerNodeId, locate_offset),
+        Lease lease = p->get_wlease(kServerNodeId,
                                     dir_id,
+                                    GlobalAddress(0, locate_offset),
+                                    0 /* alloc_hint */,
                                     sizeof(Object),
                                     0ns,
                                     (uint8_t) AcquireRequestFlag::kNoGc,
@@ -143,7 +145,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             << ", write failed. This should not happend, because we filter out "
                "the invalid mws and no lease expiration";
 
-        p->relinquish_write(lease, &ctx);
         p->relinquish(lease, 0, 0, &ctx);
 
         p->put_rdma_buffer(rdma_buf);

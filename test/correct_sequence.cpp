@@ -9,14 +9,13 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 using namespace define::literals;
 
-constexpr static size_t kTestSize = 10_M;
 constexpr static size_t kBatchSize = 1000;
 
 void test(size_t size)
 {
     std::vector<uint64_t> origin;
-    origin.reserve(kTestSize);
-    for (size_t i = 0; i < kTestSize; ++i)
+    origin.reserve(size);
+    for (size_t i = 0; i < size; ++i)
     {
         origin.push_back(fast_pseudo_rand_int());
     }
@@ -35,10 +34,14 @@ void test(size_t size)
     {
         CHECK_EQ(got[i], origin[i]) << "unequal at " << i;
     }
-    CHECK_EQ(got.front(), origin.front());
-    CHECK_EQ(got.back(), origin.back());
 
-    CHECK_EQ(seq.size(), kTestSize);
+    if (!origin.empty())
+    {
+        CHECK_EQ(got.front(), origin.front());
+        CHECK_EQ(got.back(), origin.back());
+    }
+
+    CHECK_EQ(seq.size(), size);
 }
 int main(int argc, char *argv[])
 {

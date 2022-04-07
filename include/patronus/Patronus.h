@@ -122,20 +122,24 @@ public:
     /**
      * @brief Get the rlease object
      *
-     * @param buffer_gaddr
-     * - If with_alloc OR only_alloc is ON, buffer_gaddr.offset is a hint for
-     * the allocator.
-     * - Otherwise, buffer_gaddr.offset is the address (offset, actually) you
-     * want to bind
+     * @param node_id the node_id
      * @param dir_id  the dir_id.
+     * @param bind_gaddr
+     * - w/ allocation sementics: should be nullgaddr
+     * - w/o allocation semantics: should be one valid global address
+     * @param alloc_hint
+     * - w/ allocation semantics: the hint to select allocators
+     * - w/o allocation semantics: should be 0.
      * @param size the length of the object / address
      * @param ns the length of term requesting for protection
      * @param flag @see AcquireRequestFlag
      * @param ctx sync call if ctx is nullptr. Otherwise coroutine context.
      * @return Read Lease
      */
-    inline Lease get_rlease(GlobalAddress buffer_gaddr,
+    inline Lease get_rlease(uint16_t node_id,
                             uint16_t dir_id,
+                            GlobalAddress bind_gaddr,
+                            uint64_t alloc_hint,
                             size_t size,
                             std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
@@ -148,15 +152,20 @@ public:
      * @param size the requested size
      * @param hint the hint to the allocator
      * @param ctx
-     * @return Lease
+     * @return @see GlobalAddress
      */
-    inline Lease alloc(uint16_t node_id,
-                       uint16_t dir_id,
-                       size_t size,
-                       uint64_t hint,
-                       CoroContext *ctx = nullptr);
-    inline Lease get_wlease(GlobalAddress buffer_gaddr,
+    inline GlobalAddress alloc(uint16_t node_id,
+                               uint16_t dir_id,
+                               size_t size,
+                               uint64_t hint,
+                               CoroContext *ctx = nullptr);
+    /**
+     * @brief @see get_rlease
+     */
+    inline Lease get_wlease(uint16_t node_id,
                             uint16_t dir_id,
+                            GlobalAddress bind_gaddr,
+                            uint64_t alloc_hint,
                             size_t size,
                             std::chrono::nanoseconds ns,
                             uint8_t flag /* AcquireRequestFlag */,
@@ -193,7 +202,6 @@ public:
                         size_t size,
                         uint64_t hint,
                         CoroContext *ctx = nullptr);
-    inline void relinquish_write(Lease &lease, CoroContext *ctx = nullptr);
     inline RetCode read(Lease &lease,
                         char *obuf,
                         size_t size,
@@ -871,43 +879,71 @@ bool Patronus::already_passed_ddl(time::PatronusTime patronus_ddl) const
     return already_pass_ddl;
 }
 
-Lease Patronus::alloc(uint16_t node_id,
-                      uint16_t dir_id,
-                      size_t size,
-                      uint64_t hint,
-                      CoroContext *ctx)
+GlobalAddress Patronus::alloc(uint16_t node_id,
+                              uint16_t dir_id,
+                              size_t size,
+                              uint64_t hint,
+                              CoroContext *ctx)
 {
     auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
                 (uint8_t) AcquireRequestFlag::kOnlyAllocation;
-    return get_lease_impl(node_id,
-                          dir_id,
-                          hint /* key & hint */,
-                          size,
-                          0,
-                          RequestType::kAcquireWLease,
-                          flag,
-                          ctx);
+    auto lease = get_lease_impl(node_id,
+                                dir_id,
+                                hint /* key & hint */,
+                                size,
+                                0,
+                                RequestType::kAcquireWLease,
+                                flag,
+                                ctx);
+    return get_gaddr(lease);
 }
 
 // gaddr is buffer offset
-Lease Patronus::get_rlease(GlobalAddress gaddr,
+Lease Patronus::get_rlease(uint16_t node_id,
                            uint16_t dir_id,
+                           GlobalAddress bind_gaddr,
+                           uint64_t alloc_hint,
                            size_t size,
                            std::chrono::nanoseconds chrono_ns,
                            uint8_t flag,
                            CoroContext *ctx)
 {
-    debug_validate_acquire_request_flag(flag);
     bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
-    DCHECK(!only_alloc) << "Please use Patronus::alloc";
+    bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+    bool alloc_semantics = only_alloc || with_alloc;
+    if constexpr (debug())
+    {
+        debug_validate_acquire_request_flag(flag);
+        CHECK(!only_alloc)
+            << "** API integrity: please use patronus::alloc() instead";
 
-    auto node_id = gaddr.nodeID;
+        if (alloc_semantics)
+        {
+            CHECK(bind_gaddr.is_null()) << "** API integrity: set bind_gaddr "
+                                           "to null when w/ allocation";
+        }
+        else
+        {
+            // sometimes bind_gaddr.is_null() is also a valid address
+            CHECK_EQ(alloc_hint, 0)
+                << "** API integrity: set alloc_hint to 0 when w/o allocation";
+        }
+    }
+    uint64_t addr_or_alloc_hint = 0;
+    if (alloc_semantics)
+    {
+        addr_or_alloc_hint = alloc_hint;
+    }
+    else
+    {
+        addr_or_alloc_hint = bind_gaddr.offset;
+    }
 
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     return get_lease_impl(node_id,
                           dir_id,
-                          gaddr.offset,
+                          addr_or_alloc_hint,
                           size,
                           ns,
                           RequestType::kAcquireRLease,
@@ -916,21 +952,51 @@ Lease Patronus::get_rlease(GlobalAddress gaddr,
 }
 
 // gaddr is buffer offset
-Lease Patronus::get_wlease(GlobalAddress gaddr,
+Lease Patronus::get_wlease(uint16_t node_id,
                            uint16_t dir_id,
+                           GlobalAddress bind_gaddr,
+                           uint64_t alloc_hint,
                            size_t size,
                            std::chrono::nanoseconds chrono_ns,
                            uint8_t flag,
                            CoroContext *ctx)
 {
-    debug_validate_acquire_request_flag(flag);
-    auto node_id = gaddr.nodeID;
+    bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+    bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+    bool alloc_semantics = only_alloc || with_alloc;
+
+    if constexpr (debug())
+    {
+        debug_validate_acquire_request_flag(flag);
+        CHECK(!only_alloc)
+            << "** API integrity: please use patronus::alloc() instead";
+        if (alloc_semantics)
+        {
+            CHECK(bind_gaddr.is_null()) << "** API integrity: set bind_gaddr "
+                                           "to null when w/ allocation";
+        }
+        else
+        {
+            CHECK(!bind_gaddr.is_null()) << "** Can not bind to nullptr";
+            CHECK_EQ(alloc_hint, 0)
+                << "** API integrity: set alloc_hint to 0 when w/o allocation";
+        }
+    }
+    uint64_t addr_or_alloc_hint = 0;
+    if (alloc_semantics)
+    {
+        addr_or_alloc_hint = alloc_hint;
+    }
+    else
+    {
+        addr_or_alloc_hint = bind_gaddr.offset;
+    }
 
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     return get_lease_impl(node_id,
                           dir_id,
-                          gaddr.offset,
+                          addr_or_alloc_hint,
                           size,
                           ns,
                           RequestType::kAcquireWLease,
@@ -1196,27 +1262,6 @@ void Patronus::fill_bind_mw_wr(ibv_send_wr &wr,
     wr.bind_mw.bind_info.mw_access_flags = access_flag;
 }
 
-void Patronus::relinquish_write(Lease &lease, CoroContext *ctx)
-{
-    auto offset = offsetof(ProtectionRegion, meta) +
-                  offsetof(ProtectionRegionMeta, relinquished);
-    auto rdma_buffer = get_rdma_buffer(sizeof(small_bit_t));
-    DCHECK_LE(sizeof(small_bit_t), rdma_buffer.size);
-    *(small_bit_t *) rdma_buffer.buffer = 1;
-
-    DVLOG(4) << "[patronus] relinquish write. write to "
-                "ProtectionRegionMeta::relinquished at offset "
-             << offset;
-
-    protection_region_rw_impl(lease,
-                              rdma_buffer.buffer,
-                              sizeof(ProtectionRegionMeta::relinquished),
-                              offset,
-                              false /* is_read */,
-                              ctx);
-
-    put_rdma_buffer(rdma_buffer);
-}
 void *Patronus::patronus_alloc(size_t size, uint64_t hint)
 {
     if (hint == kDefaultHint)
@@ -1267,6 +1312,12 @@ bool Patronus::valid_total_buffer_offset(size_t offset) const
 // from the dsm offset (which the lease holds)
 GlobalAddress Patronus::get_gaddr(const Lease &lease) const
 {
+    if (unlikely(!lease.success()))
+    {
+        DCHECK_EQ(lease.ec(), AcquireRequestStatus::kNoMem)
+            << "** Unexpected error type";
+        return nullgaddr;
+    }
     auto dsm_offset = lease.base_addr();
     auto buffer_offset = dsm_->dsm_offset_to_buffer_offset(dsm_offset);
     return GlobalAddress(lease.node_id_, buffer_offset);

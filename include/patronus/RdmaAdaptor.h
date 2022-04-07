@@ -100,7 +100,6 @@ public:
         : node_id_(node_id),
           dir_id_(dir_id),
           patronus_(patronus),
-          dsm_(patronus ? patronus->get_dsm() : nullptr),
           coro_ctx_(ctx),
           is_server_(is_server)
     {
@@ -145,7 +144,11 @@ public:
      * What RdmaAdaptor exposes: buffer offset
      * What Patronus accepts: buffer offset
      */
-    RemoteMemHandle remote_alloc_acquire_perm(size_t size, hint_t hint) override
+    RemoteMemHandle acquire_perm(GlobalAddress gaddr,
+                                 hint_t alloc_hint,
+                                 size_t size,
+                                 std::chrono::nanoseconds ns,
+                                 uint8_t flag) override
     {
         if constexpr (::config::kEnableRdmaTrace)
         {
@@ -155,16 +158,23 @@ public:
                 rdma_trace_record_.indv_two_sided++;
             }
         }
+        DCHECK(gaddr.nodeID == 0 || gaddr.nodeID == node_id_)
+            << "Invalid gaddr.nodeID: " << gaddr.nodeID
+            << " with node_id_: " << node_id_ << ". gaddr: " << gaddr;
+        gaddr.nodeID = 0;
 
         DCHECK(!is_server_);
-        auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                    (uint8_t) AcquireRequestFlag::kWithAllocation;
 
         auto lease = patronus_->get_wlease(
-            GlobalAddress(node_id_, hint), dir_id_, size, 0ns, flag, coro_ctx_);
+            node_id_, dir_id_, gaddr, alloc_hint, size, ns, flag, coro_ctx_);
         if (likely(lease.success()))
         {
             return alloc_handle(lease_to_exposed_gaddr(lease), size, lease);
+        }
+        else if (likely(lease.ec() == AcquireRequestStatus::kMagicMwErr))
+        {
+            // okay, do it again
+            return acquire_perm(gaddr, alloc_hint, size, ns, flag);
         }
         else
         {
@@ -176,42 +186,11 @@ public:
     GlobalAddress lease_to_exposed_gaddr(const Lease &lease) const
     {
         CHECK(lease.success());
-        auto buffer_offset =
-            dsm_->dsm_offset_to_buffer_offset(lease.base_addr());
-        return GlobalAddress(0, buffer_offset);
+        auto gaddr = patronus_->get_gaddr(lease);
+        gaddr.nodeID = 0;
+        return gaddr;
     }
-    // yes
-    RemoteMemHandle acquire_perm(GlobalAddress vaddr, size_t size) override
-    {
-        if constexpr (::config::kEnableRdmaTrace)
-        {
-            if (trace_enabled())
-            {
-                rdma_trace_record_.acquire_nr++;
-                rdma_trace_record_.indv_two_sided++;
-            }
-        }
 
-        auto gaddr = vaddr_to_gaddr(vaddr);
-        auto flag = (uint8_t) AcquireRequestFlag::kNoGc;
-        DCHECK_EQ(gaddr.nodeID, node_id_);
-        auto lease =
-            patronus_->get_wlease(gaddr, dir_id_, size, 0ns, flag, coro_ctx_);
-        if (unlikely(!lease.success()))
-        {
-            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr)
-                << "Only allow this kind of failure";
-            return acquire_perm(vaddr, size);
-        }
-        CHECK(lease.success()) << "** get lease failed: " << lease.ec();
-
-        DLOG_IF(INFO, ::config::kMonitorAddressConversion)
-            << "[addr] acquire_perm: gaddr: " << gaddr
-            << " (from vaddr: " << vaddr << "), got lease.base_addr() "
-            << (void *) lease.base_addr() << ")";
-
-        return alloc_handle(lease_to_exposed_gaddr(lease), size, lease);
-    }
     // TODO:
     GlobalAddress remote_alloc(size_t size, hint_t hint) override
     {
@@ -225,17 +204,9 @@ public:
         }
 
         DCHECK(!is_server_);
-        auto lease = patronus_->alloc(node_id_, dir_id_, size, hint, coro_ctx_);
-        if (likely(lease.success()))
-        {
-            return lease_to_exposed_gaddr(lease);
-        }
-        else
-        {
-            DCHECK_EQ(lease.ec(), AcquireRequestStatus::kNoMem)
-                << "** Unexpected lease failure: " << lease.ec();
-            return nullgaddr;
-        }
+        auto gaddr = patronus_->alloc(node_id_, dir_id_, size, hint, coro_ctx_);
+        gaddr.nodeID = 0;
+        return gaddr;
     }
     void remote_free(GlobalAddress vaddr, size_t size, hint_t hint) override
     {
@@ -256,22 +227,9 @@ public:
         auto gaddr = vaddr_to_gaddr(vaddr);
         patronus_->dealloc(gaddr, dir_id_, size, hint, coro_ctx_);
     }
-    void remote_free_relinquish_perm(RemoteMemHandle &handle,
-                                     hint_t hint) override
-    {
-        auto flag = (uint8_t) LeaseModifyFlag::kWithDeallocation;
-        return do_remote_free_relinquish_perm(handle, hint, flag);
-    }
-    void remote_free_relinquish_perm_sync(RemoteMemHandle &handle,
-                                          hint_t hint) override
-    {
-        auto flag = (uint8_t) LeaseModifyFlag::kWithDeallocation |
-                    (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
-        return do_remote_free_relinquish_perm(handle, hint, flag);
-    }
-    void do_remote_free_relinquish_perm(RemoteMemHandle &handle,
-                                        hint_t hint,
-                                        uint8_t flag)
+    void relinquish_perm(RemoteMemHandle &handle,
+                         hint_t hint,
+                         uint8_t flag) override
     {
         if constexpr (::config::kEnableRdmaTrace)
         {
@@ -285,30 +243,7 @@ public:
         patronus_->relinquish(lease, hint, flag, coro_ctx_);
         free_handle(handle);
     }
-    void relinquish_perm(RemoteMemHandle &handle) override
-    {
-        auto flag = 0;
-        return do_relinquish_perm(handle, flag);
-    }
-    void relinquish_perm_sync(RemoteMemHandle &handle) override
-    {
-        auto flag = (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
-        return do_relinquish_perm(handle, flag);
-    }
-    void do_relinquish_perm(RemoteMemHandle &handle, uint8_t flag)
-    {
-        if constexpr (::config::kEnableRdmaTrace)
-        {
-            if (trace_enabled())
-            {
-                rdma_trace_record_.rel_nr++;
-                rdma_trace_record_.indv_two_sided++;
-            }
-        }
-        auto &lease = *(Lease *) handle.private_data();
-        patronus_->relinquish(lease, 0 /* hint */, flag, coro_ctx_);
-        free_handle(handle);
-    }
+
     // yes
     Buffer get_rdma_buffer(size_t size) override
     {
@@ -505,7 +440,6 @@ private:
     uint16_t node_id_;
     uint32_t dir_id_;
     Patronus::pointer patronus_;
-    DSM::pointer dsm_;
     CoroContext *coro_ctx_{nullptr};
     std::vector<Buffer> ongoing_rdma_bufs_;
     bool is_server_;

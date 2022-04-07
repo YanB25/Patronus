@@ -62,22 +62,17 @@ void client_worker(Patronus::pointer p,
 
     for (size_t time = 0; time < kTestTime; ++time)
     {
-        DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
+        DVLOG(2) << "[bench] client coro " << ctx << " start to alloc gaddr ";
 
-        auto lease = p->alloc(
+        auto gaddr = p->alloc(
             kServerNodeId, kDirID, kAllocBufferSize, 0 /* hint */, &ctx);
-        CHECK(lease.success())
-            << "** got lease failed. lease: " << lease << ", " << ctx
-            << ". Fail reason: " << lease.ec() << " at " << time
-            << " -th for coro: " << (int) coro_id;
+        CHECK(!gaddr.is_null());
 
-        DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
+        DVLOG(2) << "[bench] client coro " << ctx << " got gaddr " << gaddr;
 
         auto rdma_buf = p->get_rdma_buffer(kAllocBufferSize);
         memset(rdma_buf.buffer, 0, kAllocBufferSize);
 
-        auto gaddr = p->get_gaddr(lease);
-        CHECK(!gaddr.is_null());
         allocated_gaddrs.push_back(gaddr);
 
         p->put_rdma_buffer(rdma_buf);
@@ -91,8 +86,14 @@ void client_worker(Patronus::pointer p,
         auto gaddr = allocated_gaddrs[addr_idx];
 
         auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
-        auto lease =
-            p->get_wlease(gaddr, kDirID, kAllocBufferSize, 0ns, ac_flag, &ctx);
+        auto lease = p->get_wlease(kServerNodeId,
+                                   kDirID,
+                                   gaddr,
+                                   0 /* alloc_hint */,
+                                   kAllocBufferSize,
+                                   0ns,
+                                   ac_flag,
+                                   &ctx);
         if (!lease.success())
         {
             CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr)

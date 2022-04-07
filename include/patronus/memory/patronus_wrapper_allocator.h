@@ -32,26 +32,13 @@ public:
     }
     void *alloc(size_t size, CoroContext *ctx = nullptr) override
     {
-        auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                    (uint8_t) AcquireRequestFlag::kOnlyAllocation;
-
-        auto lease = patronus_->get_wlease(GlobalAddress(node_id_, hint_),
-                                           dir_id_,
-                                           size,
-                                           0ns,
-                                           flag,
-                                           DCHECK_NOTNULL(ctx));
-        if (unlikely(!lease.success()))
+        auto gaddr = patronus_->alloc(
+            node_id_, dir_id_, size, hint_, DCHECK_NOTNULL(ctx));
+        if (unlikely(gaddr.is_null()))
         {
-            DCHECK_EQ(lease.ec(), AcquireRequestStatus::kNoMem)
-                << "** unrecognized fail type.";
             return nullptr;
         }
-        DCHECK_NE(lease.base_addr(), 0)
-            << "** If lease.success(), should not got nullptr";
-        auto buffer_offset =
-            dsm_->dsm_offset_to_buffer_offset(lease.base_addr());
-        return (void *) GlobalAddress(0, buffer_offset).val;
+        return (void *) gaddr.offset;
     }
     void free(void *addr, size_t size, CoroContext *ctx = nullptr) override
     {

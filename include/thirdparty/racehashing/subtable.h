@@ -7,6 +7,7 @@
 
 #include "./bucket_group.h"
 #include "./kv_block.h"
+#include "Util.h"
 #include "util/PerformanceReporter.h"
 
 namespace patronus::hash
@@ -169,12 +170,27 @@ public:
         std::vector<BucketHandle<kSlotNr>> buckets;
         buckets.reserve(4);
         CHECK_EQ(cbs.get_bucket_handle(buckets), kOk);
+        CHECK_EQ(buckets.size(), 4);
+        if constexpr (debug())
+        {
+            std::vector<Buffer> addrs;
+            for (const auto &bucket : buckets)
+            {
+                char *addr = (char *) bucket.remote_addr().val;
+                size_t size = bucket.size_bytes();
+                addrs.push_back(Buffer(addr, size));
+            }
+            validate_buffer_not_overlapped(addrs);
+        }
         for (auto &bucket : buckets)
         {
             auto poll_slot_idx = fast_pseudo_rand_int(1, kSlotNr - 1);
             constexpr auto kDataSlotNr = Bucket<kSlotNr>::kDataSlotNr;
             for (size_t i = 0; i < kDataSlotNr; ++i)
             {
+                DLOG_IF(INFO, config::kEnableMemoryDebug && dctx != nullptr)
+                    << "[race][trace] Subtable::put_slot: trying bucket "
+                    << bucket.remote_addr();
                 auto idx = (poll_slot_idx + i) % kDataSlotNr + 1;
                 DCHECK_GE(idx, 1);
                 DCHECK_LT(idx, kSlotNr);

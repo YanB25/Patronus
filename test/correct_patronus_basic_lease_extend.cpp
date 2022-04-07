@@ -79,8 +79,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     {
         auto key = rand() % max_key;
         auto locate_offset = bench_locator(key);
-        Lease lease = p->get_rlease(GlobalAddress(kServerNodeId, locate_offset),
+        Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
+                                    GlobalAddress(0, locate_offset),
+                                    0 /* alloc_hint */,
                                     sizeof(Object),
                                     1ms,
                                     0 /* no flag */,

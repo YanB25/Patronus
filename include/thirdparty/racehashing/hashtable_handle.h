@@ -90,13 +90,17 @@ public:
     }
     ~RaceHashingHandleImpl()
     {
-        rdma_adpt_->relinquish_perm_sync(kvblock_mem_handle_);
-        rdma_adpt_->relinquish_perm_sync(directory_mem_handle_);
+        auto rel_flag = (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
+        rdma_adpt_->relinquish_perm(
+            kvblock_mem_handle_, 0 /* alloc_hint */, rel_flag);
+        rdma_adpt_->relinquish_perm(
+            directory_mem_handle_, 0 /* alloc_hint */, rel_flag);
         for (auto &handle : subtable_mem_handles_)
         {
             if (handle.valid())
             {
-                rdma_adpt_->relinquish_perm_sync(handle);
+                rdma_adpt_->relinquish_perm(
+                    handle, 0 /* alloc_hint */, rel_flag);
             }
         }
     }
@@ -604,8 +608,9 @@ public:
         auto alloc_size = SubTableT::size_bytes();
         if (subtable_mem_handles_[next_subtable_idx].valid())
         {
+            auto rel_flag = 0;
             rdma_adpt_->relinquish_perm(
-                subtable_mem_handles_[next_subtable_idx]);
+                subtable_mem_handles_[next_subtable_idx], 0, rel_flag);
         }
         auto next_subtable_handle =
             remote_alloc_acquire_subtable_directory(alloc_size);
@@ -1353,7 +1358,10 @@ private:
     }
     RemoteMemHandle remote_alloc_acquire_subtable_directory(size_t size)
     {
-        return rdma_adpt_->remote_alloc_acquire_perm(size, conf_.subtable_hint);
+        auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
+                    (uint8_t) AcquireRequestFlag::kWithAllocation;
+        return rdma_adpt_->acquire_perm(
+            nullgaddr, conf_.subtable_hint, size, 0ns, flag);
     }
     // the address of hash table at remote side
     uint16_t node_id_;
@@ -1434,11 +1442,18 @@ private:
         if (unlikely(subtable_mem_handles_[idx].valid()))
         {
             // exist old handle, free it before going on
-            rdma_adpt_->relinquish_perm(subtable_mem_handles_[idx]);
+            auto rel_flag = (uint8_t) 0;
+            rdma_adpt_->relinquish_perm(
+                subtable_mem_handles_[idx], 0 /* hint */, rel_flag);
         }
         DCHECK(!subtable_mem_handles_[idx].valid());
-        subtable_mem_handles_[idx] = rdma_adpt_->acquire_perm(
-            cached_meta_.entries[idx], SubTableT::size_bytes());
+        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        subtable_mem_handles_[idx] =
+            rdma_adpt_->acquire_perm(cached_meta_.entries[idx],
+                                     0 /* hint */,
+                                     SubTableT::size_bytes(),
+                                     0ns,
+                                     ac_flag);
     }
     RemoteMemHandle &get_kvblock_mem_handle()
     {
@@ -1465,8 +1480,12 @@ private:
         CHECK(!g_kvblock_pool_gaddr.is_null());
         CHECK_GT(g_kvblock_pool_size, 0);
 
-        kvblock_mem_handle_ =
-            rdma_adpt_->acquire_perm(g_kvblock_pool_gaddr, g_kvblock_pool_size);
+        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        kvblock_mem_handle_ = rdma_adpt_->acquire_perm(g_kvblock_pool_gaddr,
+                                                       0 /* hint */,
+                                                       g_kvblock_pool_size,
+                                                       0ns,
+                                                       ac_flag);
 
         patronus::mem::RefillableSlabAllocatorConfig refill_slab_conf;
         refill_slab_conf.block_class = {config::kKVBlockExpectSize};
@@ -1483,8 +1502,9 @@ private:
     void init_directory_mem_handle()
     {
         DCHECK(!directory_mem_handle_.valid());
-        directory_mem_handle_ =
-            rdma_adpt_->acquire_perm(table_meta_addr_, sizeof(MetaT));
+        auto flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        directory_mem_handle_ = rdma_adpt_->acquire_perm(
+            table_meta_addr_, 0, sizeof(MetaT), 0ns, flag);
     }
 };
 

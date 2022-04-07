@@ -579,7 +579,7 @@ void test_expand_multiple_single_thread()
 }
 void test_burn_expand_single_thread()
 {
-    auto [rh_ptr, rhh_ptrs] = gen_mock_rdma_rh<128, 2, 2>(1, 1, true);
+    auto [rh_ptr, rhh_ptrs] = gen_mock_rdma_rh<128, 2, 4>(1, 1, true);
     auto &rh = *rh_ptr;
     auto &rhh = *rhh_ptrs[0];
 
@@ -696,7 +696,7 @@ void test_burn_expand_single_thread()
               << " actual utilization: "
               << 1.0 * (inserted_nr + another_inserted_nr) / rh.max_capacity();
 
-    tear_down_mock_rdma_rh<128, 2, 2>(rh_ptr, rhh_ptrs);
+    tear_down_mock_rdma_rh<128, 2, 4>(rh_ptr, rhh_ptrs);
 }
 
 int main(int argc, char *argv[])
@@ -704,21 +704,21 @@ int main(int argc, char *argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    // test_basic(1);
-    // test_capacity(1);
-    // test_capacity(4);
+    test_basic(1);
+    test_capacity(1);
+    test_capacity(4);
 
-    // test_multithreads<4, 8, 8>(8, 100_K, false);
+    test_multithreads<4, 8, 8>(8, 100_K, false);
 
-    // test_expand_once_single_thread();
+    test_expand_once_single_thread();
 
-    // test_expand_multiple_single_thread();
+    test_expand_multiple_single_thread();
     test_burn_expand_single_thread();
 
     // NOTE: not runnable, not correct
     // There are so many corner cases under expansion
     // so not going to check the correctness
-    // test_multithreads<16, 4, 4>(8, 10, true);
+    test_multithreads<16, 4, 4>(8, 10, true);
 
     LOG(INFO) << "PASS ALL TESTS";
     LOG(INFO) << "finished. ctrl+C to quit.";

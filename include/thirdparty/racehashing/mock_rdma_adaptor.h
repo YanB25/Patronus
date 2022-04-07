@@ -11,6 +11,7 @@
 #include "./conf.h"
 #include "./utils.h"
 #include "Common.h"
+#include "patronus/Type.h"
 #include "patronus/memory/allocator.h"
 #include "patronus/memory/slab_allocator.h"
 #include "util/IRdmaAdaptor.h"
@@ -55,14 +56,6 @@ public:
     {
         return std::make_shared<MockRdmaAdaptor>(server_endpoint, dctx);
     }
-    RemoteMemHandle remote_alloc_acquire_perm(size_t size, hint_t hint) override
-    {
-        auto ret = server_ep_.lock()->rpc_alloc(size, hint);
-        DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
-            << "[rdma][trace] remote_alloc_acquire_perm: " << ret
-            << " for size " << size;
-        return alloc_handle(ret, size);
-    }
     GlobalAddress remote_alloc(size_t size, hint_t hint) override
     {
         auto ret = server_ep_.lock()->rpc_alloc(size, hint);
@@ -75,9 +68,36 @@ public:
                "or not.";
         return ret;
     }
-    RemoteMemHandle acquire_perm(GlobalAddress gaddr, size_t size) override
+    RemoteMemHandle acquire_perm(GlobalAddress gaddr,
+                                 hint_t alloc_hint,
+                                 size_t size,
+                                 std::chrono::nanoseconds ns,
+                                 uint8_t flag) override
     {
-        return alloc_handle(gaddr, size);
+        std::ignore = ns;
+        bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+        bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+        CHECK(!only_alloc) << "use alloc API instead";
+        bool alloc_semantics = with_alloc || only_alloc;
+        if (alloc_semantics)
+        {
+            CHECK(gaddr.is_null());
+        }
+        else
+        {
+            CHECK(!gaddr.is_null());
+            CHECK_EQ(alloc_hint, 0);
+        }
+        if (!gaddr.is_null())
+        {
+            CHECK(!alloc_semantics);
+            return alloc_handle(gaddr, size);
+        }
+        else
+        {
+            CHECK(alloc_semantics);
+            return alloc_handle(remote_alloc(size, alloc_hint), size);
+        }
     }
     void reg_default_allocator(IAllocator::pointer allocator)
     {
@@ -143,27 +163,24 @@ public:
         remote_not_freed_buffers_.insert((void *) gaddr.val);
         server_ep_.lock()->rpc_free(gaddr, size, hint);
     }
-    // mock implement
-    // no action for permission
-    void remote_free_relinquish_perm(RemoteMemHandle &handle,
-                                     hint_t hint) override
+    void relinquish_perm(RemoteMemHandle &handle,
+                         hint_t hint,
+                         uint8_t flag) override
     {
-        free_handle(handle);
-        return remote_free(handle.gaddr(), handle.size(), hint);
-    }
-    void remote_free_relinquish_perm_sync(RemoteMemHandle &handle,
-                                          hint_t hint) override
-    {
-        return remote_free_relinquish_perm(handle, hint);
-    }
-    void relinquish_perm(RemoteMemHandle &handle) override
-    {
+        bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+        bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
+        CHECK(!only_dealloc) << "use remote_free instead";
+        bool dealloc_semantics = only_dealloc || with_dealloc;
+        if (dealloc_semantics)
+        {
+            remote_free(handle.gaddr(), handle.size(), hint);
+        }
+        else
+        {
+            CHECK_EQ(hint, 0);
+        }
         free_handle(handle);
         return;
-    }
-    void relinquish_perm_sync(RemoteMemHandle &handle) override
-    {
-        return relinquish_perm(handle);
     }
     Buffer get_rdma_buffer(size_t size) override
     {
