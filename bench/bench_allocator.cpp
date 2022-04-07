@@ -645,6 +645,61 @@ void bench_slab_alloc(size_t test_times,
     CHECK(hugePageFree(global_addr, memory_limit));
 }
 
+void bench_slab_alloc_reg_mr_over_mr(size_t test_times,
+                                     size_t alloc_size,
+                                     size_t memory_limit,
+                                     size_t thread_nr,
+                                     bool report)
+{
+    void *global_addr = hugePageAlloc(memory_limit);
+    size_t memory_limit_thread = memory_limit / thread_nr;
+    size_t alloc_limit_total = memory_limit / alloc_size;
+    size_t alloc_limit_thread = alloc_limit_total / thread_nr;
+
+    std::vector<std::shared_ptr<mem::IAllocator>> allocators;
+    std::vector<RdmaContext> rdma_contexts;
+    std::vector<ibv_mr *> mrs;
+    rdma_contexts.resize(thread_nr);
+    mrs.resize(thread_nr);
+
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        mem::SlabAllocatorConfig slab_conf;
+        slab_conf.block_class = {alloc_size};
+        slab_conf.block_ratio = {1};
+        void *start_addr_thread =
+            (char *) global_addr + memory_limit_thread * i;
+        auto slab_allocator = std::make_shared<mem::SlabAllocator>(
+            start_addr_thread, memory_limit_thread, slab_conf);
+
+        CHECK(createContext(&rdma_contexts[i]));
+        // bind the whole region as mr for each thread
+        mrs[i] = CHECK_NOTNULL(createMemoryRegion(
+            (uint64_t) global_addr, memory_limit, &rdma_contexts[i]));
+
+        mem::MRAllocatorConfig mr_conf;
+        mr_conf.rdma_context = &rdma_contexts[i];
+
+        mr_conf.allocator = slab_allocator;
+        allocators.push_back(std::make_shared<mem::MRAllocator>(mr_conf));
+    }
+    bench_template("alloc (slab) + MR over MR",
+                   test_times,
+                   alloc_size,
+                   alloc_limit_thread,
+                   thread_nr,
+                   allocators,
+                   report);
+
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        CHECK(destroyMemoryRegion(mrs[i]));
+        CHECK(destroyContext(&rdma_contexts[i]));
+    }
+
+    CHECK(hugePageFree(global_addr, memory_limit));
+}
+
 void bench_slab_alloc_reg_mr(size_t test_times,
                              size_t alloc_size,
                              size_t memory_limit,
@@ -1087,6 +1142,12 @@ int main(int argc, char *argv[])
             bench_slab_alloc_reg_mr(
                 1_M / 100, block_size, kMemoryLimit, thread_nr, false);
             bench_slab_alloc_reg_mr(
+                1_M / 100, block_size, kMemoryLimit, thread_nr, true);
+
+            LOG(INFO) << "[bench] bench_alloc_slab_reg_mr_over_mr()";
+            bench_slab_alloc_reg_mr_over_mr(
+                1_M / 100, block_size, kMemoryLimit, thread_nr, false);
+            bench_slab_alloc_reg_mr_over_mr(
                 1_M / 100, block_size, kMemoryLimit, thread_nr, true);
 
             LOG(INFO) << "[bench] bench_alloc_slab_reg_mw()";

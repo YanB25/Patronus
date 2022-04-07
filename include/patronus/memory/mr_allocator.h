@@ -14,6 +14,10 @@ struct MRAllocatorConfig
     RdmaContext *rdma_context;
 };
 
+/**
+ * NOTE: MR OVER MR is faster. avoid allocating already-bind memory from
+ * config.allocator.
+ */
 class MRAllocator : public IAllocator
 {
 public:

@@ -286,7 +286,7 @@ Other possibilities
 ======================
 
 Urgent TODO:
-- modify bench_allocator. See whether MR over MR is fast 
+[-] MR OVER MR IS FASTER. modify bench_allocator. See whether MR over MR is fast 
     - maybe it will be faster, becomes the NIC has already bind the memory
     - If it gots faster, we need to change the benchmark and think about how to make MR slow.
 [-] Modify RdmaAdaptor: let it be exactly the same API as Patronus
