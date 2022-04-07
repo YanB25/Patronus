@@ -58,6 +58,15 @@ public:
     }
     GlobalAddress remote_alloc(size_t size, hint_t hint) override
     {
+        auto it = overwrite_allocators_.find(hint);
+        if (it != overwrite_allocators_.end())
+        {
+            return to_exposed_gaddr(it->second->alloc(size));
+        }
+        return do_remote_alloc(size, hint);
+    }
+    GlobalAddress do_remote_alloc(size_t size, hint_t hint)
+    {
         auto ret = server_ep_.lock()->rpc_alloc(size, hint);
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
             << "[rdma][trace] remote_alloc_acquire_perm: " << ret
@@ -96,7 +105,8 @@ public:
         else
         {
             CHECK(alloc_semantics);
-            return alloc_handle(remote_alloc(size, alloc_hint), size);
+            // by semantics, will not hit local overwrite allocators
+            return alloc_handle(do_remote_alloc(size, alloc_hint), size);
         }
     }
     void reg_default_allocator(IAllocator::pointer allocator)
@@ -370,6 +380,16 @@ public:
         CHECK_EQ(allocated_handle_.erase(hid), 1);
     }
 
+    void reg_overwrite_allocator(uint64_t hint,
+                                 mem::IAllocator::pointer allocator) override
+    {
+        DCHECK_EQ(overwrite_allocators_.count(hint), 0)
+            << "** already registered allocator for hint = " << hint;
+        DCHECK_NE(hint, 0) << "** try to overwrite default allocator. hint: "
+                           << hint;
+        overwrite_allocators_[hint] = allocator;
+    }
+
 private:
     RemoteMemHandle alloc_handle(GlobalAddress gaddr, size_t size)
     {
@@ -385,6 +405,7 @@ private:
         handle.set_invalid();
     }
     std::weak_ptr<MockRdmaAdaptor> server_ep_;
+    // server-side allocators to handle requests
     std::unordered_map<hint_t, IAllocator::pointer> allocators_;
     HashContext *dctx_{nullptr};
     std::vector<MockRdmaOp> ops_;
@@ -393,6 +414,10 @@ private:
     std::unordered_set<void *> remote_not_freed_buffers_;
 
     std::unordered_set<uint64_t> allocated_handle_;
+
+    // client-side allocators for secondary allocation.
+    std::unordered_map<uint64_t, mem::IAllocator::pointer>
+        overwrite_allocators_;
 };
 
 }  // namespace patronus::hash

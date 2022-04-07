@@ -128,6 +128,14 @@ public:
                              RemoteMemHandle &) = 0;
     virtual RetCode commit() = 0;
     virtual RetCode put_all_rdma_buffer() = 0;
+    /**
+     * @brief register a secondary allocator at the client side
+     * Don't confuse with patronus_->reg_allocator, which registers allocators
+     * at the server side
+     * @param hint
+     */
+    virtual void reg_overwrite_allocator(
+        uint64_t hint, patronus::mem::IAllocator::pointer) = 0;
 
     // called by server side
     virtual GlobalAddress to_exposed_gaddr(void *addr) = 0;

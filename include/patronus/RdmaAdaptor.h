@@ -202,6 +202,12 @@ public:
                 rdma_trace_record_.indv_two_sided++;
             }
         }
+        auto it = overwrite_allocators_.find(hint);
+        if (unlikely(it != overwrite_allocators_.end()))
+        {
+            return GlobalAddress(0,
+                                 (uint64_t) it->second->alloc(size, coro_ctx_));
+        }
 
         DCHECK(!is_server_);
         auto gaddr = patronus_->alloc(node_id_, dir_id_, size, hint, coro_ctx_);
@@ -436,6 +442,16 @@ public:
         return rdma_trace_record_;
     }
 
+    void reg_overwrite_allocator(uint64_t hint,
+                                 mem::IAllocator::pointer allocator) override
+    {
+        DCHECK_EQ(overwrite_allocators_.count(hint), 0)
+            << "** already registered allocator for hint = " << hint;
+        DCHECK_NE(hint, 0) << "** try to overwrite default allocator. hint: "
+                           << hint;
+        overwrite_allocators_[hint] = allocator;
+    }
+
 private:
     uint16_t node_id_;
     uint32_t dir_id_;
@@ -445,6 +461,9 @@ private:
     bool is_server_;
     bool enable_trace_{false};
     std::string trace_name_;
+
+    std::unordered_map<uint64_t, mem::IAllocator::pointer>
+        overwrite_allocators_;
 
     PatronusBatchContext batch_;
 
