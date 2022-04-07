@@ -289,12 +289,12 @@ Urgent TODO:
 - modify bench_allocator. See whether MR over MR is fast 
     - maybe it will be faster, becomes the NIC has already bind the memory
     - If it gots faster, we need to change the benchmark and think about how to make MR slow.
-- Modify RdmaAdaptor: let it be exactly the same API as Patronus
+[-] Modify RdmaAdaptor: let it be exactly the same API as Patronus
     - So inconvinient for the API abstraction RdmaAdaptor wrapping on Patronus. We really need the detail to bench the codes.
     - Let RdmaAdaptor be Patronus + Tracer + Resource Manager. That's enough. Respect the API from patronus.
 - Modify RdmaAdaptor: support reg_overwrite_allocator
     - if the hint hit reg_overwrite_allocator, will call RdmaAdaptor's registered allocator, instead of directly call to patronus.
     - and yes, the registered overwrite allocator will (and must) delegate some ops to patronus, e.g., for the refillable slab allocator.
-- Modify RHH: The config should be modified
+- Modify RHH: The config should be modified. Let config determines the actual behaviour to handle allocation/permission, etc.
     - for the 1) read kvblock, 2) alloc_acquire / rel kv_block, 3) free kvblock, the three ops
     - Provide individual flags & hint & parameter (e.g. time_ns) to the config. So that RHH respects to the config the call RdmaAdaptor (delegating to Patronus).
