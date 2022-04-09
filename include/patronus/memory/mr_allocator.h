@@ -63,6 +63,12 @@ public:
     {
         return conf_.allocator;
     }
+    ~MRAllocator()
+    {
+        CHECK(addr_to_mr_.empty())
+            << "** MRAllocator: MR not freed. leak size: "
+            << addr_to_mr_.size();
+    }
 
 private:
     void bind_mr(void *addr, size_t size)

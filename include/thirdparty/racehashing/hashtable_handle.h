@@ -8,6 +8,7 @@
 
 #include "./hashtable.h"
 #include "./mock_rdma_adaptor.h"
+#include "./rhh_conf.h"
 #include "./utils.h"
 #include "Common.h"
 #include "patronus/RdmaAdaptor.h"
@@ -16,118 +17,6 @@
 using namespace define::literals;
 namespace patronus::hash
 {
-using AcquireRequestFlag = patronus::AcquireRequestFlag;
-struct RaceHashingHandleConfig
-{
-    // about how to manage reading kv_block
-    struct
-    {
-        struct
-        {
-            bool do_nothing{false};
-            uint8_t flag{
-                (uint8_t)
-                    patronus::AcquireRequestFlag::kNoGc};  // AcquireRequestFlag
-            uint64_t alloc_hint{0};
-            std::chrono::nanoseconds lease_time{0ns};
-
-        } begin;
-        struct
-        {
-            bool do_nothing{false};
-            uint64_t alloc_hint{0};
-            uint8_t flag{(uint8_t) 0};
-        } end;
-
-    } read_kvblock;
-
-    struct
-    {
-        struct
-        {
-            bool use_alloc_api{false};
-            uint8_t flag{(uint8_t) AcquireRequestFlag::kNoGc |
-                         (uint8_t) AcquireRequestFlag::kWithAllocation};
-            uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
-            std::chrono::nanoseconds lease_time{0ns};
-        } begin;
-        struct
-        {
-            bool do_nothing{false};
-            bool use_alloc_api{false};
-            uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
-            uint8_t flag{0};
-        } end;
-        bool enable_batch_alloc{false};
-        size_t batch_alloc_size{0};
-    } insert_kvblock;
-
-    struct
-    {
-    } free_kvblock;
-
-    // the hints
-    uint64_t subtable_hint{hash::config::kAllocHintDirSubtable};
-};
-
-inline std::ostream &operator<<(std::ostream &os,
-                                const RaceHashingHandleConfig &conf)
-{
-    os << "{RaceHashingHandleConfig: ";
-    {
-        os << ". read_kvblock:{ ";
-        {
-            const auto &c = conf.read_kvblock.begin;
-            if (c.do_nothing)
-            {
-                os << "do nothing";
-            }
-            else
-            {
-                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                              c.lease_time)
-                              .count();
-                os << "acquire hint: " << c.alloc_hint << ", time: " << ns
-                   << " ns, flag: " << AcquireRequestFlagOut(c.flag) << ". ";
-            }
-        }
-        {
-            const auto &c = conf.read_kvblock.end;
-            os << "rel: ";
-            if (c.do_nothing)
-            {
-                os << "do nothing";
-            }
-            else
-            {
-                os << "rel hint: " << c.alloc_hint
-                   << ", flag: " << LeaseModifyFlagOut(c.flag);
-            }
-        }
-        os << "}. ";
-    }
-    {
-        os << " insert_kvblock { ";
-        {
-            const auto &c = conf.insert_kvblock.begin;
-            auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                          c.lease_time)
-                          .count();
-            os << "ins: alloc_api: " << c.use_alloc_api
-               << ", hint: " << c.alloc_hint << ", ns: " << ns
-               << ", flag: " << AcquireRequestFlagOut(c.flag);
-        }
-        {
-            const auto &c = conf.insert_kvblock.end;
-            os << ". rel: alloc_api: " << c.use_alloc_api
-               << ", hint: " << c.alloc_hint
-               << ", flag: " << LeaseModifyFlagOut(c.flag);
-        }
-        os << "}";
-    }
-    return os;
-}
-
 class RdmaAdaptorKVBlockWrapperAllocator : public mem::IAllocator
 {
 public:

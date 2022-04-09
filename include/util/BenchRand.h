@@ -12,9 +12,11 @@
 class IKVRandGenerator
 {
 public:
+    // does not allow copy, because it is per-thread.
     using pointer = std::shared_ptr<IKVRandGenerator>;
     virtual size_t gen_key(char *buf, size_t size) = 0;
     virtual size_t gen_value(char *buf, size_t size) = 0;
+    virtual pointer clone() const = 0;
     virtual ~IKVRandGenerator() = default;
 };
 
@@ -48,6 +50,10 @@ public:
         fast_pseudo_fill_buf(buf, size);
         return size;
     }
+    IKVRandGenerator::pointer clone() const override
+    {
+        return new_instance(min_key_, max_key_);
+    }
 
 private:
     uint64_t min_key_{0};
@@ -72,7 +78,7 @@ public:
                                   uint64_t max,
                                   double z,
                                   uint64_t seed)
-        : min_(min)
+        : min_(min), max_(max), z_(z), seed_(seed)
     {
         mehcached_zipf_init(&state_, max - min, z, seed);
     }
@@ -88,9 +94,16 @@ public:
         fast_pseudo_fill_buf(buf, size);
         return size;
     }
+    IKVRandGenerator::pointer clone() const override
+    {
+        return new_instance(min_, max_, z_, seed_);
+    }
 
 private:
     uint64_t min_{0};
+    uint64_t max_{0};
+    double z_{0};
+    uint64_t seed_{0};
     zipf_gen_state state_;
 };
 
@@ -116,6 +129,10 @@ public:
     {
         fast_pseudo_fill_buf(buf, size);
         return size;
+    }
+    IKVRandGenerator::pointer clone() const override
+    {
+        return new_instance();
     }
 
 private:

@@ -12,6 +12,7 @@
 #include "thirdparty/racehashing/hashtable.h"
 #include "thirdparty/racehashing/hashtable_handle.h"
 #include "thirdparty/racehashing/utils.h"
+#include "util/BenchRand.h"
 #include "util/DataFrameF.h"
 #include "util/Rand.h"
 
@@ -25,6 +26,7 @@ using namespace hmdf;
 constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kThreadNr = 8;
 constexpr static size_t kMaxCoroNr = 16;
+constexpr static uint64_t kMaxKey = 1_M;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -36,6 +38,19 @@ std::vector<double> col_x_del_rate;
 std::vector<double> col_x_get_rate;
 std::vector<size_t> col_test_op_nr;
 std::vector<size_t> col_ns;
+
+struct KVGenConf
+{
+    uint64_t max_key{1};
+    bool use_zip{false};
+    double zip_skewness{0};
+};
+inline std::ostream &operator<<(std::ostream &os, const KVGenConf &c)
+{
+    os << "{kv_conf: max_key: " << c.max_key << ", use_zip: " << c.use_zip
+       << ", skewness: " << c.zip_skewness << "}";
+    return os;
+}
 
 struct BenchConfig
 {
@@ -52,24 +67,76 @@ struct BenchConfig
     bool should_report{false};
     size_t initial_subtable_nr{1};
     bool subtable_use_mr{false};
-    void validate()
+    KVGenConf kv_gen_conf_;  // remember it for debuging
+    IKVRandGenerator::pointer kv_g;
+
+    void validate() const
     {
         double sum = insert_prob + delete_prob + get_prob;
         CHECK_DOUBLE_EQ(sum, 1);
+        if (kv_g)
+        {
+            CHECK_EQ(kv_g.use_count(), 1)
+                << "Does not allow sharing by threads. Multiple owner of this "
+                   "allocator detected.";
+        }
     }
     std::string conf_name() const
     {
         return name;
     }
+    BenchConfig clone() const
+    {
+        BenchConfig ret;
+        ret.name = name;
+        ret.insert_prob = insert_prob;
+        ret.delete_prob = delete_prob;
+        ret.get_prob = get_prob;
+        ret.auto_extend = auto_extend;
+        ret.first_enter = first_enter;
+        ret.server_should_leave = server_should_leave;
+        ret.thread_nr = thread_nr;
+        ret.coro_nr = coro_nr;
+        ret.test_nr = test_nr;
+        ret.should_report = should_report;
+        ret.initial_subtable_nr = initial_subtable_nr;
+        ret.subtable_use_mr = subtable_use_mr;
+        ret.kv_gen_conf_ = kv_gen_conf_;
+        ret.kv_g = kv_g->clone();
+        return ret;
+    }
+    static BenchConfig get_empty_conf(const std::string &name,
+                                      const KVGenConf &kv_conf)
+    {
+        BenchConfig conf;
+        conf.name = name;
+        conf.initial_subtable_nr = 1;
+        conf.insert_prob = 0;
+        conf.delete_prob = 0;
+        conf.get_prob = 0;
+        conf.kv_gen_conf_ = kv_conf;
+
+        if (kv_conf.use_zip)
+        {
+            conf.kv_g = MehcachedZipfianRandGenerator::new_instance(
+                0, kv_conf.max_key, kv_conf.zip_skewness);
+        }
+        else
+        {
+            conf.kv_g = UniformRandGenerator::new_instance(0, kv_conf.max_key);
+        }
+
+        return conf;
+    }
     static BenchConfig get_default_conf(const std::string &name,
+                                        const KVGenConf &kv_conf,
                                         size_t initial_subtable_nr,
                                         size_t test_nr,
                                         size_t thread_nr,
                                         size_t coro_nr,
                                         bool auto_extend)
     {
-        BenchConfig conf;
-        conf.name = name;
+        auto conf = get_empty_conf(name, kv_conf);
         conf.initial_subtable_nr = initial_subtable_nr;
         conf.insert_prob = 0.25;
         conf.delete_prob = 0.25;
@@ -85,99 +152,17 @@ struct BenchConfig
 };
 std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 {
-    os << "{conf: name: " << conf.name << ", ins: " << conf.insert_prob
-       << ", get: " << conf.get_prob << ", del: " << conf.delete_prob
-       << ", expand: " << conf.auto_extend << ", thread: " << conf.thread_nr
-       << ", coro: " << conf.coro_nr << ", test: " << conf.test_nr
+    os << "{conf: name: " << conf.name << ", kv_conf: " << conf.kv_gen_conf_
+       << ", ins: " << conf.insert_prob << ", get: " << conf.get_prob
+       << ", del: " << conf.delete_prob << ", expand: " << conf.auto_extend
+       << ", thread: " << conf.thread_nr << ", coro: " << conf.coro_nr
+       << ", test: " << conf.test_nr
        << ", subtable_nr: " << conf.initial_subtable_nr
        << ", enter: " << conf.first_enter
        << ", leave: " << conf.server_should_leave
        << ", report: " << conf.should_report << "}";
     return os;
 }
-
-class RaceHashingConfigFactory
-{
-public:
-    static RaceHashingHandleConfig get_basic()
-    {
-        RaceHashingHandleConfig handle_conf;
-        handle_conf.subtable_hint = hash::config::kAllocHintDirSubtable;
-        return handle_conf;
-    }
-    static RaceHashingHandleConfig get_unprotected(size_t batch_size)
-    {
-        auto c = get_basic();
-        c.read_kvblock.begin.do_nothing = true;
-        c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kReserved;
-        c.read_kvblock.end.do_nothing = true;
-        c.read_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
-        c.insert_kvblock.begin.use_alloc_api = true;
-        c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
-        c.insert_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kReserved;
-        c.insert_kvblock.end.use_alloc_api =
-            c.insert_kvblock.begin.use_alloc_api;
-        c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
-        c.insert_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
-        c.insert_kvblock.batch_alloc_size = batch_size;
-        c.insert_kvblock.enable_batch_alloc = batch_size > 1;
-        return c;
-    }
-    static RaceHashingHandleConfig get_mw_protected(size_t batch_size)
-    {
-        auto c = get_basic();
-        c.read_kvblock.begin.do_nothing = false;
-        c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kNoGc;
-        c.read_kvblock.begin.lease_time = 0ns;
-        c.read_kvblock.end.do_nothing = false;
-        c.read_kvblock.end.flag = (uint8_t) 0;
-        c.insert_kvblock.begin.use_alloc_api = false;
-        c.insert_kvblock.begin.flag =
-            (uint8_t) AcquireRequestFlag::kNoGc |
-            (uint8_t) AcquireRequestFlag::kWithAllocation;
-        c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
-        c.insert_kvblock.end.use_alloc_api =
-            c.insert_kvblock.begin.use_alloc_api;
-        c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
-        c.insert_kvblock.end.flag = 0;
-        c.insert_kvblock.batch_alloc_size = batch_size;
-        c.insert_kvblock.enable_batch_alloc = batch_size > 1;
-        return c;
-    }
-    // can not support batch allocation
-    // because what we get
-    static RaceHashingHandleConfig get_mw_protected_with_timeout()
-    {
-        auto c = get_basic();
-        c.read_kvblock.begin.do_nothing = false;
-        c.read_kvblock.begin.flag = 0;
-        c.read_kvblock.begin.lease_time = 10ms;  // definitely enough
-        c.read_kvblock.end.do_nothing = true;
-        c.read_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
-        c.insert_kvblock.begin.use_alloc_api = false;
-        c.insert_kvblock.begin.flag =
-            (uint8_t) AcquireRequestFlag::kWithAllocation;
-        c.insert_kvblock.begin.lease_time = 10ms;  // definitely enough
-        c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
-        c.insert_kvblock.end.use_alloc_api =
-            c.insert_kvblock.begin.use_alloc_api;
-        c.insert_kvblock.end.do_nothing = true;
-        c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
-        c.insert_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
-        c.insert_kvblock.enable_batch_alloc = false;
-        return c;
-    }
-    static RaceHashingHandleConfig get_mr_protected(size_t batch_size)
-    {
-        auto c = get_mw_protected(batch_size);
-        c.read_kvblock.begin.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
-        c.read_kvblock.end.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
-        c.insert_kvblock.begin.alloc_hint =
-            hash::config::kAllocHintKVBlockOverMR;
-        c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
-        return c;
-    }
-};
 
 class BenchConfigFactory
 {
@@ -195,13 +180,16 @@ public:
             CHECK_EQ(thread_nr, 1);
             CHECK_EQ(coro_nr, 1);
         }
-        auto warm_conf = BenchConfig::get_default_conf(name,
-                                                       initial_subtable_nr,
-                                                       test_nr,
-                                                       thread_nr,
-                                                       coro_nr,
-                                                       expand /* extend */);
-        auto eval_conf = warm_conf;
+        auto warm_conf = BenchConfig::get_default_conf(
+            name,
+            KVGenConf{
+                .max_key = kMaxKey, .use_zip = true, .zip_skewness = 0.99},
+            initial_subtable_nr,
+            test_nr,
+            thread_nr,
+            coro_nr,
+            expand /* extend */);
+        auto eval_conf = warm_conf.clone();
         eval_conf.should_report = true;
 
         return pipeline({warm_conf, eval_conf});
@@ -211,8 +199,10 @@ public:
                                                       bool subtable_use_mr)
     {
         // fill the table with KVs
-        BenchConfig conf;
-        conf.name = name;
+        auto conf = BenchConfig::get_empty_conf(
+            name,
+            KVGenConf{
+                .max_key = kMaxKey, .use_zip = true, .zip_skewness = 0.99});
         conf.thread_nr = 1;
         conf.coro_nr = 1;
         conf.insert_prob = 1;
@@ -230,9 +220,12 @@ public:
         size_t thread_nr,
         size_t coro_nr)
     {
+        auto kv_g_conf = KVGenConf{
+            .max_key = kMaxKey, .use_zip = true, .zip_skewness = 0.99};
+
         // fill the table with KVs
-        BenchConfig insert_conf;
-        insert_conf.name = name + ".load";
+        auto insert_conf =
+            BenchConfig::get_empty_conf(name + ".load", kv_g_conf);
         insert_conf.thread_nr = 1;
         insert_conf.coro_nr = 1;
         insert_conf.insert_prob = 1;
@@ -240,7 +233,8 @@ public:
         insert_conf.test_nr = fill_nr;
         insert_conf.should_report = false;
 
-        BenchConfig query_warmup_conf;
+        auto query_warmup_conf =
+            BenchConfig::get_empty_conf(name + ".query.warmup", kv_g_conf);
         query_warmup_conf.name = name + ".query.warmup";
         query_warmup_conf.thread_nr = thread_nr;
         query_warmup_conf.coro_nr = coro_nr;
@@ -249,12 +243,11 @@ public:
         query_warmup_conf.test_nr = test_nr;
         query_warmup_conf.should_report = false;
 
-        auto query_report_conf = query_warmup_conf;
+        auto query_report_conf = query_warmup_conf.clone();
         query_report_conf.name = name + ".query";
         query_report_conf.should_report = true;
 
-        BenchConfig mix_conf;
-        mix_conf.name = name + ".mix";
+        auto mix_conf = BenchConfig::get_empty_conf(name + ".mix", kv_g_conf);
         mix_conf.thread_nr = thread_nr;
         mix_conf.coro_nr = coro_nr;
         mix_conf.get_prob = 0.8;
@@ -291,6 +284,7 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     Patronus::pointer p,
     const RaceHashingHandleConfig &conf,
     bool auto_expand,
+    GlobalAddress meta_gaddr,
     CoroContext *ctx)
 {
     using HandleT = typename RaceHashing<kE, kB, kS>::Handle;
@@ -298,7 +292,6 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     auto tid = p->get_thread_id();
     auto dir_id = tid;
 
-    auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     auto handle_rdma_ctx =
@@ -312,8 +305,6 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
 
 void init_allocator(Patronus::pointer p, size_t thread_nr)
 {
-    // TODO: should we instruct how the allocator is inited?
-
     // for server to handle kv block allocation requests
     // give all to kv blocks
     auto tid = p->get_thread_id();
@@ -335,13 +326,26 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
                                          kvblock_slab_config);
     p->reg_allocator(hash::config::kAllocHintKVBlock, kvblock_allocator);
 
-    // register the MR
-    mem::MRAllocatorConfig mr_config;
+    LOG_FIRST_N(WARNING, 1)
+        << "TODO: the performance for MR may be higher: MR over MR";
+
     // a little bit tricky here: MR allocator should use the internal ones
-    mr_config.allocator = p->get_allocator(Patronus::kDefaultHint);
-    mr_config.rdma_context = p->get_dsm()->get_rdma_context(dir_id);
-    auto mr_allocator = mem::MRAllocator::new_instance(mr_config);
-    p->reg_allocator(hash::config::kAllocHintDirSubtableOverMR, mr_allocator);
+    // otherwise will fail to convert to the dsm offset.
+    mem::MRAllocatorConfig dir_st_mr_config;
+    dir_st_mr_config.allocator = p->get_allocator(Patronus::kDefaultHint);
+    dir_st_mr_config.rdma_context = p->get_dsm()->get_rdma_context(dir_id);
+    auto dir_st_mr_allocator = mem::MRAllocator::new_instance(dir_st_mr_config);
+    p->reg_allocator(hash::config::kAllocHintDirSubtableOverMR,
+                     dir_st_mr_allocator);
+
+    // I believe sharing config is safe
+    mem::MRAllocatorConfig kvblock_mr_config;
+    kvblock_mr_config.allocator = kvblock_allocator;
+    kvblock_mr_config.rdma_context = p->get_dsm()->get_rdma_context(dir_id);
+    auto kvblock_mr_allocator =
+        mem::MRAllocator::new_instance(kvblock_mr_config);
+    p->reg_allocator(hash::config::kAllocHintKVBlockOverMR,
+                     kvblock_mr_allocator);
 }
 
 template <size_t kE, size_t kB, size_t kS>
@@ -381,6 +385,7 @@ void test_basic_client_worker(
     CoroYield &yield,
     const BenchConfig &bench_conf,
     const RaceHashingHandleConfig &rhh_conf,
+    GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
     auto tid = p->get_thread_id();
@@ -389,12 +394,8 @@ void test_basic_client_worker(
     // TODO: the dtor of rhh has performance penalty.
     // dtor out of this function.
     bool auto_expand = bench_conf.auto_extend;
-    auto rhh = gen_rdma_rhh<kE, kB, kS>(p, rhh_conf, auto_expand, &ctx);
-
-    constexpr static size_t kKeySize = 3;
-    constexpr static size_t kValueSize = 3;
-    char key_buf[kKeySize + 5];
-    char val_buf[kValueSize + 5];
+    auto rhh =
+        gen_rdma_rhh<kE, kB, kS>(p, rhh_conf, auto_expand, meta_gaddr, &ctx);
 
     size_t ins_succ_nr = 0;
     size_t ins_retry_nr = 0;
@@ -406,19 +407,18 @@ void test_basic_client_worker(
     size_t get_not_found_nr = 0;
     size_t executed_nr = 0;
 
-    std::map<std::string, std::string> inserted;
-    std::set<std::string> keys;
-
     double insert_prob = bench_conf.insert_prob;
     double delete_prob = bench_conf.delete_prob;
 
     ChronoTimer timer;
+    std::string key;
+    std::string value;
+    key.resize(sizeof(uint64_t));
+    value.resize(8);
+    CHECK_NOTNULL(bench_conf.kv_g)->gen_value(&value[0], 8);
     while (ex.get_private_data().thread_remain_task > 0)
     {
-        fast_pseudo_fill_buf(key_buf, kKeySize);
-        fast_pseudo_fill_buf(val_buf, kValueSize);
-        std::string key(key_buf, kKeySize);
-        std::string value(val_buf, kValueSize);
+        bench_conf.kv_g->gen_key(&key[0], sizeof(uint64_t));
 
         if (true_with_prob(insert_prob))
         {
@@ -533,8 +533,8 @@ void test_basic_client_master(
     }
 }
 
-std::atomic<ssize_t> total_test_nr;
-
+std::atomic<ssize_t> g_total_test_nr;
+GlobalAddress g_meta_gaddr;
 template <size_t kE, size_t kB, size_t kS>
 void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
@@ -548,15 +548,19 @@ void benchmark_client(Patronus::pointer p,
     bool first_enter = bench_conf.first_enter;
     bool server_should_leave = bench_conf.server_should_leave;
     CHECK_LE(coro_nr, kMaxCoroNr);
+    size_t actual_test_nr = bench_conf.test_nr * rhh_conf.test_nr_scale_factor;
 
     auto tid = p->get_thread_id();
     if (is_master)
     {
         // init here by master
-        total_test_nr = bench_conf.test_nr;
+        g_total_test_nr = actual_test_nr;
         if (first_enter)
         {
             p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
+            // fetch meta_gaddr here by master thread
+            // because it may be slow
+            g_meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
         }
     }
     bar.wait();
@@ -573,29 +577,33 @@ void benchmark_client(Patronus::pointer p,
         }
         for (size_t i = 0; i < coro_nr; ++i)
         {
-            ex.worker(i) =
-                CoroCall([p, coro_id = i, &bench_conf, &rhh_conf, &ex](
-                             CoroYield &yield) {
-                    test_basic_client_worker<kE, kB, kS>(
-                        p, coro_id, yield, bench_conf, rhh_conf, ex);
-                });
+            ex.worker(
+                i) = CoroCall([p,
+                               coro_id = i,
+                               &bench_conf,
+                               &rhh_conf,
+                               &ex,
+                               meta_gaddr = g_meta_gaddr](CoroYield &yield) {
+                test_basic_client_worker<kE, kB, kS>(
+                    p, coro_id, yield, bench_conf, rhh_conf, meta_gaddr, ex);
+            });
         }
         auto &master = ex.master();
-        master = CoroCall(
-            [p, &ex, test_nr = bench_conf.test_nr, coro_nr](CoroYield &yield) {
-                test_basic_client_master(
-                    p, yield, test_nr, total_test_nr, coro_nr, ex);
-            });
+        master = CoroCall([p, &ex, actual_test_nr = actual_test_nr, coro_nr](
+                              CoroYield &yield) {
+            test_basic_client_master(
+                p, yield, actual_test_nr, g_total_test_nr, coro_nr, ex);
+        });
 
         master();
     }
     bar.wait();
     auto ns = timer.pin();
 
-    double ops = 1e9 * bench_conf.test_nr / ns;
-    double avg_ns = 1.0 * ns / bench_conf.test_nr;
+    double ops = 1e9 * actual_test_nr / ns;
+    double avg_ns = 1.0 * ns / actual_test_nr;
     LOG_IF(INFO, is_master)
-        << "[bench] total op: " << bench_conf.test_nr << ", ns: " << ns
+        << "[bench] total op: " << actual_test_nr << ", ns: " << ns
         << ", ops: " << ops << ", avg " << avg_ns << " ns";
 
     if (is_master && server_should_leave)
@@ -606,13 +614,13 @@ void benchmark_client(Patronus::pointer p,
 
     if (is_master && bench_conf.should_report)
     {
-        col_idx.push_back(bench_conf.conf_name());
+        col_idx.push_back(bench_conf.conf_name() + "[" + rhh_conf.name + "]");
         col_x_thread_nr.push_back(bench_conf.thread_nr);
         col_x_coro_nr.push_back(bench_conf.coro_nr);
         col_x_put_rate.push_back(bench_conf.insert_prob);
         col_x_del_rate.push_back(bench_conf.delete_prob);
         col_x_get_rate.push_back(bench_conf.get_prob);
-        col_test_op_nr.push_back(bench_conf.test_nr);
+        col_test_op_nr.push_back(actual_test_nr);
         col_ns.push_back(ns);
     }
 }
@@ -671,19 +679,25 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     // set the rhh we like to test
     std::vector<RaceHashingHandleConfig> rhh_configs;
+    rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
+        "unprot", 0 /* no batching */));
+    rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected(
+        "patronus", 0 /* no batch */));
     rhh_configs.push_back(
-        RaceHashingConfigFactory::get_unprotected(0 /* no batching */));
+        RaceHashingConfigFactory::get_mr_protected("mr", 0 /* no batch */));
 
     for (const auto &rhh_conf : rhh_configs)
     {
-        LOG_IF(INFO, is_master) << "[bench] benching single thread";
+        LOG_IF(INFO, is_master)
+            << "[bench] benching single thread for " << rhh_conf;
         key++;
         auto basic_conf = BenchConfigFactory::get_single_round_config(
-            "single_basic", 1, 10_K, 1, 1, true);
+            "single_basic", 1, 1_M, 1, 1, true);
         if (is_client)
         {
             for (const auto &bench_conf : basic_conf)
             {
+                bench_conf.validate();
                 LOG_IF(INFO, is_master)
                     << "[bench] running conf: " << bench_conf;
                 benchmark_client<4, 16, 16>(
@@ -695,7 +709,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
             benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
         }
 
-        LOG_IF(INFO, is_master) << "[bench] benching multiple threads";
+        LOG_IF(INFO, is_master)
+            << "[bench] benching multiple threads for " << rhh_conf;
         constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
         key++;
         auto multithread_conf = BenchConfigFactory::get_multi_round_config(
@@ -704,6 +719,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         {
             for (const auto &bench_conf : multithread_conf)
             {
+                bench_conf.validate();
                 LOG_IF(INFO, is_master)
                     << "[bench] running conf: " << bench_conf;
                 benchmark_client<4, 16, 16>(

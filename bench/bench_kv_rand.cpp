@@ -31,7 +31,7 @@ using RandFunc = std::function<uint64_t()>;
 void bench_thread(size_t tid,
                   size_t test_times,
                   std::atomic<ssize_t> &work_nr,
-                  IKVRandGenerator::pointer g)
+                  IKVRandGenerator *g)
 {
     bindCore(tid + 1);
 
@@ -64,7 +64,7 @@ void bench_template(const std::string &bench_name,
     ChronoTimer timer;
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back([i, &work_nr, test_times, g = gs[i]]() {
+        threads.emplace_back([i, &work_nr, test_times, g = gs[i].get()]() {
             bench_thread(i, test_times, work_nr, g);
         });
     }
@@ -89,7 +89,7 @@ void bench_uniform(size_t test_times, size_t thread_nr, bool report)
     for (size_t i = 0; i < thread_nr; ++i)
     {
         auto g = UniformRandGenerator::new_instance(0, kMaxKey);
-        gs.push_back(g);
+        gs.emplace_back(std::move(g));
     }
     return bench_template(
         "uniform_generator", test_times, thread_nr, gs, report);
@@ -100,7 +100,7 @@ void bench_memcached_zip(size_t test_times, size_t thread_nr, bool report)
     for (size_t i = 0; i < thread_nr; ++i)
     {
         auto g = MehcachedZipfianRandGenerator::new_instance(0, kMaxKey);
-        gs.push_back(g);
+        gs.emplace_back(std::move(g));
     }
     return bench_template(
         "memcached_zipfian_generator", test_times, thread_nr, gs, report);
@@ -111,7 +111,7 @@ void bench_nothing(size_t test_times, size_t thread_nr, bool report)
     for (size_t i = 0; i < thread_nr; ++i)
     {
         auto g = NothingRandGenerator::new_instance();
-        gs.push_back(g);
+        gs.emplace_back(std::move(g));
     }
     return bench_template(
         "nothing_generator", test_times, thread_nr, gs, report);

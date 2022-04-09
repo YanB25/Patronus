@@ -179,9 +179,12 @@ void debug_validate_acquire_request_flag(uint8_t flag)
 
 std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
 {
-    debug_validate_acquire_request_flag(flag.flag);
-
     os << "{AcquireRequestFlag ";
+    bool reserved = flag.flag & (uint8_t) AcquireRequestFlag::kReserved;
+    if (reserved)
+    {
+        os << "RESERVED, ";
+    }
     bool no_gc = flag.flag & (uint8_t) AcquireRequestFlag::kNoGc;
     if (no_gc)
     {
@@ -280,9 +283,12 @@ void debug_validate_lease_modify_flag(uint8_t flag)
 
 std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
 {
-    debug_validate_lease_modify_flag(flag.flag);
-
     os << "{LeaseModifyFlag ";
+    bool reserved = flag.flag & (uint8_t) LeaseModifyFlag::kReserved;
+    if (reserved)
+    {
+        os << "RESERVED, ";
+    }
     bool no_relinquish_unbind =
         flag.flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
     if (no_relinquish_unbind)

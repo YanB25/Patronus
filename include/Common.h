@@ -299,7 +299,7 @@ constexpr static bool kMonitorAllocationDistribution = true;
 constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
 
-constexpr static bool kEnableRdmaTrace = true;
+constexpr static bool kEnableRdmaTrace = false;
 constexpr static double kRdmaTraceRateGet = 1.0 / 200_K;
 constexpr static double kRdmaTraceRatePut = 1.0 / 20_K;
 constexpr static double kRdmaTraceRateDel = 1.0 / 20_K;
@@ -331,7 +331,14 @@ inline std::string binary_to_csv_filename(const std::string &bench_path,
 {
     std::string root = "../result/";
     auto filename = std::filesystem::path(bench_path).filename().string();
-    return root + filename + "." + exec_meta + ".csv";
+    if constexpr (debug())
+    {
+        return root + filename + "." + exec_meta + ".DEBUG.csv";
+    }
+    else
+    {
+        return root + filename + "." + exec_meta + ".csv";
+    }
 }
 
 #endif /* __COMMON_H__ */

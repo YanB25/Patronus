@@ -113,3 +113,10 @@ Thread = 8, Coro = 16, RO, RH<4, 16, 16>
 Got 5 Mops. ~25us
 
 So strange, sometimes 4.3 Mops, sometimes 5 Mops. It seems that at the start of the program, the performance is fixed. Maybe due to CPU frequency? or RNIC policy?
+
+## The effectness of MR & MW
+
+bench_race_rdma_op.2022-04-09.22:06:49.f65ccaa9.csv
+unprot: 4.9 & 5.2 Mop
+patronus: 4.0 & 4.5 Mops
+MR: 609 & 473 Kops
