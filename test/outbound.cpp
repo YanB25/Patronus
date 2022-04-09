@@ -2,7 +2,7 @@
 
 #include "DSM.h"
 #include "Timer.h"
-#include "zipf.h"
+#include "util/zipf.h"
 
 const int kMaxTestThread = 24;
 [[maybe_unused]] const int kBucketPerThread = 32;

@@ -84,8 +84,10 @@ static void mehcached_zipf_init(struct zipf_gen_state *state,
 {
     assert(n > 0);
     if (theta > 0.992 && theta < 1)
+    {
         fprintf(stderr,
                 "theta > 0.992 will be inaccurate due to approximation\n");
+    }
     if (theta >= 1. && theta < 40.)
     {
         fprintf(stderr, "theta in [1., 40.) is not supported\n");

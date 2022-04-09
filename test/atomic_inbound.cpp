@@ -2,7 +2,7 @@
 
 #include "DSM.h"
 #include "Timer.h"
-#include "zipf.h"
+#include "util/zipf.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
