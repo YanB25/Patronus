@@ -920,6 +920,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     uint64_t protection_region_id = 0;
     ibv_mw *buffer_mw = nullptr;
     ibv_mw *header_mw = nullptr;
+    ibv_mr *buffer_mr = nullptr;
+    ibv_mr *header_mr = nullptr;
 
     // will not actually bind memory window.
     // TODO(patronus): even with no_bind_pr, the PR is also allocated
@@ -930,6 +932,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         req->flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
     bool with_alloc = req->flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
     bool only_alloc = req->flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+
+    bool use_mr = req->flag & (uint8_t) AcquireRequestFlag::kUseMR;
 
     bool with_lock =
         req->flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
@@ -1025,116 +1029,153 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     case RequestType::kAcquireRLease:
     case RequestType::kAcquireWLease:
     {
-        constexpr static uint32_t magic = 0b1010101010;
-        constexpr static uint16_t mask = 0b1111111111;
+        if (use_mr)
+        {
+            // use MR
+            // no pollCQ, so directly set ready to true
+            rw_ctx->ready = true;
 
-        auto *qp =
-            dsm_->get_dir_qp(req->cid.node_id, req->cid.thread_id, dirID);
-        auto *mr = dsm_->get_dir_mr(dirID);
-        int access_flag = req->type == RequestType::kAcquireRLease
-                              ? IBV_ACCESS_CUSTOM_REMOTE_RO
-                              : IBV_ACCESS_CUSTOM_REMOTE_RW;
-
-        size_t bind_req_nr = 0;
-        if (with_buf && !with_pr)
-        {
-            // only binding buffer. not to bind ProtectionRegion
-            bind_req_nr = 1;
-            buffer_mw = get_mw(dirID);
-            fill_bind_mw_wr(wrs[0],
-                            nullptr,
-                            buffer_mw,
-                            mr,
-                            (uint64_t) DCHECK_NOTNULL(object_addr),
-                            req->size,
-                            access_flag);
-            DVLOG(4) << "[patronus] Bind mw for buffer. addr "
-                     << (void *) object_addr
-                     << "(dsm_offset: " << object_dsm_offset
-                     << "), size: " << req->size << " with access flag "
-                     << (int) access_flag
-                     << ". Acquire flag: " << AcquireRequestFlagOut(req->flag);
-            wrs[0].send_flags = IBV_SEND_SIGNALED;
-            wrs[0].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
-        }
-        else if (with_buf && with_pr)
-        {
-            // bind buffer & ProtectionRegion
-            // for buffer
-            bind_req_nr = 2;
-            buffer_mw = get_mw(dirID);
-            header_mw = get_mw(dirID);
-            fill_bind_mw_wr(wrs[0],
-                            &wrs[1],
-                            buffer_mw,
-                            mr,
-                            (uint64_t) DCHECK_NOTNULL(object_addr),
-                            req->size,
-                            access_flag);
-            DVLOG(4) << "[patronus] Bind mw for buffer. addr "
-                     << (void *) object_addr
-                     << "(dsm_offset: " << object_dsm_offset
-                     << "), size: " << req->size << " with access flag "
-                     << (int) access_flag
-                     << ". Acquire flag: " << AcquireRequestFlagOut(req->flag);
-            // for header
-            fill_bind_mw_wr(wrs[1],
-                            nullptr,
-                            header_mw,
-                            mr,
-                            (uint64_t) header_addr,
-                            sizeof(ProtectionRegion),
-                            // header always grant R/W
-                            IBV_ACCESS_CUSTOM_REMOTE_RW);
-            DVLOG(4) << "[patronus] Bind mw for header. addr: "
-                     << (void *) header_addr
-                     << " (dsm_offset: " << header_dsm_offset << ")"
-                     << ", size: " << sizeof(ProtectionRegion)
-                     << " with R/W access. Acquire flag: "
-                     << AcquireRequestFlagOut(req->flag);
-            wrs[0].send_flags = 0;
-            wrs[1].send_flags = IBV_SEND_SIGNALED;
-            wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, 0).val;
-            wrs[1].wr_id = WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
-        }
-        else
-        {
-            CHECK(!with_pr && !with_buf)
-                << "invalid configuration. with_pr: " << with_pr
-                << ", with_buf: " << with_buf;
-        }
-        if constexpr (config::kEnableSkipMagicMw)
-        {
-            for (size_t time = 0; time < bind_req_nr; time++)
+            auto *rdma_ctx = DCHECK_NOTNULL(dsm_->get_rdma_context(dirID));
+            if (with_buf)
             {
-                size_t id = allocated_mw_nr_++;
-                if (unlikely((id & mask) == magic))
+                buffer_mr = createMemoryRegion(
+                    (uint64_t) object_addr, req->size, rdma_ctx);
+                if (unlikely(buffer_mr == nullptr))
                 {
-                    status = AcquireRequestStatus::kMagicMwErr;
+                    (*rw_ctx->success) = false;
+                    status = AcquireRequestStatus::kRegMrErr;
+                    goto handle_response;
                 }
             }
-        }
-        if (likely(with_pr || with_buf))
-        {
-            ibv_send_wr *bad_wr;
-            int ret = ibv_post_send(qp, wrs, &bad_wr);
-            if (unlikely(ret != 0))
+            if (with_pr)
             {
-                PLOG(ERROR) << "[patronus] failed to ibv_post_send for "
-                               "bind_mw. failed wr: "
-                            << *bad_wr;
-                status = AcquireRequestStatus::kBindErr;
-                goto handle_response;
+                header_mr = createMemoryRegion(
+                    (uint64_t) header_addr, sizeof(ProtectionRegion), rdma_ctx);
+                if (unlikely(header_mr == nullptr))
+                {
+                    (*rw_ctx->success) = false;
+                    status = AcquireRequestStatus::kRegMrErr;
+                    goto handle_response;
+                }
             }
-            if (likely(ctx != nullptr))
-            {
-                ctx->yield_to_master();
-            }
+            (*rw_ctx->success) = true;
         }
         else
         {
-            // skip all the actual binding, and set result to true
-            *rw_ctx->success = true;
+            // use MW
+            constexpr static uint32_t magic = 0b1010101010;
+            constexpr static uint16_t mask = 0b1111111111;
+
+            auto *qp =
+                dsm_->get_dir_qp(req->cid.node_id, req->cid.thread_id, dirID);
+            auto *mr = dsm_->get_dir_mr(dirID);
+            int access_flag = req->type == RequestType::kAcquireRLease
+                                  ? IBV_ACCESS_CUSTOM_REMOTE_RO
+                                  : IBV_ACCESS_CUSTOM_REMOTE_RW;
+
+            size_t bind_req_nr = 0;
+            if (with_buf && !with_pr)
+            {
+                // only binding buffer. not to bind ProtectionRegion
+                bind_req_nr = 1;
+                buffer_mw = get_mw(dirID);
+                fill_bind_mw_wr(wrs[0],
+                                nullptr,
+                                buffer_mw,
+                                mr,
+                                (uint64_t) DCHECK_NOTNULL(object_addr),
+                                req->size,
+                                access_flag);
+                DVLOG(4) << "[patronus] Bind mw for buffer. addr "
+                         << (void *) object_addr
+                         << "(dsm_offset: " << object_dsm_offset
+                         << "), size: " << req->size << " with access flag "
+                         << (int) access_flag << ". Acquire flag: "
+                         << AcquireRequestFlagOut(req->flag);
+                wrs[0].send_flags = IBV_SEND_SIGNALED;
+                wrs[0].wr_id =
+                    WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
+            }
+            else if (with_buf && with_pr)
+            {
+                // bind buffer & ProtectionRegion
+                // for buffer
+                bind_req_nr = 2;
+                buffer_mw = get_mw(dirID);
+                header_mw = get_mw(dirID);
+                fill_bind_mw_wr(wrs[0],
+                                &wrs[1],
+                                buffer_mw,
+                                mr,
+                                (uint64_t) DCHECK_NOTNULL(object_addr),
+                                req->size,
+                                access_flag);
+                DVLOG(4) << "[patronus] Bind mw for buffer. addr "
+                         << (void *) object_addr
+                         << "(dsm_offset: " << object_dsm_offset
+                         << "), size: " << req->size << " with access flag "
+                         << (int) access_flag << ". Acquire flag: "
+                         << AcquireRequestFlagOut(req->flag);
+                // for header
+                fill_bind_mw_wr(wrs[1],
+                                nullptr,
+                                header_mw,
+                                mr,
+                                (uint64_t) header_addr,
+                                sizeof(ProtectionRegion),
+                                // header always grant R/W
+                                IBV_ACCESS_CUSTOM_REMOTE_RW);
+                DVLOG(4) << "[patronus] Bind mw for header. addr: "
+                         << (void *) header_addr
+                         << " (dsm_offset: " << header_dsm_offset << ")"
+                         << ", size: " << sizeof(ProtectionRegion)
+                         << " with R/W access. Acquire flag: "
+                         << AcquireRequestFlagOut(req->flag);
+                wrs[0].send_flags = 0;
+                wrs[1].send_flags = IBV_SEND_SIGNALED;
+                wrs[0].wr_id = WRID(WRID_PREFIX_RESERVED, 0).val;
+                wrs[1].wr_id =
+                    WRID(WRID_PREFIX_PATRONUS_BIND_MW, rw_ctx_id).val;
+            }
+            else
+            {
+                CHECK(!with_pr && !with_buf)
+                    << "invalid configuration. with_pr: " << with_pr
+                    << ", with_buf: " << with_buf;
+            }
+            if constexpr (config::kEnableSkipMagicMw)
+            {
+                for (size_t time = 0; time < bind_req_nr; time++)
+                {
+                    size_t id = allocated_mw_nr_++;
+                    if (unlikely((id & mask) == magic))
+                    {
+                        status = AcquireRequestStatus::kMagicMwErr;
+                    }
+                }
+            }
+            if (likely(with_pr || with_buf))
+            {
+                ibv_send_wr *bad_wr;
+                int ret = ibv_post_send(qp, wrs, &bad_wr);
+                if (unlikely(ret != 0))
+                {
+                    PLOG(ERROR) << "[patronus] failed to ibv_post_send for "
+                                   "bind_mw. failed wr: "
+                                << *bad_wr;
+                    status = AcquireRequestStatus::kBindErr;
+                    goto handle_response;
+                }
+                if (likely(ctx != nullptr))
+                {
+                    ctx->yield_to_master();
+                }
+            }
+            else
+            {
+                // skip all the actual binding, and set result to true
+                *rw_ctx->success = true;
+            }
         }
         break;
     }
@@ -1183,6 +1224,8 @@ handle_response:
             lease_ctx->client_cid = req->cid;
             lease_ctx->buffer_mw = buffer_mw;
             lease_ctx->header_mw = header_mw;
+            lease_ctx->buffer_mr = buffer_mr;
+            lease_ctx->header_mr = header_mr;
             lease_ctx->dir_id = dirID;
             lease_ctx->addr_to_bind = (uint64_t) object_addr;
             lease_ctx->buffer_size = req->size;
@@ -1210,17 +1253,19 @@ handle_response:
         }
 
         auto ns_per_unit = req->required_ns;
-        if (buffer_mw)
+        if (with_buf)
         {
-            resp_msg->rkey_0 = buffer_mw->rkey;
+            uint32_t buffer_rkey = use_mr ? buffer_mr->rkey : buffer_mw->rkey;
+            resp_msg->rkey_0 = buffer_rkey;
         }
         else
         {
             resp_msg->rkey_0 = 0;
         }
-        if (header_mw)
+        if (with_pr)
         {
-            resp_msg->rkey_header = header_mw->rkey;
+            uint32_t header_rkey = use_mr ? header_mr->rkey : header_mw->rkey;
+            resp_msg->rkey_header = header_rkey;
         }
         else
         {
@@ -1299,6 +1344,16 @@ handle_response:
         buffer_mw = nullptr;
         put_mw(dirID, header_mw);
         header_mw = nullptr;
+        if (unlikely(buffer_mr != nullptr))
+        {
+            CHECK(destroyMemoryRegion(buffer_mr));
+            buffer_mr = nullptr;
+        }
+        if (unlikely(header_mr != nullptr))
+        {
+            CHECK(destroyMemoryRegion(header_mr));
+            header_mr = nullptr;
+        }
         put_protection_region(protection_region);
 
         protection_region = nullptr;
@@ -2180,6 +2235,8 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
     DCHECK(!only_dealloc) << "This case should have been handled. "
                              "task_gc_lease never handle this";
+    bool use_mr = flag & (uint8_t) LeaseModifyFlag::kUseMR;
+
     auto *lease_ctx = get_lease_context(lease_id);
     if (unlikely(lease_ctx == nullptr))
     {
@@ -2324,94 +2381,113 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     }
     if (likely(!no_unbind))
     {
-        // should issue unbind here.
-        static thread_local ibv_send_wr wrs[8];
-        auto dir_id = lease_ctx->dir_id;
-        auto *qp = dsm_->get_dir_qp(lease_ctx->client_cid.node_id,
-                                    lease_ctx->client_cid.thread_id,
-                                    dir_id);
-        auto *mr = dsm_->get_dir_mr(dir_id);
-        void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
-
-        // NOTE: if size == 0, no matter access set to RO, RW or NORW
-        // and no matter allocated_mw_nr +2/-2/0, it generates corrupted mws.
-        // But if set size to 1 and allocated_mw_nr + 2, it works well.
-        size_t bind_nr = 0;
-        if (with_buf && !with_pr)
+        if (use_mr)
         {
-            // only buffer
-            bind_nr = 1;
-            fill_bind_mw_wr(wrs[0],
-                            nullptr,
-                            lease_ctx->buffer_mw,
-                            mr,
-                            (uint64_t) bind_nulladdr,
-                            1,
-                            IBV_ACCESS_CUSTOM_REMOTE_NORW);
-
-            wrs[0].send_flags = 0;
-            if (unlikely(wait_success))
+            auto *buffer_mr = DCHECK_NOTNULL(lease_ctx)->buffer_mr;
+            auto *header_mr = DCHECK_NOTNULL(lease_ctx)->header_mr;
+            if (buffer_mr != nullptr)
             {
-                wrs[0].send_flags |= IBV_SEND_SIGNALED;
+                CHECK(destroyMemoryRegion(buffer_mr));
+                CHECK(destroyMemoryRegion(header_mr));
             }
-            // but want to detect failure
-            wrs[0].wr_id = WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, rw_ctx_id).val;
-        }
-        else if (with_buf && with_pr)
-        {
-            // pr and buffer
-            bind_nr = 2;
-            fill_bind_mw_wr(wrs[0],
-                            &wrs[1],
-                            lease_ctx->header_mw,
-                            mr,
-                            (uint64_t) bind_nulladdr,
-                            1,
-                            IBV_ACCESS_CUSTOM_REMOTE_NORW);
-            fill_bind_mw_wr(wrs[1],
-                            nullptr,
-                            lease_ctx->buffer_mw,
-                            mr,
-                            (uint64_t) bind_nulladdr,
-                            1,
-                            IBV_ACCESS_CUSTOM_REMOTE_NORW);
-
-            wrs[0].send_flags = 0;
-            wrs[1].send_flags = 0;
-            if (unlikely(wait_success))
+            if (rw_ctx)
             {
-                wrs[1].send_flags = IBV_SEND_SIGNALED;
+                (*rw_ctx->success) = true;
+                rw_ctx->ready = true;
             }
-            // but want to detect failure
-            wrs[0].wr_id = wrs[1].wr_id =
-                WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, rw_ctx_id).val;
         }
         else
         {
-            CHECK(!with_buf && !with_pr)
-                << "invalid configuration. with_buf: " << with_buf
-                << ", with_pr: " << with_pr;
-        }
-        if (with_buf || with_pr)
-        {
-            // these are unsignaled requests
-            // if going to fast, will overwhelm the QP
-            // so limit the rate.
-            ibv_send_wr *bad_wr;
-            int ret = ibv_post_send(qp, wrs, &bad_wr);
-            PLOG_IF(ERROR, ret != 0)
-                << "[patronus][gc_lease] failed to "
-                   "ibv_post_send to unbind memory window. "
-                << *bad_wr;
-            DCHECK(ctx != nullptr);
-            if (unlikely(wait_success))
+            // should issue unbind MW here.
+            static thread_local ibv_send_wr wrs[8];
+            auto dir_id = lease_ctx->dir_id;
+            auto *qp = dsm_->get_dir_qp(lease_ctx->client_cid.node_id,
+                                        lease_ctx->client_cid.thread_id,
+                                        dir_id);
+            auto *mr = dsm_->get_dir_mr(dir_id);
+            void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
+
+            // NOTE: if size == 0, no matter access set to RO, RW or NORW
+            // and no matter allocated_mw_nr +2/-2/0, it generates corrupted
+            // mws. But if set size to 1 and allocated_mw_nr + 2, it works well.
+            size_t bind_nr = 0;
+            if (with_buf && !with_pr)
             {
-                ctx->yield_to_master();
+                // only buffer
+                bind_nr = 1;
+                fill_bind_mw_wr(wrs[0],
+                                nullptr,
+                                lease_ctx->buffer_mw,
+                                mr,
+                                (uint64_t) bind_nulladdr,
+                                1,
+                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
+
+                wrs[0].send_flags = 0;
+                if (unlikely(wait_success))
+                {
+                    wrs[0].send_flags |= IBV_SEND_SIGNALED;
+                }
+                // but want to detect failure
+                wrs[0].wr_id =
+                    WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, rw_ctx_id).val;
             }
-        }
-        if constexpr (config::kEnableSkipMagicMw)
-        {
-            allocated_mw_nr_ += bind_nr;
+            else if (with_buf && with_pr)
+            {
+                // pr and buffer
+                bind_nr = 2;
+                fill_bind_mw_wr(wrs[0],
+                                &wrs[1],
+                                lease_ctx->header_mw,
+                                mr,
+                                (uint64_t) bind_nulladdr,
+                                1,
+                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
+                fill_bind_mw_wr(wrs[1],
+                                nullptr,
+                                lease_ctx->buffer_mw,
+                                mr,
+                                (uint64_t) bind_nulladdr,
+                                1,
+                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
+
+                wrs[0].send_flags = 0;
+                wrs[1].send_flags = 0;
+                if (unlikely(wait_success))
+                {
+                    wrs[1].send_flags = IBV_SEND_SIGNALED;
+                }
+                // but want to detect failure
+                wrs[0].wr_id = wrs[1].wr_id =
+                    WRID(WRID_PREFIX_PATRONUS_UNBIND_MW, rw_ctx_id).val;
+            }
+            else
+            {
+                CHECK(!with_buf && !with_pr)
+                    << "invalid configuration. with_buf: " << with_buf
+                    << ", with_pr: " << with_pr;
+            }
+            if (with_buf || with_pr)
+            {
+                // these are unsignaled requests
+                // if going to fast, will overwhelm the QP
+                // so limit the rate.
+                ibv_send_wr *bad_wr;
+                int ret = ibv_post_send(qp, wrs, &bad_wr);
+                PLOG_IF(ERROR, ret != 0)
+                    << "[patronus][gc_lease] failed to "
+                       "ibv_post_send to unbind memory window. "
+                    << *bad_wr;
+                DCHECK(ctx != nullptr);
+                if (unlikely(wait_success))
+                {
+                    ctx->yield_to_master();
+                }
+            }
+            if constexpr (config::kEnableSkipMagicMw)
+            {
+                allocated_mw_nr_ += bind_nr;
+            }
         }
     }
     bool with_conflict_detect = lease_ctx->with_conflict_detect;

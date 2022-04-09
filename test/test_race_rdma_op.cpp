@@ -30,7 +30,9 @@ constexpr static size_t kWaitKey = 0;
 using RaceHashingT = RaceHashing<1, 2, 2>;
 using RaceHandleT = typename RaceHashingT::Handle;
 
-RaceHandleT::pointer gen_rhh(Patronus::pointer p, CoroContext *ctx)
+RaceHandleT::pointer gen_rhh(Patronus::pointer p,
+                             bool auto_expand,
+                             CoroContext *ctx)
 {
     auto tid = p->get_thread_id();
     auto dir_id = tid;
@@ -40,9 +42,8 @@ RaceHandleT::pointer gen_rhh(Patronus::pointer p, CoroContext *ctx)
     RaceHashingHandleConfig handle_conf;
     auto handle_rdma_ctx =
         patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, ctx);
-    RaceHandleT rhh(kServerNodeId, meta_gaddr, handle_conf, handle_rdma_ctx);
     auto prhh = std::make_shared<RaceHandleT>(
-        kServerNodeId, meta_gaddr, handle_conf, handle_rdma_ctx);
+        kServerNodeId, meta_gaddr, handle_conf, auto_expand, handle_rdma_ctx);
     prhh->init();
     return prhh;
 }
@@ -54,7 +55,7 @@ void client_worker(Patronus::pointer p,
 {
     CoroContext ctx(0, &yield, &exe.master(), coro_id);
 
-    auto prhh = gen_rhh(p, &ctx);
+    auto prhh = gen_rhh(p, false, &ctx);
     auto &rhh = *prhh;
 
     std::string key;
@@ -167,9 +168,6 @@ void client_test_capacity(Patronus::pointer p)
 
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
     LOG(INFO) << "[bench] got meta of hashtable: " << meta_gaddr;
-    RaceHashingHandleConfig handle_conf;
-    handle_conf.auto_expand = false;
-    handle_conf.auto_update_dir = false;
 
     for (size_t i = 0; i < kCoroCnt; ++i)
     {

@@ -42,7 +42,7 @@ void test_capacity(size_t initial_subtable)
 
     auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
     RaceHashingT::Handle rhh(
-        0 /* node_id */, rh.meta_gaddr(), handle_conf, handle_rdma_ctx);
+        0 /* node_id */, rh.meta_gaddr(), handle_conf, false, handle_rdma_ctx);
     rhh.init();
 
     std::string key;

@@ -61,11 +61,12 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
     for (size_t i = 0; i < thread_nr; ++i)
     {
         RaceHashingHandleConfig handle_conf;
-        handle_conf.auto_expand = auto_expand;
-        handle_conf.auto_update_dir = auto_expand;
         auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
-        auto rhh = std::make_shared<RaceHashingHandleT>(
-            0 /* node_id */, rh->meta_gaddr(), handle_conf, handle_rdma_ctx);
+        auto rhh = std::make_shared<RaceHashingHandleT>(0 /* node_id */,
+                                                        rh->meta_gaddr(),
+                                                        handle_conf,
+                                                        auto_expand,
+                                                        handle_rdma_ctx);
         rhh->init();
         rhhs.push_back(rhh);
     }

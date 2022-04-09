@@ -16,13 +16,117 @@
 using namespace define::literals;
 namespace patronus::hash
 {
+using AcquireRequestFlag = patronus::AcquireRequestFlag;
 struct RaceHashingHandleConfig
 {
-    bool auto_expand{false};
-    bool auto_update_dir{false};
-    uint64_t kvblock_hint{hash::config::kAllocHintKVBlock};
+    // about how to manage reading kv_block
+    struct
+    {
+        struct
+        {
+            bool do_nothing{false};
+            uint8_t flag{
+                (uint8_t)
+                    patronus::AcquireRequestFlag::kNoGc};  // AcquireRequestFlag
+            uint64_t alloc_hint{0};
+            std::chrono::nanoseconds lease_time{0ns};
+
+        } begin;
+        struct
+        {
+            bool do_nothing{false};
+            uint64_t alloc_hint{0};
+            uint8_t flag{(uint8_t) 0};
+        } end;
+
+    } read_kvblock;
+
+    struct
+    {
+        struct
+        {
+            bool use_alloc_api{false};
+            uint8_t flag{(uint8_t) AcquireRequestFlag::kNoGc |
+                         (uint8_t) AcquireRequestFlag::kWithAllocation};
+            uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
+            std::chrono::nanoseconds lease_time{0ns};
+        } begin;
+        struct
+        {
+            bool do_nothing{false};
+            bool use_alloc_api{false};
+            uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
+            uint8_t flag{0};
+        } end;
+        bool enable_batch_alloc{false};
+        size_t batch_alloc_size{0};
+    } insert_kvblock;
+
+    struct
+    {
+    } free_kvblock;
+
+    // the hints
     uint64_t subtable_hint{hash::config::kAllocHintDirSubtable};
 };
+
+inline std::ostream &operator<<(std::ostream &os,
+                                const RaceHashingHandleConfig &conf)
+{
+    os << "{RaceHashingHandleConfig: ";
+    {
+        os << ". read_kvblock:{ ";
+        {
+            const auto &c = conf.read_kvblock.begin;
+            if (c.do_nothing)
+            {
+                os << "do nothing";
+            }
+            else
+            {
+                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              c.lease_time)
+                              .count();
+                os << "acquire hint: " << c.alloc_hint << ", time: " << ns
+                   << " ns, flag: " << AcquireRequestFlagOut(c.flag) << ". ";
+            }
+        }
+        {
+            const auto &c = conf.read_kvblock.end;
+            os << "rel: ";
+            if (c.do_nothing)
+            {
+                os << "do nothing";
+            }
+            else
+            {
+                os << "rel hint: " << c.alloc_hint
+                   << ", flag: " << LeaseModifyFlagOut(c.flag);
+            }
+        }
+        os << "}. ";
+    }
+    {
+        os << " insert_kvblock { ";
+        {
+            const auto &c = conf.insert_kvblock.begin;
+            auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          c.lease_time)
+                          .count();
+            os << "ins: alloc_api: " << c.use_alloc_api
+               << ", hint: " << c.alloc_hint << ", ns: " << ns
+               << ", flag: " << AcquireRequestFlagOut(c.flag);
+        }
+        {
+            const auto &c = conf.insert_kvblock.end;
+            os << ". rel: alloc_api: " << c.use_alloc_api
+               << ", hint: " << c.alloc_hint
+               << ", flag: " << LeaseModifyFlagOut(c.flag);
+        }
+        os << "}";
+    }
+    return os;
+}
 
 class RdmaAdaptorKVBlockWrapperAllocator : public mem::IAllocator
 {
@@ -78,15 +182,24 @@ public:
 
     using MetaT = RaceHashingMeta<kDEntryNr, kBucketGroupNr, kSlotNr>;
 
+    constexpr static size_t kOngoingHandleSize = 32;
+
     RaceHashingHandleImpl(uint16_t node_id,
                           GlobalAddress table_meta_addr,
                           const RaceHashingHandleConfig &conf,
+                          bool auto_expand,
                           IRdmaAdaptor::pointer rdma_adpt)
         : node_id_(node_id),
           table_meta_addr_(table_meta_addr),
           conf_(conf),
+          auto_expand_(auto_expand),
+          auto_update_dir_(auto_expand),
           rdma_adpt_(rdma_adpt)
     {
+        CHECK(!conf.insert_kvblock.enable_batch_alloc)
+            << "TODO: support batching";
+
+        read_kvblock_handles_.reserve(kOngoingHandleSize);
     }
     ~RaceHashingHandleImpl()
     {
@@ -175,7 +288,7 @@ public:
         std::unordered_set<SlotHandle> slot_handles;
         auto rc =
             cbs.locate(fp, cached_ld(subtable_idx), m, slot_handles, dctx);
-        if (rc == kCacheStale && conf_.auto_update_dir)
+        if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
             CHECK_EQ(update_directory_cache(dctx), kOk);
@@ -228,13 +341,13 @@ public:
         maybe_trace_pin("before put_phase_one");
 
         auto rc = put_phase_one(key, value, hash, dctx);
-        if (rc == kCacheStale && conf_.auto_update_dir)
+        if (rc == kCacheStale && auto_update_dir_)
         {
             maybe_trace_pin("before update dcache");
             CHECK_EQ(update_directory_cache(dctx), kOk);
             return put(key, value, dctx);
         }
-        if (rc == kNoMem && conf_.auto_expand)
+        if (rc == kNoMem && auto_expand_)
         {
             auto overflow_subtable_idx = round_to_bits(rounded_m, ld);
             auto rc = expand(overflow_subtable_idx, dctx);
@@ -434,7 +547,7 @@ public:
                  kOk);
         CHECK_EQ(rdma_adpt_->commit(), kOk);
 
-        auto &kvblock_mem_handle = get_kvblock_mem_handle();
+        auto &global_kvblock_mem_handle = get_global_kvblock_mem_handle();
         for (size_t i = 0; i < SubTableHandleT::kTotalBucketNr; ++i)
         {
             auto remote_bucket_addr = GlobalAddress(
@@ -443,10 +556,12 @@ public:
                 (char *) rdma_buf.buffer + i * Bucket<kSlotNr>::size_bytes();
             BucketHandle<kSlotNr> b(remote_bucket_addr,
                                     (char *) bucket_buffer_addr);
-            CHECK_EQ(
-                b.should_migrate(
-                    bit, *rdma_adpt_, kvblock_mem_handle, should_migrate, dctx),
-                kOk);
+            CHECK_EQ(b.should_migrate(bit,
+                                      *rdma_adpt_,
+                                      global_kvblock_mem_handle,
+                                      should_migrate,
+                                      dctx),
+                     kOk);
         }
 
         // TODO: rethink about how batching can boost performance
@@ -851,7 +966,7 @@ public:
             << ", h2: " << pre_hash(h2) << ", fp: " << pre_hash(fp)
             << ". key: " << key
             << ". Got possible match nr: " << slot_handles.size();
-        if (rc == kCacheStale && conf_.auto_update_dir)
+        if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
             CHECK_EQ(update_directory_cache(dctx), kOk);
@@ -905,7 +1020,7 @@ public:
             DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                 << "[race][trace] do_remove SUCC: clearing slot " << slot_handle
                 << ". kOk: " << *dctx;
-            remote_free_kvblock(expect_slot.ptr());
+            do_free_kvblock(expect_slot.ptr());
             return kOk;
         }
         else
@@ -975,6 +1090,9 @@ public:
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
         CHECK_EQ(rdma_adpt_->commit(), kOk);
 
+        // only end insert kv_block after committing the writes
+        end_insert_kvblock();
+
         DLOG_IF(INFO, config::kEnableMemoryDebug)
             << "[race][mem] new remote kv_block gaddr: " << kv_block
             << " with len: " << len
@@ -1020,8 +1138,8 @@ public:
         DCHECK_NE(rc, kOk);
         // TODO(patronus): the management of kvblock
         maybe_trace_pin("before p1.remote_free_kvblock");
-        remote_free_kvblock(kv_block);
-        if (rc == kCacheStale && conf_.auto_update_dir)
+        do_free_kvblock(kv_block);
+        if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
             maybe_trace_pin("before p1.update_dcache");
@@ -1085,6 +1203,8 @@ public:
                               size_t *len,
                               HashContext *dctx)
     {
+        auto &global_kvblock_mem_handle = get_global_kvblock_mem_handle();
+
         size_t kvblock_size = sizeof(KVBlock) + key.size() + value.size();
         size_t tag_ptr_len = len_to_ptr_len(kvblock_size);
         kvblock_size = ptr_len_to_len(tag_ptr_len);
@@ -1098,15 +1218,15 @@ public:
         memcpy(kv_block.buf, key.data(), key.size());
         memcpy(kv_block.buf + key.size(), value.data(), value.size());
 
-        auto remote_buf = remote_alloc_kvblock(kvblock_size);
+        auto remote_buf = begin_insert_kvblock(kvblock_size);
+
         CHECK(!remote_buf.is_null())
             << "** failed to remote_alloc_kvblock for size: " << kvblock_size
             << ". Possibly run out of memory.";
-        auto &kvblock_mem_handle = get_kvblock_mem_handle();
         CHECK_EQ(rdma_adpt.rdma_write(remote_buf,
                                       (char *) rdma_buf.buffer,
                                       kvblock_size,
-                                      kvblock_mem_handle),
+                                      global_kvblock_mem_handle),
                  kOk);
         (*remote_kvblock_addr) = remote_buf;
         (*len) = tag_ptr_len;
@@ -1133,8 +1253,11 @@ public:
         HashContext *dctx)
     {
         std::map<SlotHandle, KVBlockHandle> slots_rdma_buffers;
+        // TODO: maybe enable batching here. Patronus API?
         for (auto slot_handle : slot_handles)
         {
+            auto &global_kvblock_mem_handle = get_global_kvblock_mem_handle();
+
             size_t actual_size = slot_handle.slot_view().actual_len_bytes();
             DCHECK_GT(actual_size, 0)
                 << "make no sense to have actual size == 0. slot_handle: "
@@ -1147,11 +1270,13 @@ public:
                 << "[race][mem] Reading remote kvblock addr: "
                 << remote_kvblock_addr << " with size " << actual_size
                 << ", fp: " << pre_fp(slot_handle.fp());
-            auto &kvblock_mem_handle = get_kvblock_mem_handle();
+
+            begin_read_kvblock(remote_kvblock_addr, actual_size);
+
             CHECK_EQ(rdma_adpt_->rdma_read((char *) rdma_buffer.buffer,
                                            remote_kvblock_addr,
                                            actual_size,
-                                           kvblock_mem_handle),
+                                           global_kvblock_mem_handle),
                      kOk);
             slots_rdma_buffers.emplace(
                 slot_handle,
@@ -1159,6 +1284,8 @@ public:
                               (KVBlock *) rdma_buffer.buffer));
         }
         CHECK_EQ(rdma_adpt_->commit(), kOk);
+
+        end_read_kvblock();
 
         RetCode rc = kNotFound;
         for (const auto &[slot_handle, kvblock_handle] : slots_rdma_buffers)
@@ -1203,7 +1330,7 @@ public:
 
         std::unordered_set<SlotHandle> slot_handles;
         auto rc = cbs.locate(fp, cached_ld(rounded_m), m, slot_handles, dctx);
-        if (rc == kCacheStale && conf_.auto_update_dir)
+        if (rc == kCacheStale && auto_update_dir_)
         {
             maybe_trace_pin("before update_dcache");
             // update cache and retry
@@ -1288,7 +1415,7 @@ public:
                     DVLOG(4) << "[race][subtable] do_update SUCC: for slot "
                                 "with kvblock_handle:"
                              << kvblock_handle << ". New_slot " << new_slot;
-                    remote_free_kvblock(kvblock_remote_mem);
+                    do_free_kvblock(kvblock_remote_mem);
                 }
                 DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
                     << "[race][subtable] slot " << slot_handle << " update to "
@@ -1340,22 +1467,23 @@ public:
     }
 
 private:
-    GlobalAddress remote_alloc_kvblock(size_t size)
-    {
-        return GlobalAddress(kvblock_allocator_->alloc(size));
-    }
-    void remote_free_kvblock(GlobalAddress addr)
-    {
-        // TODO:
-        // uncomment the below line to enable kvblock re-use
-        // kvblock_allocator_->free((void *) addr.val);
-        LOG_FIRST_N(WARNING, 1)
-            << "TODO: do not actual impl remote_free_kvblock. Can not free it, "
-               "because the kv block may be allocated by otehr clients. The "
-               "size of the blocks may even vary. Unable to keep track and "
-               "reuse those memory. "
-            << addr;
-    }
+    // GlobalAddress remote_alloc_kvblock(size_t size)
+    // {
+    //     return GlobalAddress(kvblock_allocator_->alloc(size));
+    // }
+    // void remote_free_kvblock(GlobalAddress addr)
+    // {
+    //     // TODO:
+    //     // uncomment the below line to enable kvblock re-use
+    //     // kvblock_allocator_->free((void *) addr.val);
+    //     LOG_FIRST_N(WARNING, 1)
+    //         << "TODO: do not actual impl remote_free_kvblock. Can not free
+    //         it, "
+    //            "because the kv block may be allocated by otehr clients. The "
+    //            "size of the blocks may even vary. Unable to keep track and "
+    //            "reuse those memory. "
+    //         << addr;
+    // }
     RemoteMemHandle remote_alloc_acquire_subtable_directory(size_t size)
     {
         auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
@@ -1368,6 +1496,8 @@ private:
     GlobalAddress table_meta_addr_;
     MetaT cached_meta_;
     RaceHashingHandleConfig conf_;
+    bool auto_expand_;
+    bool auto_update_dir_;
     IRdmaAdaptor::pointer rdma_adpt_;
     std::array<RemoteMemHandle, subtable_nr()> subtable_mem_handles_;
     RemoteMemHandle kvblock_mem_handle_;
@@ -1377,7 +1507,6 @@ private:
 
     // for client private kvblock memory
     GlobalAddress kvblock_pool_gaddr_;
-    std::shared_ptr<patronus::mem::IAllocator> kvblock_allocator_;
 
     void maybe_trace_pin(const char *name)
     {
@@ -1398,6 +1527,137 @@ private:
                 rdma_adpt_->end_trace(nullptr /* give u nothing */);
             }
         }
+    }
+
+    std::vector<RemoteMemHandle> read_kvblock_handles_;
+    void begin_read_kvblock(GlobalAddress gaddr, size_t size)
+    {
+        const auto &conf = conf_.read_kvblock.begin;
+        if (conf.do_nothing)
+        {
+            return;
+        }
+        read_kvblock_handles_.push_back(rdma_adpt_->acquire_perm(
+            gaddr, conf.alloc_hint, size, conf.lease_time, conf.flag));
+    }
+    void end_read_kvblock()
+    {
+        const auto &conf = conf_.read_kvblock.end;
+        if (conf.do_nothing)
+        {
+            DCHECK(read_kvblock_handles_.empty())
+                << "** config requires to do nothing, but got not-gc-ed "
+                   "handles";
+            return;
+        }
+        for (auto &handle : read_kvblock_handles_)
+        {
+            rdma_adpt_->relinquish_perm(handle, conf.alloc_hint, conf.flag);
+        }
+        read_kvblock_handles_.clear();
+    }
+
+    GlobalAddress begin_insert_kvblock(size_t alloc_size)
+    {
+        bool enable_batch = conf_.insert_kvblock.enable_batch_alloc;
+        size_t batch_size = conf_.insert_kvblock.batch_alloc_size;
+        if (enable_batch)
+        {
+            DCHECK_GT(batch_size, 1);
+            return begin_insert_kvblock_batch(alloc_size, batch_size);
+        }
+        else
+        {
+            return begin_insert_kvblock_nobatch(alloc_size);
+        }
+    }
+    void end_insert_kvblock()
+    {
+        auto enable_batch = conf_.insert_kvblock.enable_batch_alloc;
+        size_t batch_size = conf_.insert_kvblock.batch_alloc_size;
+        if (enable_batch)
+        {
+            end_insert_kvblock_batch(batch_size);
+        }
+        else
+        {
+            end_insert_kvblock_nobatch();
+        }
+    }
+
+    RemoteMemHandle insert_kvblock_batch_handle_;
+    GlobalAddress insert_kvblock_batch_gaddr_;
+    size_t alloc_idx_{0};
+    GlobalAddress begin_insert_kvblock_batch(size_t alloc_size,
+                                             size_t batch_size)
+    {
+        CHECK(false)
+            << "TODO: a little bit complicated. will finish later. alloc_size "
+            << alloc_size << ", batch: " << batch_size;
+    }
+    void end_insert_kvblock_batch(size_t batch_size)
+    {
+        CHECK(false)
+            << "TODO: a little bit complicated. will finish later. batch: "
+            << batch_size;
+    }
+
+    // insert no batch
+    std::vector<RemoteMemHandle> insert_kvblock_handles_;
+    std::vector<GlobalAddress> insert_kvblock_gaddrs_;
+    GlobalAddress begin_insert_kvblock_nobatch(size_t alloc_size)
+    {
+        const auto &conf = conf_.insert_kvblock.begin;
+        if (conf.use_alloc_api)
+        {
+            auto gaddr = rdma_adpt_->remote_alloc(alloc_size, conf.alloc_hint);
+            insert_kvblock_gaddrs_.push_back(gaddr);
+            return gaddr;
+        }
+        else
+        {
+            auto handle = rdma_adpt_->acquire_perm(nullgaddr,
+                                                   conf.alloc_hint,
+                                                   alloc_size,
+                                                   conf.lease_time,
+                                                   conf.flag);
+            insert_kvblock_handles_.push_back(handle);
+            return handle.gaddr();
+        }
+    }
+    void end_insert_kvblock_nobatch()
+    {
+        const auto &conf = conf_.insert_kvblock.end;
+        if (conf.do_nothing)
+        {
+            DCHECK(insert_kvblock_gaddrs_.empty());
+            DCHECK(insert_kvblock_handles_.empty());
+            return;
+        }
+        if (conf.use_alloc_api)
+        {
+            DCHECK(insert_kvblock_handles_.empty());
+            // then do nothing.
+            insert_kvblock_gaddrs_.clear();
+        }
+        else
+        {
+            DCHECK(insert_kvblock_gaddrs_.empty());
+            for (auto &handle : insert_kvblock_handles_)
+            {
+                rdma_adpt_->relinquish_perm(handle, conf.alloc_hint, conf.flag);
+            }
+            insert_kvblock_handles_.clear();
+        }
+    }
+    void do_free_kvblock(GlobalAddress gaddr)
+    {
+        LOG_FIRST_N(WARNING, 1)
+            << "TODO: do not actual impl remote_free_kvblock. Can not free it, "
+               "because the kv block may be allocated by otehr clients. The "
+               "size of the blocks may even vary. Unable to keep track and "
+               "reuse those memory. "
+            << gaddr;
     }
 
     size_t cached_gd() const
@@ -1455,7 +1715,7 @@ private:
                                      0ns,
                                      ac_flag);
     }
-    RemoteMemHandle &get_kvblock_mem_handle()
+    RemoteMemHandle &get_global_kvblock_mem_handle()
     {
         return kvblock_mem_handle_;
     }
@@ -1487,16 +1747,16 @@ private:
                                                        0ns,
                                                        ac_flag);
 
-        patronus::mem::RefillableSlabAllocatorConfig refill_slab_conf;
-        refill_slab_conf.block_class = {config::kKVBlockExpectSize};
-        refill_slab_conf.block_ratio = {1.0};
-        refill_slab_conf.refill_block_size = config::kKVBlockAllocBatchSize;
-        refill_slab_conf.refill_allocator =
-            RdmaAdaptorKVBlockWrapperAllocator::new_instance(
-                rdma_adpt_, conf_.kvblock_hint);
-        kvblock_allocator_ =
-            patronus::mem::RefillableSlabAllocator::new_instance(
-                refill_slab_conf);
+        // patronus::mem::RefillableSlabAllocatorConfig refill_slab_conf;
+        // refill_slab_conf.block_class = {config::kKVBlockExpectSize};
+        // refill_slab_conf.block_ratio = {1.0};
+        // refill_slab_conf.refill_block_size = config::kKVBlockAllocBatchSize;
+        // refill_slab_conf.refill_allocator =
+        //     RdmaAdaptorKVBlockWrapperAllocator::new_instance(
+        //         rdma_adpt_, conf_.kvblock_hint);
+        // kvblock_allocator_ =
+        //     patronus::mem::RefillableSlabAllocator::new_instance(
+        //         refill_slab_conf);
     }
 
     void init_directory_mem_handle()
@@ -1532,17 +1792,20 @@ public:
     RaceHashingHandleWrapperImpl(uint16_t node_id,
                                  GlobalAddress table_meta_addr,
                                  const RaceHashingHandleConfig &conf,
+                                 bool auto_expand,
                                  IRdmaAdaptor::pointer rdma_adpt)
-        : rhh_(node_id, table_meta_addr, conf, rdma_adpt), rdma_adpt_(rdma_adpt)
+        : rhh_(node_id, table_meta_addr, conf, auto_expand, rdma_adpt),
+          rdma_adpt_(rdma_adpt)
     {
     }
     static pointer new_instance(uint16_t node_id,
                                 GlobalAddress table_meta_addr,
                                 const RaceHashingHandleConfig &conf,
+                                bool auto_expand,
                                 IRdmaAdaptor::pointer rdma_adpt)
     {
         return std::make_shared<RaceHashingHandleWrapperImpl>(
-            node_id, table_meta_addr, conf, rdma_adpt);
+            node_id, table_meta_addr, conf, auto_expand, rdma_adpt);
     }
     static size_t max_capacity()
     {

@@ -131,13 +131,11 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     LOG(INFO) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     RaceHashingHandleConfig handle_conf;
-    handle_conf.auto_expand = auto_expand;
-    handle_conf.auto_update_dir = auto_expand;
     auto handle_rdma_ctx =
         patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, ctx);
 
     auto prhh = HandleT::new_instance(
-        kServerNodeId, meta_gaddr, handle_conf, handle_rdma_ctx);
+        kServerNodeId, meta_gaddr, handle_conf, auto_expand, handle_rdma_ctx);
     prhh->init();
     return prhh;
 }

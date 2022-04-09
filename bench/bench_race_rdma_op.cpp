@@ -96,6 +96,89 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
     return os;
 }
 
+class RaceHashingConfigFactory
+{
+public:
+    static RaceHashingHandleConfig get_basic()
+    {
+        RaceHashingHandleConfig handle_conf;
+        handle_conf.subtable_hint = hash::config::kAllocHintDirSubtable;
+        return handle_conf;
+    }
+    static RaceHashingHandleConfig get_unprotected(size_t batch_size)
+    {
+        auto c = get_basic();
+        c.read_kvblock.begin.do_nothing = true;
+        c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kReserved;
+        c.read_kvblock.end.do_nothing = true;
+        c.read_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.insert_kvblock.begin.use_alloc_api = true;
+        c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
+        c.insert_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kReserved;
+        c.insert_kvblock.end.use_alloc_api =
+            c.insert_kvblock.begin.use_alloc_api;
+        c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
+        c.insert_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.insert_kvblock.batch_alloc_size = batch_size;
+        c.insert_kvblock.enable_batch_alloc = batch_size > 1;
+        return c;
+    }
+    static RaceHashingHandleConfig get_mw_protected(size_t batch_size)
+    {
+        auto c = get_basic();
+        c.read_kvblock.begin.do_nothing = false;
+        c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        c.read_kvblock.begin.lease_time = 0ns;
+        c.read_kvblock.end.do_nothing = false;
+        c.read_kvblock.end.flag = (uint8_t) 0;
+        c.insert_kvblock.begin.use_alloc_api = false;
+        c.insert_kvblock.begin.flag =
+            (uint8_t) AcquireRequestFlag::kNoGc |
+            (uint8_t) AcquireRequestFlag::kWithAllocation;
+        c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
+        c.insert_kvblock.end.use_alloc_api =
+            c.insert_kvblock.begin.use_alloc_api;
+        c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
+        c.insert_kvblock.end.flag = 0;
+        c.insert_kvblock.batch_alloc_size = batch_size;
+        c.insert_kvblock.enable_batch_alloc = batch_size > 1;
+        return c;
+    }
+    // can not support batch allocation
+    // because what we get
+    static RaceHashingHandleConfig get_mw_protected_with_timeout()
+    {
+        auto c = get_basic();
+        c.read_kvblock.begin.do_nothing = false;
+        c.read_kvblock.begin.flag = 0;
+        c.read_kvblock.begin.lease_time = 10ms;  // definitely enough
+        c.read_kvblock.end.do_nothing = true;
+        c.read_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.insert_kvblock.begin.use_alloc_api = false;
+        c.insert_kvblock.begin.flag =
+            (uint8_t) AcquireRequestFlag::kWithAllocation;
+        c.insert_kvblock.begin.lease_time = 10ms;  // definitely enough
+        c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
+        c.insert_kvblock.end.use_alloc_api =
+            c.insert_kvblock.begin.use_alloc_api;
+        c.insert_kvblock.end.do_nothing = true;
+        c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
+        c.insert_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.insert_kvblock.enable_batch_alloc = false;
+        return c;
+    }
+    static RaceHashingHandleConfig get_mr_protected(size_t batch_size)
+    {
+        auto c = get_mw_protected(batch_size);
+        c.read_kvblock.begin.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
+        c.read_kvblock.end.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
+        c.insert_kvblock.begin.alloc_hint =
+            hash::config::kAllocHintKVBlockOverMR;
+        c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
+        return c;
+    }
+};
+
 class BenchConfigFactory
 {
 public:
@@ -205,11 +288,12 @@ private:
 
 template <size_t kE, size_t kB, size_t kS>
 typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
-    Patronus::pointer p, const BenchConfig &conf, CoroContext *ctx)
+    Patronus::pointer p,
+    const RaceHashingHandleConfig &conf,
+    bool auto_expand,
+    CoroContext *ctx)
 {
     using HandleT = typename RaceHashing<kE, kB, kS>::Handle;
-    auto auto_expand = conf.auto_extend;
-    bool subtable_use_mr = conf.subtable_use_mr;
 
     auto tid = p->get_thread_id();
     auto dir_id = tid;
@@ -217,24 +301,19 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
-    RaceHashingHandleConfig handle_conf;
-    handle_conf.auto_expand = auto_expand;
-    handle_conf.auto_update_dir = auto_expand;
-    handle_conf.subtable_hint = subtable_use_mr
-                                    ? hash::config::kAllocHintDirSubtableMR
-                                    : hash::config::kAllocHintDirSubtable;
-
     auto handle_rdma_ctx =
         patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, ctx);
 
     auto prhh = HandleT::new_instance(
-        kServerNodeId, meta_gaddr, handle_conf, handle_rdma_ctx);
+        kServerNodeId, meta_gaddr, conf, auto_expand, handle_rdma_ctx);
     prhh->init();
     return prhh;
 }
 
 void init_allocator(Patronus::pointer p, size_t thread_nr)
 {
+    // TODO: should we instruct how the allocator is inited?
+
     // for server to handle kv block allocation requests
     // give all to kv blocks
     auto tid = p->get_thread_id();
@@ -248,7 +327,7 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
         rh_buffer.buffer + tid * thread_kvblock_pool_size;
 
     mem::SlabAllocatorConfig kvblock_slab_config;
-    kvblock_slab_config.block_class = {hash::config::kKVBlockAllocBatchSize};
+    kvblock_slab_config.block_class = {hash::config::kKVBlockExpectSize};
     kvblock_slab_config.block_ratio = {1.0};
     auto kvblock_allocator =
         mem::SlabAllocator::new_instance(thread_kvblock_pool_addr,
@@ -262,7 +341,7 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
     mr_config.allocator = p->get_allocator(Patronus::kDefaultHint);
     mr_config.rdma_context = p->get_dsm()->get_rdma_context(dir_id);
     auto mr_allocator = mem::MRAllocator::new_instance(mr_config);
-    p->reg_allocator(hash::config::kAllocHintDirSubtableMR, mr_allocator);
+    p->reg_allocator(hash::config::kAllocHintDirSubtableOverMR, mr_allocator);
 }
 
 template <size_t kE, size_t kB, size_t kS>
@@ -300,7 +379,8 @@ void test_basic_client_worker(
     Patronus::pointer p,
     size_t coro_id,
     CoroYield &yield,
-    const BenchConfig &conf,
+    const BenchConfig &bench_conf,
+    const RaceHashingHandleConfig &rhh_conf,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
     auto tid = p->get_thread_id();
@@ -308,7 +388,8 @@ void test_basic_client_worker(
 
     // TODO: the dtor of rhh has performance penalty.
     // dtor out of this function.
-    auto rhh = gen_rdma_rhh<kE, kB, kS>(p, conf, &ctx);
+    bool auto_expand = bench_conf.auto_extend;
+    auto rhh = gen_rdma_rhh<kE, kB, kS>(p, rhh_conf, auto_expand, &ctx);
 
     constexpr static size_t kKeySize = 3;
     constexpr static size_t kValueSize = 3;
@@ -328,8 +409,8 @@ void test_basic_client_worker(
     std::map<std::string, std::string> inserted;
     std::set<std::string> keys;
 
-    double insert_prob = conf.insert_prob;
-    double delete_prob = conf.delete_prob;
+    double insert_prob = bench_conf.insert_prob;
+    double delete_prob = bench_conf.delete_prob;
 
     ChronoTimer timer;
     while (ex.get_private_data().thread_remain_task > 0)
@@ -458,20 +539,21 @@ template <size_t kE, size_t kB, size_t kS>
 void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
-                      const BenchConfig &conf,
+                      const BenchConfig &bench_conf,
+                      const RaceHashingHandleConfig &rhh_conf,
                       uint64_t key)
 {
-    auto coro_nr = conf.coro_nr;
-    auto thread_nr = conf.thread_nr;
-    bool first_enter = conf.first_enter;
-    bool server_should_leave = conf.server_should_leave;
+    auto coro_nr = bench_conf.coro_nr;
+    auto thread_nr = bench_conf.thread_nr;
+    bool first_enter = bench_conf.first_enter;
+    bool server_should_leave = bench_conf.server_should_leave;
     CHECK_LE(coro_nr, kMaxCoroNr);
 
     auto tid = p->get_thread_id();
     if (is_master)
     {
         // init here by master
-        total_test_nr = conf.test_nr;
+        total_test_nr = bench_conf.test_nr;
         if (first_enter)
         {
             p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
@@ -492,14 +574,15 @@ void benchmark_client(Patronus::pointer p,
         for (size_t i = 0; i < coro_nr; ++i)
         {
             ex.worker(i) =
-                CoroCall([p, coro_id = i, &conf, &ex](CoroYield &yield) {
+                CoroCall([p, coro_id = i, &bench_conf, &rhh_conf, &ex](
+                             CoroYield &yield) {
                     test_basic_client_worker<kE, kB, kS>(
-                        p, coro_id, yield, conf, ex);
+                        p, coro_id, yield, bench_conf, rhh_conf, ex);
                 });
         }
         auto &master = ex.master();
         master = CoroCall(
-            [p, &ex, test_nr = conf.test_nr, coro_nr](CoroYield &yield) {
+            [p, &ex, test_nr = bench_conf.test_nr, coro_nr](CoroYield &yield) {
                 test_basic_client_master(
                     p, yield, test_nr, total_test_nr, coro_nr, ex);
             });
@@ -509,10 +592,10 @@ void benchmark_client(Patronus::pointer p,
     bar.wait();
     auto ns = timer.pin();
 
-    double ops = 1e9 * conf.test_nr / ns;
-    double avg_ns = 1.0 * ns / conf.test_nr;
+    double ops = 1e9 * bench_conf.test_nr / ns;
+    double avg_ns = 1.0 * ns / bench_conf.test_nr;
     LOG_IF(INFO, is_master)
-        << "[bench] total op: " << conf.test_nr << ", ns: " << ns
+        << "[bench] total op: " << bench_conf.test_nr << ", ns: " << ns
         << ", ops: " << ops << ", avg " << avg_ns << " ns";
 
     if (is_master && server_should_leave)
@@ -521,15 +604,15 @@ void benchmark_client(Patronus::pointer p,
         p->finished(key);
     }
 
-    if (is_master && conf.should_report)
+    if (is_master && bench_conf.should_report)
     {
-        col_idx.push_back(conf.conf_name());
-        col_x_thread_nr.push_back(conf.thread_nr);
-        col_x_coro_nr.push_back(conf.coro_nr);
-        col_x_put_rate.push_back(conf.insert_prob);
-        col_x_del_rate.push_back(conf.delete_prob);
-        col_x_get_rate.push_back(conf.get_prob);
-        col_test_op_nr.push_back(conf.test_nr);
+        col_idx.push_back(bench_conf.conf_name());
+        col_x_thread_nr.push_back(bench_conf.thread_nr);
+        col_x_coro_nr.push_back(bench_conf.coro_nr);
+        col_x_put_rate.push_back(bench_conf.insert_prob);
+        col_x_del_rate.push_back(bench_conf.delete_prob);
+        col_x_get_rate.push_back(bench_conf.get_prob);
+        col_test_op_nr.push_back(bench_conf.test_nr);
         col_ns.push_back(ns);
     }
 }
@@ -586,80 +669,96 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bool is_master = battle_master.fetch_add(1) == 0;
     bar.wait();
 
-    // LOG_IF(INFO, is_master) << "[bench] benching single thread";
-    // key++;
-    // auto basic_conf = BenchConfigFactory::get_single_round_config(
-    //     "single_basic", 1, 10_K, 1, 1, true);
-    // if (is_client)
-    // {
-    //     for (const auto &conf : basic_conf)
-    //     {
-    //         LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
-    //         benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
-    //     }
-    // }
-    // else
-    // {
-    //     benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
-    // }
+    // set the rhh we like to test
+    std::vector<RaceHashingHandleConfig> rhh_configs;
+    rhh_configs.push_back(
+        RaceHashingConfigFactory::get_unprotected(0 /* no batching */));
 
-    // LOG_IF(INFO, is_master) << "[bench] benching multiple threads";
-    // constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
-    // key++;
-    // auto multithread_conf = BenchConfigFactory::get_multi_round_config(
-    //     "multithread_basic", capacity, 10_M, kThreadNr, kMaxCoroNr);
-    // if (is_client)
-    // {
-    //     for (const auto &conf : multithread_conf)
-    //     {
-    //         LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
-    //         benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
-    //     }
-    // }
-    // else
-    // {
-    //     benchmark_server<4, 16, 16>(p, bar, is_master, multithread_conf,
-    //     key);
-    // }
-
-    LOG_IF(INFO, is_master) << "[bench] benching expansion mw";
+    for (const auto &rhh_conf : rhh_configs)
     {
-        constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
+        LOG_IF(INFO, is_master) << "[bench] benching single thread";
         key++;
-        auto expand_mw_conf = BenchConfigFactory::get_expand_config(
-            "expand(mw)", capacity, false /* st use mr */);
+        auto basic_conf = BenchConfigFactory::get_single_round_config(
+            "single_basic", 1, 10_K, 1, 1, true);
         if (is_client)
         {
-            for (const auto &conf : expand_mw_conf)
+            for (const auto &bench_conf : basic_conf)
             {
-                LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
-                benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+                LOG_IF(INFO, is_master)
+                    << "[bench] running conf: " << bench_conf;
+                benchmark_client<4, 16, 16>(
+                    p, bar, is_master, bench_conf, rhh_conf, key);
             }
         }
         else
         {
-            benchmark_server<4, 16, 16>(p, bar, is_master, expand_mw_conf, key);
+            benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
         }
-    }
 
-    LOG_IF(INFO, is_master) << "[bench] benching expansion mr";
-    {
+        LOG_IF(INFO, is_master) << "[bench] benching multiple threads";
         constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
         key++;
-        auto expand_mr_conf = BenchConfigFactory::get_expand_config(
-            "expand(mr)", capacity, true /* st use mr*/);
+        auto multithread_conf = BenchConfigFactory::get_multi_round_config(
+            "multithread_basic", capacity, 10_M, kThreadNr, kMaxCoroNr);
         if (is_client)
         {
-            for (const auto &conf : expand_mr_conf)
+            for (const auto &bench_conf : multithread_conf)
             {
-                LOG_IF(INFO, is_master) << "[bench] running conf: " << conf;
-                benchmark_client<4, 16, 16>(p, bar, is_master, conf, key);
+                LOG_IF(INFO, is_master)
+                    << "[bench] running conf: " << bench_conf;
+                benchmark_client<4, 16, 16>(
+                    p, bar, is_master, bench_conf, rhh_conf, key);
             }
         }
         else
         {
-            benchmark_server<4, 16, 16>(p, bar, is_master, expand_mr_conf, key);
+            benchmark_server<4, 16, 16>(
+                p, bar, is_master, multithread_conf, key);
         }
+
+        // LOG_IF(INFO, is_master) << "[bench] benching expansion mw";
+        // {
+        //     constexpr size_t capacity = RaceHashing<4, 16,
+        //     16>::max_capacity(); key++; auto expand_mw_conf =
+        //     BenchConfigFactory::get_expand_config(
+        //         "expand(mw)", capacity, false /* st use mr */);
+        //     if (is_client)
+        //     {
+        //         for (const auto &conf : expand_mw_conf)
+        //         {
+        //             LOG_IF(INFO, is_master) << "[bench] running conf: " <<
+        //             conf; benchmark_client<4, 16, 16>(p, bar, is_master,
+        //             conf, key);
+        //         }
+        //     }
+        //     else
+        //     {
+        //         benchmark_server<4, 16, 16>(p, bar, is_master,
+        //         expand_mw_conf, key);
+        //     }
+        // }
+
+        // LOG_IF(INFO, is_master) << "[bench] benching expansion mr";
+        // {
+        //     constexpr size_t capacity = RaceHashing<4, 16,
+        //     16>::max_capacity(); key++; auto expand_mr_conf =
+        //     BenchConfigFactory::get_expand_config(
+        //         "expand(mr)", capacity, true /* st use mr*/);
+        //     if (is_client)
+        //     {
+        //         for (const auto &conf : expand_mr_conf)
+        //         {
+        //             LOG_IF(INFO, is_master) << "[bench] running conf: " <<
+        //             conf; benchmark_client<4, 16, 16>(p, bar, is_master,
+        //             conf, key);
+        //         }
+        //     }
+        //     else
+        //     {
+        //         benchmark_server<4, 16, 16>(p, bar, is_master,
+        //         expand_mr_conf, key);
+        //     }
+        // }
     }
 }
 

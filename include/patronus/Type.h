@@ -37,6 +37,7 @@ enum class AcquireRequestStatus : uint8_t
     kMagicMwErr,
     kLockedErr,
     kBindErr,
+    kRegMrErr,
     kAddressOutOfRangeErr,
     kNoMem,
     kReserved,
@@ -89,7 +90,8 @@ enum class AcquireRequestFlag : uint8_t
     kDebugNoBindAny = 1 << 3,
     kWithAllocation = 1 << 4,
     kOnlyAllocation = 1 << 5,
-    kReserved = 1 << 6,
+    kUseMR = 1 << 6,
+    kReserved = 1 << 7,
 };
 
 void debug_validate_acquire_request_flag(uint8_t flag);
@@ -209,7 +211,8 @@ enum class LeaseModifyFlag : uint8_t
     // wait until unbind success before returning
     // will harm performance
     kWaitUntilSuccess = 1 << 4,
-    kReserved = 1 << 5,
+    kUseMR = 1 << 5,
+    kReserved = 1 << 6,
 };
 void debug_validate_lease_modify_flag(uint8_t flag);
 struct LeaseModifyFlagOut

@@ -439,6 +439,33 @@ void bench_patronus_get_rlease_full(Patronus::pointer patronus,
                           relinquish_flag);
 }
 
+void bench_patronus_get_rlease_full_over_mr(Patronus::pointer patronus,
+                                            boost::barrier &bar,
+                                            std::atomic<ssize_t> &work_nr,
+                                            size_t test_times,
+                                            size_t alloc_size,
+                                            size_t thread_nr,
+                                            size_t coro_nr,
+                                            bool is_master,
+                                            bool warm_up)
+{
+    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc |
+                           (uint8_t) AcquireRequestFlag::kUseMR;
+    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kUseMR;
+    return bench_template("get_rlease w(pr buf unbind [MR]) w/o(gc)",
+                          patronus,
+                          bar,
+                          work_nr,
+                          test_times,
+                          alloc_size,
+                          thread_nr,
+                          coro_nr,
+                          is_master,
+                          warm_up,
+                          acquire_flag,
+                          relinquish_flag);
+}
+
 void bench_patronus_get_rlease_full_auto_gc(Patronus::pointer patronus,
                                             boost::barrier &bar,
                                             std::atomic<ssize_t> &work_nr,
@@ -542,7 +569,8 @@ void client(Patronus::pointer patronus,
 
     bar.wait();
 
-    for (size_t thread_nr : {1, 2, 4, 8, 16})
+    // for (size_t thread_nr : {1, 2, 4, 8, 16})
+    for (size_t thread_nr : {1, 8})
     // for (size_t thread_nr : {1, 2})
     {
         CHECK_LE(thread_nr, kThreadNr);
@@ -601,6 +629,17 @@ void client(Patronus::pointer patronus,
                                                            coro_nr,
                                                            is_master,
                                                            warm_up);
+                    // too slow, bench this with 1/10 tasks.
+                    bench_patronus_get_rlease_full_over_mr(
+                        patronus,
+                        bar,
+                        task_nr,
+                        total_test_times / 10,
+                        block_size,
+                        thread_nr,
+                        coro_nr,
+                        is_master,
+                        warm_up);
                     bench_patronus_alloc(patronus,
                                          bar,
                                          task_nr,

@@ -81,6 +81,8 @@ struct LeaseContext
     // end
     ibv_mw *buffer_mw;
     ibv_mw *header_mw;
+    ibv_mr *buffer_mr;
+    ibv_mr *header_mr;
     size_t dir_id{size_t(-1)};
     uint64_t addr_to_bind{0};
     size_t buffer_size{0};

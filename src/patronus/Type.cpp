@@ -144,6 +144,7 @@ void debug_validate_acquire_request_flag(uint8_t flag)
         bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
         bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
         bool reserved = flag & (uint8_t) AcquireRequestFlag::kReserved;
+        bool use_mr = flag & (uint8_t) AcquireRequestFlag::kUseMR;
         DCHECK(!reserved);
         if (with_alloc)
         {
@@ -166,6 +167,12 @@ void debug_validate_acquire_request_flag(uint8_t flag)
             DCHECK(!debug_no_bind_pr)
                 << "Allocation semantics will not bind pr";
             DCHECK(!with_alloc) << "with_alloc conflict with only_alloc";
+        }
+        if (use_mr)
+        {
+            DCHECK(no_gc)
+                << "Not sure: If using MR, not guarantee to work with lease. "
+                   "And the performance will be terrible in my expection";
         }
     }
 }
@@ -207,6 +214,11 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
     if (only_alloc)
     {
         os << "only-alloc, ";
+    }
+    bool use_mr = flag.flag & (uint8_t) AcquireRequestFlag::kUseMR;
+    if (use_mr)
+    {
+        os << "use-MR, ";
     }
     os << "}";
     return os;
@@ -300,6 +312,12 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
     {
         os << "wait-success, ";
     }
+    bool use_mr = flag.flag & (uint8_t) LeaseModifyFlag::kUseMR;
+    if (use_mr)
+    {
+        os << "use-MR, ";
+    }
+
     os << "}";
     return os;
 }

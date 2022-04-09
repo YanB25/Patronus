@@ -293,6 +293,14 @@ public:
                            "succeeds. Expect to insert a new element";
                 }
             }
+            else
+            {
+                LOG(ERROR) << "Failed to allocate size " << size
+                           << ". allocated from this class: "
+                           << debug_class_allocated_nr_[it->first]
+                           << ". class: " << std::endl
+                           << pre_class_info(class_info_);
+            }
 
             if constexpr (::config::kMonitorAllocationDistribution)
             {
