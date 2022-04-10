@@ -122,4 +122,33 @@ std::ostream &operator<<(std::ostream &os, const Debug<T> &debug)
 }
 #endif
 
+class pre_file_location
+{
+public:
+    pre_file_location(const std::string &file, uint64_t line)
+        : file_(file), line_(line)
+    {
+    }
+    std::string file() const
+    {
+        return file_;
+    }
+    uint64_t line() const
+    {
+        return line_;
+    }
+
+private:
+    std::string file_;
+    uint64_t line_;
+};
+
+inline std::ostream &operator<<(std::ostream &os, const pre_file_location &f)
+{
+    os << f.file() << ":" << f.line();
+    return os;
+}
+
+#define DEBUG_HERE pre_file_location(__FILE__, __LINE__)
+
 #endif

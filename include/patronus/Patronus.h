@@ -831,7 +831,7 @@ private:
 
     // owned by client threads
     static thread_local ThreadUnsafePool<RpcContext, kMaxCoroNr> rpc_context_;
-    static thread_local ThreadUnsafePool<RWContext, kMaxCoroNr> rw_context_;
+    static thread_local ThreadUnsafePool<RWContext, 2 * kMaxCoroNr> rw_context_;
     static thread_local std::unique_ptr<
         ThreadUnsafeBufferPool<kClientRdmaBufferSize>>
         rdma_client_buffer_;

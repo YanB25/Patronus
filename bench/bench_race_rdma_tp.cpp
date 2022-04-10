@@ -26,11 +26,12 @@ using namespace hmdf;
 constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kThreadNr = 8;
 constexpr static size_t kMaxCoroNr = 16;
-constexpr static uint64_t kMaxKey = 1_M;
+constexpr static uint64_t kMaxKey = 100_K;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 std::vector<std::string> col_idx;
+std::vector<std::string> col_x_kvdist;
 std::vector<size_t> col_x_thread_nr;
 std::vector<size_t> col_x_coro_nr;
 std::vector<double> col_x_put_rate;
@@ -39,11 +40,27 @@ std::vector<double> col_x_get_rate;
 std::vector<size_t> col_test_op_nr;
 std::vector<size_t> col_ns;
 
+std::vector<double> col_get_succ_rate;
+std::vector<double> col_put_succ_rate;
+std::vector<double> col_del_succ_rate;
+
 struct KVGenConf
 {
     uint64_t max_key{1};
     bool use_zip{false};
     double zip_skewness{0};
+    std::string desc() const
+    {
+        if (use_zip)
+        {
+            return "zip-" + std::to_string(zip_skewness) + "-" +
+                   std::to_string(max_key);
+        }
+        else
+        {
+            return "uni-" + std::to_string(max_key);
+        }
+    }
 };
 inline std::ostream &operator<<(std::ostream &os, const KVGenConf &c)
 {
@@ -376,6 +393,12 @@ typename RaceHashing<kE, kB, kS>::pointer gen_rdma_rh(Patronus::pointer p,
 struct AdditionalCoroCtx
 {
     ssize_t thread_remain_task{0};
+    size_t get_nr{0};
+    size_t get_succ_nr{0};
+    size_t put_nr{0};
+    size_t put_succ_nr{0};
+    size_t del_nr{0};
+    size_t del_succ_nr{0};
 };
 
 template <size_t kE, size_t kB, size_t kS>
@@ -453,6 +476,14 @@ void test_basic_client_worker(
         ex.get_private_data().thread_remain_task--;
     }
     auto ns = timer.pin();
+
+    auto &comm = ex.get_private_data();
+    comm.get_nr += get_succ_nr + get_not_found_nr;
+    comm.get_succ_nr += get_succ_nr;
+    comm.put_nr += ins_succ_nr + ins_retry_nr + ins_nomem_nr;
+    comm.put_succ_nr += ins_succ_nr;
+    comm.del_nr += del_succ_nr + del_retry_nr + del_not_found_nr;
+    comm.del_succ_nr += del_succ_nr;
 
     VLOG(1) << "[bench] insert: succ: " << ins_succ_nr
             << ", retry: " << ins_retry_nr << ", nomem: " << ins_nomem_nr
@@ -566,9 +597,9 @@ void benchmark_client(Patronus::pointer p,
     bar.wait();
 
     ChronoTimer timer;
+    CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
     if (tid < thread_nr)
     {
-        CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
         ex.get_private_data().thread_remain_task = 0;
         for (size_t i = coro_nr; i < kMaxCoroNr; ++i)
         {
@@ -615,6 +646,7 @@ void benchmark_client(Patronus::pointer p,
     if (is_master && bench_conf.should_report)
     {
         col_idx.push_back(bench_conf.conf_name() + "[" + rhh_conf.name + "]");
+        col_x_kvdist.push_back(bench_conf.kv_gen_conf_.desc());
         col_x_thread_nr.push_back(bench_conf.thread_nr);
         col_x_coro_nr.push_back(bench_conf.coro_nr);
         col_x_put_rate.push_back(bench_conf.insert_prob);
@@ -622,6 +654,14 @@ void benchmark_client(Patronus::pointer p,
         col_x_get_rate.push_back(bench_conf.get_prob);
         col_test_op_nr.push_back(actual_test_nr);
         col_ns.push_back(ns);
+
+        const auto &prv = ex.get_private_data();
+        double get_succ_rate = 1.0 * prv.get_succ_nr / prv.get_nr;
+        col_get_succ_rate.push_back(get_succ_rate);
+        double put_succ_rate = 1.0 * prv.put_succ_nr / prv.put_nr;
+        col_put_succ_rate.push_back(put_succ_rate);
+        double del_succ_rate = 1.0 * prv.del_succ_nr / prv.del_nr;
+        col_del_succ_rate.push_back(del_succ_rate);
     }
 }
 
@@ -670,11 +710,10 @@ void benchmark_server(Patronus::pointer p,
     bar.wait();
 }
 
-std::atomic<size_t> battle_master{0};
 void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 {
     uint64_t key = 0;
-    bool is_master = battle_master.fetch_add(1) == 0;
+    bool is_master = p->get_thread_id() == 0;
     bar.wait();
 
     // set the rhh we like to test
@@ -833,6 +872,7 @@ int main(int argc, char *argv[])
 
     StrDataFrame df;
     df.load_index(std::move(col_idx));
+    df.load_column<std::string>("x_kv_dist", std::move(col_x_kvdist));
     df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
     df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
     df.load_column<double>("x_put_rate", std::move(col_x_put_rate));
@@ -840,6 +880,10 @@ int main(int argc, char *argv[])
     df.load_column<double>("x_get_rate", std::move(col_x_get_rate));
     df.load_column<size_t>("test_nr(total)", std::move(col_test_op_nr));
     df.load_column<size_t>("test_ns(total)", std::move(col_ns));
+
+    df.load_column<double>("get_succ_rate", std::move(col_get_succ_rate));
+    df.load_column<double>("put_succ_rate", std::move(col_put_succ_rate));
+    df.load_column<double>("del_succ_rate", std::move(col_del_succ_rate));
 
     auto div_f = gen_F_div<size_t, size_t, double>();
     auto div_f2 = gen_F_div<double, size_t, double>();

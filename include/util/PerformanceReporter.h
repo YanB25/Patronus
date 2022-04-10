@@ -312,6 +312,11 @@ public:
         range_nr_ = std::max(range_nr_, (size_t) 1);
         buckets_.resize(range_nr_);
     }
+    // too expensive to copy
+    OnePassBucketMonitor(const OnePassBucketMonitor<T> &rhs) = delete;
+    OnePassBucketMonitor<T> &operator=(const OnePassBucketMonitor<T> &) =
+        delete;
+
     void collect(T t)
     {
         collect_min_ = std::min(t, collect_min_);
@@ -364,6 +369,14 @@ public:
     {
         return collected_nr_;
     }
+    size_t underflow_nr() const
+    {
+        return less_than_min_;
+    }
+    size_t overflow_nr() const
+    {
+        return larger_than_max_;
+    }
 
 private:
     T min_;
@@ -386,7 +399,8 @@ inline std::ostream &operator<<(std::ostream &os,
        << ", median: " << m.percentile(0.5) << ", p8: " << m.percentile(0.8)
        << ", p9: " << m.percentile(0.9) << ", p99: " << m.percentile(0.99)
        << ", p999: " << m.percentile(0.999) << ", max: " << m.max()
-       << ". collected " << m.data_nr() << " data}";
+       << ". collected " << m.data_nr() << " data, underflow "
+       << m.underflow_nr() << ", overflow: " << m.overflow_nr() << "}";
     return os;
 }
 
@@ -395,6 +409,11 @@ template <typename T, size_t kBatchSize = 1000>
 class Sequence
 {
 public:
+    // too expensieve to copy
+    Sequence() = default;
+    Sequence(const Sequence &) = delete;
+    Sequence &operator=(Sequence &) = delete;
+
     bool empty() const
     {
         return size_ == 0;

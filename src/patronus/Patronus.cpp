@@ -16,7 +16,7 @@ thread_local std::unique_ptr<ThreadUnsafeBufferPool<8>>
     Patronus::rdma_client_buffer_8B_;
 thread_local ThreadUnsafePool<RpcContext, Patronus::kMaxCoroNr>
     Patronus::rpc_context_;
-thread_local ThreadUnsafePool<RWContext, Patronus::kMaxCoroNr>
+thread_local ThreadUnsafePool<RWContext, 2 * Patronus::kMaxCoroNr>
     Patronus::rw_context_;
 thread_local std::queue<ibv_mw *> Patronus::mw_pool_[NR_DIRECTORY];
 thread_local ThreadUnsafePool<LeaseContext, Patronus::kLeaseContextNr>
@@ -2520,7 +2520,10 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         DCHECK(rw_ctx->ready) << "** go back to coro " << pre_coro_ctx(ctx)
                               << ", but rw_ctx not ready";
         DCHECK(ctx_success) << "Don't know why this op failed";
-        put_rw_context(DCHECK_NOTNULL(rw_ctx));
+    }
+    if (rw_ctx != nullptr)
+    {
+        put_rw_context(rw_ctx);
     }
 
     put_lease_context(lease_ctx);

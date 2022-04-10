@@ -120,3 +120,15 @@ bench_race_rdma_op.2022-04-09.22:06:49.f65ccaa9.csv
 unprot: 4.9 & 5.2 Mop
 patronus: 4.0 & 4.5 Mops
 MR: 609 & 473 Kops
+
+## About the success rate
+
+Insert fail by nomem (insert can be tested by individual experiments: load with initial subtables)
+Query fail by not found (already zip 0.99, can change max_key if needed)
+Delete fail by not found (same as query)
+At least: make sense
+
+```
+[bench] insert: succ: 657, retry: 115, nomem: 7199, del: succ: 139, retry: 125, not found: 7136, get: succ: 3586, not found: 62382. executed: 81339, take: 2352721033 ns. ctx: {Coro T(3) 3}
+[bench] insert: succ: 606, retry: 130, nomem: 6752, del: succ: 135, retry: 107, not found: 6520, get: succ: 3595, not found: 57179. executed: 75024, take: 2213821922 ns. ctx: {Coro T(2) 8}
+```
