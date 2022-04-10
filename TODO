@@ -292,5 +292,4 @@ Other possibilities
 [-] csv should report read, ins, del, success rate as references.
     [-] double check bench_race_rdma_[tp|lat] is runnable
     [-] run with --v=1 to see why the succ rate is so low. What happened?
-- see how many threads we can scale to. Try thread 24, will be interesting.
-- If okay, check the evaluation TODO lists above, and move on to the next exprs.
+[-] see how many threads we can scale to. Try thread 24, will be interesting.
