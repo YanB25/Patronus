@@ -140,3 +140,5 @@ The reason (I guess) is that,
 1. The patronus version will skip binding PR, but the auto-gc version have to. That would be unfair I guess. 
 2. Also auto-gc version has to unbind PR. 
 3. The auto-gc version requires every unbind to be signal. Instead, we could let every N of one signal.
+
+The auto-gc's latency is worse. But at least it is runnable.

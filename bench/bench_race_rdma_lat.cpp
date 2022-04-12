@@ -45,6 +45,7 @@ std::vector<size_t> col_ns;
 std::vector<double> col_get_succ_rate;
 std::vector<double> col_put_succ_rate;
 std::vector<double> col_del_succ_rate;
+std::vector<size_t> col_rdma_protection_nr;
 
 std::vector<size_t> col_g_lat_min;
 std::vector<size_t> col_g_lat_p5;
@@ -444,6 +445,7 @@ struct AdditionalCoroCtx
     size_t put_succ_nr{0};
     size_t del_nr{0};
     size_t del_succ_nr{0};
+    size_t rdma_protection_nr{0};
 };
 
 template <size_t kE, size_t kB, size_t kS>
@@ -474,6 +476,7 @@ void test_basic_client_worker(
     size_t get_succ_nr = 0;
     size_t get_not_found_nr = 0;
     size_t executed_nr = 0;
+    size_t rdma_protection_nr = 0;
 
     double insert_prob = bench_conf.insert_prob;
     double delete_prob = bench_conf.delete_prob;
@@ -496,7 +499,9 @@ void test_basic_client_worker(
             ins_succ_nr += rc == kOk;
             ins_retry_nr += rc == kRetry;
             ins_nomem_nr += rc == kNoMem;
-            DCHECK(rc == kOk || rc == kRetry || rc == kNoMem)
+            rdma_protection_nr += rc == kRdmaProtectionErr;
+            DCHECK(rc == kOk || rc == kRetry || rc == kNoMem ||
+                   kRdmaProtectionErr)
                 << "** unexpected rc:" << rc;
 
             auto ns = op_timer.pin();
@@ -517,7 +522,9 @@ void test_basic_client_worker(
             del_succ_nr += rc == kOk;
             del_retry_nr += rc == kRetry;
             del_not_found_nr += rc == kNotFound;
-            DCHECK(rc == kOk || rc == kRetry || rc == kNotFound)
+            rdma_protection_nr += rc == kRdmaProtectionErr;
+            DCHECK(rc == kOk || rc == kRetry || rc == kNotFound ||
+                   kRdmaProtectionErr)
                 << "** unexpected rc: " << rc;
         }
         else
@@ -528,7 +535,9 @@ void test_basic_client_worker(
             auto rc = rhh->get(key, got_value);
             get_succ_nr += rc == kOk;
             get_not_found_nr += rc == kNotFound;
-            DCHECK(rc == kOk || rc == kNotFound) << "** unexpected rc: " << rc;
+            rdma_protection_nr += rc == kRdmaProtectionErr;
+            DCHECK(rc == kOk || rc == kNotFound || rc == kRdmaProtectionErr)
+                << "** unexpected rc: " << rc;
 
             auto ns = op_timer.pin();
             ex.get_private_data().g.collect(ns);
@@ -554,6 +563,8 @@ void test_basic_client_worker(
     ex.get_private_data().del_nr +=
         del_not_found_nr + del_succ_nr + del_retry_nr;
     ex.get_private_data().del_succ_nr += del_succ_nr;
+
+    ex.get_private_data().rdma_protection_nr += rdma_protection_nr;
 
     VLOG(1) << "[bench] insert: succ: " << ins_succ_nr
             << ", retry: " << ins_retry_nr << ", nomem: " << ins_nomem_nr
@@ -843,6 +854,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         "patronus", 0 /* no batch */));
     rhh_configs.push_back(
         RaceHashingConfigFactory::get_mr_protected("mr", 0 /* no batch */));
+    rhh_configs.push_back(
+        RaceHashingConfigFactory::get_mw_protected_with_timeout(
+            "patronus-lease"));
 
     for (const auto &rhh_conf : rhh_configs)
     {
@@ -999,6 +1013,9 @@ int main(int argc, char *argv[])
     df.load_column<double>("x_get_rate", std::move(col_x_get_rate));
     df.load_column<size_t>("test_nr(total)", std::move(col_test_op_nr));
     df.load_column<size_t>("test_ns(total)", std::move(col_ns));
+
+    df.load_column<size_t>("rdma_protection_nr",
+                           std::move(col_rdma_protection_nr));
 
     df.load_column<double>("get_succ_rate", std::move(col_get_succ_rate));
     df.load_column<double>("put_succ_rate", std::move(col_put_succ_rate));
