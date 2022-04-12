@@ -272,7 +272,11 @@ Race Hashing Experiments: (**iPad have detailed discussion**)
     - The tolerance of crashed client under expansion
         - The fault tolerance of RH: The locking of directory uses lease. When a client failed, the lock is automatically released, and the next client triggers and continues the expansion
         - raw v.s. patronus
-- The effectness of auto time out: If the relinquish of kvblock is auto-ed (so we save one message RTT for relinquish). Can we boost the performance?
+{-} The effectness of auto time out: If the relinquish of kvblock is auto-ed (so we save one message RTT for relinquish). Can we boost the performance?
+    - Current result: better than patronus, but negligible. Should go back here and test.
+    - Should be more REAL: rhh should really use the allocated, time-sensitive handle, rather than the global, never-gc-ed handle.
+    - Test the latency? At least we got one RPC less for do-nothing-relinquish
+    - Enable rate wait-until-success? Now, for all the auto-gc lease, will enable wait-until-sucess for all of them. Maybe enable for half of them? Not need to be accurate. I think we have a deep QP queue.
 
 Serverless Experiments
 - Cite some papers, talking about one-sided data structures, e.g. arrays
@@ -293,3 +297,13 @@ Other possibilities
     [-] double check bench_race_rdma_[tp|lat] is runnable
     [-] run with --v=1 to see why the succ rate is so low. What happened?
 [-] see how many threads we can scale to. Try thread 24, will be interesting.
+
+
+[-] Let bench_rdma_race_tp workable: especially the auto-gc workable
+    - auto-gc workable, has a little bit better performance, but not significant.
+[-] kNoBindPR & kDebugNoBindAll rename to kForceNoBind*
+- double check: all existing kWithAllocation and all kOnlyAllocation is with kNoPr
+    - Please search AcquireRequestFlag, and think about: should I enable kNoBindPR?
+[-] double check: rhh_conf.h: all the configures have kNoPr if necessary. especially the begin_read_kvblock, likely to work without PR.
+- refactor WRID. be tagged pointer to RWContext. higher 16 bits be PREFIX
+- double check whether my handling of rdma_protection_err to rhh is correct: especially for the resource gc. don't leak anything.

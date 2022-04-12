@@ -344,7 +344,7 @@ void bench_patronus_get_rlease_nothing(Patronus::pointer patronus,
                                        bool warm_up)
 {
     uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                           (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
+                           (uint8_t) AcquireRequestFlag::kNoBindAny;
     uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
     return bench_template("get_rlease w/o(*)",
                           patronus,
@@ -371,7 +371,7 @@ void bench_patronus_get_rlease_one_bind(Patronus::pointer patronus,
                                         bool warm_up)
 {
     uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                           (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
+                           (uint8_t) AcquireRequestFlag::kNoBindPR;
     uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
     return bench_template("get_rlease w(buf) w/o(pr unbind gc)",
                           patronus,
@@ -502,6 +502,7 @@ void bench_patronus_alloc(Patronus::pointer patronus,
                           bool warm_up)
 {
     uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kWithAllocation |
+                           (uint8_t) AcquireRequestFlag::kNoBindPR |
                            (uint8_t) AcquireRequestFlag::kNoGc;
     uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kWithDeallocation;
     return bench_template("alloc w(unbind)",
@@ -528,6 +529,7 @@ void bench_patronus_alloc_no_unbind(Patronus::pointer patronus,
                                     bool warm_up)
 {
     uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kWithAllocation |
+                           (uint8_t) AcquireRequestFlag::kNoBindPR |
                            (uint8_t) AcquireRequestFlag::kNoGc;
     uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind |
                               (uint8_t) LeaseModifyFlag::kWithDeallocation;

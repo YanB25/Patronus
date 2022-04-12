@@ -310,7 +310,7 @@ void bench_alloc_mw_thread(size_t tid,
     // these are never change, so place them to the very begining
     auto dir_id = conf.dir_id;
     ibv_qp *qp = conf.dsm->get_dir_qp(conf.node_id, conf.thread_id, dir_id);
-    auto wr_id = WRID(WRID_PREFIX_BENCHMARK_ONLY, 0);
+    auto wr_id = WRID(WRID_PREFIX_BENCHMARK_ONLY, get_WRID_ID_RESERVED());
     auto *dsm_mr = conf.dsm->get_dir_mr(dir_id);
 
     while (remain > 0)

@@ -257,7 +257,14 @@ struct Data
 #define WRID_PREFIX_PATRONUS_BATCH_RWCAS 10
 // The outer-most benchmark only prefix
 #define WRID_PREFIX_BENCHMARK_ONLY 11
-#define WRID_PREFIX_RESERVED 12
+#define WRID_PREFIX_RESERVED_1 12
+#define WRID_PREFIX_RESERVED_2 13
+#define WRID_PREFIX_RESERVED_g 14
+
+constexpr uint32_t get_WRID_ID_RESERVED()
+{
+    return std::numeric_limits<uint32_t>::max();
+}
 
 static inline uint64_t djb2_digest(const void *void_str, size_t size)
 {

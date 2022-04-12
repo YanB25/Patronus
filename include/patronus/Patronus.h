@@ -727,7 +727,7 @@ private:
     void task_gc_lease(uint64_t lease_id,
                        ClientID cid,
                        compound_uint64_t expect_unit_nr,
-                       uint8_t flag,
+                       uint8_t flag /* LeaseModifyFlag */,
                        CoroContext *ctx = nullptr);
 
     // server coroutines

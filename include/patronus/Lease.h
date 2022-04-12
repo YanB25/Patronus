@@ -186,7 +186,7 @@ private:
     // for extend policy
     size_t cur_unit_nr_{1};
 
-    LeaseCache<config::kLeaseCacheItemLimitNr> cache_;
+    LeaseCache<::config::kLeaseCacheItemLimitNr> cache_;
 };
 
 std::ostream &operator<<(std::ostream &os, const Lease &lease);

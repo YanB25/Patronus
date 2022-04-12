@@ -40,6 +40,7 @@ enum class AcquireRequestStatus : uint8_t
     kRegMrErr,
     kAddressOutOfRangeErr,
     kNoMem,
+    kNoMw,
     kReserved,
 };
 std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status);
@@ -86,8 +87,8 @@ enum class AcquireRequestFlag : uint8_t
 {
     kNoGc = 1 << 0,
     kWithConflictDetect = 1 << 1,
-    kDebugNoBindPR = 1 << 2,
-    kDebugNoBindAny = 1 << 3,
+    kNoBindPR = 1 << 2,
+    kNoBindAny = 1 << 3,
     kWithAllocation = 1 << 4,
     kOnlyAllocation = 1 << 5,
     kUseMR = 1 << 6,

@@ -56,12 +56,15 @@ public:
         DVLOG(4) << "[Coro] " << *this << " yielding to master.";
         DCHECK(is_worker()) << *this;
         (*yield_)(*master_);
+        DVLOG(4) << "[Coro] " << *this << " yielded back from master.";
     }
     void yield_to_worker(coro_t wid)
     {
         DVLOG(4) << "[Coro] " << *this << " yielding to worker " << (int) wid;
         DCHECK(is_master()) << *this;
         (*yield_)(workers_[wid]);
+        DVLOG(4) << "[Coro] " << *this << " yielded back from worker "
+                 << (int) wid;
     }
     friend std::ostream &operator<<(std::ostream &os, const CoroContext &ctx);
 
@@ -73,7 +76,7 @@ public:
     {
         return trace_;
     }
-    ContTimer<config::kEnableTrace> &timer()
+    ContTimer<::config::kEnableTrace> &timer()
     {
         return timer_;
     }
@@ -86,7 +89,7 @@ private:
     coro_t coro_id_{kNotACoro};
 
     trace_t trace_{0};
-    ContTimer<config::kEnableTrace> timer_;
+    ContTimer<::config::kEnableTrace> timer_;
 };
 
 static CoroContext nullctx;
@@ -95,7 +98,7 @@ inline std::ostream &operator<<(std::ostream &os, const CoroContext &ctx)
 {
     if (ctx.coro_id_ == kMasterCoro)
     {
-        os << "{Coro Master T(" << ctx.thread_id_ << ") }";
+        os << "{Coro T(" << ctx.thread_id_ << ") Master }";
     }
     else if (ctx.coro_id_ == kNotACoro)
     {

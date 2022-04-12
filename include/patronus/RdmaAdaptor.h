@@ -84,7 +84,7 @@ inline std::ostream &operator<<(std::ostream &os, const RdmaTraceRecord &r)
 class RdmaAdaptor : public IRdmaAdaptor
 {
 public:
-    constexpr static size_t kMaxOngoingRdmaBuf = 1024;
+    constexpr static size_t kMaxOngoingRdmaBuf = 2048;
     constexpr static size_t kWarningOngoingRdmaBuf = 16;
     /**
      * @brief Construct a new Rdma Adaptor object
@@ -111,12 +111,12 @@ public:
         {
             if (!ongoing_remote_handle_.get().empty())
             {
-                for (const auto &handle : ongoing_remote_handle_.get())
-                {
-                    CHECK(false) << "[rdma-adpt] possible handle leak for "
-                                 << handle << ". known leak nr: "
-                                 << ongoing_remote_handle_.get().size();
-                }
+                const auto &handle = *ongoing_remote_handle_.get().begin();
+                LOG(WARNING) << "[rdma-adpt] possible handle leak for "
+                             << handle << ". known leak nr: "
+                             << ongoing_remote_handle_.get().size()
+                             << ". Note: this could be a false positive if "
+                                "auto-gc (i.e. lease semantics) is enabled.";
             }
         }
     }
@@ -178,8 +178,12 @@ public:
         }
         else
         {
-            DCHECK_EQ(lease.ec(), AcquireRequestStatus::kNoMem)
-                << "** Unexpected lease failure: " << lease.ec();
+            if (lease.ec() != AcquireRequestStatus::kNoMem &&
+                lease.ec() != AcquireRequestStatus::kNoMw)
+            {
+                CHECK(false) << "** Unexpected lease failure: " << lease.ec()
+                             << ". expect kNoMem or kNoMw";
+            }
             return alloc_handle(nullgaddr, 0, lease);
         }
     }
@@ -499,9 +503,8 @@ private:
             std::unique_ptr<Lease>((Lease *) handle.private_data());
         if constexpr (debug())
         {
-            // CHECK_EQ(ongoing_remote_handle_.get().erase(handle), 1);
             auto ret = ongoing_remote_handle_.get().erase(handle);
-            CHECK_EQ(ret, 1);
+            CHECK_EQ(ret, 1) << "** freeing an not-allocated-handled.";
         }
 
         handle.set_invalid();

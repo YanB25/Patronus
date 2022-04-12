@@ -29,14 +29,14 @@ void show_distribution(IKVRandGenerator::pointer alloc, size_t test_size)
         m.collect(key);
         if (i < 20)
         {
-            LOG(INFO) << "[debug] showing: " << key;
+            LOG(INFO) << "[bench] showing: " << key;
         }
         CHECK_GE(key, kMinKey);
         CHECK_LT(key, kMaxKey);
     }
     for (double p = 0; p <= 1; p += 0.1)
     {
-        auto percentile = m.percentile(p);
+        // auto percentile = m.percentile(p);
         // auto expect = kMaxKey * p;
         // auto error = abs(percentile - expect);
         // double error_rate = 1.0 * error / kMaxKey;
@@ -45,7 +45,7 @@ void show_distribution(IKVRandGenerator::pointer alloc, size_t test_size)
         //           << error << " (calculate from expect: " << expect
         //           << ", max_key: " << kMaxKey << ") "
         //           << ", rate: " << error_rate;
-        LOG(INFO) << "[debug] percentile(" << p << "): " << percentile;
+        // LOG(INFO) << "[debug] percentile(" << p << "): " << percentile;
     }
     LOG(INFO) << "[bench] got distribution: " << m;
 }

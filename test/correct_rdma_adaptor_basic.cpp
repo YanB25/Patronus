@@ -116,7 +116,8 @@ void client_worker(Patronus::pointer p,
     // checking acquire_perm with allocation semantics
     {
         auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                       (uint8_t) AcquireRequestFlag::kWithAllocation;
+                       (uint8_t) AcquireRequestFlag::kWithAllocation |
+                       (uint8_t) AcquireRequestFlag::kNoBindPR;
         auto handle =
             rdma_adpt->acquire_perm(nullgaddr, 0 /* hint */, 64, 0ns, ac_flag);
 

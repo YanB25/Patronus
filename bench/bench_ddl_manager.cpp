@@ -18,7 +18,8 @@ void test_handle_speed(size_t test_size, size_t interval_us)
 
     for (size_t i = 0; i < test_size; ++i)
     {
-        m.push(now + 1s + std::chrono::microseconds(i * interval_us), []() {});
+        m.push(now + 1s + std::chrono::microseconds(i * interval_us),
+               [](CoroContext *) {});
     }
 
     size_t done = 0;
@@ -26,7 +27,7 @@ void test_handle_speed(size_t test_size, size_t interval_us)
     while (true)
     {
         auto now = std::chrono::steady_clock::now();
-        if (m.do_task(now))
+        if (m.do_task(now, nullptr))
         {
             // okay, the first task arrived.
             done++;
@@ -40,7 +41,7 @@ void test_handle_speed(size_t test_size, size_t interval_us)
     while (done < test_size)
     {
         auto now = std::chrono::steady_clock::now();
-        size_t size = m.do_task(now);
+        size_t size = m.do_task(now, nullptr);
         if (size > 0)
         {
             done += size;
@@ -67,7 +68,7 @@ void burn(size_t max_size)
     t.begin();
     for (size_t i = 0; i < max_size / 2; ++i)
     {
-        m.push(fast_pseudo_rand_int(), []() {});
+        m.push(fast_pseudo_rand_int(), [](CoroContext *) {});
     }
     for (size_t i = 0; i < 10_M; ++i)
     {
@@ -82,12 +83,12 @@ void burn(size_t max_size)
         }
         if (insert)
         {
-            m.push(fast_pseudo_rand_int(), []() {});
+            m.push(fast_pseudo_rand_int(), [](CoroContext *) {});
             op++;
         }
         else
         {
-            DCHECK_LE(m.do_task(fast_pseudo_rand_int(), 1), 1);
+            DCHECK_LE(m.do_task(fast_pseudo_rand_int(), nullptr, 1), 1);
         }
     }
     auto ns = t.end();

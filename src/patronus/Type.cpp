@@ -86,6 +86,11 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status)
         os << "no-mem";
         break;
     }
+    case AcquireRequestStatus::kNoMw:
+    {
+        os << "no-mw";
+        break;
+    }
     default:
     {
         CHECK(false);
@@ -137,10 +142,10 @@ void debug_validate_acquire_request_flag(uint8_t flag)
         bool no_gc = flag & (uint8_t) AcquireRequestFlag::kNoGc;
         bool with_conflict_detect =
             flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
-        bool debug_no_bind_pr =
-            flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
-        bool debug_no_bind_any =
-            flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
+        [[maybe_unused]] bool no_bind_pr =
+            flag & (uint8_t) AcquireRequestFlag::kNoBindPR;
+        [[maybe_unused]] bool no_bind_any =
+            flag & (uint8_t) AcquireRequestFlag::kNoBindAny;
         bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
         bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
         bool reserved = flag & (uint8_t) AcquireRequestFlag::kReserved;
@@ -148,25 +153,18 @@ void debug_validate_acquire_request_flag(uint8_t flag)
         DCHECK(!reserved);
         if (with_alloc)
         {
-            DCHECK(no_gc) << "Set no-gc for allocation semantics.";
+            DCHECK(!only_alloc) << "only_alloc conflict with with_alloc";
             DCHECK(!with_conflict_detect)
                 << "Allocation semantics will not detect conflict";
-            DCHECK(!debug_no_bind_any)
-                << "Allocation semantics will not bind any";
-            DCHECK(!debug_no_bind_pr)
-                << "Allocation semantics will not bind pr";
-            DCHECK(!only_alloc) << "only_alloc conflict with with_alloc";
+            DCHECK(!no_bind_any)
+                << "If does not bind_any, it should be only_alloc";
         }
         if (only_alloc)
         {
+            DCHECK(!with_alloc) << "with_alloc conflict with only_alloc";
             DCHECK(no_gc) << "Set no-gc for allocation semantics";
             DCHECK(!with_conflict_detect)
                 << "Allocation semantics will not detect conflict";
-            DCHECK(!debug_no_bind_any)
-                << "Allocation semantics will not bind any";
-            DCHECK(!debug_no_bind_pr)
-                << "Allocation semantics will not bind pr";
-            DCHECK(!with_alloc) << "with_alloc conflict with only_alloc";
         }
         if (use_mr)
         {
@@ -196,14 +194,13 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
     {
         os << "with-lock, ";
     }
-    bool debug_no_bind_pr =
-        flag.flag & (uint8_t) AcquireRequestFlag::kDebugNoBindPR;
+    bool debug_no_bind_pr = flag.flag & (uint8_t) AcquireRequestFlag::kNoBindPR;
     if (debug_no_bind_pr)
     {
         os << "no-pr, ";
     }
     bool debug_no_bind_any =
-        flag.flag & (uint8_t) AcquireRequestFlag::kDebugNoBindAny;
+        flag.flag & (uint8_t) AcquireRequestFlag::kNoBindAny;
     if (debug_no_bind_any)
     {
         os << "no-any, ";
@@ -360,7 +357,8 @@ std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req)
 {
     os << "{LeaseModifyRequest type: " << req.type << ", cid: " << req.cid
        << ", lease_id: " << req.lease_id << ", ns: " << req.ns
-       << ", hint: " << req.hint << ", flag: " << req.flag << " }";
+       << ", hint: " << req.hint << ", flag: " << LeaseModifyFlagOut(req.flag)
+       << " }";
     return os;
 }
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &resp)

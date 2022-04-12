@@ -43,6 +43,7 @@ std::vector<size_t> col_ns;
 std::vector<double> col_get_succ_rate;
 std::vector<double> col_put_succ_rate;
 std::vector<double> col_del_succ_rate;
+std::vector<size_t> col_rdma_protection_err;
 
 struct KVGenConf
 {
@@ -399,6 +400,7 @@ struct AdditionalCoroCtx
     size_t put_succ_nr{0};
     size_t del_nr{0};
     size_t del_succ_nr{0};
+    size_t rdma_protection_nr{0};
 };
 
 template <size_t kE, size_t kB, size_t kS>
@@ -428,6 +430,7 @@ void test_basic_client_worker(
     size_t del_not_found_nr = 0;
     size_t get_succ_nr = 0;
     size_t get_not_found_nr = 0;
+    size_t rdma_protection_nr = 0;
     size_t executed_nr = 0;
 
     double insert_prob = bench_conf.insert_prob;
@@ -450,7 +453,9 @@ void test_basic_client_worker(
             ins_succ_nr += rc == kOk;
             ins_retry_nr += rc == kRetry;
             ins_nomem_nr += rc == kNoMem;
-            DCHECK(rc == kOk || rc == kRetry || rc == kNoMem)
+            rdma_protection_nr += rc == kRdmaProtectionErr;
+            DCHECK(rc == kOk || rc == kRetry || rc == kNoMem ||
+                   rc == kRdmaProtectionErr)
                 << "** unexpected rc:" << rc;
         }
         else if (true_with_prob(delete_prob))
@@ -460,7 +465,9 @@ void test_basic_client_worker(
             del_succ_nr += rc == kOk;
             del_retry_nr += rc == kRetry;
             del_not_found_nr += rc == kNotFound;
-            DCHECK(rc == kOk || rc == kRetry || rc == kNotFound)
+            rdma_protection_nr += rc == kRdmaProtectionErr;
+            DCHECK(rc == kOk || rc == kRetry || rc == kNotFound ||
+                   rc == kRdmaProtectionErr)
                 << "** unexpected rc: " << rc;
         }
         else
@@ -470,7 +477,9 @@ void test_basic_client_worker(
             auto rc = rhh->get(key, got_value);
             get_succ_nr += rc == kOk;
             get_not_found_nr += rc == kNotFound;
-            DCHECK(rc == kOk || rc == kNotFound) << "** unexpected rc: " << rc;
+            rdma_protection_nr += rc == kRdmaProtectionErr;
+            DCHECK(rc == kOk || rc == kNotFound || rc == kRdmaProtectionErr)
+                << "** unexpected rc: " << rc;
         }
         executed_nr++;
         ex.get_private_data().thread_remain_task--;
@@ -484,6 +493,7 @@ void test_basic_client_worker(
     comm.put_succ_nr += ins_succ_nr;
     comm.del_nr += del_succ_nr + del_retry_nr + del_not_found_nr;
     comm.del_succ_nr += del_succ_nr;
+    comm.rdma_protection_nr += rdma_protection_nr;
 
     VLOG(1) << "[bench] insert: succ: " << ins_succ_nr
             << ", retry: " << ins_retry_nr << ", nomem: " << ins_nomem_nr
@@ -491,6 +501,7 @@ void test_basic_client_worker(
             << ", not found: " << del_not_found_nr
             << ", get: succ: " << get_succ_nr
             << ", not found: " << get_not_found_nr
+            << ", rdma_protection_nr: " << rdma_protection_nr
             << ". executed: " << executed_nr << ", take: " << ns
             << " ns. ctx: " << ctx;
 
@@ -549,7 +560,7 @@ void test_basic_client_master(
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
-            DVLOG(1) << "[bench] yielding due to CQE: " << (int) coro_id;
+            // DVLOG(1) << "[bench] yielding due to CQE: " << (int) coro_id;
             mctx.yield_to_worker(coro_id);
         }
 
@@ -662,6 +673,8 @@ void benchmark_client(Patronus::pointer p,
         col_put_succ_rate.push_back(put_succ_rate);
         double del_succ_rate = 1.0 * prv.del_succ_nr / prv.del_nr;
         col_del_succ_rate.push_back(del_succ_rate);
+
+        col_rdma_protection_err.push_back(prv.rdma_protection_nr);
     }
 }
 
@@ -724,6 +737,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         "patronus", 0 /* no batch */));
     rhh_configs.push_back(
         RaceHashingConfigFactory::get_mr_protected("mr", 0 /* no batch */));
+    rhh_configs.push_back(
+        RaceHashingConfigFactory::get_mw_protected_with_timeout(
+            "patronus-lease"));
 
     for (const auto &rhh_conf : rhh_configs)
     {
@@ -881,6 +897,8 @@ int main(int argc, char *argv[])
     df.load_column<size_t>("test_nr(total)", std::move(col_test_op_nr));
     df.load_column<size_t>("test_ns(total)", std::move(col_ns));
 
+    df.load_column<size_t>("rdma_prot_err_nr",
+                           std::move(col_rdma_protection_err));
     df.load_column<double>("get_succ_rate", std::move(col_get_succ_rate));
     df.load_column<double>("put_succ_rate", std::move(col_put_succ_rate));
     df.load_column<double>("del_succ_rate", std::move(col_del_succ_rate));

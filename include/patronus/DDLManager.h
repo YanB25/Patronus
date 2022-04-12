@@ -8,11 +8,13 @@
 #include <vector>
 
 #include "Common.h"
+#include "CoroContext.h"
 #include "patronus/Type.h"
 
 namespace patronus
 {
-using Task = std::function<void()>;
+// yes, you have to give me CoroContext
+using Task = std::function<void(CoroContext *)>;
 class DDLTask
 {
 public:
@@ -60,12 +62,13 @@ public:
         push(ddl, task);
     }
     size_t do_task(const std::chrono::time_point<std::chrono::steady_clock> &tp,
+                   CoroContext *ctx,
                    size_t limit = kLimit)
     {
         auto ddl = to_ddl(tp);
-        return do_task(ddl, limit);
+        return do_task(ddl, ctx, limit);
     }
-    size_t do_task(time::term_t until, size_t limit = kLimit)
+    size_t do_task(time::term_t until, CoroContext *ctx, size_t limit = kLimit)
     {
         size_t done = 0;
         while (!pqueue_.empty())
@@ -78,10 +81,28 @@ public:
             DVLOG(4) << "[DDLManager] protronus_now: "
                      << time::PatronusTime(until)
                      << ", ns_diff: " << until - front.ddl();
-            auto &task = front.task();
-            task();
-            done++;
+            // NOTE: we have to do the copy
+            // because the following pop will invalidate the reference
+            auto task = front.task();
+            /**
+             * NOTE: pop from the queue BEFORE executing the task,
+             * to resolve the following RC
+             * Coroutine 1:
+             * - do_task(ddl, ctx, 1)
+             *   - task(ctx)
+             *     - task_gc_lease => ctx.yield_to_master()
+             *
+             * Coroutine master:
+             * yield to Coroutine 2
+             *
+             * Coroutine 2:
+             * - ** do_task(ddl, ctx, 1)
+             * ** re-enter the same task_gc_lease!
+             */
+
             pqueue_.pop();
+            task(ctx);
+            done++;
             if (unlikely(done >= limit))
             {
                 return done;

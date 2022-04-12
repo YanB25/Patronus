@@ -73,7 +73,7 @@ up to 26 Mops with 16 threads (I think RNIC bounded)
 ## bench_patronus_alloc
 One patronus->get_rlease() requires two binding: one for PR and one for buffer.
 
-* patronus->get_rlease(kDebugNoBindAny):
+* patronus->get_rlease(kNoBindAny):
 2.13 Mops per thread with 16 coroutines
 up to 25.5 Mops with 16 threads
 
@@ -132,3 +132,11 @@ At least: make sense
 [bench] insert: succ: 657, retry: 115, nomem: 7199, del: succ: 139, retry: 125, not found: 7136, get: succ: 3586, not found: 62382. executed: 81339, take: 2352721033 ns. ctx: {Coro T(3) 3}
 [bench] insert: succ: 606, retry: 130, nomem: 6752, del: succ: 135, retry: 107, not found: 6520, get: succ: 3595, not found: 57179. executed: 75024, take: 2213821922 ns. ctx: {Coro T(2) 8}
 ```
+
+## Auto-gc
+
+Now auto-gc have better performance, but negligible. Should be more significant, like 10% boost.
+The reason (I guess) is that, 
+1. The patronus version will skip binding PR, but the auto-gc version have to. That would be unfair I guess. 
+2. Also auto-gc version has to unbind PR. 
+3. The auto-gc version requires every unbind to be signal. Instead, we could let every N of one signal.

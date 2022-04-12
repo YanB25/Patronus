@@ -22,8 +22,8 @@ struct RaceHashingHandleConfig
         {
             bool do_nothing{false};
             uint8_t flag{
-                (uint8_t)
-                    patronus::AcquireRequestFlag::kNoGc};  // AcquireRequestFlag
+                (uint8_t) AcquireRequestFlag::kNoGc |
+                (uint8_t) AcquireRequestFlag::kNoBindPR};  // AcquireRequestFlag
             uint64_t alloc_hint{0};
             std::chrono::nanoseconds lease_time{0ns};
 
@@ -43,7 +43,8 @@ struct RaceHashingHandleConfig
         {
             bool use_alloc_api{false};
             uint8_t flag{(uint8_t) AcquireRequestFlag::kNoGc |
-                         (uint8_t) AcquireRequestFlag::kWithAllocation};
+                         (uint8_t) AcquireRequestFlag::kWithAllocation |
+                         (uint8_t) AcquireRequestFlag::kNoBindPR};
             uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
             std::chrono::nanoseconds lease_time{0ns};
         } begin;
@@ -161,14 +162,16 @@ public:
     {
         auto c = get_basic(name);
         c.read_kvblock.begin.do_nothing = false;
-        c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kNoGc |
+                                    (uint8_t) AcquireRequestFlag::kNoBindPR;
         c.read_kvblock.begin.lease_time = 0ns;
         c.read_kvblock.end.do_nothing = false;
         c.read_kvblock.end.flag = (uint8_t) 0;
         c.insert_kvblock.begin.use_alloc_api = false;
         c.insert_kvblock.begin.flag =
             (uint8_t) AcquireRequestFlag::kNoGc |
-            (uint8_t) AcquireRequestFlag::kWithAllocation;
+            (uint8_t) AcquireRequestFlag::kWithAllocation |
+            (uint8_t) AcquireRequestFlag::kNoBindPR;
         c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
         c.insert_kvblock.end.use_alloc_api =
             c.insert_kvblock.begin.use_alloc_api;
@@ -186,13 +189,13 @@ public:
         auto c = get_basic(name);
         c.read_kvblock.begin.do_nothing = false;
         c.read_kvblock.begin.flag = 0;
-        c.read_kvblock.begin.lease_time = 10ms;  // definitely enough
+        c.read_kvblock.begin.lease_time = 1ms;  // definitely enough
         c.read_kvblock.end.do_nothing = true;
         c.read_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.begin.use_alloc_api = false;
         c.insert_kvblock.begin.flag =
             (uint8_t) AcquireRequestFlag::kWithAllocation;
-        c.insert_kvblock.begin.lease_time = 10ms;  // definitely enough
+        c.insert_kvblock.begin.lease_time = 1ms;  // definitely enough
         c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
         c.insert_kvblock.end.use_alloc_api =
             c.insert_kvblock.begin.use_alloc_api;

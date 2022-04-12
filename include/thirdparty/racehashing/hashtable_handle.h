@@ -113,7 +113,7 @@ public:
     void init(HashContext *dctx = nullptr)
     {
         init_directory_mem_handle();
-        update_directory_cache(dctx);
+        CHECK_EQ(update_directory_cache(dctx), kOk);
         // init_kvblock_mem_handle AFTER getting the directory cache
         // because we need to know where server places the kvblock pool
         init_kvblock_mem_handle();
@@ -131,7 +131,12 @@ public:
             rdma_buf.buffer, table_meta_addr_, meta_size(), dir_mem_handle);
         CHECK_EQ(rc, kOk);
 
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto ret = rdma_adpt_->commit();
+        if (ret == kRdmaProtectionErr)
+        {
+            return ret;
+        }
+        CHECK_EQ(ret, kOk);
         memcpy(&cached_meta_, rdma_buf.buffer, meta_size());
 
         LOG_IF(INFO, config::kEnableDebug)
@@ -172,15 +177,24 @@ public:
 
         // get the two combined buckets the same time
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
 
         std::unordered_set<SlotHandle> slot_handles;
-        auto rc =
-            cbs.locate(fp, cached_ld(subtable_idx), m, slot_handles, dctx);
+        rc = cbs.locate(fp, cached_ld(subtable_idx), m, slot_handles, dctx);
         if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
-            CHECK_EQ(update_directory_cache(dctx), kOk);
+            auto ret = update_directory_cache(dctx);
+            if (ret == kRdmaProtectionErr)
+            {
+                return ret;
+            }
+            CHECK_EQ(ret, kOk);
             return del(key, dctx);
         }
 
@@ -233,7 +247,12 @@ public:
         if (rc == kCacheStale && auto_update_dir_)
         {
             maybe_trace_pin("before update dcache");
-            CHECK_EQ(update_directory_cache(dctx), kOk);
+            auto ret = update_directory_cache(dctx);
+            if (ret == kRdmaProtectionErr)
+            {
+                return ret;
+            }
+            CHECK_EQ(ret, kOk);
             return put(key, value, dctx);
         }
         if (rc == kNoMem && auto_expand_)
@@ -252,7 +271,7 @@ public:
             return rc;
         }
         maybe_trace_pin("before phase_two_deduplicate");
-        rc = phase_two_deduplicate(key, hash, ld, dctx);
+        rc = phase_two_deduplicate(key, hash, ld, 10 /* retry nr */, dctx);
         CHECK_NE(rc, kNoMem);
         if constexpr (debug())
         {
@@ -276,7 +295,12 @@ public:
         CHECK_EQ(rdma_adpt_->rdma_cas(
                      remote, expect, desired, rdma_buf.buffer, dir_mem_handle),
                  kOk);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
         uint64_t r = *(uint64_t *) rdma_buf.buffer;
         CHECK(r == 0 || r == 1)
             << "Unexpected value read from lock of subtable[" << subtable_idx
@@ -363,7 +387,13 @@ public:
         CHECK_EQ(rdma_adpt_->rdma_cas(
                      remote, expect, desired, rdma_buf.buffer, dir_mem_handle),
                  kOk);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
+
         uint64_t r = *(uint64_t *) rdma_buf.buffer;
         DCHECK_LE(r, log2(kDEntryNr))
             << "The old gd should not larger than log2(entries_nr)";
@@ -434,7 +464,12 @@ public:
                                        st_size,
                                        src_st_handle.mem_handle()),
                  kOk);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
 
         auto &global_kvblock_mem_handle = get_global_kvblock_mem_handle();
         for (size_t i = 0; i < SubTableHandleT::kTotalBucketNr; ++i)
@@ -519,7 +554,12 @@ public:
         // 1) I think updating the directory cache is definitely necessary
         // while expanding.
         maybe_trace_pin("before 1) update dcache");
-        update_directory_cache(dctx);
+        auto ret = update_directory_cache(dctx);
+        if (ret == kRdmaProtectionErr)
+        {
+            return ret;
+        }
+        CHECK_EQ(ret, kOk);
         auto depth = cached_meta_.lds[subtable_idx];
         auto next_subtable_idx = subtable_idx | (1 << depth);
         // DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
@@ -537,8 +577,18 @@ public:
             //               << next_depth << " with entries "
             //               << pow(2, next_depth) << ". Out of directory
             //               entry.";
-            CHECK_EQ(expand_unlock_subtable_nodrain(subtable_idx), kOk);
-            CHECK_EQ(rdma_adpt_->commit(), kOk);
+            auto rc = expand_unlock_subtable_nodrain(subtable_idx);
+            if (unlikely(rc == kRdmaProtectionErr))
+            {
+                return rc;
+            }
+            CHECK_EQ(rc, kOk);
+            rc = rdma_adpt_->commit();
+            if (unlikely(rc == kRdmaProtectionErr))
+            {
+                return rc;
+            }
+            CHECK_EQ(rc, kOk);
             DCHECK_EQ(cached_meta_.expanding[subtable_idx], 1);
             cached_meta_.expanding[subtable_idx] = 0;
             maybe_drop_trace();
@@ -566,21 +616,40 @@ public:
                     auto subtable_remote_addr =
                         cached_meta_.entries[from_subtable_idx];
                     auto ld = cached_ld(from_subtable_idx);
-                    CHECK_EQ(
-                        expand_write_entry_nodrain(i, subtable_remote_addr),
-                        kOk);
-                    CHECK_EQ(expand_update_ld_nodrain(i, ld), kOk);
+                    auto rc =
+                        expand_write_entry_nodrain(i, subtable_remote_addr);
+                    if (unlikely(rc == kRdmaProtectionErr))
+                    {
+                        return rc;
+                    }
+                    CHECK_EQ(rc, kOk);
+                    rc = expand_update_ld_nodrain(i, ld);
+                    if (unlikely(rc == kRdmaProtectionErr))
+                    {
+                        return rc;
+                    }
+                    CHECK_EQ(rc, kOk);
                     // TODO(race): update cache here. Not sure if it is right
                     cached_meta_.entries[i] = subtable_remote_addr;
                     cached_meta_.lds[i] = ld;
                 }
             }
-            CHECK_EQ(rdma_adpt_->commit(), kOk);
+            auto rc = rdma_adpt_->commit();
+            if (unlikely(rc == kRdmaProtectionErr))
+            {
+                return rc;
+            }
+            CHECK_EQ(rc, kOk);
 
             DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
                 << "[race][expand] (2) Update gd and directory: setting gd to "
                 << next_depth;
-            CHECK_EQ(expand_cas_gd_drain(expect_gd, next_depth), kOk);
+            rc = expand_cas_gd_drain(expect_gd, next_depth);
+            if (unlikely(rc == kRdmaProtectionErr))
+            {
+                return rc;
+            }
+            CHECK_EQ(rc, kOk);
         }
 
         CHECK_LT(next_subtable_idx, kDEntryNr);
@@ -653,14 +722,34 @@ public:
             << "] at directory. Insert subtable " << new_remote_subtable
             << " into directory. Update ld to " << ld << " for subtable["
             << subtable_idx << "] and subtable[" << next_subtable_idx << "]";
-        CHECK_EQ(expand_try_lock_subtable_drain(next_subtable_idx), kOk)
-            << "Should not be conflict with concurrent expand.";
+        rc = expand_try_lock_subtable_drain(next_subtable_idx);
+        if (unlikely(rc != kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk) << "Should not be conflict with concurrent expand.";
         CHECK_EQ(expand_install_subtable_nodrain(next_subtable_idx,
                                                  new_remote_subtable),
                  kOk);
-        CHECK_EQ(expand_update_ld_nodrain(subtable_idx, ld), kOk);
-        CHECK_EQ(expand_update_ld_nodrain(next_subtable_idx, ld), kOk);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+
+        rc = expand_update_ld_nodrain(subtable_idx, ld);
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
+        rc = expand_update_ld_nodrain(next_subtable_idx, ld);
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
+        rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
         // update local cache
         cached_meta_.entries[next_subtable_idx] = new_remote_subtable;
         cached_meta_.lds[subtable_idx] = ld;
@@ -723,7 +812,12 @@ public:
         auto &dst_st_mem_handle = next_subtable_handle;
         SubTableHandleT org_st(origin_subtable_remote_addr, src_st_mem_handle);
         SubTableHandleT dst_st(new_remote_subtable, dst_st_mem_handle);
-        CHECK_EQ(expand_migrate_subtable(org_st, dst_st, bits - 1, dctx), kOk);
+        rc = expand_migrate_subtable(org_st, dst_st, bits - 1, dctx);
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
 
         // 7) unlock
@@ -731,9 +825,24 @@ public:
         DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
             << "[race][expand] (7) Unlock subtable[" << next_subtable_idx
             << "] and subtable[" << subtable_idx << "]. " << *dctx;
-        CHECK_EQ(expand_unlock_subtable_nodrain(next_subtable_idx), kOk);
-        CHECK_EQ(expand_unlock_subtable_nodrain(subtable_idx), kOk);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        rc = expand_unlock_subtable_nodrain(next_subtable_idx);
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
+        rc = expand_unlock_subtable_nodrain(subtable_idx);
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
+        rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
         cached_meta_.expanding[next_subtable_idx] = 0;
         cached_meta_.expanding[subtable_idx] = 0;
 
@@ -825,14 +934,24 @@ public:
                 }
             }
         }
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
         return kOk;
     }
     RetCode phase_two_deduplicate(const Key &key,
                                   uint64_t hash,
                                   uint32_t cached_ld,
+                                  ssize_t retry_nr,
                                   HashContext *dctx)
     {
+        if (unlikely(retry_nr <= 0))
+        {
+            return kCacheStale;
+        }
         auto m = hash_m(hash);
         auto rounded_m = round_to_bits(m, gd());
         auto [h1, h2] = hash_h1_h2(hash);
@@ -845,10 +964,15 @@ public:
         // get the two combined buckets the same time
         // validate staleness at the same time
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
 
         std::unordered_set<SlotHandle> slot_handles;
-        auto rc = cbs.locate(fp, cached_ld, m, slot_handles, dctx);
+        rc = cbs.locate(fp, cached_ld, m, slot_handles, dctx);
         DLOG_IF(WARNING, slot_handles.size() >= 5)
             << "** Got a lots of real match. m: " << m
             << ", rounded_m: " << rounded_m << ", h1: " << pre_hash(h1)
@@ -858,8 +982,14 @@ public:
         if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
-            CHECK_EQ(update_directory_cache(dctx), kOk);
-            return phase_two_deduplicate(key, hash, cached_ld, dctx);
+            auto ret = update_directory_cache(dctx);
+            if (ret == kRdmaProtectionErr)
+            {
+                return ret;
+            }
+            CHECK_EQ(ret, kOk);
+            return phase_two_deduplicate(
+                key, hash, cached_ld, retry_nr - 1, dctx);
         }
 
         if (slot_handles.size() >= 2)
@@ -902,7 +1032,12 @@ public:
                                       rdma_buf.buffer,
                                       subtable_mem_handle),
                  kOk);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto rc = rdma_adpt_->commit();
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
         bool success = memcmp(rdma_buf.buffer, &expect_val, 8) == 0;
         if (success)
         {
@@ -966,9 +1101,14 @@ public:
         maybe_trace_pin("before p1.parallel_write_kv");
         GlobalAddress kv_block;
         size_t len = 0;
-        CHECK_EQ(parallel_write_kv(
-                     key, value, hash, *rdma_adpt_, &kv_block, &len, dctx),
-                 kOk);
+        rc = parallel_write_kv(
+            key, value, hash, *rdma_adpt_, &kv_block, &len, dctx);
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            end_insert_kvblock();
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
 
         DCHECK_EQ(kv_block.nodeID, 0)
             << "The gaddr we got here should have been transformed: the upper "
@@ -977,8 +1117,14 @@ public:
 
         maybe_trace_pin("before p1.get_two_combined_bucket_handle");
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        rc = rdma_adpt_->commit();
 
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            end_insert_kvblock();
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
         // only end insert kv_block after committing the writes
         end_insert_kvblock();
 
@@ -1004,7 +1150,7 @@ public:
         {
             return rc;
         }
-        else if (rc == kRetry)
+        else if (rc == kRetry || rc == kRdmaProtectionErr)
         {
             // can not re-execute update_if_exists
             // because the @slot_handles needs to be re-read
@@ -1032,7 +1178,12 @@ public:
         {
             // update cache and retry
             maybe_trace_pin("before p1.update_dcache");
-            CHECK_EQ(update_directory_cache(dctx), kOk);
+            auto ret = update_directory_cache(dctx);
+            if (ret == kRdmaProtectionErr)
+            {
+                return ret;
+            }
+            CHECK_EQ(ret, kOk);
             return put(key, value, dctx);
         }
         return rc;
@@ -1047,13 +1198,19 @@ public:
     {
         std::vector<BucketHandle<kSlotNr>> buckets;
         buckets.reserve(4);
-        CHECK_EQ(cb.get_bucket_handle(buckets), kOk);
+        auto rc = cb.get_bucket_handle(buckets);
+        if (unlikely(rc == kRdmaProtectionErr))
+        {
+            return rc;
+        }
+        CHECK_EQ(rc, kOk);
         for (auto &bucket : buckets)
         {
             RetCode rc;
             if ((rc = bucket.validate_staleness(ld, suffix, dctx)) != kOk)
             {
-                DCHECK_EQ(rc, kCacheStale);
+                DCHECK(rc == kCacheStale || rc == kRdmaProtectionErr)
+                    << "** unexpected rc: " << rc;
                 return rc;
             }
             auto poll_slot_idx = fast_pseudo_rand_int(1, kSlotNr - 1);
@@ -1172,8 +1329,15 @@ public:
                 KVBlockHandle(remote_kvblock_addr,
                               (KVBlock *) rdma_buffer.buffer));
         }
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
 
+        auto ret = rdma_adpt_->commit();
+        // no matter what happened, should end_read_kvblock.
+        if (unlikely(ret == kRdmaProtectionErr))
+        {
+            end_read_kvblock();
+            return ret;
+        }
+        CHECK_EQ(ret, kOk);
         end_read_kvblock();
 
         RetCode rc = kNotFound;
@@ -1187,6 +1351,10 @@ public:
             rc = func(key, slot_handle, kvblock_handle, dctx);
             CHECK_NE(rc, kNotFound)
                 << "Make no sense to return kNotFound: already found for you.";
+            if (unlikely(rc == kRdmaProtectionErr))
+            {
+                return rc;
+            }
         }
         return rc;
     }
@@ -1213,7 +1381,12 @@ public:
         // get the two combined buckets the same time
         // validate staleness at the same time
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        auto ret = rdma_adpt_->commit();
+        if (ret == kRdmaProtectionErr)
+        {
+            return ret;
+        }
+        CHECK_EQ(ret, kOk);
 
         maybe_trace_pin("before locate");
 
@@ -1223,7 +1396,12 @@ public:
         {
             maybe_trace_pin("before update_dcache");
             // update cache and retry
-            CHECK_EQ(update_directory_cache(dctx), kOk);
+            auto ret = update_directory_cache(dctx);
+            if (ret == kRdmaProtectionErr)
+            {
+                return ret;
+            }
+            CHECK_EQ(ret, kOk);
             return get(key, value, dctx);
         }
         DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
@@ -1285,7 +1463,12 @@ public:
                                         rdma_buf.buffer,
                                         st_mem_handle),
                      kOk);
-            CHECK_EQ(rdma_adpt.commit(), kOk);
+            auto ret = rdma_adpt.commit();
+            if (unlikely(ret == kRdmaProtectionErr))
+            {
+                return ret;
+            }
+            CHECK_EQ(ret, kOk);
             bool success =
                 memcmp(rdma_buf.buffer, (char *) &expect_val, 8) == 0;
             expect_val = *(uint64_t *) rdma_buf.buffer;
@@ -1376,7 +1559,8 @@ private:
     RemoteMemHandle remote_alloc_acquire_subtable_directory(size_t size)
     {
         auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                    (uint8_t) AcquireRequestFlag::kWithAllocation;
+                    (uint8_t) AcquireRequestFlag::kWithAllocation |
+                    (uint8_t) AcquireRequestFlag::kNoBindPR;
         return rdma_adpt_->acquire_perm(
             nullgaddr, conf_.subtable_hint, size, 0ns, flag);
     }
@@ -1434,9 +1618,7 @@ private:
         const auto &conf = conf_.read_kvblock.end;
         if (conf.do_nothing)
         {
-            DCHECK(read_kvblock_handles_.empty())
-                << "** config requires to do nothing, but got not-gc-ed "
-                   "handles";
+            read_kvblock_handles_.clear();
             return;
         }
         for (auto &handle : read_kvblock_handles_)
@@ -1519,8 +1701,8 @@ private:
         const auto &conf = conf_.insert_kvblock.end;
         if (conf.do_nothing)
         {
-            DCHECK(insert_kvblock_gaddrs_.empty());
-            DCHECK(insert_kvblock_handles_.empty());
+            insert_kvblock_gaddrs_.clear();
+            insert_kvblock_handles_.clear();
             return;
         }
         if (conf.use_alloc_api)
