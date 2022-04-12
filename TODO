@@ -234,6 +234,7 @@ Just take a couple of data. do like quick sort, summing, etc.
 
 Small TODOs:
 - Track tail latency: add OnePassLatencyMonitor and track with buckets.
+- Talk about delaying unbinding PR for faster execution. The client could use ABA to avoid strayed CAS to PR.
 - UNTIL NECESSARY: patronus add API signals to let server handle special signals.
     - p->send_signals
     - p->reg_signal_handler
@@ -302,8 +303,8 @@ Other possibilities
 [-] Let bench_rdma_race_tp workable: especially the auto-gc workable
     - auto-gc workable, has a little bit better performance, but not significant.
 [-] kNoBindPR & kDebugNoBindAll rename to kForceNoBind*
-- double check: all existing kWithAllocation and all kOnlyAllocation is with kNoPr
-    - Please search AcquireRequestFlag, and think about: should I enable kNoBindPR?
+[-] double check: all existing kWithAllocation and all kOnlyAllocation is with kNoPr
+    [-] Please search AcquireRequestFlag, and think about: should I enable kNoBindPR?
 [-] double check: rhh_conf.h: all the configures have kNoPr if necessary. especially the begin_read_kvblock, likely to work without PR.
 - refactor WRID. be tagged pointer to RWContext. higher 16 bits be PREFIX
 - double check whether my handling of rdma_protection_err to rhh is correct: especially for the resource gc. don't leak anything.

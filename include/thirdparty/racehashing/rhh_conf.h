@@ -193,6 +193,7 @@ public:
         c.read_kvblock.end.do_nothing = true;
         c.read_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.begin.use_alloc_api = false;
+        // with PR, because lease is enabled.
         c.insert_kvblock.begin.flag =
             (uint8_t) AcquireRequestFlag::kWithAllocation;
         c.insert_kvblock.begin.lease_time = 1ms;  // definitely enough

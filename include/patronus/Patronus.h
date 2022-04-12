@@ -888,7 +888,8 @@ GlobalAddress Patronus::alloc(uint16_t node_id,
                               CoroContext *ctx)
 {
     auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+                (uint8_t) AcquireRequestFlag::kOnlyAllocation |
+                (uint8_t) AcquireRequestFlag::kNoBindPR;
     auto lease = get_lease_impl(node_id,
                                 dir_id,
                                 hint /* key & hint */,
