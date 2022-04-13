@@ -261,11 +261,11 @@ public:
     }
     ~SlabAllocator()
     {
-        if constexpr (::config::kMonitorAllocationDistribution)
+        if constexpr (::config::kMonitorSlabAllocator)
         {
-            DLOG_IF(INFO, !allocated_distribution.get().empty())
+            DLOG_IF(INFO, !allocated_distribution.empty())
                 << "[slab][report] Allocation distribution: "
-                << pre_alloc_dist(allocated_distribution.get());
+                << pre_alloc_dist(allocated_distribution);
         }
     }
 
@@ -281,11 +281,11 @@ public:
             return nullptr;
         }
         auto *ret = it->second->get();
-        if constexpr (debug())
+        if constexpr (::config::kMonitorSlabAllocator)
         {
             if (ret)
             {
-                debug_class_allocated_nr_[it->first]++;
+                class_allocated_nr_[it->first]++;
                 if constexpr (::config::kEnableSlabAllocatorStrictChecking)
                 {
                     CHECK(debug_ongoing_bufs_.insert(ret).second)
@@ -297,20 +297,31 @@ public:
             {
                 LOG(ERROR) << "Failed to allocate size " << size
                            << ". allocated from this class: "
-                           << debug_class_allocated_nr_[it->first]
+                           << class_allocated_nr_[it->first]
                            << ". class: " << std::endl
                            << pre_class_info(class_info_);
             }
 
-            if constexpr (::config::kMonitorAllocationDistribution)
+            if constexpr (::config::kMonitorSlabAllocator)
             {
-                allocated_distribution.get()[size]++;
+                allocated_distribution[size]++;
             }
         }
 
-        // DLOG_IF(FATAL, ret == nullptr) << "Failed to allocate size " << size
-        //                                << ": " <<
-        //                                pre_class_info(class_info_);
+        if constexpr (::config::kMonitorSlabAllocator)
+        {
+            LOG_IF(WARNING, ret == nullptr)
+                << "Failed to allocate size " << size << ": "
+                << pre_class_info(class_info_)
+                << ". Allocated: " << class_allocated_nr_[it->first]
+                << ", free: " << class_freed_nr_[it->first];
+        }
+        else
+        {
+            LOG_IF(WARNING, ret == nullptr)
+                << "Failed to allocate size " << size << ": "
+                << pre_class_info(class_info_);
+        }
 
         return ret;
     }
@@ -320,13 +331,14 @@ public:
         auto it = end_addr_to_class_.upper_bound(addr);
         if (it == end_addr_to_class_.end())
         {
-            DCHECK(false) << "[alloc] can not find class for addr " << addr;
+            CHECK(false) << "[alloc] can not find class for addr " << addr;
         }
         size_t ptr_class = it->second;
         blocks_[ptr_class]->put(addr);
-        if constexpr (debug())
+
+        if constexpr (::config::kMonitorSlabAllocator)
         {
-            debug_class_freed_nr_[ptr_class]++;
+            class_freed_nr_[ptr_class]++;
             if constexpr (::config::kEnableSlabAllocatorStrictChecking)
             {
                 CHECK_EQ(debug_ongoing_bufs_.erase(addr), 1)
@@ -347,7 +359,7 @@ public:
     size_t debug_allocated_bytes() const
     {
         size_t ret = 0;
-        for (const auto &[clz, alloc_nr] : debug_class_allocated_nr_)
+        for (const auto &[clz, alloc_nr] : class_allocated_nr_)
         {
             ret += clz * alloc_nr;
         }
@@ -356,7 +368,7 @@ public:
     size_t debug_freed_bytes() const
     {
         size_t ret = 0;
-        for (const auto &[clz, freed_nr] : debug_class_freed_nr_)
+        for (const auto &[clz, freed_nr] : class_freed_nr_)
         {
             ret += clz * freed_nr;
         }
@@ -377,12 +389,12 @@ private:
 
     std::map<size_t, ClassInformation> class_info_;
     size_t wasted_len_{0};
-    std::unordered_map<size_t, size_t> debug_class_allocated_nr_;
-    std::unordered_map<size_t, size_t> debug_class_freed_nr_;
+    std::unordered_map<size_t, size_t> class_allocated_nr_;
+    std::unordered_map<size_t, size_t> class_freed_nr_;
     std::unordered_set<void *> debug_ongoing_bufs_;
 
     // alloc_size => alloc_num
-    Debug<std::unordered_map<size_t, size_t>> allocated_distribution;
+    std::unordered_map<size_t, size_t> allocated_distribution;
 };
 
 inline std::ostream &operator<<(std::ostream &os,
@@ -394,12 +406,12 @@ inline std::ostream &operator<<(std::ostream &os,
         os << "[" << cls << ", " << info << "]; ";
     }
     os << "wasted: " << allocator.wasted_len_ << "; ";
-    if constexpr (debug())
+    if constexpr (::config::kMonitorSlabAllocator)
     {
         os << "Allocated: [";
-        for (const auto &[cls, nr] : allocator.debug_class_allocated_nr_)
+        for (const auto &[cls, nr] : allocator.class_allocated_nr_)
         {
-            auto free_nr = allocator.debug_class_freed_nr_.find(cls)->second;
+            auto free_nr = allocator.class_freed_nr_.find(cls)->second;
             os << "(" << cls << ", "
                << "alloc: " << nr << ", freed: " << free_nr << "), ";
         }

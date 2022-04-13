@@ -21,7 +21,6 @@ constexpr static uint64_t kAllocHintDirSubtable = 0;  // subtable uses default
 constexpr static uint64_t kAllocHintDirSubtableOverMR = 3;  // the mr version
 
 constexpr static size_t kKVBlockAllocBatchSize = 2_MB;
-constexpr static size_t kKVBlockExpectSize = 64;
 }  // namespace patronus::hash::config
 
 #endif

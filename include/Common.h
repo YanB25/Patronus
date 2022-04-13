@@ -301,7 +301,6 @@ constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
 constexpr static bool kMonitorFailureRecovery = false;
 constexpr static bool kMonitorAddressConversion = false;
-constexpr static bool kMonitorAllocationDistribution = true;
 
 constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
@@ -326,6 +325,7 @@ constexpr static uint64_t kTraceRate =
 // slab allocator checks whether each free is valid.
 // Turn this off, since patronus allows free-ing buffers across clients
 constexpr static bool kEnableSlabAllocatorStrictChecking = true;
+constexpr static bool kMonitorSlabAllocator = true;
 // other settings
 constexpr static size_t kLeaseCacheItemLimitNr = 3;
 }  // namespace config

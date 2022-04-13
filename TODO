@@ -247,7 +247,7 @@ Race Hashing Experiments: (**iPad have detailed discussion**)
         - RO: is RO
         - RW: is RW
     - The throughput: patronus v.s. MR v.s. unprotected
-    - For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
+    {-} Later until necessary. For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
     - kvblock_size in {64_B, 4_KB}, rh in {small, large}
 - The latency of RaceHashing over Patronus:
     - Disable migration, RO/WO/RW. Focus on the protection of KV Blocks
@@ -287,3 +287,9 @@ Serverless Experiments
 Other possibilities
 - Lock conflict, fairness and lock transfering
 - The effective of caching
+
+==================================
+
+
+- Better end_insert_kvblock & free_insert_kvblock
+place them at RHH.

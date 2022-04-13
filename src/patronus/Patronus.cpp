@@ -2501,6 +2501,11 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                     << "invalid configuration. with_buf: " << with_buf
                     << ", with_pr: " << with_pr;
             }
+
+            if constexpr (config::kEnableSkipMagicMw)
+            {
+                allocated_mw_nr_ += bind_nr;
+            }
             if (with_buf || with_pr)
             {
                 // these are unsignaled requests
@@ -2517,12 +2522,6 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                 {
                     ctx->yield_to_master();
                 }
-            }
-            // TODO: maybe the below should move BEFORE ibv_post_send
-            // because there's a gap where the coroutine will be switched out
-            if constexpr (config::kEnableSkipMagicMw)
-            {
-                allocated_mw_nr_ += bind_nr;
             }
         }
     }

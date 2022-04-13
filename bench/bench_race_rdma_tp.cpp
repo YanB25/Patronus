@@ -50,23 +50,27 @@ struct KVGenConf
     uint64_t max_key{1};
     bool use_zip{false};
     double zip_skewness{0};
+    size_t kvblock_expect_size{64};
     std::string desc() const
     {
         if (use_zip)
         {
-            return "zip-" + std::to_string(zip_skewness) + "-" +
-                   std::to_string(max_key);
+            return "zip(skewness:" + std::to_string(zip_skewness) +
+                   ";max_key:" + std::to_string(max_key) +
+                   ";blk_sz:" + std::to_string(kvblock_expect_size) + ")";
         }
         else
         {
-            return "uni-" + std::to_string(max_key);
+            return "uni(max_key:" + std::to_string(max_key) +
+                   ";blk_sz:" + std::to_string(kvblock_expect_size) + ")";
         }
     }
 };
 inline std::ostream &operator<<(std::ostream &os, const KVGenConf &c)
 {
     os << "{kv_conf: max_key: " << c.max_key << ", use_zip: " << c.use_zip
-       << ", skewness: " << c.zip_skewness << "}";
+       << ", skewness: " << c.zip_skewness
+       << ", kvblock_expect_size: " << c.kvblock_expect_size << "}";
     return os;
 }
 
@@ -191,6 +195,7 @@ public:
         size_t test_nr,
         size_t thread_nr,
         size_t coro_nr,
+        size_t kvblock_expect_size,
         bool expand)
     {
         if (expand)
@@ -200,8 +205,10 @@ public:
         }
         auto warm_conf = BenchConfig::get_default_conf(
             name,
-            KVGenConf{
-                .max_key = kMaxKey, .use_zip = true, .zip_skewness = 0.99},
+            KVGenConf{.max_key = kMaxKey,
+                      .use_zip = true,
+                      .zip_skewness = 0.99,
+                      .kvblock_expect_size = kvblock_expect_size},
             initial_subtable_nr,
             test_nr,
             thread_nr,
@@ -212,15 +219,19 @@ public:
 
         return pipeline({warm_conf, eval_conf});
     }
-    static std::vector<BenchConfig> get_expand_config(const std::string &name,
-                                                      size_t fill_nr,
-                                                      bool subtable_use_mr)
+    static std::vector<BenchConfig> get_expand_config(
+        const std::string &name,
+        size_t fill_nr,
+        size_t kvblock_expect_size,
+        bool subtable_use_mr)
     {
         // fill the table with KVs
         auto conf = BenchConfig::get_empty_conf(
             name,
-            KVGenConf{
-                .max_key = kMaxKey, .use_zip = true, .zip_skewness = 0.99});
+            KVGenConf{.max_key = kMaxKey,
+                      .use_zip = true,
+                      .zip_skewness = 0.99,
+                      .kvblock_expect_size = kvblock_expect_size});
         conf.thread_nr = 1;
         conf.coro_nr = 1;
         conf.insert_prob = 1;
@@ -231,15 +242,47 @@ public:
 
         return pipeline({conf});
     }
+    // disable auto-expand
+    // the server needs to initialize the subtable (and empty) on ctor
+    static std::vector<BenchConfig> get_modify_heavy_config(
+        const std::string &name,
+        size_t initial_subtable_nr,
+        size_t test_nr,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t kvblock_expect_size)
+    {
+        auto kv_g_conf = KVGenConf{.max_key = kMaxKey,
+                                   .use_zip = true,
+                                   .zip_skewness = 0.99,
+                                   .kvblock_expect_size = kvblock_expect_size};
+
+        // fill the table with KVs
+        auto w_conf = BenchConfig::get_empty_conf(name + ".mix", kv_g_conf);
+        w_conf.thread_nr = thread_nr;
+        w_conf.coro_nr = coro_nr;
+        w_conf.get_prob = 0.5;
+        w_conf.delete_prob = 0.25;
+        w_conf.insert_prob = 0.25;
+        w_conf.auto_extend = false;
+        w_conf.test_nr = test_nr;
+        w_conf.should_report = true;
+        w_conf.initial_subtable_nr = initial_subtable_nr;
+
+        return pipeline({w_conf});
+    }
     static std::vector<BenchConfig> get_multi_round_config(
         const std::string &name,
         size_t fill_nr,
         size_t test_nr,
         size_t thread_nr,
-        size_t coro_nr)
+        size_t coro_nr,
+        size_t kvblock_expet_size)
     {
-        auto kv_g_conf = KVGenConf{
-            .max_key = kMaxKey, .use_zip = true, .zip_skewness = 0.99};
+        auto kv_g_conf = KVGenConf{.max_key = kMaxKey,
+                                   .use_zip = true,
+                                   .zip_skewness = 0.99,
+                                   .kvblock_expect_size = kvblock_expet_size};
 
         // fill the table with KVs
         auto insert_conf =
@@ -321,7 +364,9 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     return prhh;
 }
 
-void init_allocator(Patronus::pointer p, size_t thread_nr)
+void init_allocator(Patronus::pointer p,
+                    size_t thread_nr,
+                    size_t kvblock_expect_size)
 {
     // for server to handle kv block allocation requests
     // give all to kv blocks
@@ -336,12 +381,13 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
         rh_buffer.buffer + tid * thread_kvblock_pool_size;
 
     mem::SlabAllocatorConfig kvblock_slab_config;
-    kvblock_slab_config.block_class = {hash::config::kKVBlockExpectSize};
+    kvblock_slab_config.block_class = {kvblock_expect_size};
     kvblock_slab_config.block_ratio = {1.0};
     auto kvblock_allocator =
         mem::SlabAllocator::new_instance(thread_kvblock_pool_addr,
                                          thread_kvblock_pool_size,
                                          kvblock_slab_config);
+
     p->reg_allocator(hash::config::kAllocHintKVBlock, kvblock_allocator);
 
     LOG_FIRST_N(WARNING, 1)
@@ -687,10 +733,12 @@ void benchmark_server(Patronus::pointer p,
 {
     auto thread_nr = confs[0].thread_nr;
     auto initial_subtable = confs[0].initial_subtable_nr;
+    auto kvblock_expect_size = confs[0].kv_gen_conf_.kvblock_expect_size;
     for (const auto &conf : confs)
     {
         thread_nr = std::max(thread_nr, conf.thread_nr);
         DCHECK_EQ(initial_subtable, conf.initial_subtable_nr);
+        DCHECK_EQ(conf.kv_gen_conf_.kvblock_expect_size, kvblock_expect_size);
     }
 
     using RaceHashingT = RaceHashing<kE, kB, kS>;
@@ -700,7 +748,7 @@ void benchmark_server(Patronus::pointer p,
     typename RaceHashingT::pointer rh;
     if (tid < thread_nr)
     {
-        init_allocator(p, thread_nr);
+        init_allocator(p, thread_nr, kvblock_expect_size);
     }
     else
     {
@@ -731,61 +779,108 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     // set the rhh we like to test
     std::vector<RaceHashingHandleConfig> rhh_configs;
-    rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
-        "unprot", 0 /* no batching */));
-    rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected(
-        "patronus", 0 /* no batch */));
-    rhh_configs.push_back(
-        RaceHashingConfigFactory::get_mr_protected("mr", 0 /* no batch */));
-    rhh_configs.push_back(
-        RaceHashingConfigFactory::get_mw_protected_with_timeout(
-            "patronus-lease"));
+    for (size_t kvblock_expect_size : {64_B, 4_KB})
+    {
+        rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
+            "unprot", kvblock_expect_size, 0 /* no batching */));
+        rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected(
+            "patronus", kvblock_expect_size, 0 /* no batch */));
+        rhh_configs.push_back(
+            RaceHashingConfigFactory::get_mw_protected_with_timeout(
+                "patronus-lease", kvblock_expect_size));
+        rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
+            "mr", kvblock_expect_size, 0 /* no batch */));
+    }
 
     for (const auto &rhh_conf : rhh_configs)
     {
-        LOG_IF(INFO, is_master)
-            << "[bench] benching single thread for " << rhh_conf;
-        key++;
-        auto basic_conf = BenchConfigFactory::get_single_round_config(
-            "single_basic", 1, 1_M, 1, 1, true);
-        if (is_client)
         {
-            for (const auto &bench_conf : basic_conf)
+            LOG_IF(INFO, is_master)
+                << "[bench] benching single thread for " << rhh_conf;
+            key++;
+            auto basic_conf = BenchConfigFactory::get_single_round_config(
+                "single_basic",
+                1 /* initial subtable nr */,
+                1_M,
+                1 /* thread nr */,
+                1 /* coro nr */,
+                rhh_conf.kvblock_expect_size,
+                true);
+            if (is_client)
             {
-                bench_conf.validate();
-                LOG_IF(INFO, is_master)
-                    << "[bench] running conf: " << bench_conf;
-                benchmark_client<4, 16, 16>(
-                    p, bar, is_master, bench_conf, rhh_conf, key);
+                for (const auto &bench_conf : basic_conf)
+                {
+                    bench_conf.validate();
+                    LOG_IF(INFO, is_master)
+                        << "[sub-conf] running conf: " << bench_conf;
+                    benchmark_client<4, 16, 16>(
+                        p, bar, is_master, bench_conf, rhh_conf, key);
+                }
             }
-        }
-        else
-        {
-            benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
+            else
+            {
+                benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
+            }
         }
 
-        LOG_IF(INFO, is_master)
-            << "[bench] benching multiple threads for " << rhh_conf;
-        constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
-        key++;
-        auto multithread_conf = BenchConfigFactory::get_multi_round_config(
-            "multithread_basic", capacity, 10_M, kThreadNr, kMaxCoroNr);
-        if (is_client)
         {
-            for (const auto &bench_conf : multithread_conf)
+            LOG_IF(INFO, is_master)
+                << "[bench] benching multiple threads for " << rhh_conf;
+            constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
+            key++;
+            auto multithread_conf = BenchConfigFactory::get_multi_round_config(
+                "multithread_basic",
+                capacity,
+                10_M,
+                kThreadNr,
+                kMaxCoroNr,
+                rhh_conf.kvblock_expect_size);
+            if (is_client)
             {
-                bench_conf.validate();
-                LOG_IF(INFO, is_master)
-                    << "[bench] running conf: " << bench_conf;
-                benchmark_client<4, 16, 16>(
-                    p, bar, is_master, bench_conf, rhh_conf, key);
+                for (const auto &bench_conf : multithread_conf)
+                {
+                    bench_conf.validate();
+                    LOG_IF(INFO, is_master)
+                        << "[sub-conf] running conf: " << bench_conf;
+                    benchmark_client<4, 16, 16>(
+                        p, bar, is_master, bench_conf, rhh_conf, key);
+                }
+            }
+            else
+            {
+                benchmark_server<4, 16, 16>(
+                    p, bar, is_master, multithread_conf, key);
             }
         }
-        else
-        {
-            benchmark_server<4, 16, 16>(
-                p, bar, is_master, multithread_conf, key);
-        }
+
+        // {
+        //     LOG_IF(INFO, is_master)
+        //         << "[bench] benching multiple threads for " << rhh_conf;
+        //     key++;
+        //     auto w_conf = BenchConfigFactory::get_modify_heavy_config(
+        //         "write_heavy",
+        //         4 /* initial_subtable_nr */,
+        //         10_M,
+        //         kThreadNr,
+        //         kMaxCoroNr,
+        //         rhh_conf.kvblock_expect_size);
+        //     if (is_client)
+        //     {
+        //         for (const auto &bench_conf : w_conf)
+        //         {
+        //             bench_conf.validate();
+        //             LOG_IF(INFO, is_master)
+        //                 << "[sub-conf] running conf: " << bench_conf;
+        //             benchmark_client<4, 16, 16>(
+        //                 p, bar, is_master, bench_conf, rhh_conf, key);
+        //         }
+        //     }
+        //     else
+        //     {
+        //         benchmark_server<4, 16, 16>(p, bar, is_master, w_conf,
+        //         key);
+        //     }
+        // }
 
         // LOG_IF(INFO, is_master) << "[bench] benching expansion mw";
         // {
@@ -797,9 +892,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         //     {
         //         for (const auto &conf : expand_mw_conf)
         //         {
-        //             LOG_IF(INFO, is_master) << "[bench] running conf: " <<
-        //             conf; benchmark_client<4, 16, 16>(p, bar, is_master,
-        //             conf, key);
+        //             LOG_IF(INFO, is_master) << "[bench] running conf: "
+        //             << conf; benchmark_client<4, 16, 16>(p, bar,
+        //             is_master, conf, key);
         //         }
         //     }
         //     else
@@ -819,9 +914,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         //     {
         //         for (const auto &conf : expand_mr_conf)
         //         {
-        //             LOG_IF(INFO, is_master) << "[bench] running conf: " <<
-        //             conf; benchmark_client<4, 16, 16>(p, bar, is_master,
-        //             conf, key);
+        //             LOG_IF(INFO, is_master) << "[bench] running conf: "
+        //             << conf; benchmark_client<4, 16, 16>(p, bar,
+        //             is_master, conf, key);
         //         }
         //     }
         //     else

@@ -50,17 +50,31 @@ struct RaceHashingHandleConfig
         } begin;
         struct
         {
+            // insert success
+            // recover the MW resource
             bool do_nothing{false};
             bool use_alloc_api{false};
             uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
             uint8_t flag{0};
         } end;
+        struct
+        {
+            // insert failure
+            // recover ALL the resources
+            bool do_nothing{false};
+            bool use_dealloc_api{false};
+            uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
+            uint8_t flag{(uint8_t) LeaseModifyFlag::kWithDeallocation};
+        } free;
         bool enable_batch_alloc{false};
         size_t batch_alloc_size{0};
     } insert_kvblock;
 
     struct
     {
+        // used in overwrite & delete, currently do nothing
+        bool do_nothing{true};
+        uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
     } free_kvblock;
 
     // the hints
@@ -68,12 +82,13 @@ struct RaceHashingHandleConfig
     // for some slow benchmark, we want test_nr *= test_nr_scale_factor.
     double test_nr_scale_factor{1.0};
     std::string name;
+    size_t kvblock_expect_size{64};
 };
 
 inline std::ostream &operator<<(std::ostream &os,
                                 const RaceHashingHandleConfig &conf)
 {
-    os << "{RaceHashingHandleConfig: ";
+    os << "{RaceHashingHandleConfig: " << conf.name;
     {
         os << ". read_kvblock:{ ";
         {
@@ -123,6 +138,20 @@ inline std::ostream &operator<<(std::ostream &os,
                << ", hint: " << c.alloc_hint
                << ", flag: " << LeaseModifyFlagOut(c.flag);
         }
+        {
+            const auto &c = conf.insert_kvblock.free;
+            os << ". free: ";
+            if (c.do_nothing)
+            {
+                os << "do nothing";
+            }
+            else
+            {
+                os << "alloc_api: " << c.use_dealloc_api
+                   << ", hint: " << c.alloc_hint
+                   << ", flag: " << LeaseModifyFlagOut(c.flag);
+            }
+        }
         os << "}";
     }
     return os;
@@ -131,17 +160,20 @@ inline std::ostream &operator<<(std::ostream &os,
 class RaceHashingConfigFactory
 {
 public:
-    static RaceHashingHandleConfig get_basic(const std::string &name)
+    static RaceHashingHandleConfig get_basic(const std::string &name,
+                                             size_t kvblock_expect_size)
     {
         RaceHashingHandleConfig handle_conf;
         handle_conf.name = name;
         handle_conf.subtable_hint = hash::config::kAllocHintDirSubtable;
+        handle_conf.kvblock_expect_size = kvblock_expect_size;
         return handle_conf;
     }
     static RaceHashingHandleConfig get_unprotected(const std::string name,
+                                                   size_t kvblock_expect_size,
                                                    size_t batch_size)
     {
-        auto c = get_basic(name);
+        auto c = get_basic(name, kvblock_expect_size);
         c.read_kvblock.begin.do_nothing = true;
         c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kReserved;
         c.read_kvblock.end.do_nothing = true;
@@ -155,12 +187,19 @@ public:
         c.insert_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.batch_alloc_size = batch_size;
         c.insert_kvblock.enable_batch_alloc = batch_size > 1;
+        c.insert_kvblock.free.do_nothing = false;
+        c.insert_kvblock.free.use_dealloc_api =
+            c.insert_kvblock.begin.use_alloc_api;
+        c.insert_kvblock.free.alloc_hint = c.insert_kvblock.begin.alloc_hint;
+        c.insert_kvblock.free.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.free_kvblock.do_nothing = true;
         return c;
     }
     static RaceHashingHandleConfig get_mw_protected(const std::string &name,
+                                                    size_t kvblock_expect_size,
                                                     size_t batch_size)
     {
-        auto c = get_basic(name);
+        auto c = get_basic(name, kvblock_expect_size);
         c.read_kvblock.begin.do_nothing = false;
         c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kNoGc |
                                     (uint8_t) AcquireRequestFlag::kNoBindPR;
@@ -179,14 +218,21 @@ public:
         c.insert_kvblock.end.flag = 0;
         c.insert_kvblock.batch_alloc_size = batch_size;
         c.insert_kvblock.enable_batch_alloc = batch_size > 1;
+        c.insert_kvblock.free.do_nothing = false;
+        c.insert_kvblock.free.use_dealloc_api =
+            c.insert_kvblock.begin.use_alloc_api;
+        c.insert_kvblock.free.alloc_hint = c.insert_kvblock.begin.alloc_hint;
+        c.insert_kvblock.free.flag =
+            (uint8_t) LeaseModifyFlag::kWithDeallocation;
+        c.free_kvblock.do_nothing = true;
         return c;
     }
     // can not support batch allocation
     // because what we get
     static RaceHashingHandleConfig get_mw_protected_with_timeout(
-        const std::string &name)
+        const std::string &name, size_t kvblock_expect_size)
     {
-        auto c = get_basic(name);
+        auto c = get_basic(name, kvblock_expect_size);
         c.read_kvblock.begin.do_nothing = false;
         c.read_kvblock.begin.flag = 0;
         c.read_kvblock.begin.lease_time = 1ms;  // definitely enough
@@ -204,12 +250,20 @@ public:
         c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
         c.insert_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.enable_batch_alloc = false;
+        c.insert_kvblock.free.do_nothing = false;
+        c.insert_kvblock.free.use_dealloc_api =
+            c.insert_kvblock.begin.use_alloc_api;
+        c.insert_kvblock.free.alloc_hint = c.insert_kvblock.begin.alloc_hint;
+        c.insert_kvblock.free.flag =
+            (uint8_t) LeaseModifyFlag::kWithDeallocation;
+        c.free_kvblock.do_nothing = true;
         return c;
     }
     static RaceHashingHandleConfig get_mr_protected(const std::string &name,
+                                                    size_t kvblock_expect_size,
                                                     size_t batch_size)
     {
-        auto c = get_mw_protected(name, batch_size);
+        auto c = get_mw_protected(name, kvblock_expect_size, batch_size);
         c.read_kvblock.begin.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
         c.read_kvblock.end.flag |= (uint8_t) LeaseModifyFlag::kUseMR;
         // NOTE: we already set flag kUSeMR ON.
@@ -221,6 +275,8 @@ public:
         c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
         c.insert_kvblock.begin.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
         c.insert_kvblock.end.flag |= (uint8_t) LeaseModifyFlag::kUseMR;
+        c.insert_kvblock.free.flag |= (uint8_t) LeaseModifyFlag::kUseMR;
+
         c.test_nr_scale_factor = 1.0 / 10;
         return c;
     }

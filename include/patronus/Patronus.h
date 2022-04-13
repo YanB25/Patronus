@@ -108,7 +108,7 @@ public:
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
     constexpr static uint64_t kDefaultHint = 0;
-    constexpr static size_t kMaxSyncKey = 16;
+    constexpr static size_t kMaxSyncKey = 128;
 
     static pointer ins(const PatronusConfig &conf)
     {
