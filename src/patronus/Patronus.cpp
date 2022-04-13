@@ -1730,6 +1730,7 @@ void Patronus::handle_admin_recover(AdminRequest *req,
         req->digest = 0;
         DCHECK_EQ(digest, djb2_digest(req, sizeof(AdminRequest)));
     }
+    LOG(WARNING) << "[patronus] QP recovering. req: " << *req;
 
     ContTimer<config::kMonitorFailureRecovery> timer;
     timer.init("Recover Dir QP");

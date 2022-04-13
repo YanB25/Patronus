@@ -241,19 +241,20 @@ Small TODOs:
 
 Race Hashing Experiments: (**iPad have detailed discussion**)
 - The r/w throughput of RaceHashing over Patronus:
-    - Don't silently reinit directory. As I remember, if I alloc too many mws, will trigger failure and then reconnects. Print a warning when reinit happens.
-    - Disable migration. RO/WO/RW. Focus on the protection of KV Blocks
+    [-] Don't silently reinit directory. As I remember, if I alloc too many mws, will trigger failure and then reconnects. Print a warning when reinit happens.
+    [-] Disable migration. RO/WO/RW. Focus on the protection of KV Blocks
         - WO: only insert, see how long it takes to fill the RH (load)
         - RO: is RO
         - RW: is RW
-    - The throughput: patronus v.s. MR v.s. unprotected
+    [-] The throughput: patronus v.s. MR v.s. unprotected
     {-} Later until necessary. For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
-    - kvblock_size in {64_B, 4_KB}, rh in {small, large}
+    {-} kvblock_size in {64_B, 4_KB}, rh in {small, large}
+        - 64_B and 4_KB not significantly difference. Maybe 1) Ops bounded, 2) success rate too low, so that kvblock size does not take effect, 3) MR binding 64_B and 4_KB nearly the same.
 - The latency of RaceHashing over Patronus:
-    - Disable migration, RO/WO/RW. Focus on the protection of KV Blocks
-    - The latency of each op: patronus v.s. MR v.s. unprotected
-    - For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
-    - kvblock_size in {64_B, 4_KB}, rh in {small, large}
+    [-] Disable migration, RO/WO/RW. Focus on the protection of KV Blocks
+    [-] The latency of each op: patronus v.s. MR v.s. unprotected
+    {-} For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
+    [-] kvblock_size in {64_B, 4_KB}, rh in {small, large}
 - The latency of special cases:
     - The latency of client bootstrap (break down)
         - RHH constructs: bind & read directory, bind & read subtable, then issues a read.
