@@ -15,7 +15,10 @@ std::ostream &operator<<(std::ostream &os, const Lease &lease)
        << ", begin_term_: " << lease.begin_term_
        << ", ns_per_unit_: " << lease.ns_per_unit_
        << ", aba_unit_nr_to_ddl: " << lease.aba_unit_nr_to_ddl_
-       << ", ddl_term: " << lease.ddl_term_ << "}";
+       << ", ddl_term: " << lease.ddl_term_ << "} (status: " << lease.status_
+       << ", id: " << lease.id_ << ", ready: " << lease.ready_
+       << ", no_gc: " << lease.no_gc_ << ", cur_unit_nr: " << lease.cur_unit_nr_
+       << ")";
     return os;
 }
 // Lease::Lease(Lease &&rhs)

@@ -24,7 +24,7 @@ using namespace hmdf;
 [[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
 constexpr uint32_t kMachineNr = 2;
-constexpr static size_t kThreadNr = 8;
+constexpr static size_t kThreadNr = 16;
 constexpr static size_t kMaxCoroNr = 16;
 constexpr static uint64_t kMaxKey = 100_K;
 
@@ -492,6 +492,16 @@ void test_basic_client_worker(
     {
         bench_conf.kv_g->gen_key(&key[0], sizeof(uint64_t));
 
+        // if (unlikely(executed_nr == 1000))
+        // {
+        //     if (unlikely(coro_id == 0 && tid == 0))
+        //     {
+        //         LOG(WARNING)
+        //             << "[bench] trigger rdma protection error manually.";
+        //         rhh->hack_trigger_rdma_protection_error();
+        //     }
+        // }
+
         if (true_with_prob(insert_prob))
         {
             // insert
@@ -822,7 +832,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
             }
         }
-
+        for (size_t thread_nr : {1, 4, 8, 16})
+        // for (size_t thread_nr : {16})
+        // for (size_t thread_nr : {8, 16})
         {
             LOG_IF(INFO, is_master)
                 << "[bench] benching multiple threads for " << rhh_conf;
@@ -832,7 +844,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 "multithread_basic",
                 capacity,
                 10_M,
-                kThreadNr,
+                thread_nr,
                 kMaxCoroNr,
                 rhh_conf.kvblock_expect_size);
             if (is_client)
@@ -935,7 +947,7 @@ int main(int argc, char *argv[])
 
     PatronusConfig pconfig;
     pconfig.machine_nr = kMachineNr;
-    pconfig.block_class = {2_MB, 4_KB};
+    pconfig.block_class = {2_MB, 8_KB};
     pconfig.block_ratio = {0.5, 0.5};
     pconfig.reserved_buffer_size = 2_GB;
     pconfig.lease_buffer_size = (kDSMCacheSize - 2_GB) / 2;

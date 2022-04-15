@@ -76,6 +76,10 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status)
         os << "bind-err";
         break;
     }
+    case AcquireRequestStatus::kRegMrErr:
+    {
+        os << "reg-mr-err";
+    }
     case AcquireRequestStatus::kAddressOutOfRangeErr:
     {
         os << "addr-out-of-range-err";
@@ -89,6 +93,16 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status)
     case AcquireRequestStatus::kNoMw:
     {
         os << "no-mw";
+        break;
+    }
+    case AcquireRequestStatus::kReserved:
+    {
+        os << "reserved";
+        break;
+    }
+    case AcquireRequestStatus::kReservedNoReturn:
+    {
+        os << "reserved-no-return";
         break;
     }
     default:

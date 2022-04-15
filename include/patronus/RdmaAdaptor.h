@@ -182,7 +182,8 @@ public:
                 lease.ec() != AcquireRequestStatus::kNoMw)
             {
                 CHECK(false) << "** Unexpected lease failure: " << lease.ec()
-                             << ". expect kNoMem or kNoMw";
+                             << ". expect kNoMem or kNoMw. Lease " << lease
+                             << ". Lease success: " << lease.success();
             }
             return alloc_handle(nullgaddr, 0, lease);
         }
@@ -241,6 +242,7 @@ public:
                          hint_t hint,
                          uint8_t flag) override
     {
+        CHECK(handle.valid());
         if constexpr (::config::kEnableRdmaTrace)
         {
             if (trace_enabled())
@@ -298,6 +300,7 @@ public:
                       size_t size,
                       RemoteMemHandle &handle) override
     {
+        CHECK(handle.valid());
         auto gaddr = vaddr_to_gaddr(vaddr);
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
@@ -331,6 +334,7 @@ public:
                        size_t size,
                        RemoteMemHandle &handle) override
     {
+        CHECK(handle.valid());
         auto gaddr = vaddr_to_gaddr(vaddr);
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
@@ -363,6 +367,7 @@ public:
                      void *rdma_buf,
                      RemoteMemHandle &handle) override
     {
+        CHECK(handle.valid());
         if constexpr (::config::kEnableRdmaTrace)
         {
             if (trace_enabled())
@@ -520,6 +525,7 @@ private:
         {
             CHECK(ongoing_remote_handle_.get().insert(handle).second);
         }
+        CHECK(handle.valid());
         return handle;
     }
 };

@@ -297,9 +297,16 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
             ctx->timer().pin("[get] Back and Lease prepared");
         }
     }
-    DCHECK(rpc_context->ready) << "** Should have been ready when switch back "
-                                  "to worker coro. ctx: "
-                               << (ctx ? *ctx : nullctx);
+    CHECK(rpc_context->ready) << "** Should have been ready when switch back "
+                                 "to worker coro. ctx: "
+                              << (ctx ? *ctx : nullctx);
+    if (!ret_lease.success())
+    {
+        CHECK_NE(ret_lease.status_, AcquireRequestStatus::kReserved)
+            << "** getting ret_lease is not succeeded, but the status is "
+               "reserved. Lease: "
+            << ret_lease;
+    }
 
     if constexpr (debug())
     {
@@ -675,9 +682,9 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     // so rpc_context is not used.
     if (type != RequestType::kRelinquish)
     {
-        DCHECK(rpc_context->ready) << "** Should have been ready when switch "
-                                      "back to worker coro. ctx: "
-                                   << (ctx ? *ctx : nullctx);
+        CHECK(rpc_context->ready) << "** Should have been ready when switch "
+                                     "back to worker coro. ctx: "
+                                  << (ctx ? *ctx : nullctx);
         if (ret_lease.success())
         {
             // if success, should disable the original lease
@@ -687,7 +694,7 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     else
     {
         // actually no return. so never use me
-        ret_lease.set_error(AcquireRequestStatus::kReserved);
+        ret_lease.set_error(AcquireRequestStatus::kReservedNoReturn);
     }
 
     if constexpr (debug())
@@ -729,6 +736,11 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
             auto *msg = (AcquireResponse *) base;
             DVLOG(4) << "[patronus] handling acquire response. " << *msg
                      << " at patronus_now: " << time_syncer_->patronus_now();
+            if (unlikely(msg->status == AcquireRequestStatus::kReserved))
+            {
+                CHECK(false) << "** Unexpected status: " << msg->status
+                             << ". Msg: " << *msg;
+            }
             handle_response_acquire(msg);
             break;
         }
@@ -881,7 +893,15 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     }
     else
     {
+        CHECK_NE(resp->status, AcquireRequestStatus::kReserved)
+            << "** Server response with a reserved status. msg:" << *resp;
         ret_lease.set_error(resp->status);
+    }
+
+    if (!ret_lease.success())
+    {
+        CHECK_NE(resp->status, AcquireRequestStatus::kReserved)
+            << "** Server response with a reserved status. msg:" << *resp;
     }
 
     rpc_context->ready.store(true, std::memory_order_release);
@@ -1221,6 +1241,8 @@ handle_response:
     resp_msg->cid.node_id = get_node_id();
     resp_msg->cid.thread_id = get_thread_id();
     resp_msg->status = status;
+    CHECK_NE(resp_msg->status, AcquireRequestStatus::kReserved)
+        << "** Server should not response a reserved status.";
 
     using LeaseIdT = decltype(AcquireResponse::lease_id);
 
@@ -1972,6 +1994,8 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
         while (fail_nr < rw_context_.ongoing_size())
         {
             auto another_nr = dsm_->try_poll_rdma_cq(wc_buffer, kBufferSize);
+            LOG(WARNING)
+                << "[patronus] QP recovering: handling on-going rdma finishes";
             auto another_rdma_nr = handle_rdma_finishes(
                 wc_buffer, another_nr, coro_buf + cur_idx, recovery);
             DCHECK_EQ(another_rdma_nr, another_nr);
@@ -1992,8 +2016,11 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
             nr = dsm_->reliable_try_recv(
                 mid, buf, std::min(limit, ReliableConnection::kRecvLimit));
             got += nr;
-            LOG_IF(INFO, nr > 0) << "got another " << nr << ", cur: " << got
-                                 << ", expect " << expect_rpc_nr;
+            LOG_IF(WARNING, nr > 0)
+                << "[patronus] QP recovering: handling on-going rpc. Got "
+                   "another "
+                << nr << " responses, cur: " << got << ", expect another "
+                << expect_rpc_nr;
             nr = handle_response_messages(buf, nr, coro_buf + cur_idx);
             cur_idx += nr;
             CHECK_LT(cur_idx, limit);
@@ -2059,6 +2086,7 @@ void Patronus::handle_response_lease_extend(LeaseModifyResponse *resp)
     else
     {
         // TODO(patronus): deprecated, so don't care about the err code
+        CHECK(false) << "Deprecated.";
         lease.set_error(AcquireRequestStatus::kReserved);
     }
 

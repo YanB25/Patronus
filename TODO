@@ -290,7 +290,14 @@ Other possibilities
 - The effective of caching
 
 ==================================
+un-resolved BUGS:
+bench_race_rdma_tp, when benching 1, 2, 4, 8, 16 threads (i.e. test so many sub cases):
+will see an unexpected cases:
+- QP failed, recovering is triggered (happen randomly at sub-cases)
+- The phenomenon: RdmaAdaptor::acquire_perm => patronus::get_wlease() got a return release, which is NOT success with ::status == kReserved.
+- Added more checks at the handling path of response messages. Didnt catch any resp message with status == kReserved.
+- Fail to reproduce, and reproduce once may takes ~10 minutes
+- Decided to ignore this bug for now.
 
 
-- Better end_insert_kvblock & free_insert_kvblock
-place them at RHH.
+***** git stash pop

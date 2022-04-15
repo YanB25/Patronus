@@ -42,6 +42,7 @@ enum class AcquireRequestStatus : uint8_t
     kNoMem,
     kNoMw,
     kReserved,
+    kReservedNoReturn,
 };
 std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status);
 

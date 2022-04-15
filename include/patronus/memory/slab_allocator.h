@@ -331,7 +331,10 @@ public:
         auto it = end_addr_to_class_.upper_bound(addr);
         if (it == end_addr_to_class_.end())
         {
-            CHECK(false) << "[alloc] can not find class for addr " << addr;
+            CHECK(false) << "[alloc] can not find class for addr " << addr
+                         << ". Begin address: "
+                         << end_addr_to_class_.begin()->first
+                         << ", end: " << (--end_addr_to_class_.end())->first;
         }
         size_t ptr_class = it->second;
         blocks_[ptr_class]->put(addr);

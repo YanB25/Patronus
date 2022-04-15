@@ -133,6 +133,20 @@ public:
         inited_ = true;
     }
 
+    void hack_trigger_rdma_protection_error()
+    {
+        auto rdma_buffer = rdma_adpt_->get_rdma_buffer(64);
+        auto &handle = get_directory_mem_handle();
+        auto ret = rdma_adpt_->rdma_write(
+            GlobalAddress(node_id_, 8_GB), rdma_buffer.buffer, 64, handle);
+        CHECK_EQ(ret, kOk);
+        ret = rdma_adpt_->commit();
+        LOG_IF(ERROR, ret != kRdmaProtectionErr)
+            << "** Expect RdmaProtectionError. got: " << ret;
+
+        rdma_adpt_->put_all_rdma_buffer();
+    }
+
     RetCode update_directory_cache(HashContext *dctx)
     {
         // TODO(race): this have performance problem because of additional
@@ -1964,6 +1978,11 @@ public:
         rhh_.init(dctx);
         auto rc = rdma_adpt_->put_all_rdma_buffer();
         CHECK_EQ(rc, kOk);
+    }
+
+    void hack_trigger_rdma_protection_error()
+    {
+        rhh_.hack_trigger_rdma_protection_error();
     }
 
     RetCode update_directory_cache(HashContext *dctx)
