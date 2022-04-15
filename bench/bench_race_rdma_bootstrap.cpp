@@ -41,6 +41,12 @@ std::vector<size_t> col_test_op_nr;
 std::vector<size_t> col_ns;
 std::vector<size_t> col_rdma_protection_nr;
 
+std::vector<size_t> col_latency_min;
+std::vector<size_t> col_latency_p5;
+std::vector<size_t> col_latency_p9;
+std::vector<size_t> col_latency_p99;
+std::vector<size_t> col_latency_max;
+
 struct KVGenConf
 {
     uint64_t max_key{1};
@@ -261,14 +267,6 @@ struct AdditionalCoroCtx
 {
     ssize_t thread_remain_task{0};
     OnePassBucketMonitor<size_t> g{kLatencyMin, kLatencyMax, kLatencyRange};
-    OnePassBucketMonitor<size_t> read_hit_lat{
-        kLatencyMin, kLatencyMax, kLatencyRange};
-    OnePassBucketMonitor<size_t> read_miss_lat{
-        kLatencyMin, kLatencyMax, kLatencyRange};
-    OnePassBucketMonitor<size_t> insert_succ_lat{
-        kLatencyMin, kLatencyMax, kLatencyRange};
-    OnePassBucketMonitor<size_t> insert_fail_lat{
-        kLatencyMin, kLatencyMax, kLatencyRange};
     size_t get_nr{0};
     size_t get_succ_nr{0};
     size_t put_nr{0};
@@ -304,6 +302,7 @@ void test_basic_client_worker(
     std::string got_value;
     while (ex.get_private_data().thread_remain_task > 0)
     {
+        ChronoTimer timer;
         {
             using HandleT = typename RaceHashing<kE, kB, kS>::Handle;
             auto prhh = HandleT::new_instance(kServerNodeId,
@@ -318,8 +317,14 @@ void test_basic_client_worker(
                 prhh->get(key, got_value);
             }
         }
+        auto ns = timer.pin();
         executed_nr++;
         ex.get_private_data().thread_remain_task--;
+
+        if (coro_id == 0)
+        {
+            ex.get_private_data().g.collect(ns);
+        }
     }
     auto ns = timer.pin();
 
@@ -490,6 +495,13 @@ void benchmark_client(Patronus::pointer p,
         col_test_op_nr.push_back(actual_test_nr);
         col_ns.push_back(ns);
         col_x_io_per_boot.push_back(bench_conf.io_nr_per_bootstrap);
+
+        const auto &m = ex.get_private_data().g;
+        col_latency_min.push_back(m.min());
+        col_latency_p5.push_back(m.percentile(0.5));
+        col_latency_p9.push_back(m.percentile(0.9));
+        col_latency_p99.push_back(m.percentile(0.99));
+        col_latency_max.push_back(m.max());
     }
 }
 
@@ -652,12 +664,12 @@ int main(int argc, char *argv[])
     df.load_index(std::move(col_idx));
     df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
     df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
+    df.load_column<size_t>("x_io_nr_per_boot", std::move(col_x_io_per_boot));
     df.load_column<size_t>("test_nr(total)", std::move(col_test_op_nr));
     df.load_column<size_t>("test_ns(total)", std::move(col_ns));
 
     df.load_column<size_t>("rdma_protection_nr",
                            std::move(col_rdma_protection_nr));
-    df.load_column<size_t>("io_nr_per_boot", std::move(col_x_io_per_boot));
 
     auto div_f = gen_F_div<size_t, size_t, double>();
     auto div_f2 = gen_F_div<double, size_t, double>();
@@ -681,6 +693,12 @@ int main(int argc, char *argv[])
         "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
     df.consolidate<double, size_t, double>(
         "ops(thread)", "x_coro_nr", "ops(coro)", div_f2, false);
+
+    df.load_column<size_t>("lat_min", std::move(col_latency_min));
+    df.load_column<size_t>("lat_p5", std::move(col_latency_p5));
+    df.load_column<size_t>("lat_p9", std::move(col_latency_p9));
+    df.load_column<size_t>("lat_p99", std::move(col_latency_p99));
+    df.load_column<size_t>("lat_max", std::move(col_latency_max));
 
     auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
     df.write<std::ostream, std::string, size_t, double>(std::cout,
