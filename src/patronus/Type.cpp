@@ -257,6 +257,11 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
     {
         os << "with-cache, ";
     }
+    bool use_universal_rkey = flag.flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        os << "use-universal-rkey, ";
+    }
     bool reserve = flag.flag & (uint8_t) RWFlag::kReserved;
     DCHECK(!reserve);
     os << "}";

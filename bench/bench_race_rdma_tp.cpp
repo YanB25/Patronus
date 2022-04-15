@@ -832,9 +832,10 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
             }
         }
-        for (size_t thread_nr : {1, 4, 8, 16})
+
         // for (size_t thread_nr : {16})
         // for (size_t thread_nr : {8, 16})
+        for (size_t thread_nr : {1, 4, 8, 16})
         {
             LOG_IF(INFO, is_master)
                 << "[bench] benching multiple threads for " << rhh_conf;

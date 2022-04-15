@@ -83,7 +83,8 @@ public:
           conf_(conf),
           auto_expand_(auto_expand),
           auto_update_dir_(auto_expand),
-          rdma_adpt_(rdma_adpt)
+          rdma_adpt_(rdma_adpt),
+          bootstrap_timer_("ctor()")
     {
         CHECK(!conf.insert_kvblock.enable_batch_alloc)
             << "TODO: support batching";
@@ -92,19 +93,29 @@ public:
     }
     ~RaceHashingHandleImpl()
     {
-        auto rel_flag = (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
-        rdma_adpt_->relinquish_perm(
-            kvblock_mem_handle_, 0 /* alloc_hint */, rel_flag);
-        rdma_adpt_->relinquish_perm(
-            directory_mem_handle_, 0 /* alloc_hint */, rel_flag);
+        maybe_trace_bootstrap("before ~kvblock_mem_handle");
+        const auto &c = conf_.dctor;
+        if (kvblock_mem_handle_.valid())
+        {
+            rdma_adpt_->relinquish_perm(
+                kvblock_mem_handle_, c.alloc_hint, c.flag);
+        }
+        maybe_trace_bootstrap("before ~dir_mem_handle");
+        if (directory_mem_handle_.valid())
+        {
+            rdma_adpt_->relinquish_perm(
+                directory_mem_handle_, c.alloc_hint, c.flag);
+        }
+        maybe_trace_bootstrap("before ~subtable_mem_handles");
         for (auto &handle : subtable_mem_handles_)
         {
             if (handle.valid())
             {
-                rdma_adpt_->relinquish_perm(
-                    handle, 0 /* alloc_hint */, rel_flag);
+                rdma_adpt_->relinquish_perm(handle, c.alloc_hint, c.flag);
             }
         }
+        maybe_trace_bootstrap("~finished()");
+        maybe_trace_end_bootstrap();
     }
     constexpr static size_t meta_size()
     {
@@ -116,10 +127,39 @@ public:
            << ", end_insert: " << end_insert_nr_
            << ", free_insert: " << free_insert_nr_;
     }
+    void maybe_trace_bootstrap(const std::string &name)
+    {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            bootstrap_timer_.pin(name);
+        }
+    }
+    void maybe_trace_end_bootstrap()
+    {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (unlikely(enable_boostrap_trace_))
+            {
+                LOG(INFO) << bootstrap_timer_;
+            }
+        }
+    }
     void init(HashContext *dctx = nullptr)
     {
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (unlikely(true_with_prob(::config::kRdmaTraceRateBootstrap)))
+            {
+                enable_boostrap_trace_ = true;
+            }
+        }
+
+        maybe_trace_bootstrap("init() before init_dir_mem_handle()");
         init_directory_mem_handle();
+
+        maybe_trace_bootstrap("before update_dcache()");
         auto ret = update_directory_cache(dctx);
+
         while (unlikely(ret == kRdmaProtectionErr))
         {
             LOG(ERROR) << "[race] update_dcache got " << ret << ". Retry.";
@@ -129,8 +169,26 @@ public:
 
         // init_kvblock_mem_handle AFTER getting the directory cache
         // because we need to know where server places the kvblock pool
+        maybe_trace_bootstrap("before init_kvblock_mem_handle()");
         init_kvblock_mem_handle();
+
+        const auto &c = conf_.init;
+        if (c.eager_bind_subtable)
+        {
+            maybe_trace_bootstrap("before eager_init_subtable_mem_handle()");
+            eager_init_subtable_mem_handle();
+        }
+
         inited_ = true;
+        maybe_trace_bootstrap("init() finished");
+    }
+    void eager_init_subtable_mem_handle()
+    {
+        for (size_t i = 0; i < cached_subtable_nr(); ++i)
+        {
+            // trigger binding
+            std::ignore = get_subtable_mem_handle(i);
+        }
     }
 
     void hack_trigger_rdma_protection_error()
@@ -151,19 +209,31 @@ public:
     {
         // TODO(race): this have performance problem because of additional
         // memcpy.
+        auto &c = conf_.init;
+
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
         DCHECK_GE(rdma_buf.size, meta_size());
-        auto &dir_mem_handle = get_directory_mem_handle();
-        auto rc = rdma_adpt_->rdma_read(
-            rdma_buf.buffer, table_meta_addr_, meta_size(), dir_mem_handle);
+        RetCode rc;
+        if (c.dcache_handle.has_value())
+        {
+            auto &dir_mem_handle = c.dcache_handle.value();
+            rc = rdma_adpt_->rdma_read(
+                rdma_buf.buffer, table_meta_addr_, meta_size(), dir_mem_handle);
+        }
+        else
+        {
+            auto &dir_mem_handle = get_directory_mem_handle();
+            rc = rdma_adpt_->rdma_read(
+                rdma_buf.buffer, table_meta_addr_, meta_size(), dir_mem_handle);
+        }
         CHECK_EQ(rc, kOk);
 
-        auto ret = rdma_adpt_->commit();
-        if (ret == kRdmaProtectionErr)
+        rc = rdma_adpt_->commit();
+        if (rc == kRdmaProtectionErr)
         {
-            return ret;
+            return rc;
         }
-        CHECK_EQ(ret, kOk);
+        CHECK_EQ(rc, kOk);
         memcpy(&cached_meta_, rdma_buf.buffer, meta_size());
 
         LOG_IF(INFO, config::kEnableDebug)
@@ -1623,6 +1693,9 @@ private:
 
     bool inited_{false};
 
+    ContTimer<::config::kEnableRdmaTrace> bootstrap_timer_;
+    bool enable_boostrap_trace_{false};
+
     // for client private kvblock memory
     GlobalAddress kvblock_pool_gaddr_;
 
@@ -1906,6 +1979,11 @@ private:
 
     void init_kvblock_mem_handle()
     {
+        const auto &c = conf_.init;
+        if (unlikely(c.skip_bind_g_kvblock))
+        {
+            return;
+        }
         // init the global covering handle of kvblock
         auto g_kvblock_pool_gaddr = cached_meta_.kvblock_pool_gaddr;
         auto g_kvblock_pool_size = cached_meta_.kvblock_pool_size;
@@ -1922,10 +2000,17 @@ private:
 
     void init_directory_mem_handle()
     {
+        const auto &c = conf_.init;
+        if (c.do_nothing)
+        {
+            return;
+        }
         DCHECK(!directory_mem_handle_.valid());
-        auto flag = (uint8_t) AcquireRequestFlag::kNoGc;
-        directory_mem_handle_ = rdma_adpt_->acquire_perm(
-            table_meta_addr_, 0, sizeof(MetaT), 0ns, flag);
+        directory_mem_handle_ = rdma_adpt_->acquire_perm(table_meta_addr_,
+                                                         c.alloc_hint,
+                                                         sizeof(MetaT),
+                                                         c.lease_time,
+                                                         c.flag);
     }
 };
 

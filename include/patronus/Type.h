@@ -192,7 +192,8 @@ enum class RWFlag : uint8_t
     kNoLocalExpireCheck = 1 << 0,
     kWithAutoExtend = 1 << 1,
     kWithCache = 1 << 2,
-    kReserved = 1 << 3,
+    kUseUniversalRkey = 1 << 3,
+    kReserved = 1 << 4,
 };
 
 struct RWFlagOut

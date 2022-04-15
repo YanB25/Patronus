@@ -306,13 +306,16 @@ constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;
 
 constexpr static bool kEnableRdmaTrace = false;
-constexpr static double kRdmaTraceRateGet = 1.0 / 200_K;
-constexpr static double kRdmaTraceRatePut = 1.0 / 20_K;
-constexpr static double kRdmaTraceRateDel = 1.0 / 20_K;
-// constexpr static double kRdmaTraceRateGet = 0;
-// constexpr static double kRdmaTraceRatePut = 0;
-// constexpr static double kRdmaTraceRateDel = 0;
-constexpr static double kRdmaTraceRateExpand = 1.0;
+// constexpr static double kRdmaTraceRateGet = 1.0 / 200_K;
+// constexpr static double kRdmaTraceRatePut = 1.0 / 20_K;
+// constexpr static double kRdmaTraceRateDel = 1.0 / 20_K;
+// constexpr static double kRdmaTraceRateExpand = 1.0;
+constexpr static double kRdmaTraceRateBootstrap = 1.0 / 20_K;
+constexpr static double kRdmaTraceRateGet = 0;
+constexpr static double kRdmaTraceRatePut = 0;
+constexpr static double kRdmaTraceRateDel = 0;
+constexpr static double kRdmaTraceRateExpand = 0;
+// constexpr static double kRdmaTraceRateBootstrap = 0;
 
 // about opening a feature
 constexpr static bool kEnableReliableMessage = true;
