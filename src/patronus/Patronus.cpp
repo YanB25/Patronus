@@ -34,6 +34,7 @@ thread_local char *Patronus::client_rdma_buffer_{nullptr};
 thread_local size_t Patronus::client_rdma_buffer_size_{0};
 thread_local bool Patronus::is_server_{false};
 thread_local bool Patronus::is_client_{false};
+thread_local bool Patronus::self_managing_client_rdma_buffer_{false};
 
 // clang-format off
 /**
@@ -617,6 +618,14 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     CHECK(type == RequestType::kExtend || type == RequestType::kRelinquish ||
           type == RequestType::kUpgrade)
         << "** invalid type " << (int) type;
+
+    bool do_nothing = flag & (flag_t) LeaseModifyFlag::kDoNothing;
+    if (unlikely(do_nothing))
+    {
+        lease.set_invalid();
+        // actually, return nothing
+        return Lease();
+    }
 
     auto target_node_id = lease.node_id_;
     auto dir_id = lease.dir_id();
@@ -1896,8 +1905,8 @@ void Patronus::registerClientThread()
 {
     dsm_->registerThread();
     // - reserve 4MB for message pool. total 65536 messages, far then enough
-    // - reserve other 12 MB for client's usage. If coro_nr == 8, could
-    // get 1.5 MB each coro.
+    // - reserve other kRDMABufferSize - 4MB (32 - 4 MB) for client's usage.
+    // If coro_nr == 8, could get 4 MB each coro.
 
     // dsm_->get_rdma_buffer() is per-thread
     auto rdma_buffer = dsm_->get_rdma_buffer();
@@ -2449,6 +2458,9 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             if (buffer_mr != nullptr)
             {
                 CHECK(destroyMemoryRegion(buffer_mr));
+            }
+            if (header_mr != nullptr)
+            {
                 CHECK(destroyMemoryRegion(header_mr));
             }
             if (rw_ctx)

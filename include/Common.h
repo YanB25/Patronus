@@ -175,7 +175,7 @@ constexpr uint8_t kMaxHandOverTime = 8;
 constexpr int kIndexCacheSize = 1024;  // MB
 
 // for dsm
-constexpr static uint32_t kRDMABufferSize = 12 * define::MB;
+constexpr static uint32_t kRDMABufferSize = 32 * define::MB;
 constexpr int64_t kPerCoroRdmaBuf = 32 * define::KB;
 }  // namespace define
 

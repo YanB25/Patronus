@@ -293,6 +293,7 @@ void debug_validate_lease_modify_flag(flag_t flag)
         bool only_dealloc = flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
         bool reserved = flag & (flag_t) LeaseModifyFlag::kReserved;
         bool wait_success = flag & (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
+        bool do_nothing = flag & (flag_t) LeaseModifyFlag::kDoNothing;
         if (only_dealloc)
         {
             DCHECK(!with_dealloc) << "with_dealloc conflict with only_dealloc";
@@ -306,6 +307,12 @@ void debug_validate_lease_modify_flag(flag_t flag)
             DCHECK(!no_relinquish_unbind)
                 << "wait_success conflict with no_relinquish_unbind: If you do "
                    "not want to unbind, make no sense to wait for nothing.";
+        }
+        if (do_nothing)
+        {
+            CHECK(!with_dealloc) << "with_dealloc conflict with do_nothing";
+            CHECK(!only_dealloc) << "only_dealloc conflict with do_nothing";
+            CHECK(!wait_success) << "wait_success conflict with do_nothing";
         }
         DCHECK(!reserved);
     }
@@ -350,6 +357,11 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
     if (use_mr)
     {
         os << "use-MR, ";
+    }
+    bool do_nothing = flag.flag & (flag_t) LeaseModifyFlag::kDoNothing;
+    if (do_nothing)
+    {
+        os << "do-nothing, ";
     }
 
     os << "}";

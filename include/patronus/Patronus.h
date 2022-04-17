@@ -353,6 +353,7 @@ public:
     }
     Buffer get_rdma_buffer_8B()
     {
+        CHECK(!self_managing_client_rdma_buffer_);
         auto *ret = (char *) rdma_client_buffer_8B_->get();
         if (likely(ret != nullptr))
         {
@@ -369,8 +370,23 @@ public:
         }
     }
 
+    Buffer get_self_managed_rdma_buffer()
+    {
+        CHECK(!self_managing_client_rdma_buffer_);
+        self_managing_client_rdma_buffer_ = true;
+        return Buffer(client_rdma_buffer_, client_rdma_buffer_size_);
+    }
+    void put_self_managed_rdma_buffer(Buffer buffer)
+    {
+        CHECK_EQ(buffer.buffer, client_rdma_buffer_);
+        CHECK_EQ(buffer.size, client_rdma_buffer_size_);
+        CHECK(self_managing_client_rdma_buffer_);
+        self_managing_client_rdma_buffer_ = false;
+    }
+
     Buffer get_rdma_buffer(size_t size)
     {
+        CHECK(!self_managing_client_rdma_buffer_);
         if (size <= 8)
         {
             return get_rdma_buffer_8B();
@@ -837,6 +853,8 @@ private:
 
     static thread_local bool is_server_;
     static thread_local bool is_client_;
+
+    static thread_local bool self_managing_client_rdma_buffer_;
 
     // owned by server threads
     // [NR_DIRECTORY]
@@ -1413,29 +1431,35 @@ inline std::ostream &operator<<(std::ostream &os,
     {
         os << "rdma_message_buffer(thread): "
            << p.rdma_message_buffer_pool_->size() << " nr with size "
-           << Patronus::kMessageSize << " B. ";
+           << Patronus::kMessageSize << " B. at "
+           << (void *) p.rdma_message_buffer_pool_.get() << ". ";
     }
     if (p.rdma_client_buffer_)
     {
         os << "rdma_client_buffer(thread): " << p.rdma_client_buffer_->size()
-           << " nr with size " << Patronus::kClientRdmaBufferSize << " B. ";
+           << " nr with size " << Patronus::kClientRdmaBufferSize << " B. at "
+           << (void *) p.rdma_client_buffer_.get() << ". ";
     }
     if (p.rdma_client_buffer_8B_)
     {
         os << "rdma_client_buffer_8B(thread): "
-           << p.rdma_client_buffer_8B_->size() << " nr with size 8 B. ";
+           << p.rdma_client_buffer_8B_->size() << " nr with size 8 B. at "
+           << (void *) p.rdma_client_buffer_8B_.get() << ". ";
     }
 
     os << "rpc_context(thread): " << p.rpc_context_.size() << " with "
-       << sizeof(RpcContext) << " B. ";
+       << sizeof(RpcContext) << " B. at " << (void *) &p.rpc_context_ << ". ";
     os << "rw_context(thread): " << p.rw_context_.size() << " with "
-       << sizeof(RWContext) << " B. ";
+       << sizeof(RWContext) << " B. at " << (void *) &p.rw_context_ << ". ";
     os << "lease_context(thread): " << p.lease_context_.size() << " with "
-       << sizeof(LeaseContext) << " B. ";
+       << sizeof(LeaseContext) << " B. at " << (void *) &p.lease_context_
+       << ". ";
+
     if (p.protection_region_pool_)
     {
         os << "pr_pool(thread): " << p.protection_region_pool_->size()
-           << " with " << sizeof(ProtectionRegion) << " B. ";
+           << " with " << sizeof(ProtectionRegion) << " B. at "
+           << (void *) p.protection_region_pool_.get() << ". ";
     }
     os << "}";
 

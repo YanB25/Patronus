@@ -174,7 +174,8 @@ enum class LeaseModifyFlag : uint8_t
     // will harm performance
     kWaitUntilSuccess = 1 << 4,
     kUseMR = 1 << 5,
-    kReserved = 1 << 6,
+    kDoNothing = 1 << 6,
+    kReserved = 1 << 7,
 };
 void debug_validate_lease_modify_flag(flag_t flag);
 struct LeaseModifyFlagOut
