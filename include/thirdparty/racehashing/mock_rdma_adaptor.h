@@ -81,11 +81,11 @@ public:
                                  hint_t alloc_hint,
                                  size_t size,
                                  std::chrono::nanoseconds ns,
-                                 uint8_t flag) override
+                                 flag_t flag) override
     {
         std::ignore = ns;
-        bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
-        bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+        bool with_alloc = flag & (flag_t) AcquireRequestFlag::kWithAllocation;
+        bool only_alloc = flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
         CHECK(!only_alloc) << "use alloc API instead";
         bool alloc_semantics = with_alloc || only_alloc;
         if (alloc_semantics)
@@ -175,10 +175,10 @@ public:
     }
     void relinquish_perm(RemoteMemHandle &handle,
                          hint_t hint,
-                         uint8_t flag) override
+                         flag_t flag) override
     {
-        bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
-        bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
+        bool only_dealloc = flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
+        bool with_dealloc = flag & (flag_t) LeaseModifyFlag::kWithDeallocation;
         CHECK(!only_dealloc) << "use remote_free instead";
         bool dealloc_semantics = only_dealloc || with_dealloc;
         if (dealloc_semantics)

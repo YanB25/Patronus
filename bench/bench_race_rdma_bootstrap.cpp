@@ -226,7 +226,7 @@ RemoteMemHandle alloc_dcache_handle(IRdmaAdaptor::pointer rdma_adpt,
                                    0 /* alloc hint */,
                                    64_MB,
                                    0ns,
-                                   (uint8_t) AcquireRequestFlag::kNoGc);
+                                   (flag_t) AcquireRequestFlag::kNoGc);
 }
 void free_dcache_handle(IRdmaAdaptor::pointer rdma_adpt,
                         RemoteMemHandle &handle)

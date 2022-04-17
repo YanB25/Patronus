@@ -1673,9 +1673,9 @@ private:
     // }
     RemoteMemHandle remote_alloc_acquire_subtable_directory(size_t size)
     {
-        auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                    (uint8_t) AcquireRequestFlag::kWithAllocation |
-                    (uint8_t) AcquireRequestFlag::kNoBindPR;
+        auto flag = (flag_t) AcquireRequestFlag::kNoGc |
+                    (flag_t) AcquireRequestFlag::kWithAllocation |
+                    (flag_t) AcquireRequestFlag::kNoBindPR;
         return rdma_adpt_->acquire_perm(
             nullgaddr, conf_.subtable_hint, size, 0ns, flag);
     }
@@ -1947,12 +1947,12 @@ private:
         if (unlikely(subtable_mem_handles_[idx].valid()))
         {
             // exist old handle, free it before going on
-            auto rel_flag = (uint8_t) 0;
+            auto rel_flag = (flag_t) 0;
             rdma_adpt_->relinquish_perm(
                 subtable_mem_handles_[idx], 0 /* hint */, rel_flag);
         }
         DCHECK(!subtable_mem_handles_[idx].valid());
-        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
         subtable_mem_handles_[idx] =
             rdma_adpt_->acquire_perm(cached_meta_.entries[idx],
                                      0 /* hint */,
@@ -1990,7 +1990,7 @@ private:
         CHECK(!g_kvblock_pool_gaddr.is_null());
         CHECK_GT(g_kvblock_pool_size, 0);
 
-        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
         kvblock_mem_handle_ = rdma_adpt_->acquire_perm(g_kvblock_pool_gaddr,
                                                        0 /* hint */,
                                                        g_kvblock_pool_size,

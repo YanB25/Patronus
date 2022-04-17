@@ -123,7 +123,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     0 /* alloc hint */,
                                     sizeof(Object),
                                     0ns,
-                                    (uint8_t) AcquireRequestFlag::kNoGc,
+                                    (flag_t) AcquireRequestFlag::kNoGc,
                                     &ctx);
         if (unlikely(!lease.success()))
         {
@@ -155,7 +155,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         // p->relinquish_write(lease, &ctx);
         // p->relinquish(
-        //     lease, (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind, &ctx);
+        //     lease, (flag_t) LeaseModifyFlag::kNoRelinquishUnbind, &ctx);
         p->relinquish(lease, 0, 0, &ctx);
 
         if (unlikely(enable_trace))

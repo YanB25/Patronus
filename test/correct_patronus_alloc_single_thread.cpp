@@ -85,7 +85,7 @@ void client_worker(Patronus::pointer p,
         auto addr_idx = fast_pseudo_rand_int(0, allocated_gaddrs.size() - 1);
         auto gaddr = allocated_gaddrs[addr_idx];
 
-        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
         auto lease = p->get_wlease(kServerNodeId,
                                    kDirID,
                                    gaddr,
@@ -104,12 +104,12 @@ void client_worker(Patronus::pointer p,
 
         CHECK_GE(rdma_buf.size, kAllocBufferSize);
         memset(CHECK_NOTNULL(rdma_buf.buffer), 0, kAllocBufferSize);
-        auto w_flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+        auto w_flag = (flag_t) RWFlag::kNoLocalExpireCheck;
         auto ec =
             p->write(lease, rdma_buf.buffer, kAllocBufferSize, 0, w_flag, &ctx);
         CHECK_EQ(ec, kOk);
 
-        auto rel_flag = (uint8_t) 0;
+        auto rel_flag = (flag_t) 0;
         p->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
     }
     p->put_rdma_buffer(rdma_buf);

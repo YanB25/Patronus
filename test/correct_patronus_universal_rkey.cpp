@@ -96,7 +96,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     0 /* alloc_hint */,
                                     size,
                                     0ns,
-                                    (uint8_t) AcquireRequestFlag::kNoGc,
+                                    (flag_t) AcquireRequestFlag::kNoGc |
+                                        (flag_t) AcquireRequestFlag::kDoNothing,
                                     &ctx);
         if (unlikely(!lease.success()))
         {
@@ -116,7 +117,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           rdma_buf.buffer,
                           sizeof(Object),
                           0 /* offset */,
-                          (uint8_t) RWFlag::kUseUniversalRkey,
+                          (flag_t) RWFlag::kUseUniversalRkey,
                           &ctx);
         CHECK_EQ(ec, RetCode::kOk)
             << "[bench] client coro " << ctx

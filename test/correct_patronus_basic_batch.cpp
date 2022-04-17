@@ -101,7 +101,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     0 /* alloc_hint */,
                                     sizeof(Object),
                                     0ns,
-                                    (uint8_t) AcquireRequestFlag::kNoGc,
+                                    (flag_t) AcquireRequestFlag::kNoGc,
                                     &ctx);
         if (unlikely(!lease.success()))
         {
@@ -112,7 +112,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
-        auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
 
         auto rdma_buf_1 = p->get_rdma_buffer(sizeof(uint64_t));
         CHECK_GE(rdma_buf_1.size, sizeof(uint64_t));

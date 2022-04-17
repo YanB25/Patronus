@@ -91,6 +91,7 @@ struct hash<RemoteMemHandle>
 class IRdmaAdaptor
 {
 public:
+    using flag_t = patronus::flag_t;
     using pointer = std::shared_ptr<IRdmaAdaptor>;
     using IAllocator = patronus::mem::IAllocator;
     using hint_t = uint64_t;
@@ -104,11 +105,11 @@ public:
                                          hint_t alloc_hint,
                                          size_t size,
                                          std::chrono::nanoseconds ns,
-                                         uint8_t flag) = 0;
+                                         flag_t flag) = 0;
     // free only
     virtual void remote_free(GlobalAddress, size_t size, hint_t) = 0;
     // all rel operations other than free-only
-    virtual void relinquish_perm(RemoteMemHandle &, hint_t, uint8_t flag) = 0;
+    virtual void relinquish_perm(RemoteMemHandle &, hint_t, flag_t flag) = 0;
 
     virtual Buffer get_rdma_buffer(size_t size) = 0;
     // use the put_all_rdma_buffer API.

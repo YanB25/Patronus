@@ -149,21 +149,22 @@ std::ostream &operator<<(std::ostream &os, const ClientID &cid)
     return os;
 }
 
-void debug_validate_acquire_request_flag(uint8_t flag)
+void debug_validate_acquire_request_flag(flag_t flag)
 {
     if constexpr (debug())
     {
-        bool no_gc = flag & (uint8_t) AcquireRequestFlag::kNoGc;
+        bool no_gc = flag & (flag_t) AcquireRequestFlag::kNoGc;
         bool with_conflict_detect =
-            flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+            flag & (flag_t) AcquireRequestFlag::kWithConflictDetect;
         [[maybe_unused]] bool no_bind_pr =
-            flag & (uint8_t) AcquireRequestFlag::kNoBindPR;
+            flag & (flag_t) AcquireRequestFlag::kNoBindPR;
         [[maybe_unused]] bool no_bind_any =
-            flag & (uint8_t) AcquireRequestFlag::kNoBindAny;
-        bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
-        bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
-        bool reserved = flag & (uint8_t) AcquireRequestFlag::kReserved;
-        bool use_mr = flag & (uint8_t) AcquireRequestFlag::kUseMR;
+            flag & (flag_t) AcquireRequestFlag::kNoBindAny;
+        bool with_alloc = flag & (flag_t) AcquireRequestFlag::kWithAllocation;
+        bool only_alloc = flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
+        bool reserved = flag & (flag_t) AcquireRequestFlag::kReserved;
+        bool use_mr = flag & (flag_t) AcquireRequestFlag::kUseMR;
+        bool do_nothing = flag & (flag_t) AcquireRequestFlag::kDoNothing;
         DCHECK(!reserved);
         if (with_alloc)
         {
@@ -186,53 +187,66 @@ void debug_validate_acquire_request_flag(uint8_t flag)
                 << "Not sure: If using MR, not guarantee to work with lease. "
                    "And the performance will be terrible in my expection";
         }
+        if (do_nothing)
+        {
+            CHECK(!with_conflict_detect)
+                << "with_conflict_detect conflict with do_nothing";
+            CHECK(!with_alloc) << "with_alloc conflict with do_nothing";
+            CHECK(!only_alloc) << "only_alloc conflict with do_nothing";
+            CHECK(!use_mr) << "use_mr conflict with do_nothing";
+        }
     }
 }
 
 std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
 {
     os << "{AcquireRequestFlag ";
-    bool reserved = flag.flag & (uint8_t) AcquireRequestFlag::kReserved;
+    bool reserved = flag.flag & (flag_t) AcquireRequestFlag::kReserved;
     if (reserved)
     {
         os << "RESERVED, ";
     }
-    bool no_gc = flag.flag & (uint8_t) AcquireRequestFlag::kNoGc;
+    bool no_gc = flag.flag & (flag_t) AcquireRequestFlag::kNoGc;
     if (no_gc)
     {
         os << "no-gc, ";
     }
     bool with_conflict_detect =
-        flag.flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+        flag.flag & (flag_t) AcquireRequestFlag::kWithConflictDetect;
     if (with_conflict_detect)
     {
         os << "with-lock, ";
     }
-    bool debug_no_bind_pr = flag.flag & (uint8_t) AcquireRequestFlag::kNoBindPR;
+    bool debug_no_bind_pr = flag.flag & (flag_t) AcquireRequestFlag::kNoBindPR;
     if (debug_no_bind_pr)
     {
         os << "no-pr, ";
     }
     bool debug_no_bind_any =
-        flag.flag & (uint8_t) AcquireRequestFlag::kNoBindAny;
+        flag.flag & (flag_t) AcquireRequestFlag::kNoBindAny;
     if (debug_no_bind_any)
     {
         os << "no-any, ";
     }
-    bool with_alloc = flag.flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+    bool with_alloc = flag.flag & (flag_t) AcquireRequestFlag::kWithAllocation;
     if (with_alloc)
     {
         os << "with-alloc, ";
     }
-    bool only_alloc = flag.flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+    bool only_alloc = flag.flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
     if (only_alloc)
     {
         os << "only-alloc, ";
     }
-    bool use_mr = flag.flag & (uint8_t) AcquireRequestFlag::kUseMR;
+    bool use_mr = flag.flag & (flag_t) AcquireRequestFlag::kUseMR;
     if (use_mr)
     {
         os << "use-MR, ";
+    }
+    bool do_nothing = flag.flag & (flag_t) AcquireRequestFlag::kDoNothing;
+    if (do_nothing)
+    {
+        os << "do-nothing, ";
     }
     os << "}";
     return os;
@@ -242,43 +256,43 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
 {
     os << "{RWFlag ";
     bool no_local_expire_check =
-        flag.flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
+        flag.flag & (flag_t) RWFlag::kNoLocalExpireCheck;
     if (no_local_expire_check)
     {
         os << "no-check, ";
     }
-    bool with_auto_extend = flag.flag & (uint8_t) RWFlag::kWithAutoExtend;
+    bool with_auto_extend = flag.flag & (flag_t) RWFlag::kWithAutoExtend;
     if (with_auto_extend)
     {
         os << "with-extend, ";
     }
-    bool with_cache = flag.flag & (uint8_t) RWFlag::kWithCache;
+    bool with_cache = flag.flag & (flag_t) RWFlag::kWithCache;
     if (with_cache)
     {
         os << "with-cache, ";
     }
-    bool use_universal_rkey = flag.flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    bool use_universal_rkey = flag.flag & (flag_t) RWFlag::kUseUniversalRkey;
     if (use_universal_rkey)
     {
         os << "use-universal-rkey, ";
     }
-    bool reserve = flag.flag & (uint8_t) RWFlag::kReserved;
+    bool reserve = flag.flag & (flag_t) RWFlag::kReserved;
     DCHECK(!reserve);
     os << "}";
     return os;
 }
-void debug_validate_lease_modify_flag(uint8_t flag)
+void debug_validate_lease_modify_flag(flag_t flag)
 {
     if constexpr (debug())
     {
         [[maybe_unused]] bool no_relinquish_unbind =
-            flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+            flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
         [[maybe_unused]] bool force_unbind =
-            flag & (uint8_t) LeaseModifyFlag::kForceUnbind;
-        bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
-        bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
-        bool reserved = flag & (uint8_t) LeaseModifyFlag::kReserved;
-        bool wait_success = flag & (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
+            flag & (flag_t) LeaseModifyFlag::kForceUnbind;
+        bool with_dealloc = flag & (flag_t) LeaseModifyFlag::kWithDeallocation;
+        bool only_dealloc = flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
+        bool reserved = flag & (flag_t) LeaseModifyFlag::kReserved;
+        bool wait_success = flag & (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
         if (only_dealloc)
         {
             DCHECK(!with_dealloc) << "with_dealloc conflict with only_dealloc";
@@ -300,41 +314,39 @@ void debug_validate_lease_modify_flag(uint8_t flag)
 std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
 {
     os << "{LeaseModifyFlag ";
-    bool reserved = flag.flag & (uint8_t) LeaseModifyFlag::kReserved;
+    bool reserved = flag.flag & (flag_t) LeaseModifyFlag::kReserved;
     if (reserved)
     {
         os << "RESERVED, ";
     }
     bool no_relinquish_unbind =
-        flag.flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        flag.flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
     if (no_relinquish_unbind)
     {
         os << "no-rel-unbind, ";
     }
-    bool force_unbind = flag.flag & (uint8_t) LeaseModifyFlag::kForceUnbind;
+    bool force_unbind = flag.flag & (flag_t) LeaseModifyFlag::kForceUnbind;
     if (force_unbind)
     {
         os << "force-unbind, ";
     }
-    bool with_dealloc =
-        flag.flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
+    bool with_dealloc = flag.flag & (flag_t) LeaseModifyFlag::kWithDeallocation;
     if (with_dealloc)
     {
         os << "with-dealloc, ";
     }
-    bool only_dealloc =
-        flag.flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    bool only_dealloc = flag.flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
     if (only_dealloc)
     {
         os << "only-dealloc, ";
     }
     bool wait_till_succ =
-        flag.flag & (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
+        flag.flag & (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
     if (wait_till_succ)
     {
         os << "wait-success, ";
     }
-    bool use_mr = flag.flag & (uint8_t) LeaseModifyFlag::kUseMR;
+    bool use_mr = flag.flag & (flag_t) LeaseModifyFlag::kUseMR;
     if (use_mr)
     {
         os << "use-MR, ";

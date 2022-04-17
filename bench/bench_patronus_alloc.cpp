@@ -161,8 +161,8 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     CoroYield &yield,
                                     CoroCommunication &coro_comm,
                                     size_t alloc_size,
-                                    uint8_t acquire_flag,
-                                    uint8_t relinquish_flag)
+                                    flag_t acquire_flag,
+                                    flag_t relinquish_flag)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid;
@@ -218,8 +218,8 @@ void bench_alloc_thread_coro(Patronus::pointer patronus,
                              size_t test_times,
                              std::atomic<ssize_t> &work_nr,
                              size_t coro_nr,
-                             uint8_t acquire_flag,
-                             uint8_t relinquish_flag)
+                             flag_t acquire_flag,
+                             flag_t relinquish_flag)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid;
@@ -262,8 +262,8 @@ void bench_template_coro(Patronus::pointer patronus,
                          size_t alloc_size,
                          size_t coro_nr,
                          std::atomic<ssize_t> &work_nr,
-                         uint8_t acquire_flag,
-                         uint8_t relinquish_flag)
+                         flag_t acquire_flag,
+                         flag_t relinquish_flag)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid;
@@ -290,8 +290,8 @@ void bench_template(const std::string &name,
                     size_t coro_nr,
                     bool is_master,
                     bool warm_up,
-                    uint8_t acquire_flag,
-                    uint8_t relinquish_flag)
+                    flag_t acquire_flag,
+                    flag_t relinquish_flag)
 
 {
     if (is_master)
@@ -343,9 +343,9 @@ void bench_patronus_get_rlease_nothing(Patronus::pointer patronus,
                                        bool is_master,
                                        bool warm_up)
 {
-    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                           (uint8_t) AcquireRequestFlag::kNoBindAny;
-    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                          (flag_t) AcquireRequestFlag::kNoBindAny;
+    flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
     return bench_template("get_rlease w/o(*)",
                           patronus,
                           bar,
@@ -370,9 +370,9 @@ void bench_patronus_get_rlease_one_bind(Patronus::pointer patronus,
                                         bool is_master,
                                         bool warm_up)
 {
-    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                           (uint8_t) AcquireRequestFlag::kNoBindPR;
-    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                          (flag_t) AcquireRequestFlag::kNoBindPR;
+    flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
     return bench_template("get_rlease w(buf) w/o(pr unbind gc)",
                           patronus,
                           bar,
@@ -397,8 +397,8 @@ void bench_patronus_get_rlease_no_unbind(Patronus::pointer patronus,
                                          bool is_master,
                                          bool warm_up)
 {
-    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc;
-    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc;
+    flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
     return bench_template("get_rlease w(pr buf) w/o(unbind gc)",
                           patronus,
                           bar,
@@ -423,8 +423,8 @@ void bench_patronus_get_rlease_full(Patronus::pointer patronus,
                                     bool is_master,
                                     bool warm_up)
 {
-    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc;
-    uint8_t relinquish_flag = 0;
+    flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc;
+    flag_t relinquish_flag = 0;
     return bench_template("get_rlease w(pr buf unbind) w/o(gc)",
                           patronus,
                           bar,
@@ -449,9 +449,9 @@ void bench_patronus_get_rlease_full_over_mr(Patronus::pointer patronus,
                                             bool is_master,
                                             bool warm_up)
 {
-    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                           (uint8_t) AcquireRequestFlag::kUseMR;
-    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kUseMR;
+    flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                          (flag_t) AcquireRequestFlag::kUseMR;
+    flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kUseMR;
     return bench_template("get_rlease w(pr buf unbind [MR]) w/o(gc)",
                           patronus,
                           bar,
@@ -476,8 +476,8 @@ void bench_patronus_get_rlease_full_auto_gc(Patronus::pointer patronus,
                                             bool is_master,
                                             bool warm_up)
 {
-    uint8_t acquire_flag = 0;
-    uint8_t relinquish_flag = 0;
+    flag_t acquire_flag = 0;
+    flag_t relinquish_flag = 0;
     return bench_template("get_rlease w(pr buf unbind gc)",
                           patronus,
                           bar,
@@ -501,10 +501,10 @@ void bench_patronus_alloc(Patronus::pointer patronus,
                           bool is_master,
                           bool warm_up)
 {
-    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kWithAllocation |
-                           (uint8_t) AcquireRequestFlag::kNoBindPR |
-                           (uint8_t) AcquireRequestFlag::kNoGc;
-    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kWithDeallocation;
+    flag_t acquire_flag = (flag_t) AcquireRequestFlag::kWithAllocation |
+                          (flag_t) AcquireRequestFlag::kNoBindPR |
+                          (flag_t) AcquireRequestFlag::kNoGc;
+    flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kWithDeallocation;
     return bench_template("alloc w(unbind)",
                           patronus,
                           bar,
@@ -528,11 +528,11 @@ void bench_patronus_alloc_no_unbind(Patronus::pointer patronus,
                                     bool is_master,
                                     bool warm_up)
 {
-    uint8_t acquire_flag = (uint8_t) AcquireRequestFlag::kWithAllocation |
-                           (uint8_t) AcquireRequestFlag::kNoBindPR |
-                           (uint8_t) AcquireRequestFlag::kNoGc;
-    uint8_t relinquish_flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind |
-                              (uint8_t) LeaseModifyFlag::kWithDeallocation;
+    flag_t acquire_flag = (flag_t) AcquireRequestFlag::kWithAllocation |
+                          (flag_t) AcquireRequestFlag::kNoBindPR |
+                          (flag_t) AcquireRequestFlag::kNoGc;
+    flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind |
+                             (flag_t) LeaseModifyFlag::kWithDeallocation;
     return bench_template("alloc w/o(unbind)",
                           patronus,
                           bar,

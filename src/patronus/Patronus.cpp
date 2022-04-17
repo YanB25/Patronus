@@ -118,7 +118,7 @@ void Patronus::barrier(uint64_t key)
     char *rdma_buf = get_rdma_message_buffer();
     auto *msg = (AdminRequest *) rdma_buf;
     msg->type = RequestType::kAdmin;
-    msg->flag = (uint8_t) AdminFlag::kAdminBarrier;
+    msg->flag = (flag_t) AdminFlag::kAdminBarrier;
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = tid;
     msg->cid.mid = from_mid;
@@ -199,12 +199,48 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
                                size_t size,
                                time::ns_t ns,
                                RequestType type,
-                               uint8_t flag,
+                               flag_t flag,
                                CoroContext *ctx)
 {
     DCHECK(type == RequestType::kAcquireNoLease ||
            type == RequestType::kAcquireWLease ||
            type == RequestType::kAcquireRLease);
+
+    bool do_nothing = flag & (flag_t) AcquireRequestFlag::kDoNothing;
+    bool no_gc = flag & (flag_t) AcquireRequestFlag::kNoGc;
+    if (unlikely(do_nothing))
+    {
+        Lease ret;
+        ret.node_id_ = node_id;
+        ret.no_gc_ = no_gc;
+        if (no_gc)
+        {
+            ret.ddl_term_ = time::PatronusTime::max();
+        }
+
+        auto object_buffer_offset = key_or_hint;  // must be key in this case
+        auto object_dsm_offset =
+            dsm_->buffer_offset_to_dsm_offset(object_buffer_offset);
+        ret.base_addr_ = object_dsm_offset;
+
+        ret.buffer_size_ = size;
+        ret.header_addr_ = 0;
+        ret.header_size_ = 0;
+        ret.header_rkey_ = 0;
+        ret.cur_rkey_ = 0;
+        ret.begin_term_ = 0;
+        ret.ns_per_unit_ = 0;
+        ret.aba_unit_nr_to_ddl_ = compound_uint64_t(0, 1);
+        ret.update_ddl_term();
+        ret.id_ = 0;
+        ret.dir_id_ = dir_id;
+        ret.lease_type_ = type == RequestType::kAcquireWLease
+                              ? LeaseType::kWriteLease
+                              : LeaseType::kReadLease;
+
+        ret.set_finish();
+        return ret;
+    }
 
     bool enable_trace = false;
     trace_t trace = 0;
@@ -237,7 +273,6 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
 
     Lease ret_lease;
     ret_lease.node_id_ = node_id;
-    bool no_gc = flag & (uint8_t) AcquireRequestFlag::kNoGc;
     ret_lease.no_gc_ = no_gc;
 
     auto *msg = (AcquireRequest *) rdma_buf;
@@ -561,7 +596,7 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
  * @brief the actual implementation to modify a lease (especially relinquish
  * it).
  *
- * Depending on whether flag & (uint8_t) LeaseModifyFlag::kOnlyAllocation is ON,
+ * Depending on whether flag & (flag_t) LeaseModifyFlag::kOnlyAllocation is ON,
  * the actual implemention will be very different.
  *
  * If flag is ON:
@@ -576,7 +611,7 @@ Lease Patronus::lease_modify_impl(Lease &lease,
                                   uint64_t hint,
                                   RequestType type,
                                   time::ns_t ns,
-                                  uint8_t flag,
+                                  flag_t flag,
                                   CoroContext *ctx)
 {
     CHECK(type == RequestType::kExtend || type == RequestType::kRelinquish ||
@@ -914,16 +949,16 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     // will not actually bind memory window.
     // TODO(patronus): even with no_bind_pr, the PR is also allocated
     // We can optimize this.
-    bool force_no_bind_pr = req->flag & (uint8_t) AcquireRequestFlag::kNoBindPR;
+    bool force_no_bind_pr = req->flag & (flag_t) AcquireRequestFlag::kNoBindPR;
     bool force_no_bind_any =
-        req->flag & (uint8_t) AcquireRequestFlag::kNoBindAny;
-    bool with_alloc = req->flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
-    bool only_alloc = req->flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
+        req->flag & (flag_t) AcquireRequestFlag::kNoBindAny;
+    bool with_alloc = req->flag & (flag_t) AcquireRequestFlag::kWithAllocation;
+    bool only_alloc = req->flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
 
-    bool use_mr = req->flag & (uint8_t) AcquireRequestFlag::kUseMR;
+    bool use_mr = req->flag & (flag_t) AcquireRequestFlag::kUseMR;
 
     bool with_lock =
-        req->flag & (uint8_t) AcquireRequestFlag::kWithConflictDetect;
+        req->flag & (flag_t) AcquireRequestFlag::kWithConflictDetect;
 
     bool with_buf = true;
     bool with_pr = true;
@@ -1273,7 +1308,7 @@ handle_response:
         resp_msg->header_base = header_dsm_offset;
         resp_msg->lease_id = lease_id;
 
-        bool reserved = req->flag & (uint8_t) AcquireRequestFlag::kReserved;
+        bool reserved = req->flag & (flag_t) AcquireRequestFlag::kReserved;
         DCHECK(!reserved)
             << "reserved flag should not be set. Possible corrupted message";
 
@@ -1288,7 +1323,7 @@ handle_response:
         }
 
         // success, so register Lease expiring logic here.
-        bool no_gc = req->flag & (uint8_t) AcquireRequestFlag::kNoGc;
+        bool no_gc = req->flag & (flag_t) AcquireRequestFlag::kNoGc;
 
         // can not enable gc while disable pr.
         bool invalid = !no_gc && !with_pr;
@@ -1305,7 +1340,7 @@ handle_response:
             // NOTE:
             // We have to wait until success, because
             // a flood of auto-unbind will overwhelm the QP
-            auto flag = (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
+            auto flag = (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
 
             ddl_manager_.push(
                 patronus_ddl_term,
@@ -1412,8 +1447,7 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
 {
     DCHECK_EQ(req->type, RequestType::kRelinquish);
 
-    bool only_dealloc =
-        req->flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    bool only_dealloc = req->flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
 
     // handle dealloc here
     if (only_dealloc)
@@ -1428,7 +1462,7 @@ void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
     task_gc_lease(lease_id,
                   req->cid,
                   compound_uint64_t(0),
-                  req->flag | (uint8_t) LeaseModifyFlag::kForceUnbind,
+                  req->flag | (flag_t) LeaseModifyFlag::kForceUnbind,
                   ctx);
 }
 
@@ -1665,7 +1699,7 @@ void Patronus::finished(uint64_t key)
     char *rdma_buf = get_rdma_message_buffer();
     auto *msg = (AdminRequest *) rdma_buf;
     msg->type = RequestType::kAdmin;
-    msg->flag = (uint8_t) AdminFlag::kAdminReqExit;
+    msg->flag = (flag_t) AdminFlag::kAdminReqExit;
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = tid;
     msg->cid.mid = from_mid;
@@ -1781,7 +1815,7 @@ void Patronus::signal_server_to_recover_qp(size_t node_id, size_t dir_id)
     msg->cid.coro_id = kNotACoro;
     msg->cid.rpc_ctx_id = 0;
     msg->dir_id = dir_id;
-    msg->flag = (uint8_t) AdminFlag::kAdminReqRecovery;
+    msg->flag = (flag_t) AdminFlag::kAdminReqRecovery;
 
     if constexpr (debug())
     {
@@ -2244,7 +2278,7 @@ void Patronus::server_coro_master(CoroYield &yield,
 void Patronus::task_gc_lease(uint64_t lease_id,
                              ClientID cid,
                              compound_uint64_t expect_aba_unit_nr_to_ddl,
-                             uint8_t flag /* LeaseModifyFlag */,
+                             flag_t flag /* LeaseModifyFlag */,
                              CoroContext *ctx)
 {
     debug_validate_lease_modify_flag(flag);
@@ -2253,12 +2287,12 @@ void Patronus::task_gc_lease(uint64_t lease_id,
              << ", expect cid " << cid << ", coro: " << pre_coro_ctx(ctx)
              << ", at patronus time: " << time_syncer_->patronus_now();
 
-    bool wait_success = flag & (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
-    bool with_dealloc = flag & (uint8_t) LeaseModifyFlag::kWithDeallocation;
-    bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    bool wait_success = flag & (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
+    bool with_dealloc = flag & (flag_t) LeaseModifyFlag::kWithDeallocation;
+    bool only_dealloc = flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
     DCHECK(!only_dealloc) << "This case should have been handled. "
                              "task_gc_lease never handle this";
-    bool use_mr = flag & (uint8_t) LeaseModifyFlag::kUseMR;
+    bool use_mr = flag & (flag_t) LeaseModifyFlag::kUseMR;
 
     auto *lease_ctx = get_lease_context(lease_id);
     if (unlikely(lease_ctx == nullptr))
@@ -2311,7 +2345,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         DCHECK_GE(unit_nr_to_ddl, expect_unit_nr_to_ddl)
             << "** The period will not go back: client only extend them";
         // indicate that server will by no means GC the lease
-        bool force_gc = flag & (uint8_t) LeaseModifyFlag::kForceUnbind;
+        bool force_gc = flag & (flag_t) LeaseModifyFlag::kForceUnbind;
         bool client_already_exteded = unit_nr_to_ddl != expect_unit_nr_to_ddl;
         DVLOG(4) << "[patronus][gc_lease] determine the behaviour: force_gc: "
                  << force_gc
@@ -2401,7 +2435,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         DCHECK_EQ(signal_wrid.prefix, WRID_PREFIX_PATRONUS_UNBIND_MW);
     }
 
-    bool no_unbind = flag & (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    bool no_unbind = flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
     if (only_dealloc)
     {
         no_unbind = true;
@@ -2710,7 +2744,7 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
                                 const char *ibuf,
                                 size_t size,
                                 size_t offset,
-                                uint8_t flag,
+                                flag_t flag,
                                 CoroContext *ctx)
 {
     auto ec = handle_batch_op_flag(flag);
@@ -2724,7 +2758,7 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
     uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
     if (use_universal_rkey)
     {
         rkey = dsm_->get_rkey(node_id, dir_id);
@@ -2751,7 +2785,7 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
                                char *obuf,
                                size_t size,
                                size_t offset,
-                               uint8_t flag,
+                               flag_t flag,
                                CoroContext *ctx)
 {
     auto ec = handle_batch_op_flag(flag);
@@ -2765,7 +2799,7 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
     uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
     if (use_universal_rkey)
     {
         rkey = dsm_->get_rkey(node_id, dir_id);
@@ -2793,7 +2827,7 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
                               size_t offset,
                               uint64_t compare,
                               uint64_t swap,
-                              uint8_t flag,
+                              flag_t flag,
                               CoroContext *ctx)
 {
     auto ec = handle_batch_op_flag(flag);
@@ -2807,7 +2841,7 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
     uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
     if (use_universal_rkey)
     {
         rkey = dsm_->get_rkey(node_id, dir_id);
@@ -2829,18 +2863,18 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
         qp, node_id, dir_id, dest, source, compare, swap, lkey, rkey, ctx);
 }
 
-RetCode Patronus::handle_batch_op_flag(uint8_t flag) const
+RetCode Patronus::handle_batch_op_flag(flag_t flag) const
 {
     if constexpr (debug())
     {
-        bool no_local_check = flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
+        bool no_local_check = flag & (flag_t) RWFlag::kNoLocalExpireCheck;
         CHECK(no_local_check) << "** Batch op not support local expire checks";
-        bool with_auto_expend = flag & (uint8_t) RWFlag::kWithAutoExtend;
+        bool with_auto_expend = flag & (flag_t) RWFlag::kWithAutoExtend;
         CHECK(!with_auto_expend)
             << "** Batch op does not support auto lease extend";
-        bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+        bool with_cache = flag & (flag_t) RWFlag::kWithCache;
         CHECK(!with_cache) << "** Batch op does not support local caching";
-        bool reserved = flag & (uint8_t) RWFlag::kReserved;
+        bool reserved = flag & (flag_t) RWFlag::kReserved;
         CHECK(!reserved);
     }
     return kOk;

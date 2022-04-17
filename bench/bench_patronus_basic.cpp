@@ -30,14 +30,13 @@ static_assert(kThreadNr <= RMSG_MULTIPLEXING);
 // this script will use the fatest path:
 // server no auto gc, client no lease checking, relinquish no unbind.
 // But still bind both ProtectionRegion and Buffer.
-constexpr static uint8_t kAcquireLeaseFlag =
-    (uint8_t) AcquireRequestFlag::kNoGc;
+constexpr static flag_t kAcquireLeaseFlag = (flag_t) AcquireRequestFlag::kNoGc;
 
-constexpr static uint8_t kRelinquishFlag =
-    (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
-// constexpr static uint8_t kRelinquishFlag = 0;
+constexpr static flag_t kRelinquishFlag =
+    (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
+// constexpr static flag_t kRelinquishFlag = 0;
 
-constexpr static uint8_t kReadWriteFlag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+constexpr static flag_t kReadWriteFlag = (flag_t) RWFlag::kNoLocalExpireCheck;
 constexpr static uint64_t kWaitKey = 0;
 
 using namespace std::chrono_literals;

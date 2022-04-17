@@ -21,9 +21,9 @@ struct RaceHashingHandleConfig
         struct
         {
             bool do_nothing{false};
-            uint8_t flag{
-                (uint8_t) AcquireRequestFlag::kNoGc |
-                (uint8_t) AcquireRequestFlag::kNoBindPR};  // AcquireRequestFlag
+            flag_t flag{
+                (flag_t) AcquireRequestFlag::kNoGc |
+                (flag_t) AcquireRequestFlag::kNoBindPR};  // AcquireRequestFlag
             uint64_t alloc_hint{0};
             std::chrono::nanoseconds lease_time{0ns};
 
@@ -32,7 +32,7 @@ struct RaceHashingHandleConfig
         {
             bool do_nothing{false};
             uint64_t alloc_hint{0};
-            uint8_t flag{(uint8_t) 0};
+            flag_t flag{(flag_t) 0};
         } end;
 
     } read_kvblock;
@@ -42,9 +42,9 @@ struct RaceHashingHandleConfig
         struct
         {
             bool use_alloc_api{false};
-            uint8_t flag{(uint8_t) AcquireRequestFlag::kNoGc |
-                         (uint8_t) AcquireRequestFlag::kWithAllocation |
-                         (uint8_t) AcquireRequestFlag::kNoBindPR};
+            flag_t flag{(flag_t) AcquireRequestFlag::kNoGc |
+                        (flag_t) AcquireRequestFlag::kWithAllocation |
+                        (flag_t) AcquireRequestFlag::kNoBindPR};
             uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
             std::chrono::nanoseconds lease_time{0ns};
         } begin;
@@ -55,7 +55,7 @@ struct RaceHashingHandleConfig
             bool do_nothing{false};
             bool use_alloc_api{false};
             uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
-            uint8_t flag{0};
+            flag_t flag{0};
         } end;
         struct
         {
@@ -64,7 +64,7 @@ struct RaceHashingHandleConfig
             bool do_nothing{false};
             bool use_dealloc_api{false};
             uint64_t alloc_hint{hash::config::kAllocHintKVBlock};
-            uint8_t flag{(uint8_t) LeaseModifyFlag::kWithDeallocation};
+            flag_t flag{(flag_t) LeaseModifyFlag::kWithDeallocation};
         } free;
         bool enable_batch_alloc{false};
         size_t batch_alloc_size{0};
@@ -84,13 +84,13 @@ struct RaceHashingHandleConfig
         bool eager_bind_subtable{false};
         uint64_t alloc_hint{hash::config::kAllocHintDefault};
         std::chrono::nanoseconds lease_time{0ns};
-        uint8_t flag{(uint8_t) AcquireRequestFlag::kNoGc};
+        flag_t flag{(flag_t) AcquireRequestFlag::kNoGc};
         std::optional<RemoteMemHandle> dcache_handle{std::nullopt};
     } init;
     struct
     {
         uint64_t alloc_hint{0};
-        uint8_t flag{(uint8_t) LeaseModifyFlag::kWaitUntilSuccess};
+        flag_t flag{(flag_t) LeaseModifyFlag::kWaitUntilSuccess};
     } dctor;
 
     // the hints
@@ -222,23 +222,23 @@ public:
     {
         auto c = get_basic(name, kvblock_expect_size);
         c.read_kvblock.begin.do_nothing = true;
-        c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kReserved;
+        c.read_kvblock.begin.flag = (flag_t) AcquireRequestFlag::kReserved;
         c.read_kvblock.end.do_nothing = true;
-        c.read_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.read_kvblock.end.flag = (flag_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.begin.use_alloc_api = true;
         c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
-        c.insert_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kReserved;
+        c.insert_kvblock.begin.flag = (flag_t) AcquireRequestFlag::kReserved;
         c.insert_kvblock.end.use_alloc_api =
             c.insert_kvblock.begin.use_alloc_api;
         c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
-        c.insert_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.insert_kvblock.end.flag = (flag_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.batch_alloc_size = batch_size;
         c.insert_kvblock.enable_batch_alloc = batch_size > 1;
         c.insert_kvblock.free.do_nothing = false;
         c.insert_kvblock.free.use_dealloc_api =
             c.insert_kvblock.begin.use_alloc_api;
         c.insert_kvblock.free.alloc_hint = c.insert_kvblock.begin.alloc_hint;
-        c.insert_kvblock.free.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.insert_kvblock.free.flag = (flag_t) LeaseModifyFlag::kReserved;
         c.free_kvblock.do_nothing = true;
         return c;
     }
@@ -250,8 +250,8 @@ public:
         c.init.skip_bind_g_kvblock = true;
         // no subtable, because no protection
         c.init.eager_bind_subtable = false;
-        c.init.flag = (uint8_t) AcquireRequestFlag::kReserved;
-        c.dctor.flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        c.init.flag = (flag_t) AcquireRequestFlag::kReserved;
+        c.dctor.flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
         // can not init mem_handle here
         // because we don't know the dir_id
         return c;
@@ -262,16 +262,16 @@ public:
     {
         auto c = get_basic(name, kvblock_expect_size);
         c.read_kvblock.begin.do_nothing = false;
-        c.read_kvblock.begin.flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                                    (uint8_t) AcquireRequestFlag::kNoBindPR;
+        c.read_kvblock.begin.flag = (flag_t) AcquireRequestFlag::kNoGc |
+                                    (flag_t) AcquireRequestFlag::kNoBindPR;
         c.read_kvblock.begin.lease_time = 0ns;
         c.read_kvblock.end.do_nothing = false;
-        c.read_kvblock.end.flag = (uint8_t) 0;
+        c.read_kvblock.end.flag = (flag_t) 0;
         c.insert_kvblock.begin.use_alloc_api = false;
         c.insert_kvblock.begin.flag =
-            (uint8_t) AcquireRequestFlag::kNoGc |
-            (uint8_t) AcquireRequestFlag::kWithAllocation |
-            (uint8_t) AcquireRequestFlag::kNoBindPR;
+            (flag_t) AcquireRequestFlag::kNoGc |
+            (flag_t) AcquireRequestFlag::kWithAllocation |
+            (flag_t) AcquireRequestFlag::kNoBindPR;
         c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
         c.insert_kvblock.end.use_alloc_api =
             c.insert_kvblock.begin.use_alloc_api;
@@ -284,7 +284,7 @@ public:
             c.insert_kvblock.begin.use_alloc_api;
         c.insert_kvblock.free.alloc_hint = c.insert_kvblock.begin.alloc_hint;
         c.insert_kvblock.free.flag =
-            (uint8_t) LeaseModifyFlag::kWithDeallocation;
+            (flag_t) LeaseModifyFlag::kWithDeallocation;
         c.free_kvblock.do_nothing = true;
         return c;
     }
@@ -298,8 +298,8 @@ public:
         // time
         c.init.skip_bind_g_kvblock = true;
         c.init.eager_bind_subtable = eager_bind_subtable;
-        c.init.flag = (uint8_t) AcquireRequestFlag::kNoGc;
-        c.dctor.flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        c.init.flag = (flag_t) AcquireRequestFlag::kNoGc;
+        c.dctor.flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
         return c;
     }
     // can not support batch allocation
@@ -312,25 +312,25 @@ public:
         c.read_kvblock.begin.flag = 0;
         c.read_kvblock.begin.lease_time = 1ms;  // definitely enough
         c.read_kvblock.end.do_nothing = true;
-        c.read_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.read_kvblock.end.flag = (flag_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.begin.use_alloc_api = false;
         // with PR, because lease is enabled.
         c.insert_kvblock.begin.flag =
-            (uint8_t) AcquireRequestFlag::kWithAllocation;
+            (flag_t) AcquireRequestFlag::kWithAllocation;
         c.insert_kvblock.begin.lease_time = 1ms;  // definitely enough
         c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
         c.insert_kvblock.end.use_alloc_api =
             c.insert_kvblock.begin.use_alloc_api;
         c.insert_kvblock.end.do_nothing = true;
         c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
-        c.insert_kvblock.end.flag = (uint8_t) LeaseModifyFlag::kReserved;
+        c.insert_kvblock.end.flag = (flag_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.enable_batch_alloc = false;
         c.insert_kvblock.free.do_nothing = false;
         c.insert_kvblock.free.use_dealloc_api =
             c.insert_kvblock.begin.use_alloc_api;
         c.insert_kvblock.free.alloc_hint = c.insert_kvblock.begin.alloc_hint;
         c.insert_kvblock.free.flag =
-            (uint8_t) LeaseModifyFlag::kWithDeallocation;
+            (flag_t) LeaseModifyFlag::kWithDeallocation;
         c.free_kvblock.do_nothing = true;
         return c;
     }
@@ -339,8 +339,8 @@ public:
                                                     size_t batch_size)
     {
         auto c = get_mw_protected(name, kvblock_expect_size, batch_size);
-        c.read_kvblock.begin.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
-        c.read_kvblock.end.flag |= (uint8_t) LeaseModifyFlag::kUseMR;
+        c.read_kvblock.begin.flag |= (flag_t) AcquireRequestFlag::kUseMR;
+        c.read_kvblock.end.flag |= (flag_t) LeaseModifyFlag::kUseMR;
         // NOTE: we already set flag kUSeMR ON.
         // No need to use KVBlockOverMR hint.
         // Otherwise, the MR will be bind twice, and MR in the allocator is
@@ -348,10 +348,10 @@ public:
         c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
         DCHECK(!c.insert_kvblock.begin.use_alloc_api);
         c.insert_kvblock.end.alloc_hint = c.insert_kvblock.begin.alloc_hint;
-        c.insert_kvblock.begin.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
-        c.insert_kvblock.end.flag |= (uint8_t) LeaseModifyFlag::kUseMR;
-        c.insert_kvblock.free.flag |= (uint8_t) LeaseModifyFlag::kUseMR;
-        c.dctor.flag |= (uint8_t) LeaseModifyFlag::kUseMR;
+        c.insert_kvblock.begin.flag |= (flag_t) AcquireRequestFlag::kUseMR;
+        c.insert_kvblock.end.flag |= (flag_t) LeaseModifyFlag::kUseMR;
+        c.insert_kvblock.free.flag |= (flag_t) LeaseModifyFlag::kUseMR;
+        c.dctor.flag |= (flag_t) LeaseModifyFlag::kUseMR;
 
         c.test_nr_scale_factor = 1.0 / 10;
         return c;
@@ -360,8 +360,8 @@ public:
         const std::string &name, bool eager_bind_subtable)
     {
         auto c = get_mw_protected_bootstrap(name, eager_bind_subtable);
-        c.init.flag |= (uint8_t) AcquireRequestFlag::kUseMR;
-        c.dctor.flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        c.init.flag |= (flag_t) AcquireRequestFlag::kUseMR;
+        c.dctor.flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
 
         c.test_nr_scale_factor = 1.0 / 10;
         return c;

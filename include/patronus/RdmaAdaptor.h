@@ -148,7 +148,7 @@ public:
                                  hint_t alloc_hint,
                                  size_t size,
                                  std::chrono::nanoseconds ns,
-                                 uint8_t flag) override
+                                 flag_t flag) override
     {
         if constexpr (::config::kEnableRdmaTrace)
         {
@@ -240,7 +240,7 @@ public:
     }
     void relinquish_perm(RemoteMemHandle &handle,
                          hint_t hint,
-                         uint8_t flag) override
+                         flag_t flag) override
     {
         CHECK(handle.valid());
         if constexpr (::config::kEnableRdmaTrace)
@@ -305,7 +305,7 @@ public:
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
         auto ec = patronus_->prepare_read(
             batch_, lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
         if (unlikely(ec == kNoMem))
@@ -339,7 +339,7 @@ public:
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
         auto ec = patronus_->prepare_write(
             batch_, lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
         if (unlikely(ec == kNoMem))
@@ -380,7 +380,7 @@ public:
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (uint8_t) RWFlag::kNoLocalExpireCheck;
+        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
         auto rc = patronus_->prepare_cas(batch_,
                                          lease,
                                          (char *) rdma_buf,

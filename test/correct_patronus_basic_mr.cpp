@@ -86,8 +86,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto locate_offset = bench_locator(coro_key);
-        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                       (uint8_t) AcquireRequestFlag::kUseMR;
+        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                       (flag_t) AcquireRequestFlag::kUseMR;
         Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
                                     GlobalAddress(0, locate_offset),
@@ -132,7 +132,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
-        auto rel_flag = (uint8_t) LeaseModifyFlag::kUseMR;
+        auto rel_flag = (flag_t) LeaseModifyFlag::kUseMR;
         p->relinquish(lease, 0, rel_flag, &ctx);
 
         p->put_rdma_buffer(rdma_buf);

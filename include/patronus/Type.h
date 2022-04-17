@@ -16,6 +16,7 @@ namespace patronus
 using id_t = uint64_t;
 using rkey_t = uint32_t;
 using chrono_time_t = std::chrono::time_point<std::chrono::steady_clock>;
+using flag_t = uint64_t;
 
 // force enum to be sizeof(uint8_t)
 enum class RequestType : uint8_t
@@ -84,7 +85,7 @@ struct BaseMessage
     char others[0];
 } __attribute__((packed));
 
-enum class AcquireRequestFlag : uint8_t
+enum class AcquireRequestFlag : uint16_t
 {
     kNoGc = 1 << 0,
     kWithConflictDetect = 1 << 1,
@@ -93,16 +94,17 @@ enum class AcquireRequestFlag : uint8_t
     kWithAllocation = 1 << 4,
     kOnlyAllocation = 1 << 5,
     kUseMR = 1 << 6,
-    kReserved = 1 << 7,
+    kDoNothing = 1 << 7,
+    kReserved = 1 << 8,
 };
 
-void debug_validate_acquire_request_flag(uint8_t flag);
+void debug_validate_acquire_request_flag(flag_t flag);
 struct AcquireRequestFlagOut
 {
-    AcquireRequestFlagOut(uint8_t flag) : flag(flag)
+    AcquireRequestFlagOut(flag_t flag) : flag(flag)
     {
     }
-    uint8_t flag;
+    flag_t flag;
 };
 std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag);
 struct AcquireRequest
@@ -114,12 +116,13 @@ struct AcquireRequest
     time::ns_t required_ns;
     uint16_t dir_id;
     trace_t trace;
-    uint8_t flag;  // should be AcquireRequestFlag
+    uint16_t flag;  // should be AcquireRequestFlag
     Debug<uint64_t> digest;
 } __attribute__((packed));
 static_assert(sizeof(AcquireRequest) < ReliableConnection::kMessageSize);
 static_assert(NR_DIRECTORY <
               std::numeric_limits<decltype(AcquireRequest::dir_id)>::max());
+static_assert(sizeof(AcquireRequest::flag) >= sizeof(AcquireRequestFlag));
 std::ostream &operator<<(std::ostream &os, const AcquireRequest &req);
 
 struct AcquireResponse
@@ -158,7 +161,30 @@ struct AdminRequest
     uint64_t data;  // used by p->barrier()
 } __attribute__((packed));
 static_assert(sizeof(AdminRequest) < ReliableConnection::kMessageSize);
+static_assert(sizeof(AdminRequest::flag) >= sizeof(AdminFlag));
 std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);
+
+enum class LeaseModifyFlag : uint8_t
+{
+    kNoRelinquishUnbind = 1 << 0,
+    kForceUnbind = 1 << 1,
+    kWithDeallocation = 1 << 2,
+    kOnlyDeallocation = 1 << 3,
+    // wait until unbind success before returning
+    // will harm performance
+    kWaitUntilSuccess = 1 << 4,
+    kUseMR = 1 << 5,
+    kReserved = 1 << 6,
+};
+void debug_validate_lease_modify_flag(flag_t flag);
+struct LeaseModifyFlagOut
+{
+    LeaseModifyFlagOut(flag_t flag) : flag(flag)
+    {
+    }
+    flag_t flag;
+};
+std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag);
 
 struct LeaseModifyRequest
 {
@@ -174,6 +200,7 @@ struct LeaseModifyRequest
 } __attribute__((packed));
 static_assert(sizeof(LeaseModifyRequest) < ReliableConnection::kMessageSize);
 std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req);
+static_assert(sizeof(LeaseModifyRequest::flag) >= sizeof(LeaseModifyFlag));
 
 struct LeaseModifyResponse
 {
@@ -198,34 +225,12 @@ enum class RWFlag : uint8_t
 
 struct RWFlagOut
 {
-    RWFlagOut(uint8_t flag) : flag(flag)
+    RWFlagOut(flag_t flag) : flag(flag)
     {
     }
-    uint8_t flag;
+    flag_t flag;
 };
 std::ostream &operator<<(std::ostream &os, RWFlagOut flag);
-
-enum class LeaseModifyFlag : uint8_t
-{
-    kNoRelinquishUnbind = 1 << 0,
-    kForceUnbind = 1 << 1,
-    kWithDeallocation = 1 << 2,
-    kOnlyDeallocation = 1 << 3,
-    // wait until unbind success before returning
-    // will harm performance
-    kWaitUntilSuccess = 1 << 4,
-    kUseMR = 1 << 5,
-    kReserved = 1 << 6,
-};
-void debug_validate_lease_modify_flag(uint8_t flag);
-struct LeaseModifyFlagOut
-{
-    LeaseModifyFlagOut(uint8_t flag) : flag(flag)
-    {
-    }
-    uint8_t flag;
-};
-std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag);
 
 }  // namespace patronus
 

@@ -49,7 +49,7 @@ void client_worker(Patronus::pointer p,
 
     // checking acquire_perm
     {
-        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
         auto handle =
             rdma_adpt->acquire_perm(gaddr, 0 /* hint */, 64, 0ns, ac_flag);
         auto rdma_buf = rdma_adpt->get_rdma_buffer(128);
@@ -115,9 +115,9 @@ void client_worker(Patronus::pointer p,
 
     // checking acquire_perm with allocation semantics
     {
-        auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                       (uint8_t) AcquireRequestFlag::kWithAllocation |
-                       (uint8_t) AcquireRequestFlag::kNoBindPR;
+        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                       (flag_t) AcquireRequestFlag::kWithAllocation |
+                       (flag_t) AcquireRequestFlag::kNoBindPR;
         auto handle =
             rdma_adpt->acquire_perm(nullgaddr, 0 /* hint */, 64, 0ns, ac_flag);
 
@@ -176,7 +176,7 @@ void client_worker(Patronus::pointer p,
             }
         }
 
-        auto rel_flag = (uint8_t) LeaseModifyFlag::kWaitUntilSuccess;
+        auto rel_flag = (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
         rdma_adpt->relinquish_perm(handle, 0 /* hint */, rel_flag);
 
         auto rc = rdma_adpt->put_all_rdma_buffer();
@@ -205,7 +205,7 @@ void client_worker(Patronus::pointer p,
         for (const auto &gaddr : gaddrs)
         {
             // should be writable
-            auto ac_flag = (uint8_t) AcquireRequestFlag::kNoGc;
+            auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
             auto handle = rdma_adpt->acquire_perm(
                 gaddr, 0 /* hint */, kAllocSize, 0ns, ac_flag);
             auto rdma_w_buf = rdma_adpt->get_rdma_buffer(kAllocSize);

@@ -100,7 +100,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               rdma_buf.buffer,
                               sizeof(Object),
                               0 /*offset*/,
-                              (uint8_t) RWFlag::kWithAutoExtend,
+                              (flag_t) RWFlag::kWithAutoExtend,
                               &ctx);
             if (ec == RetCode::kOk)
             {

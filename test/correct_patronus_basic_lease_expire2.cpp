@@ -88,7 +88,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     sizeof(Object),
                                     kInitialLeasePeriod,
                                     0 /* no flag */,
-                                    // (uint8_t) AcquireRequestFlag::kNoGc,
+                                    // (flag_t) AcquireRequestFlag::kNoGc,
                                     &ctx);
         auto after_get_rlease = std::chrono::steady_clock::now();
         auto get_rlease_ns =
@@ -162,7 +162,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                      rdma_buf.buffer,
                      sizeof(Object),
                      0,
-                     (uint8_t) RWFlag::kNoLocalExpireCheck,
+                     (flag_t) RWFlag::kNoLocalExpireCheck,
                      &ctx);
         if (unlikely(ec == RetCode::kOk))
         {

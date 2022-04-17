@@ -20,6 +20,8 @@ constexpr static size_t kMemoryLimit = 1_G;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
+using flag_t = patronus::flag_t;
+
 void check_not_overlapped(const std::vector<void *> addrs, size_t size)
 {
     for (size_t i = 0; i < addrs.size(); ++i)
@@ -161,7 +163,7 @@ void test_bucket_group_not_overlapped_handle()
     void *addr = hugePageAlloc(kMemoryLimit);
     auto rdma_adpt = MockRdmaAdaptor::new_instance({});
     auto exposed_gaddr = rdma_adpt->to_exposed_gaddr(addr);
-    auto ac_flag = (uint8_t) patronus::AcquireRequestFlag::kNoGc;
+    auto ac_flag = (flag_t) patronus::AcquireRequestFlag::kNoGc;
     auto handle = rdma_adpt->acquire_perm(exposed_gaddr,
                                           0 /* alloc_hint */,
                                           std::numeric_limits<size_t>::max(),
@@ -226,7 +228,7 @@ void test_bucket_group_not_overlapped_handle2()
     void *addr = hugePageAlloc(kMemoryLimit);
     auto rdma_adpt = MockRdmaAdaptor::new_instance({});
     auto exposed_gaddr = rdma_adpt->to_exposed_gaddr(addr);
-    auto ac_flag = (uint8_t) patronus::AcquireRequestFlag::kNoGc;
+    auto ac_flag = (flag_t) patronus::AcquireRequestFlag::kNoGc;
     auto handle = rdma_adpt->acquire_perm(exposed_gaddr,
                                           0 /* alloc_hint */,
                                           SubTableT::size_bytes(),

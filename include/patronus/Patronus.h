@@ -144,7 +144,7 @@ public:
                             uint64_t alloc_hint,
                             size_t size,
                             std::chrono::nanoseconds ns,
-                            uint8_t flag /* AcquireRequestFlag */,
+                            flag_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     /**
      * @brief Alloc a piece of remote memory, without any permission binded
@@ -170,24 +170,24 @@ public:
                             uint64_t alloc_hint,
                             size_t size,
                             std::chrono::nanoseconds ns,
-                            uint8_t flag /* AcquireRequestFlag */,
+                            flag_t flag /* AcquireRequestFlag */,
                             CoroContext *ctx = nullptr);
     inline Lease upgrade(Lease &lease,
-                         uint8_t flag /*LeaseModifyFlag */,
+                         flag_t flag /*LeaseModifyFlag */,
                          CoroContext *ctx = nullptr);
     /**
      * @brief extend the lifecycle of lease for another more ns.
      */
     inline RetCode extend(Lease &lease,
                           std::chrono::nanoseconds ns,
-                          uint8_t flag /* LeaseModifyFlag */,
+                          flag_t flag /* LeaseModifyFlag */,
                           CoroContext *ctx = nullptr);
     /**
      * when allocation is ON, hint is sent to the server
      */
     inline void relinquish(Lease &lease,
                            uint64_t hint,
-                           uint8_t flag /* LeaseModifyFlag */,
+                           flag_t flag /* LeaseModifyFlag */,
                            CoroContext *ctx = nullptr);
     /**
      * @brief Deallocate to a piece of remote memory, without any permission
@@ -208,20 +208,20 @@ public:
                         char *obuf,
                         size_t size,
                         size_t offset,
-                        uint8_t flag /* RWFlag */,
+                        flag_t flag /* RWFlag */,
                         CoroContext *ctx = nullptr);
     inline RetCode write(Lease &lease,
                          const char *ibuf,
                          size_t size,
                          size_t offset,
-                         uint8_t flag /* RWFlag */,
+                         flag_t flag /* RWFlag */,
                          CoroContext *ctx = nullptr);
     inline RetCode cas(Lease &lease,
                        char *iobuf,
                        size_t offset,
                        uint64_t compare,
                        uint64_t swap,
-                       uint8_t flag /* RWFlag */,
+                       flag_t flag /* RWFlag */,
                        CoroContext *ctx = nullptr);
     // below for batch API
     RetCode prepare_write(PatronusBatchContext &batch,
@@ -229,14 +229,14 @@ public:
                           const char *ibuf,
                           size_t size,
                           size_t offset,
-                          uint8_t flag,
+                          flag_t flag,
                           CoroContext *ctx = nullptr);
     RetCode prepare_read(PatronusBatchContext &batch,
                          Lease &lease,
                          char *obuf,
                          size_t size,
                          size_t offset,
-                         uint8_t flag,
+                         flag_t flag,
                          CoroContext *ctx = nullptr);
     RetCode prepare_cas(PatronusBatchContext &batch,
                         Lease &lease,
@@ -244,7 +244,7 @@ public:
                         size_t offset,
                         uint64_t compare,
                         uint64_t swap,
-                        uint8_t flag,
+                        flag_t flag,
                         CoroContext *ctx = nullptr);
     RetCode commit(PatronusBatchContext &batch, CoroContext *ctx = nullptr);
 
@@ -727,7 +727,7 @@ private:
     void task_gc_lease(uint64_t lease_id,
                        ClientID cid,
                        compound_uint64_t expect_unit_nr,
-                       uint8_t flag /* LeaseModifyFlag */,
+                       flag_t flag /* LeaseModifyFlag */,
                        CoroContext *ctx = nullptr);
 
     // server coroutines
@@ -741,15 +741,15 @@ private:
                          size_t size,
                          time::ns_t ns,
                          RequestType type,
-                         uint8_t flag,
+                         flag_t flag,
                          CoroContext *ctx = nullptr);
 
     inline bool already_passed_ddl(time::PatronusTime time) const;
     // flag should be RWFlag
     inline RetCode handle_rwcas_flag(Lease &lease,
-                                     uint8_t flag,
+                                     flag_t flag,
                                      CoroContext *ctx);
-    inline RetCode handle_batch_op_flag(uint8_t flag) const;
+    inline RetCode handle_batch_op_flag(flag_t flag) const;
     inline RetCode validate_lease(const Lease &lease);
     RetCode protection_region_rw_impl(Lease &lease,
                                       char *io_buf,
@@ -780,7 +780,7 @@ private:
                             CoroContext *ctx = nullptr);
     inline RetCode extend_impl(Lease &lease,
                                size_t extend_unit_nr,
-                               uint8_t flag,
+                               flag_t flag,
                                CoroContext *ctx);
     RetCode cas_impl(char *iobuf,
                      size_t node_id,
@@ -795,7 +795,7 @@ private:
                             uint64_t hint,
                             RequestType type,
                             time::ns_t ns,
-                            uint8_t flag /* LeaseModificationFlag */,
+                            flag_t flag /* LeaseModificationFlag */,
                             CoroContext *ctx = nullptr);
     inline void fill_bind_mw_wr(ibv_send_wr &wr,
                                 ibv_send_wr *next_wr,
@@ -882,9 +882,9 @@ GlobalAddress Patronus::alloc(uint16_t node_id,
                               uint64_t hint,
                               CoroContext *ctx)
 {
-    auto flag = (uint8_t) AcquireRequestFlag::kNoGc |
-                (uint8_t) AcquireRequestFlag::kOnlyAllocation |
-                (uint8_t) AcquireRequestFlag::kNoBindPR;
+    auto flag = (flag_t) AcquireRequestFlag::kNoGc |
+                (flag_t) AcquireRequestFlag::kOnlyAllocation |
+                (flag_t) AcquireRequestFlag::kNoBindPR;
     auto lease = get_lease_impl(node_id,
                                 dir_id,
                                 hint /* key & hint */,
@@ -903,11 +903,11 @@ Lease Patronus::get_rlease(uint16_t node_id,
                            uint64_t alloc_hint,
                            size_t size,
                            std::chrono::nanoseconds chrono_ns,
-                           uint8_t flag,
+                           flag_t flag,
                            CoroContext *ctx)
 {
-    bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
-    bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+    bool only_alloc = flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
+    bool with_alloc = flag & (flag_t) AcquireRequestFlag::kWithAllocation;
     bool alloc_semantics = only_alloc || with_alloc;
     if constexpr (debug())
     {
@@ -956,11 +956,11 @@ Lease Patronus::get_wlease(uint16_t node_id,
                            uint64_t alloc_hint,
                            size_t size,
                            std::chrono::nanoseconds chrono_ns,
-                           uint8_t flag,
+                           flag_t flag,
                            CoroContext *ctx)
 {
-    bool only_alloc = flag & (uint8_t) AcquireRequestFlag::kOnlyAllocation;
-    bool with_alloc = flag & (uint8_t) AcquireRequestFlag::kWithAllocation;
+    bool only_alloc = flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
+    bool with_alloc = flag & (flag_t) AcquireRequestFlag::kWithAllocation;
     bool alloc_semantics = only_alloc || with_alloc;
 
     if constexpr (debug())
@@ -1002,7 +1002,7 @@ Lease Patronus::get_wlease(uint16_t node_id,
                           ctx);
 }
 
-Lease Patronus::upgrade(Lease &lease, uint8_t flag, CoroContext *ctx)
+Lease Patronus::upgrade(Lease &lease, flag_t flag, CoroContext *ctx)
 {
     debug_validate_lease_modify_flag(flag);
     // return lease_modify_impl(
@@ -1011,7 +1011,7 @@ Lease Patronus::upgrade(Lease &lease, uint8_t flag, CoroContext *ctx)
 }
 RetCode Patronus::extend_impl(Lease &lease,
                               size_t extend_unit_nr,
-                              uint8_t flag,
+                              flag_t flag,
                               CoroContext *ctx)
 {
     DVLOG(4) << "[patronus][extend-impl] trying to extend. extend_unit_nr: "
@@ -1046,7 +1046,7 @@ RetCode Patronus::extend_impl(Lease &lease,
 }
 RetCode Patronus::extend(Lease &lease,
                          std::chrono::nanoseconds chrono_ns,
-                         uint8_t flag,
+                         flag_t flag,
                          CoroContext *ctx)
 {
     debug_validate_lease_modify_flag(flag);
@@ -1101,17 +1101,17 @@ void Patronus::dealloc(GlobalAddress gaddr,
     lease.buffer_size_ = size;
     lease.id_ = std::numeric_limits<LeaseIDT>::max();
 
-    auto flag = (uint8_t) LeaseModifyFlag::kNoRelinquishUnbind |
-                (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    auto flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind |
+                (flag_t) LeaseModifyFlag::kOnlyDeallocation;
     lease_modify_impl(
         lease, hint, RequestType::kRelinquish, 0 /* term */, flag, ctx);
 }
 void Patronus::relinquish(Lease &lease,
                           uint64_t hint,
-                          uint8_t flag,
+                          flag_t flag,
                           CoroContext *ctx)
 {
-    bool only_dealloc = flag & (uint8_t) LeaseModifyFlag::kOnlyDeallocation;
+    bool only_dealloc = flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
     DCHECK(!only_dealloc) << "Please use Patronus::dealloc instead";
 
     debug_validate_lease_modify_flag(flag);
@@ -1132,9 +1132,7 @@ RetCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)
     return ret;
 }
 
-RetCode Patronus::handle_rwcas_flag(Lease &lease,
-                                    uint8_t flag,
-                                    CoroContext *ctx)
+RetCode Patronus::handle_rwcas_flag(Lease &lease, flag_t flag, CoroContext *ctx)
 {
     RetCode ec = RetCode::kOk;
 
@@ -1146,7 +1144,7 @@ RetCode Patronus::handle_rwcas_flag(Lease &lease,
     }
     else
     {
-        no_check = flag & (uint8_t) RWFlag::kNoLocalExpireCheck;
+        no_check = flag & (flag_t) RWFlag::kNoLocalExpireCheck;
     }
 
     if (likely(!no_check))
@@ -1156,12 +1154,12 @@ RetCode Patronus::handle_rwcas_flag(Lease &lease,
             return ec;
         }
     }
-    bool with_auto_extend = flag & (uint8_t) RWFlag::kWithAutoExtend;
+    bool with_auto_extend = flag & (flag_t) RWFlag::kWithAutoExtend;
     if (with_auto_extend)
     {
         maybe_auto_extend(lease, ctx);
     }
-    bool reserved = flag & (uint8_t) RWFlag::kReserved;
+    bool reserved = flag & (flag_t) RWFlag::kReserved;
     DCHECK(!reserved);
     return RetCode::kOk;
 }
@@ -1170,7 +1168,7 @@ RetCode Patronus::read(Lease &lease,
                        char *obuf,
                        size_t size,
                        size_t offset,
-                       uint8_t flag,
+                       flag_t flag,
                        CoroContext *ctx)
 {
     RetCode ec = RetCode::kOk;
@@ -1179,7 +1177,7 @@ RetCode Patronus::read(Lease &lease,
         return ec;
     }
 
-    bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+    bool with_cache = flag & (flag_t) RWFlag::kWithCache;
     if (with_cache)
     {
         if (lease.cache_query(offset, size, obuf))
@@ -1195,7 +1193,7 @@ RetCode Patronus::read(Lease &lease,
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
     uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
     if (use_universal_rkey)
     {
         rkey = dsm_->get_rkey(node_id, dir_id);
@@ -1220,7 +1218,7 @@ RetCode Patronus::write(Lease &lease,
                         const char *ibuf,
                         size_t size,
                         size_t offset,
-                        uint8_t flag,
+                        flag_t flag,
                         CoroContext *ctx)
 {
     auto ec = handle_rwcas_flag(lease, flag, ctx);
@@ -1232,7 +1230,7 @@ RetCode Patronus::write(Lease &lease,
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
     uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
     if (use_universal_rkey)
     {
         rkey = dsm_->get_rkey(node_id, dir_id);
@@ -1252,7 +1250,7 @@ RetCode Patronus::write(Lease &lease,
                          WRID_PREFIX_PATRONUS_RW,
                          ctx);
 
-    bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+    bool with_cache = flag & (flag_t) RWFlag::kWithCache;
     if (ec == RetCode::kOk && with_cache)
     {
         lease.cache_insert(offset, size, ibuf);
@@ -1265,7 +1263,7 @@ RetCode Patronus::cas(Lease &lease,
                       size_t offset,
                       uint64_t compare,
                       uint64_t swap,
-                      uint8_t flag,
+                      flag_t flag,
                       CoroContext *ctx)
 {
     auto ec = handle_rwcas_flag(lease, flag, ctx);
@@ -1277,7 +1275,7 @@ RetCode Patronus::cas(Lease &lease,
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
     uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
     if (use_universal_rkey)
     {
         rkey = dsm_->get_rkey(node_id, dir_id);
@@ -1297,7 +1295,7 @@ RetCode Patronus::cas(Lease &lease,
                   WRID_PREFIX_PATRONUS_CAS,
                   ctx);
 
-    bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
+    bool with_cache = flag & (flag_t) RWFlag::kWithCache;
     if (ec == RetCode::kOk && with_cache)
     {
         DCHECK_GE(sizeof(swap), 8);

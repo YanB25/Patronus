@@ -102,7 +102,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     0 /* alloc_hint */,
                                     sizeof(Object),
                                     0ns,
-                                    (uint8_t) AcquireRequestFlag::kNoGc,
+                                    (flag_t) AcquireRequestFlag::kNoGc,
                                     &ctx);
         if (unlikely(!lease.success()))
         {
