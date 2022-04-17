@@ -282,9 +282,14 @@ Race Hashing Experiments: (**iPad have detailed discussion**)
     - Enable rate wait-until-success? Now, for all the auto-gc lease, will enable wait-until-sucess for all of them. Maybe enable for half of them? Not need to be accurate. I think we have a deep QP queue.
 
 Serverless Experiments
-- Cite some papers, talking about one-sided data structures, e.g. arrays
-- Boot, binds large (e.g. 128_MB), do the SQL (summarize, filter, count_if, ...), returns
-- no protection v.s. patronus v.s. MR
+{-} The serverless experiments
+    - Cite some papers, talking about one-sided data structures, e.g. arrays
+    [-] Boot, binds large (e.g. 128_MB), do the SQL (summarize, filter, count_if, ...), returns
+    [-] no protection v.s. patronus v.s. MR
+    - Report the latency from bucket monitor.
+    - Test the effectiveness of lease
+    - Test the effectiveness of cache
+    - Test the effectiveness of lock
 
 Other possibilities
 - Lock conflict, fairness and lock transfering
@@ -304,7 +309,7 @@ will see an unexpected cases:
 =========================
 4/15, 4/17, 4/18
 [-] Finishing the latency bench of bootstrap race hashing
-- Finishing the benchmark of mock serverless
+[-] Finishing the benchmark of mock serverless
 - IMPORTANT Finishing the benchmark of fault tolerance hidden
 
 4/19 - 
