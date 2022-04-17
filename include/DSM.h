@@ -183,6 +183,7 @@ public:
     inline ibv_qp *get_th_qp(int node_id, size_t dirID);
     inline ibv_mr *get_dir_mr(size_t dirID);
     inline RdmaContext *get_rdma_context(size_t dirID);
+    inline uint32_t get_rkey(size_t node_id, size_t dir_id);
 
     void cas(GlobalAddress gaddr,
              uint64_t equal,
@@ -736,6 +737,10 @@ ibv_qp *DSM::get_th_qp(int node_id, size_t dirID)
 {
     DCHECK_LT(dirID, iCon->QPs.size());
     return iCon->QPs[dirID][node_id];
+}
+uint32_t DSM::get_rkey(size_t node_id, size_t dir_id)
+{
+    return remoteInfo[node_id].dsmRKey[dir_id];
 }
 ibv_mr *DSM::get_dir_mr(size_t dirID)
 {

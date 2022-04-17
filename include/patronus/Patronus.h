@@ -743,12 +743,7 @@ private:
                          RequestType type,
                          uint8_t flag,
                          CoroContext *ctx = nullptr);
-    RetCode buffer_rw_impl(Lease &lease,
-                           char *iobuf,
-                           size_t size,
-                           size_t offset,
-                           bool is_read,
-                           CoroContext *ctx = nullptr);
+
     inline bool already_passed_ddl(time::PatronusTime time) const;
     // flag should be RWFlag
     inline RetCode handle_rwcas_flag(Lease &lease,
@@ -1194,7 +1189,32 @@ RetCode Patronus::read(Lease &lease,
         }
     }
 
-    return buffer_rw_impl(lease, obuf, size, offset, true /* is_read */, ctx);
+    CHECK(lease.success());
+    CHECK(lease.is_readable());
+
+    auto node_id = lease.node_id_;
+    auto dir_id = lease.dir_id_;
+    uint32_t rkey = 0;
+    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        rkey = dsm_->get_rkey(node_id, dir_id);
+    }
+    else
+    {
+        rkey = lease.cur_rkey_;
+    }
+    uint64_t remote_addr = lease.base_addr_ + offset;
+
+    return read_write_impl(obuf,
+                           size,
+                           node_id,
+                           dir_id,
+                           rkey,
+                           remote_addr,
+                           true /* is_read */,
+                           WRID_PREFIX_PATRONUS_RW,
+                           ctx);
 }
 RetCode Patronus::write(Lease &lease,
                         const char *ibuf,
@@ -1208,8 +1228,29 @@ RetCode Patronus::write(Lease &lease,
     {
         return ec;
     }
-    ec = buffer_rw_impl(
-        lease, (char *) ibuf, size, offset, false /* is_read */, ctx);
+
+    auto node_id = lease.node_id_;
+    auto dir_id = lease.dir_id_;
+    uint32_t rkey = 0;
+    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        rkey = dsm_->get_rkey(node_id, dir_id);
+    }
+    else
+    {
+        rkey = lease.cur_rkey_;
+    }
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    ec = read_write_impl((char *) ibuf,
+                         size,
+                         node_id,
+                         dir_id,
+                         rkey,
+                         remote_addr,
+                         false /* is_read */,
+                         WRID_PREFIX_PATRONUS_RW,
+                         ctx);
 
     bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
     if (ec == RetCode::kOk && with_cache)
@@ -1232,7 +1273,30 @@ RetCode Patronus::cas(Lease &lease,
     {
         return ec;
     }
-    ec = buffer_cas_impl(lease, iobuf, offset, compare, swap, ctx);
+
+    auto node_id = lease.node_id_;
+    auto dir_id = lease.dir_id_;
+    uint32_t rkey = 0;
+    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        rkey = dsm_->get_rkey(node_id, dir_id);
+    }
+    else
+    {
+        rkey = lease.cur_rkey_;
+    }
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    ec = cas_impl(iobuf,
+                  node_id,
+                  dir_id,
+                  rkey,
+                  remote_addr,
+                  compare,
+                  swap,
+                  WRID_PREFIX_PATRONUS_CAS,
+                  ctx);
+
     bool with_cache = flag & (uint8_t) RWFlag::kWithCache;
     if (ec == RetCode::kOk && with_cache)
     {

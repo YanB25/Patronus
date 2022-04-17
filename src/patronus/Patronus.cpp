@@ -398,40 +398,6 @@ RetCode Patronus::read_write_impl(char *iobuf,
     return ret ? RetCode::kOk : RetCode::kRdmaProtectionErr;
 }
 
-RetCode Patronus::buffer_rw_impl(Lease &lease,
-                                 char *iobuf,
-                                 size_t size,
-                                 size_t offset,
-                                 bool is_read,
-                                 CoroContext *ctx)
-{
-    CHECK(lease.success());
-    if (is_read)
-    {
-        CHECK(lease.is_readable());
-    }
-    else
-    {
-        CHECK(lease.is_writable());
-    }
-    uint32_t rkey = lease.cur_rkey_;
-    uint64_t remote_addr = lease.base_addr_ + offset;
-    DLOG_IF(INFO, config::kMonitorAddressConversion)
-        << "[addr] patronus remote_addr: " << (void *) remote_addr
-        << " (base: " << (void *) lease.base_addr_
-        << ", offset: " << (void *) offset << ")";
-
-    return read_write_impl(iobuf,
-                           size,
-                           lease.node_id_,
-                           lease.dir_id_,
-                           rkey,
-                           remote_addr,
-                           is_read,
-                           WRID_PREFIX_PATRONUS_RW,
-                           ctx);
-}
-
 RetCode Patronus::protection_region_rw_impl(Lease &lease,
                                             char *io_buf,
                                             size_t size,
@@ -2755,10 +2721,19 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
     CHECK(lease.success());
     CHECK(lease.is_writable());
 
-    uint32_t rkey = lease.cur_rkey_;
-    uint64_t remote_addr = lease.base_addr_ + offset;
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
+    uint32_t rkey = 0;
+    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        rkey = dsm_->get_rkey(node_id, dir_id);
+    }
+    else
+    {
+        rkey = lease.cur_rkey_;
+    }
+    uint64_t remote_addr = lease.base_addr_ + offset;
 
     GlobalAddress gaddr;
     gaddr.nodeID = node_id;
@@ -2787,10 +2762,19 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
     CHECK(lease.success());
     CHECK(lease.is_readable());
 
-    uint32_t rkey = lease.cur_rkey_;
-    uint64_t remote_addr = lease.base_addr_ + offset;
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
+    uint32_t rkey = 0;
+    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        rkey = dsm_->get_rkey(node_id, dir_id);
+    }
+    else
+    {
+        rkey = lease.cur_rkey_;
+    }
+    uint64_t remote_addr = lease.base_addr_ + offset;
 
     GlobalAddress gaddr;
     gaddr.nodeID = node_id;
@@ -2820,10 +2804,19 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
     CHECK(lease.success());
     CHECK(lease.is_writable());
 
-    uint32_t rkey = lease.cur_rkey_;
-    uint64_t remote_addr = lease.base_addr_ + offset;
     auto node_id = lease.node_id_;
     auto dir_id = lease.dir_id_;
+    uint32_t rkey = 0;
+    bool use_universal_rkey = flag & (uint8_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        rkey = dsm_->get_rkey(node_id, dir_id);
+    }
+    else
+    {
+        rkey = lease.cur_rkey_;
+    }
+    uint64_t remote_addr = lease.base_addr_ + offset;
 
     GlobalAddress gaddr;
     gaddr.nodeID = node_id;

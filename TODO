@@ -256,9 +256,10 @@ Race Hashing Experiments: (**iPad have detailed discussion**)
     {-} For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
     [-] kvblock_size in {64_B, 4_KB}, rh in {small, large}
 - The latency of special cases:
-    [-] The latency of client bootstrap (break down)
+    {-} The latency of client bootstrap (break down)
         - RHH constructs: bind & read directory, bind & read subtable, then issues a read.
         - unprotected v.s. MR v.s. patronus
+        - The unprotected number is not accurate, because we did not skip binding subtable for the unprotected versions. I wanna fxxk myself for the arrangement of codes. I need to add an option to control the *bypass* of binding subtable. I need to *pass* kUseUniversalRkey to RdmaAdpt, which needs a hole, because RdmaAdpt API does not consider passing flag to r/w API. Fxxk up. A possible easy way would be creating a brand new RdmaAdpt, which skips any binding and pass kUniversalRKey to the Patronus. 
     {-} Code ready, not generated archived. The latency of expansion: unprotected v.s. MW v.s. MR
         [-] MR == MW == unprotected: this can be the case arguing patronus not harming performance but providing further safety
         [-] Considering that MR 2MB takes only 200 us, which is far from enough for expansion

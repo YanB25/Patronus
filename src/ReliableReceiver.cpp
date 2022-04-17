@@ -37,19 +37,19 @@ void ReliableRecvMessageConnection::fills(ibv_sge &sge,
     wr.num_sge = 1;
     if ((batch_id + 1) % kPostRecvBufferBatch == 0)
     {
-        DVLOG(5) << "[rmsg-recv] recvs[" << multiplexing_id << "][" << node_id
-                 << "][" << batch_id << "] set next to "
-                 << "nullptr. Current k " << batch_id << " @"
-                 << (void *) sge.addr;
+        DVLOG(10) << "[rmsg-recv] recvs[" << multiplexing_id << "][" << node_id
+                  << "][" << batch_id << "] set next to "
+                  << "nullptr. Current k " << batch_id << " @"
+                  << (void *) sge.addr;
         wr.next = nullptr;
     }
     else
     {
-        DVLOG(5) << "[rmesg-recv] recvs[" << multiplexing_id << "][" << node_id
-                 << "][" << batch_id << "] set next to "
-                 << "recvs[" << multiplexing_id << "][" << node_id << "]["
-                 << batch_id + 1 << "]. Current k " << batch_id << " @"
-                 << (void *) sge.addr;
+        DVLOG(10) << "[rmesg-recv] recvs[" << multiplexing_id << "][" << node_id
+                  << "][" << batch_id << "] set next to "
+                  << "recvs[" << multiplexing_id << "][" << node_id << "]["
+                  << batch_id + 1 << "]. Current k " << batch_id << " @"
+                  << (void *) sge.addr;
         wr.next = &recvs[multiplexing_id][node_id][batch_id + 1];
         DCHECK_LT(node_id, MAX_MACHINE);
         DCHECK_LT(batch_id + 1, kRecvBuffer)
