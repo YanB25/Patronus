@@ -301,10 +301,13 @@ will see an unexpected cases:
 
 
 =========================
-4/15, 4/16, 4/17
+4/15, 4/17, 4/18
 [-] Finishing the latency bench of bootstrap race hashing
 - Finishing the benchmark of mock serverless
-- Finishing the benchmark of fault tolerance hidden
+- IMPORTANT Finishing the benchmark of fault tolerance hidden
 
-4/18 - 
+4/19 - 
 Begin to write the paper.
+
+Then go back:
+Finished the lease-expire related tests.
