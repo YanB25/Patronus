@@ -120,6 +120,8 @@ public:
     }
     GlobalAddress rpc_alloc(size_t size, hint_t hint)
     {
+        std::lock_guard<std::mutex> lk(rpc_mu_);
+
         void *ret = nullptr;
         auto it = allocators_.find(hint);
         if (it == allocators_.end())
@@ -142,6 +144,8 @@ public:
     }
     void rpc_free(GlobalAddress gaddr, size_t size, hint_t hint)
     {
+        std::lock_guard<std::mutex> lk(rpc_mu_);
+
         auto *addr = from_exposed_gaddr(gaddr);
         CHECK_EQ(remote_allocated_buffers_.count(addr), 1);
         CHECK_EQ(remote_allocated_buffers_[addr], size);
@@ -163,14 +167,11 @@ public:
         {
             DCHECK_NOTNULL(it->second)->free(addr);
         }
-
-        remote_not_freed_buffers_.insert(addr);
     }
     void remote_free(GlobalAddress gaddr, size_t size, hint_t hint) override
     {
         DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
             << "[rdma][trace] remote_free: " << gaddr;
-        remote_not_freed_buffers_.insert((void *) gaddr.val);
         server_ep_.lock()->rpc_free(gaddr, size, hint);
     }
     void relinquish_perm(RemoteMemHandle &handle,
@@ -187,7 +188,7 @@ public:
         }
         else
         {
-            CHECK_EQ(hint, 0);
+            // CHECK_EQ(hint, 0);
         }
         free_handle(handle);
         return;
@@ -418,6 +419,9 @@ private:
     // client-side allocators for secondary allocation.
     std::unordered_map<uint64_t, mem::IAllocator::pointer>
         overwrite_allocators_;
+
+    // rpc_alloc, rpc_free is not thread-safe. make it be
+    std::mutex rpc_mu_;
 };
 
 }  // namespace patronus::hash

@@ -9,6 +9,7 @@
 #include "DSM.h"
 #include "Result.h"
 #include "patronus/Batch.h"
+#include "patronus/Config.h"
 #include "patronus/Coro.h"
 #include "patronus/DDLManager.h"
 #include "patronus/Lease.h"
@@ -96,6 +97,19 @@ struct LeaseContext
     uint64_t hint{0};
 };
 
+struct PatronusThreadResourceDesc
+{
+    ThreadResourceDesc dsm_desc;
+    std::unique_ptr<ThreadUnsafeBufferPool<config::patronus::kMessageSize>>
+        rdma_message_buffer_pool;
+    char *client_rdma_buffer;
+    size_t client_rdma_buffer_size;
+    std::unique_ptr<
+        ThreadUnsafeBufferPool<config::patronus::kClientRdmaBufferSize>>
+        rdma_client_buffer;
+    std::unique_ptr<ThreadUnsafeBufferPool<8>> rdma_client_buffer_8B;
+};
+
 class pre_patronus_explain;
 
 class Patronus
@@ -103,8 +117,9 @@ class Patronus
 public:
     using pointer = std::shared_ptr<Patronus>;
 
-    constexpr static size_t kMaxCoroNr = define::kMaxCoroNr;
-    constexpr static size_t kMessageSize = ReliableConnection::kMessageSize;
+    constexpr static size_t kMaxCoroNr = ::config::patronus::kMaxCoroNr;
+    constexpr static size_t kMessageSize = ::config::patronus::kMessageSize;
+
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
     constexpr static uint64_t kDefaultHint = 0;
@@ -318,6 +333,11 @@ public:
                                          coro_t *coro_buf,
                                          size_t limit);
 
+    PatronusThreadResourceDesc prepare_client_thread(
+        bool is_registering_thread);
+    bool apply_client_resource(PatronusThreadResourceDesc &&, bool bind_core);
+    bool has_registered() const;
+
     /**
      * @brief Any thread should call this function before calling any
      * function of Patronus
@@ -337,6 +357,10 @@ public:
     size_t get_thread_id() const
     {
         return dsm_->get_thread_id();
+    }
+    size_t get_thread_name_id() const
+    {
+        return dsm_->get_thread_name_id();
     }
     Buffer get_server_internal_buffer()
     {
@@ -413,6 +437,10 @@ public:
             }
         }
     }
+
+    void hack_trigger_rdma_protection_error(size_t node_id,
+                                            size_t dir_id,
+                                            CoroContext *ctx);
 
     DSM::pointer get_dsm()
     {
@@ -503,6 +531,8 @@ public:
     friend std::ostream &operator<<(std::ostream &,
                                     const pre_patronus_explain &);
 
+    void prepare_fast_backup_recovery(size_t prepare_nr);
+
 private:
     PatronusConfig conf_;
     // the default_allocator_ is set on registering server thread.
@@ -515,7 +545,8 @@ private:
     // How many leases on average may a tenant hold?
     // It determines how much resources we should reserve
     constexpr static size_t kGuessActiveLeasePerCoro = 64;
-    constexpr static size_t kClientRdmaBufferSize = 8 * define::KB;
+    constexpr static size_t kClientRdmaBufferSize =
+        ::config::patronus::kClientRdmaBufferSize;
     constexpr static size_t kLeaseContextNr =
         kMaxCoroNr * kGuessActiveLeasePerCoro;
     static_assert(
@@ -659,6 +690,8 @@ private:
         auto *ret = protection_region_pool_->id_to_buf(id);
         return (ProtectionRegion *) ret;
     }
+
+    bool fast_switch_backup_qp();
 
     // clang-format off
     /**
@@ -869,6 +902,7 @@ private:
         protection_region_pool_;
     static thread_local DDLManager ddl_manager_;
     static thread_local size_t allocated_mw_nr_;
+    static thread_local bool has_registered_;
     constexpr static uint32_t magic = 0b1010101010;
     constexpr static uint16_t mask = 0b1111111111;
 
@@ -882,6 +916,9 @@ private:
     std::mutex barrier_mu_;
 
     std::chrono::time_point<std::chrono::steady_clock> finish_time_sync_now_;
+
+    std::queue<PatronusThreadResourceDesc> prepared_fast_backup_descs_;
+    std::mutex fast_backup_descs_mu_;
 };
 
 bool Patronus::already_passed_ddl(time::PatronusTime patronus_ddl) const

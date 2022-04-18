@@ -25,6 +25,12 @@ constexpr static size_t kPingpoingCnt = 100 * define::K;
 constexpr static size_t kBurnCnt = 1 * define::M;
 
 constexpr static size_t kBenchMessageBufSize = 16;
+
+// constexpr static size_t kMultiThreadNr = 16;
+constexpr static size_t kClientThreadNr = RMSG_MULTIPLEXING - 1;
+constexpr static size_t kServerThreadNr = RMSG_MULTIPLEXING - 1;
+static_assert(kClientThreadNr < kMaxAppThread);
+static_assert(kServerThreadNr < kMaxAppThread);
 struct BenchMessage
 {
     uint16_t from_node;
@@ -160,9 +166,9 @@ void server_multithread(std::shared_ptr<DSM> dsm,
     {
         threads.emplace_back([dsm, &finished_nr, total_nr]() {
             dsm->registerThread();
-            auto tid = dsm->get_thread_id();
-            auto mid = tid % RMSG_MULTIPLEXING;
-            CHECK_NE(mid, 0);
+            auto tid = dsm->get_thread_id() - 1;
+            // auto mid = tid % kServerThreadNr;
+            auto mid = tid;
 
             char buffer[102400];
             auto *rdma_buf = dsm->get_rdma_buffer().buffer;
@@ -202,7 +208,7 @@ void server_multithread(std::shared_ptr<DSM> dsm,
     }
 }
 
-constexpr static size_t kMidOffset = 0;
+// constexpr static ssize_t kMidOffset = -1;
 
 // we can not reserve mid == 0 in this situation, because we set it to thread
 // safe.
@@ -217,10 +223,9 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
         threads.emplace_back([dsm]() {
             dsm->registerThread();
 
-            auto tid = dsm->get_thread_id();
-            auto from_mid = (tid + kMidOffset) % RMSG_MULTIPLEXING;
+            auto tid = dsm->get_thread_id() - 1;
+            auto from_mid = tid;
             CHECK_EQ(tid, from_mid) << "Currently we ensure that tid == mid";
-            // CHECK_NE(from_mid, 0);
 
             size_t sent = 0;
 
@@ -236,8 +241,6 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
                     msg->buf[s] = rand();
                 }
                 msg->from_node = kClientNodeId;
-                CHECK_NE(tid, 0) << "The tid == 0 is reserved. So we (tid "
-                                    "- 1) at the below line.";
                 msg->from_mid = from_mid;
                 msg->digest = djb2_digest(msg->buf, msg->size);
                 dsm->reliable_send(
@@ -268,20 +271,6 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
     }
 }
 
-void client_wait(std::shared_ptr<DSM> dsm)
-{
-    // sync
-    auto *buf = dsm->get_rdma_buffer().buffer;
-    dsm->reliable_recv(0, nullptr);
-    dsm->reliable_send(buf, 0, kServerNodeId, 0);
-}
-
-// constexpr static size_t kMultiThreadNr = 16;
-constexpr static size_t kClientThreadNr = RMSG_MULTIPLEXING - 1;
-constexpr static size_t kServerThreadNr = RMSG_MULTIPLEXING - 1;
-static_assert(kClientThreadNr < kMaxAppThread);
-static_assert(kServerThreadNr < kMaxAppThread);
-
 void client(std::shared_ptr<DSM> dsm)
 {
     // client_pingpong_correct(dsm);
@@ -294,15 +283,8 @@ void client(std::shared_ptr<DSM> dsm)
 
     client_multithread(dsm, kClientThreadNr);
 
-    client_wait(dsm);
+    dsm->barrier("finished", 10ms);
     LOG(INFO) << "ALL TEST PASSED";
-}
-
-void server_wait(std::shared_ptr<DSM> dsm)
-{
-    auto *buffer = dsm->get_rdma_buffer().buffer;
-    dsm->reliable_send(buffer, 0, kClientNodeId, 0);
-    dsm->reliable_recv(0, nullptr);
 }
 
 void server(std::shared_ptr<DSM> dsm)
@@ -319,7 +301,7 @@ void server(std::shared_ptr<DSM> dsm)
     size_t expect_work = kClientThreadNr * kBurnCnt;
     server_multithread(dsm, expect_work, kServerThreadNr);
 
-    server_wait(dsm);
+    dsm->barrier("finished", 10ms);
     LOG(INFO) << "ALL TEST PASSED";
 }
 

@@ -16,6 +16,7 @@
 #include "HugePageAlloc.h"
 #include "Statistics.h"
 #include "Timer.h"
+#include "WRID.h"
 #include "WRLock.h"
 #include "util/Type.h"
 
@@ -243,28 +244,6 @@ struct Data
 } __attribute__((packed));
 
 #define ROUND_UP(num, multiple) ceil(((double) (num)) / (multiple)) * (multiple)
-
-#define WRID_PREFIX_EXMETA 1
-#define WRID_PREFIX_RELIABLE_SEND 2
-#define WRID_PREFIX_RELIABLE_RECV 3
-#define WRID_PREFIX_PATRONUS_RW 4
-#define WRID_PREFIX_PATRONUS_BIND_MW 5
-#define WRID_PREFIX_PATRONUS_UNBIND_MW 6
-// PR: ProtectionRegion
-#define WRID_PREFIX_PATRONUS_PR_RW 7
-#define WRID_PREFIX_PATRONUS_CAS 8
-#define WRID_PREFIX_PATRONUS_PR_CAS 9
-#define WRID_PREFIX_PATRONUS_BATCH_RWCAS 10
-// The outer-most benchmark only prefix
-#define WRID_PREFIX_BENCHMARK_ONLY 11
-#define WRID_PREFIX_RESERVED_1 12
-#define WRID_PREFIX_RESERVED_2 13
-#define WRID_PREFIX_RESERVED_g 14
-
-constexpr uint32_t get_WRID_ID_RESERVED()
-{
-    return std::numeric_limits<uint32_t>::max();
-}
 
 static inline uint64_t djb2_digest(const void *void_str, size_t size)
 {

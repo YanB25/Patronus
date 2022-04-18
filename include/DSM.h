@@ -27,13 +27,38 @@ struct Identify
     int node_id;
 };
 
+// what we get from a DSM::registerThread
+struct ThreadResourceDesc
+{
+    uint64_t thread_id{0};
+    uint64_t thread_name_id{0};
+    uint64_t thread_tag{0};
+    ThreadConnection *icon{nullptr};
+    char *rdma_buffer{nullptr};
+    size_t rdma_buffer_size{0};
+};
+
+inline std::ostream &operator<<(std::ostream &os,
+                                const ThreadResourceDesc &desc)
+{
+    os << "{ThreadResourceDesc tid: " << desc.thread_id
+       << ", tag: " << desc.thread_tag << ", icon: " << (void *) desc.icon
+       << ", rdma_buffer: " << (void *) desc.rdma_buffer;
+    return os;
+}
+
 class DSM : public std::enable_shared_from_this<DSM>
 {
 public:
     using pointer = std::shared_ptr<DSM>;
     using WcErrHandler = WcErrHandler;
 
-    void registerThread();
+    ThreadResourceDesc prepareThread();
+    ThreadResourceDesc getCurrentThreadDesc();
+    bool applyResource(const ThreadResourceDesc &, bool bind_core);
+    bool registerThread();
+    bool hasRegistered() const;
+
     static std::shared_ptr<DSM> getInstance(const DSMConfig &conf);
 
     uint16_t getMyNodeID() const
@@ -42,7 +67,11 @@ public:
     }
     uint16_t getMyThreadID() const
     {
-        return thread_id;
+        return thread_id_;
+    }
+    uint16_t getMyThreadNameID() const
+    {
+        return thread_name_id_;
     }
     uint16_t getClusterSize() const
     {
@@ -50,7 +79,7 @@ public:
     }
     uint64_t getThreadTag() const
     {
-        return thread_tag;
+        return thread_tag_;
     }
 
     void syncMetadataBootstrap(const ExchangeMeta &, size_t remoteID);
@@ -495,7 +524,11 @@ public:
     }
     int get_thread_id() const
     {
-        return thread_id;
+        return thread_id_;
+    }
+    int get_thread_name_id() const
+    {
+        return thread_name_id_;
     }
     Identify get_identify() const
     {
@@ -527,7 +560,7 @@ public:
                        uint16_t node_id,
                        size_t mid)
     {
-        reliable_msg_->send(thread_id, buf, size, node_id, mid);
+        reliable_msg_->send(thread_id_, buf, size, node_id, mid);
     }
     void reliable_recv(size_t from_mid, char *ibuf, size_t limit = 1)
     {
@@ -562,12 +595,16 @@ private:
     std::atomic<int> appID{0};
     Cache cache;
 
-    static thread_local int thread_id;
-    static thread_local ThreadConnection *iCon;
-    static thread_local char *rdma_buffer;
-    static thread_local LocalAllocator local_allocator;
-    static thread_local RdmaBuffer rbuf[define::kMaxCoroNr];
-    static thread_local uint64_t thread_tag;
+    // thread_id_ is high coupled to the resources, i.e, QPs
+    static thread_local int thread_id_;
+    // thread name id is the id used for debugging. The unique identify of the
+    // thread.
+    static thread_local int thread_name_id_;
+    static thread_local ThreadConnection *iCon_;
+    static thread_local char *rdma_buffer_;
+    static thread_local LocalAllocator local_allocator_;
+    static thread_local RdmaBuffer rbuf_[define::kMaxCoroNr];
+    static thread_local uint64_t thread_tag_;
 
     uint64_t baseAddr;
     uint64_t baseAddrSize;
@@ -588,7 +625,7 @@ private:
 public:
     bool is_register()
     {
-        return thread_id != -1;
+        return thread_id_ != -1;
     }
     template <typename T>
     void keeper_barrier(const std::string &ss, const T &sleep_time)
@@ -603,7 +640,7 @@ public:
      */
     Buffer get_rdma_buffer()
     {
-        return Buffer(rdma_buffer, define::kRDMABufferSize);
+        return Buffer(rdma_buffer_, define::kRDMABufferSize);
     }
     inline Buffer get_server_internal_dsm_buffer();
     inline Buffer get_server_reserved_buffer();
@@ -612,7 +649,7 @@ public:
     {
         DCHECK(coro_id < define::kMaxCoroNr)
             << "coro_id should be < define::kMaxCoroNr";
-        return rbuf[coro_id];
+        return rbuf_[coro_id];
     }
 
     GlobalAddress alloc(size_t size);
@@ -622,13 +659,13 @@ public:
                       uint16_t node_id,
                       uint16_t dir_id = 0)
     {
-        auto buffer = (RawMessage *) iCon->message->getSendPool();
+        auto buffer = (RawMessage *) iCon_->message->getSendPool();
 
         memcpy(buffer, &m, sizeof(RawMessage));
         buffer->node_id = myNodeID;
-        buffer->app_id = thread_id;
+        buffer->app_id = thread_id_;
 
-        iCon->sendMessage2Dir(buffer, node_id, dir_id);
+        iCon_->sendMessage2Dir(buffer, node_id, dir_id);
     }
     /**
      * Do not use in the critical path.
@@ -643,12 +680,12 @@ public:
               uint16_t dir_id = 0,
               bool sync = false)
     {
-        auto buffer = (RawMessage *) iCon->message->getSendPool();
+        auto buffer = (RawMessage *) iCon_->message->getSendPool();
         buffer->node_id = myNodeID;
-        buffer->app_id = thread_id;
+        buffer->app_id = thread_id_;
         CHECK_LT(size, sizeof(RawMessage::inlined_buffer));
         memcpy(buffer->inlined_buffer, buf, size);
-        iCon->sendMessage2Dir(buffer, node_id, dir_id, sync);
+        iCon_->sendMessage2Dir(buffer, node_id, dir_id, sync);
     }
     char *try_recv()
     {
@@ -698,8 +735,8 @@ public:
     {
         ibv_wc wc;
 
-        pollWithCQ(iCon->rpc_cq, 1, &wc);
-        return (RawMessage *) iCon->message->getMessage();
+        pollWithCQ(iCon_->rpc_cq, 1, &wc);
+        return (RawMessage *) iCon_->message->getMessage();
     }
 
     void explain()
@@ -735,8 +772,8 @@ ibv_cq *DSM::get_dir_cq(size_t dirID)
 }
 ibv_qp *DSM::get_th_qp(int node_id, size_t dirID)
 {
-    DCHECK_LT(dirID, iCon->QPs.size());
-    return iCon->QPs[dirID][node_id];
+    DCHECK_LT(dirID, iCon_->QPs.size());
+    return iCon_->QPs[dirID][node_id];
 }
 uint32_t DSM::get_rkey(size_t node_id, size_t dir_id)
 {
@@ -755,7 +792,7 @@ RdmaContext *DSM::get_rdma_context(size_t dirID)
 
 inline uint32_t DSM::get_icon_lkey()
 {
-    return DCHECK_NOTNULL(iCon)->cacheLKey;
+    return DCHECK_NOTNULL(iCon_)->cacheLKey;
 }
 
 void DSM::read(char *buffer,
@@ -829,14 +866,14 @@ Buffer DSM::get_server_reserved_buffer()
 
 size_t DSM::try_poll_rdma_cq(ibv_wc *buf, size_t limit)
 {
-    return ibv_poll_cq(iCon->cq, limit, buf);
+    return ibv_poll_cq(iCon_->cq, limit, buf);
 }
 
 uint64_t DSM::poll_rdma_cq(int count)
 {
     ibv_wc wc;
-    // dinfo("Polling cq %p", iCon->cq);
-    pollWithCQ(iCon->cq, count, &wc);
+    // dinfo("Polling cq %p", iCon_->cq);
+    pollWithCQ(iCon_->cq, count, &wc);
 
     return wc.wr_id;
 }
@@ -857,7 +894,7 @@ int DSM::poll_dir_cq(size_t dirID, size_t count)
 bool DSM::poll_rdma_cq_once(uint64_t &wr_id)
 {
     ibv_wc wc;
-    int res = pollOnce(iCon->cq, 1, &wc);
+    int res = pollOnce(iCon_->cq, 1, &wc);
 
     wr_id = wc.wr_id;
 
@@ -872,14 +909,14 @@ inline GlobalAddress DSM::alloc(size_t size)
         (getMyThreadID() + getMyNodeID()) % NR_DIRECTORY;
 
     bool need_chunk = false;
-    auto addr = local_allocator.malloc(size, need_chunk);
+    auto addr = local_allocator_.malloc(size, need_chunk);
     if (need_chunk)
     {
         RawMessage m;
         m.type = RpcType::MALLOC;
 
         this->rpc_call_dir(m, next_target_node, next_target_dir_id);
-        local_allocator.set_chunck(rpc_wait()->addr);
+        local_allocator_.set_chunck(rpc_wait()->addr);
 
         if (++next_target_dir_id == NR_DIRECTORY)
         {
@@ -888,7 +925,7 @@ inline GlobalAddress DSM::alloc(size_t size)
         }
 
         // retry
-        addr = local_allocator.malloc(size, need_chunk);
+        addr = local_allocator_.malloc(size, need_chunk);
     }
 
     return addr;
@@ -896,6 +933,6 @@ inline GlobalAddress DSM::alloc(size_t size)
 
 inline void DSM::free(GlobalAddress addr)
 {
-    local_allocator.free(addr);
+    local_allocator_.free(addr);
 }
 #endif /* __DSM_H__ */

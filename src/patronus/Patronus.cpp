@@ -8,6 +8,11 @@
 
 namespace patronus
 {
+// rdma_message_buffer_pool_
+// client_rdma_buffer_
+// client_rdma_buffer_size_
+// rdma_client_buffer_
+// rdma_client_buffer_8B_
 thread_local std::unique_ptr<ThreadUnsafeBufferPool<Patronus::kMessageSize>>
     Patronus::rdma_message_buffer_pool_;
 thread_local std::unique_ptr<
@@ -35,6 +40,7 @@ thread_local size_t Patronus::client_rdma_buffer_size_{0};
 thread_local bool Patronus::is_server_{false};
 thread_local bool Patronus::is_client_{false};
 thread_local bool Patronus::self_managing_client_rdma_buffer_{false};
+thread_local bool Patronus::has_registered_{false};
 
 // clang-format off
 /**
@@ -55,6 +61,10 @@ Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
     dsm_config.dsmSize = conf.total_buffer_size();
     dsm_ = DSM::getInstance(dsm_config);
 
+    // we have to registered dsm threads
+    // because the following time syncer needs it.
+    dsm_->registerThread();
+
     // validate dsm
     auto internal_buf = dsm_->get_server_buffer();
     auto reserve_buf = dsm_->get_server_reserved_buffer();
@@ -64,8 +74,9 @@ Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
         << "**dsm should provide reserved buffer at least what Patronus "
            "requries";
 
-    internal_barrier();
-    DVLOG(1) << "[patronus] Barrier: ctor of DSM";
+    // internal_barrier();
+    // DVLOG(1) << "[patronus] Barrier: ctor of DSM";
+    dsm_->keeper_barrier("__patronus::internal_barrier", 10ms);
 
     // for initial of allocator
     // the actual initialization will be postponed to registerServerThread
@@ -245,7 +256,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
 
     bool enable_trace = false;
     trace_t trace = 0;
-    if constexpr (config::kEnableTrace)
+    if constexpr (::config::kEnableTrace)
     {
         if (likely(ctx != nullptr))
         {
@@ -954,6 +965,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     ibv_mr *buffer_mr = nullptr;
     ibv_mr *header_mr = nullptr;
     WRID signal_wrid{WRID_PREFIX_RESERVED_1, get_WRID_ID_RESERVED()};
+    WRID unsignal_wrid{WRID_PREFIX_PATRONUS_BIND_MW, get_WRID_ID_RESERVED()};
 
     // will not actually bind memory window.
     // TODO(patronus): even with no_bind_pr, the PR is also allocated
@@ -1174,8 +1186,9 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                          << AcquireRequestFlagOut(req->flag)
                          << ", signal wrid: " << signal_wrid;
                 wrs[0].send_flags = 0;
+                wrs[0].wr_id = unsignal_wrid.val;
                 wrs[1].send_flags = IBV_SEND_SIGNALED;
-                wrs[0].wr_id = wrs[1].wr_id = signal_wrid.val;
+                wrs[1].wr_id = signal_wrid.val;
             }
             else
             {
@@ -1183,7 +1196,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                     << "invalid configuration. with_pr: " << with_pr
                     << ", with_buf: " << with_buf;
             }
-            if constexpr (config::kEnableSkipMagicMw)
+            if constexpr (::config::kEnableSkipMagicMw)
             {
                 for (size_t time = 0; time < bind_req_nr; time++)
                 {
@@ -1233,14 +1246,19 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 
     if (likely(ctx != nullptr))
     {
-        DCHECK(rw_ctx->success)
+        DCHECK(rw_ctx->ready)
             << "** Should set to finished when switch back to worker "
                "coroutine. coro: "
-            << *ctx << " ready: @" << (void *) rw_ctx->success;
+            << *ctx << " ready: @" << (void *) &rw_ctx->ready;
     }
     else
     {
         ctx_success = true;
+    }
+
+    if (unlikely(status == AcquireRequestStatus::kSuccess && !ctx_success))
+    {
+        status = AcquireRequestStatus::kBindErr;
     }
 
 handle_response:
@@ -1663,7 +1681,8 @@ size_t Patronus::handle_rdma_finishes(
                wr_id.prefix == WRID_PREFIX_PATRONUS_PR_RW ||
                wr_id.prefix == WRID_PREFIX_PATRONUS_CAS ||
                wr_id.prefix == WRID_PREFIX_PATRONUS_PR_CAS ||
-               wr_id.prefix == WRID_PREFIX_PATRONUS_BATCH_RWCAS)
+               wr_id.prefix == WRID_PREFIX_PATRONUS_BATCH_RWCAS ||
+               wr_id.prefix == WRID_PREFIX_PATRONUS_GENERATE_FAULT)
             << "** unexpected prefix " << (int) wr_id.prefix;
         auto *rw_context = rw_context_.id_to_obj(id);
         auto node_id = rw_context->target_node;
@@ -1681,10 +1700,10 @@ size_t Patronus::handle_rdma_finishes(
         }
         else
         {
-            DLOG(WARNING) << "[patronus] rdma R/W/CAS failed. wr_id: " << wr_id
-                          << " for node " << node_id << ", dir: " << dir_id
-                          << ", coro_id: " << (int) coro_id
-                          << ". detail: " << wc;
+            LOG(WARNING) << "[patronus] rdma R/W/CAS failed. wr_id: " << wr_id
+                         << " for node " << node_id << ", dir: " << dir_id
+                         << ", coro_id: " << (int) coro_id
+                         << ". detail: " << wc;
             *(rw_context->success) = false;
             recov.insert({node_id, dir_id});
             fail_nr++;
@@ -1763,7 +1782,7 @@ void Patronus::handle_admin_recover(AdminRequest *req,
     }
     LOG(WARNING) << "[patronus] QP recovering. req: " << *req;
 
-    ContTimer<config::kMonitorFailureRecovery> timer;
+    ContTimer<::config::kMonitorFailureRecovery> timer;
     timer.init("Recover Dir QP");
     auto from_node = req->cid.node_id;
     auto tid = req->cid.thread_id;
@@ -1771,7 +1790,7 @@ void Patronus::handle_admin_recover(AdminRequest *req,
     CHECK(dsm_->recoverDirQP(from_node, tid, dir_id));
     timer.pin("finished");
 
-    LOG_IF(INFO, config::kMonitorFailureRecovery)
+    LOG_IF(INFO, ::config::kMonitorFailureRecovery)
         << "[patronus] timer: " << timer;
 }
 
@@ -1903,51 +1922,10 @@ void Patronus::registerServerThread()
 
 void Patronus::registerClientThread()
 {
-    dsm_->registerThread();
-    // - reserve 4MB for message pool. total 65536 messages, far then enough
-    // - reserve other kRDMABufferSize - 4MB (32 - 4 MB) for client's usage.
-    // If coro_nr == 8, could get 4 MB each coro.
-
-    // dsm_->get_rdma_buffer() is per-thread
-    auto rdma_buffer = dsm_->get_rdma_buffer();
-    auto *dsm_rdma_buffer = rdma_buffer.buffer;
-
-    size_t message_pool_size = 4 * define::MB;
-    CHECK_GT(rdma_buffer.size, message_pool_size);
-    CHECK_GE(message_pool_size / kMessageSize, 65536)
-        << "Consider to tune up message pool size? Less than 64436 "
-           "possible messages";
-
-    rdma_message_buffer_pool_ =
-        std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
-            dsm_rdma_buffer, message_pool_size);
-
-    // the remaining buffer is given to client rdma buffers
-    // 8B and non-8B
-    auto *client_rdma_buffer = dsm_rdma_buffer + message_pool_size;
-    size_t rdma_buffer_size = rdma_buffer.size - message_pool_size;
-    CHECK_GE(rdma_buffer_size, kMaxCoroNr * kClientRdmaBufferSize)
-        << "rdma_buffer not enough for maximum coroutine";
-
-    // remember that, so that we could validate when debugging
-    client_rdma_buffer_ = client_rdma_buffer;
-    client_rdma_buffer_size_ = rdma_buffer_size;
-
-    auto rdma_buffer_size_8B = 8 * 1024;
-    CHECK_GE(rdma_buffer_size, rdma_buffer_size_8B);
-    auto rdma_buffer_size_non_8B = rdma_buffer_size - rdma_buffer_size_8B;
-    auto *client_rdma_buffer_8B = client_rdma_buffer;
-    auto *client_rdma_buffer_non_8B = client_rdma_buffer + rdma_buffer_size_8B;
-
-    rdma_client_buffer_8B_ = std::make_unique<ThreadUnsafeBufferPool<8>>(
-        client_rdma_buffer_8B, rdma_buffer_size_8B);
-    rdma_client_buffer_ =
-        std::make_unique<ThreadUnsafeBufferPool<kClientRdmaBufferSize>>(
-            client_rdma_buffer_non_8B, rdma_buffer_size_non_8B);
-
-    CHECK(!is_client_) << "** already registered";
-    CHECK(!is_server_) << "** already registered as server thread.";
-    is_client_ = true;
+    auto desc = prepare_client_thread(true /* is_registering_thread */);
+    auto succ = apply_client_resource(std::move(desc), true /* bind_core */);
+    CHECK(succ);
+    has_registered_ = true;
 }
 
 size_t Patronus::try_get_client_continue_coros(size_t mid,
@@ -1990,9 +1968,24 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
 
     if (unlikely(fail_nr))
     {
+        // ignore dsm_->try_poll_rdma_cq, ignoring any on-going one-sided
+        // requests (if any)
+        // ignore dsm_- >reliable_try_recv, ignoring any on-going two-sided
+        // requests (if any)
+        bool succ = fast_switch_backup_qp();
+        if (succ)
+        {
+            DVLOG(1) << "[patronus] succeeded in QP recovery fast path.";
+            return cur_idx;
+        }
+        else
+        {
+            DVLOG(1) << "[patronus] failed in QP recovery fast path.";
+        }
+
         LOG(WARNING) << "[patronus] QP failed. Recovering is triggered. tid: "
                      << get_thread_id() << ", mid: " << mid;
-        ContTimer<config::kMonitorFailureRecovery> timer;
+        ContTimer<::config::kMonitorFailureRecovery> timer;
         timer.init("Failure recovery");
 
         if constexpr (debug())
@@ -2015,7 +2008,8 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
         }
         timer.pin("Wait R/W");
         // need to wait for server realizes QP errors, and response error to
-        // memory bind call otherwise, the server will recovery QP and drop the
+        // memory bind call
+        // otherwise, the server will recovery QP and drop the
         // failed window_bind calls then the client corotine will be waiting
         // forever.
         size_t got = msg_nr;
@@ -2046,7 +2040,7 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
             CHECK(dsm_->recoverThreadQP(node_id, dir_id));
         }
         timer.pin("recover QP");
-        LOG_IF(INFO, config::kMonitorFailureRecovery)
+        LOG_IF(INFO, ::config::kMonitorFailureRecovery)
             << "[patronus] client recovery: " << timer;
     }
     else
@@ -2239,8 +2233,18 @@ void Patronus::server_coro_master(CoroYield &yield,
                    wrid.prefix == WRID_PREFIX_PATRONUS_UNBIND_MW)
                 << "** unexpexted prefix from wrid: " << wrid;
             auto rw_ctx_id = wrid.id;
-            DCHECK_NE(wrid.id, get_WRID_ID_RESERVED())
-                << "ID conflicts with reserved ones";
+            // DCHECK_NE(wrid.id, get_WRID_ID_RESERVED())
+            //     << "ID conflicts with reserved ones";
+            if (unlikely(wrid.id == get_WRID_ID_RESERVED()))
+            {
+                DLOG(WARNING)
+                    << "[patronus] server_coro_master: ignoring reserved "
+                       "wr_id: "
+                    << wrid
+                    << ". Possible from a failed unsignaled wr. status: "
+                    << ibv_wc_status_str(wc.status);
+                continue;
+            }
             auto *rw_ctx = rw_context_.id_to_obj(rw_ctx_id);
             auto coro_id = rw_ctx->coro_id;
             CHECK_NE(coro_id, kNotACoro);
@@ -2430,7 +2434,8 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     bool ctx_success = false;
     // NOTE: prefix should be valid, because we will check the prefix
     // for those failed wcs even it is not signaled.
-    WRID signal_wrid(WRID_PREFIX_PATRONUS_UNBIND_MW, get_WRID_ID_RESERVED());
+    WRID signal_wrid(WRID_PREFIX_RESERVED_2, get_WRID_ID_RESERVED());
+    WRID unsignal_wrid(WRID_PREFIX_PATRONUS_UNBIND_MW, get_WRID_ID_RESERVED());
     if (unlikely(wait_success))
     {
         rw_ctx = DCHECK_NOTNULL(get_rw_context());
@@ -2496,15 +2501,16 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                                 1,
                                 IBV_ACCESS_CUSTOM_REMOTE_NORW);
 
-                wrs[0].send_flags = 0;
                 if (unlikely(wait_success))
                 {
-                    wrs[0].send_flags |= IBV_SEND_SIGNALED;
-                    DCHECK_EQ(signal_wrid.prefix,
-                              WRID_PREFIX_PATRONUS_UNBIND_MW);
+                    wrs[0].send_flags = IBV_SEND_SIGNALED;
+                    wrs[0].wr_id = signal_wrid.val;
                 }
-                // but want to detect failure
-                wrs[0].wr_id = signal_wrid.val;
+                else
+                {
+                    wrs[0].send_flags = 0;
+                    wrs[0].wr_id = unsignal_wrid.val;
+                }
             }
             else if (with_buf && with_pr)
             {
@@ -2527,14 +2533,12 @@ void Patronus::task_gc_lease(uint64_t lease_id,
 
                 wrs[0].send_flags = 0;
                 wrs[1].send_flags = 0;
+                wrs[0].wr_id = wrs[1].wr_id = unsignal_wrid.val;
                 if (unlikely(wait_success))
                 {
                     wrs[1].send_flags = IBV_SEND_SIGNALED;
-                    DCHECK_EQ(signal_wrid.prefix,
-                              WRID_PREFIX_PATRONUS_UNBIND_MW);
+                    wrs[1].wr_id = signal_wrid.val;
                 }
-                // but want to detect failure
-                wrs[0].wr_id = wrs[1].wr_id = signal_wrid.val;
             }
             else
             {
@@ -2543,7 +2547,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                     << ", with_pr: " << with_pr;
             }
 
-            if constexpr (config::kEnableSkipMagicMw)
+            if constexpr (::config::kEnableSkipMagicMw)
             {
                 allocated_mw_nr_ += bind_nr;
             }
@@ -2939,6 +2943,120 @@ RetCode Patronus::commit(PatronusBatchContext &batch, CoroContext *ctx)
 ret:
     put_rw_context(rw_context);
     return rc;
+}
+
+void Patronus::hack_trigger_rdma_protection_error(size_t node_id,
+                                                  size_t dir_id,
+                                                  CoroContext *ctx)
+{
+    size_t size = 1;
+    auto rdma_buf = get_rdma_buffer(size);
+    auto rc = read_write_impl(rdma_buf.buffer,
+                              size,
+                              node_id,
+                              dir_id,
+                              0 /* rkey */,
+                              GlobalAddress(0).val,
+                              true /* is_read */,
+                              WRID_PREFIX_PATRONUS_GENERATE_FAULT,
+                              ctx);
+    CHECK_EQ(rc, kRdmaProtectionErr);
+    // NOTE:
+    // do not put rdma buffer from previous thread desc.
+    // put_rdma_buffer(rdma_buf);
+}
+
+void Patronus::prepare_fast_backup_recovery(size_t prepare_nr)
+{
+    std::lock_guard<std::mutex> lk(fast_backup_descs_mu_);
+    for (size_t i = 0; i < prepare_nr; ++i)
+    {
+        prepared_fast_backup_descs_.push(
+            prepare_client_thread(false /* is_registering */));
+    }
+}
+
+PatronusThreadResourceDesc Patronus::prepare_client_thread(
+    bool is_registering_thread)
+{
+    PatronusThreadResourceDesc desc;
+    if (unlikely(is_registering_thread && dsm_->hasRegistered()))
+    {
+        desc.dsm_desc = dsm_->getCurrentThreadDesc();
+    }
+    else
+    {
+        desc.dsm_desc = dsm_->prepareThread();
+    }
+
+    auto *dsm_rdma_buffer = desc.dsm_desc.rdma_buffer;
+
+    size_t message_pool_size = 4 * define::MB;
+    CHECK_GT(desc.dsm_desc.rdma_buffer_size, message_pool_size);
+    CHECK_GE(message_pool_size / kMessageSize, 65536)
+        << "Consider to tune up message pool size? Less than 64436 "
+           "possible messages";
+
+    desc.rdma_message_buffer_pool =
+        std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
+            dsm_rdma_buffer, message_pool_size);
+
+    // the remaining buffer is given to client rdma buffers
+    // 8B and non-8B
+    auto *client_rdma_buffer = dsm_rdma_buffer + message_pool_size;
+    size_t rdma_buffer_size =
+        desc.dsm_desc.rdma_buffer_size - message_pool_size;
+    CHECK_GE(rdma_buffer_size, kMaxCoroNr * kClientRdmaBufferSize)
+        << "rdma_buffer not enough for maximum coroutine";
+
+    // remember that, so that we could validate when debugging
+    desc.client_rdma_buffer = client_rdma_buffer;
+    desc.client_rdma_buffer_size = rdma_buffer_size;
+
+    auto rdma_buffer_size_8B = 8 * 1024;
+    CHECK_GE(rdma_buffer_size, rdma_buffer_size_8B);
+    auto rdma_buffer_size_non_8B = rdma_buffer_size - rdma_buffer_size_8B;
+    auto *client_rdma_buffer_8B = client_rdma_buffer;
+    auto *client_rdma_buffer_non_8B = client_rdma_buffer + rdma_buffer_size_8B;
+
+    desc.rdma_client_buffer_8B = std::make_unique<ThreadUnsafeBufferPool<8>>(
+        client_rdma_buffer_8B, rdma_buffer_size_8B);
+    desc.rdma_client_buffer =
+        std::make_unique<ThreadUnsafeBufferPool<kClientRdmaBufferSize>>(
+            client_rdma_buffer_non_8B, rdma_buffer_size_non_8B);
+    return desc;
+}
+
+bool Patronus::has_registered() const
+{
+    return has_registered_;
+}
+
+bool Patronus::apply_client_resource(PatronusThreadResourceDesc &&desc,
+                                     bool bind_core)
+{
+    auto succ = dsm_->applyResource(desc.dsm_desc, bind_core);
+    CHECK(succ);
+    rdma_message_buffer_pool_ = std::move(desc.rdma_message_buffer_pool);
+    client_rdma_buffer_ = desc.client_rdma_buffer;
+    client_rdma_buffer_size_ = desc.client_rdma_buffer_size;
+    rdma_client_buffer_8B_ = std::move(desc.rdma_client_buffer_8B);
+    rdma_client_buffer_ = std::move(desc.rdma_client_buffer);
+
+    is_client_ = true;
+    return true;
+}
+
+bool Patronus::fast_switch_backup_qp()
+{
+    std::lock_guard<std::mutex> lk(fast_backup_descs_mu_);
+    if (unlikely(prepared_fast_backup_descs_.empty()))
+    {
+        return false;
+    }
+    auto desc = std::move(prepared_fast_backup_descs_.front());
+    prepared_fast_backup_descs_.pop();
+    return apply_client_resource(std::move(desc), false /* bind core */);
 }
 
 }  // namespace patronus

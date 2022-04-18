@@ -74,9 +74,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     {
         trace_t trace = 0;
         bool enable_trace = false;
-        if constexpr (config::kEnableTrace)
+        if constexpr (::config::kEnableTrace)
         {
-            enable_trace = fast_pseudo_bool_with_nth(config::kTraceRate);
+            enable_trace = fast_pseudo_bool_with_nth(::config::kTraceRate);
 
             if (unlikely(enable_trace))
             {

@@ -22,6 +22,7 @@ using namespace patronus;
 constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kThreadNr = 8;
 constexpr static size_t kMaxCoroNr = 16;
+constexpr static size_t kKVBlockExpectSize = 64;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -131,6 +132,7 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     LOG(INFO) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     RaceHashingHandleConfig handle_conf;
+    handle_conf.kvblock_expect_size = kKVBlockExpectSize;
     auto handle_rdma_ctx =
         patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, ctx);
 
@@ -140,7 +142,7 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     return prhh;
 }
 
-void init_allocator(Patronus::pointer p, size_t thread_nr)
+void init_allocator(Patronus::pointer p, size_t thread_nr, size_t kvblock_size)
 {
     // for server to handle kv block allocation requests
     // give all to kv blocks
@@ -154,7 +156,7 @@ void init_allocator(Patronus::pointer p, size_t thread_nr)
         rh_buffer.buffer + tid * thread_kvblock_pool_size;
 
     mem::SlabAllocatorConfig kvblock_slab_config;
-    kvblock_slab_config.block_class = {hash::config::kKVBlockAllocBatchSize};
+    kvblock_slab_config.block_class = {kvblock_size};
     kvblock_slab_config.block_ratio = {1.0};
     auto kvblock_allocator =
         mem::SlabAllocator::new_instance(thread_kvblock_pool_addr,
@@ -476,7 +478,7 @@ void test_basic_server(Patronus::pointer p,
     typename RaceHashingT::pointer rh;
     if (tid < thread_nr)
     {
-        init_allocator(p, thread_nr);
+        init_allocator(p, thread_nr, kKVBlockExpectSize);
     }
     else
     {

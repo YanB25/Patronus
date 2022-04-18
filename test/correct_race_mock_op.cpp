@@ -35,6 +35,7 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
     using RaceHashingT = RaceHashing<kDEntry, kBucketNr, kSlotNr>;
     using RaceHashingHandleT = typename RaceHashingT::Handle;
 
+    size_t kvblock_size = 64;
     // generate rh here
     auto allocator = std::make_shared<patronus::mem::RawAllocator>();
     RaceHashingConfig conf;
@@ -47,7 +48,8 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
     server_rdma_ctx->reg_default_allocator(
         patronus::mem::MallocAllocator::new_instance());
     patronus::mem::SlabAllocatorConfig slab_conf;
-    slab_conf.block_class = {patronus::hash::config::kKVBlockAllocBatchSize};
+    // slab_conf.block_class = {patronus::hash::config::kKVBlockAllocBatchSize};
+    slab_conf.block_class = {kvblock_size};
     slab_conf.block_ratio = {1.0};
     auto slab_allocator = std::make_shared<patronus::mem::SlabAllocator>(
         conf.g_kvblock_pool_addr, conf.g_kvblock_pool_size, slab_conf);
@@ -61,6 +63,7 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
     for (size_t i = 0; i < thread_nr; ++i)
     {
         RaceHashingHandleConfig handle_conf;
+        handle_conf.kvblock_expect_size = kvblock_size;
         auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
         auto rhh = std::make_shared<RaceHashingHandleT>(0 /* node_id */,
                                                         rh->meta_gaddr(),

@@ -40,9 +40,10 @@ struct WRID
 } __attribute__((packed));
 inline std::ostream &operator<<(std::ostream &os, WRID wrid)
 {
-    os << "{WRID prefix: " << wrid.prefix << ", a: " << wrid.u16_a
-       << ", b: " << wrid.u16_b << ", c: " << wrid.u16_c << "/ id: " << wrid.id
-       << "/ val: " << wrid.val << "}";
+    os << "{WRID prefix: " << pre_wrid_prefix(wrid.prefix)
+       << ", a: " << wrid.u16_a << ", b: " << wrid.u16_b
+       << ", c: " << wrid.u16_c << "/ id: " << wrid.id << "/ val: " << wrid.val
+       << "}";
     return os;
 }
 
