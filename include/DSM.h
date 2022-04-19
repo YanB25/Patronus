@@ -17,6 +17,7 @@
 #include "LocalAllocator.h"
 #include "Pool.h"
 #include "RdmaBuffer.h"
+#include "util/Tracer.h"
 
 class DSMKeeper;
 class Directory;
@@ -538,7 +539,9 @@ public:
         return id;
     }
     bool recoverDirQP(int node_id, int thread_id, size_t dirID);
-    bool recoverThreadQP(int node_id, size_t dirID);
+    bool recoverThreadQP(int node_id,
+                         size_t dirID,
+                         util::TraceView v = util::nulltrace);
 
     void roll_dir()
     {

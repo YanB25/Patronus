@@ -33,12 +33,15 @@ public:
     }
     ~ThreadUnsafeBufferPool()
     {
-        if (pool_.size() != buffer_nr_)
+        if constexpr (debug())
         {
-            LOG(WARNING)
-                << "Possible memory leak for ThreadUnsafeBufferPool at "
-                << (void *) this << ", expect " << buffer_nr_ << ", got "
-                << pool_.size() << util::stack_trace;
+            if (pool_.size() != buffer_nr_)
+            {
+                LOG(WARNING)
+                    << "Possible memory leak for ThreadUnsafeBufferPool at "
+                    << (void *) this << ", expect " << buffer_nr_ << ", got "
+                    << pool_.size() << util::stack_trace;
+            }
         }
     }
     void debug_validity_get(void *addr)

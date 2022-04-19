@@ -379,7 +379,8 @@ RetCode Patronus::read_write_impl(char *iobuf,
                                   uint64_t remote_addr,
                                   bool is_read,
                                   uint16_t wrid_prefix,
-                                  CoroContext *ctx)
+                                  CoroContext *ctx,
+                                  TraceView v)
 {
     bool ret = false;
 
@@ -401,6 +402,8 @@ RetCode Patronus::read_write_impl(char *iobuf,
     rw_context->coro_id = coro_id;
     rw_context->target_node = gaddr.nodeID;
     rw_context->dir_id = dir_id;
+    rw_context->trace_view = v;
+    v.pin("issue");
 
     // already switch ctx if not null
     if (is_read)
@@ -526,7 +529,8 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
                            uint64_t compare,
                            uint64_t swap,
                            uint16_t wr_prefix,
-                           CoroContext *ctx)
+                           CoroContext *ctx,
+                           TraceView v)
 {
     bool ret = false;
 
@@ -547,6 +551,8 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
     rw_context->coro_id = coro_id;
     rw_context->target_node = gaddr.nodeID;
     rw_context->dir_id = dir_id;
+    rw_context->trace_view = v;
+    v.pin("issue");
 
     auto wrid = WRID(wr_prefix, rw_ctx_id);
     DVLOG(4) << "[patronus] CAS node_id: " << node_id << ", dir_id " << dir_id
@@ -1667,7 +1673,7 @@ size_t Patronus::handle_rdma_finishes(
     ibv_wc *wc_buffer,
     size_t rdma_nr,
     coro_t *coro_buf,
-    std::set<std::pair<size_t, size_t>> &recov)
+    std::map<std::pair<size_t, size_t>, TraceView> &recov)
 {
     size_t cur_idx = 0;
     size_t fail_nr = 0;
@@ -1691,6 +1697,8 @@ size_t Patronus::handle_rdma_finishes(
         CHECK_NE(coro_id, kMasterCoro)
             << "** Coro master should not issue R/W.";
 
+        rw_context->trace_view.pin("arrived");
+
         if (likely(wc.status == IBV_WC_SUCCESS))
         {
             *(rw_context->success) = true;
@@ -1705,7 +1713,8 @@ size_t Patronus::handle_rdma_finishes(
                          << ", coro_id: " << (int) coro_id
                          << ". detail: " << wc;
             *(rw_context->success) = false;
-            recov.insert({node_id, dir_id});
+            recov.emplace(std::make_pair(node_id, dir_id),
+                          rw_context->trace_view);
             fail_nr++;
         }
         rw_context->ready.store(true, std::memory_order_release);
@@ -1824,7 +1833,9 @@ void Patronus::handle_admin_exit(AdminRequest *req,
     DCHECK_LT(key, should_exit_.size());
     should_exit_[key].store(true, std::memory_order_release);
 }
-void Patronus::signal_server_to_recover_qp(size_t node_id, size_t dir_id)
+void Patronus::signal_server_to_recover_qp(size_t node_id,
+                                           size_t dir_id,
+                                           TraceView v)
 {
     auto tid = get_thread_id();
     auto from_mid = tid;
@@ -1856,6 +1867,8 @@ void Patronus::signal_server_to_recover_qp(size_t node_id, size_t dir_id)
     // TODO(patronus): this may have problem if message not inlined and buffer
     // is re-used and NIC is DMA-ing
     put_rdma_message_buffer(rdma_buf);
+
+    v.pin("signal-server-recovery");
 }
 void Patronus::registerServerThread()
 {
@@ -1951,7 +1964,9 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
     DCHECK_LT(rdma_nr, kBufferSize)
         << "** performance issue: buffer size not enough";
 
-    std::set<std::pair<size_t, size_t>> recovery;
+    using node_t = size_t;
+    using dir_t = size_t;
+    std::map<std::pair<node_t, dir_t>, TraceView> recovery;
     size_t fail_nr =
         handle_rdma_finishes(wc_buffer, rdma_nr, coro_buf + cur_idx, recovery);
 
@@ -1968,11 +1983,12 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
 
     if (unlikely(fail_nr))
     {
+        auto trace = recovery.begin()->second;
         // ignore dsm_->try_poll_rdma_cq, ignoring any on-going one-sided
         // requests (if any)
         // ignore dsm_- >reliable_try_recv, ignoring any on-going two-sided
         // requests (if any)
-        bool succ = fast_switch_backup_qp();
+        bool succ = fast_switch_backup_qp(trace);
         if (succ)
         {
             DVLOG(1) << "[patronus] succeeded in QP recovery fast path.";
@@ -2030,14 +2046,20 @@ size_t Patronus::try_get_client_continue_coros(size_t mid,
         }
         timer.pin("Wait RPC");
 
-        for (const auto &[node_id, dir_id] : recovery)
+        for (const auto &[position, trace_view] : recovery)
         {
-            signal_server_to_recover_qp(node_id, dir_id);
+            auto node_id = position.first;
+            auto dir_id = position.second;
+            signal_server_to_recover_qp(node_id, dir_id, trace_view);
         }
+
         timer.pin("signal server");
-        for (const auto &[node_id, dir_id] : recovery)
+        // for (const auto &tp : recovery)
+        for (const auto &[position, trace_view] : recovery)
         {
-            CHECK(dsm_->recoverThreadQP(node_id, dir_id));
+            auto node_id = position.first;
+            auto dir_id = position.second;
+            CHECK(dsm_->recoverThreadQP(node_id, dir_id, trace_view));
         }
         timer.pin("recover QP");
         LOG_IF(INFO, ::config::kMonitorFailureRecovery)
@@ -3033,7 +3055,8 @@ bool Patronus::has_registered() const
 }
 
 bool Patronus::apply_client_resource(PatronusThreadResourceDesc &&desc,
-                                     bool bind_core)
+                                     bool bind_core,
+                                     TraceView v)
 {
     auto succ = dsm_->applyResource(desc.dsm_desc, bind_core);
     CHECK(succ);
@@ -3044,10 +3067,11 @@ bool Patronus::apply_client_resource(PatronusThreadResourceDesc &&desc,
     rdma_client_buffer_ = std::move(desc.rdma_client_buffer);
 
     is_client_ = true;
+    v.pin("switch-thread-desc");
     return true;
 }
 
-bool Patronus::fast_switch_backup_qp()
+bool Patronus::fast_switch_backup_qp(TraceView v)
 {
     std::lock_guard<std::mutex> lk(fast_backup_descs_mu_);
     if (unlikely(prepared_fast_backup_descs_.empty()))
@@ -3056,7 +3080,7 @@ bool Patronus::fast_switch_backup_qp()
     }
     auto desc = std::move(prepared_fast_backup_descs_.front());
     prepared_fast_backup_descs_.pop();
-    return apply_client_resource(std::move(desc), false /* bind core */);
+    return apply_client_resource(std::move(desc), false /* bind core */, v);
 }
 
 }  // namespace patronus

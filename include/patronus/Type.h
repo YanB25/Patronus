@@ -221,7 +221,8 @@ enum class RWFlag : uint8_t
     kWithAutoExtend = 1 << 1,
     kWithCache = 1 << 2,
     kUseUniversalRkey = 1 << 3,
-    kReserved = 1 << 4,
+    kEnableTrace = 1 << 4,
+    kReserved = 1 << 5,
 };
 
 struct RWFlagOut

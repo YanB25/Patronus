@@ -142,3 +142,12 @@ The reason (I guess) is that,
 3. The auto-gc version requires every unbind to be signal. Instead, we could let every N of one signal.
 
 The auto-gc's latency is worse. But at least it is runnable.
+
+## bench_patronus_fast_recovery
+Don't know, but I got the number I want.
+The fast recovery can not reach us(s) latency, because we need at least ~600us to detect the fault.
+But we could achieve 1/3 latency compared to the naive recovering solution, which is great.
+
+Querying QP status: needs ~60us, too slow to be applicable.
+No way to optimize querying QP status: at least didn't find
+No way to make the failed wc occurs faster: at least didn't find

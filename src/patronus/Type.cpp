@@ -276,6 +276,11 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
     {
         os << "use-universal-rkey, ";
     }
+    bool enable_trace = flag.flag & (flag_t) RWFlag::kEnableTrace;
+    if (enable_trace)
+    {
+        os << "enable-trace";
+    }
     bool reserve = flag.flag & (flag_t) RWFlag::kReserved;
     DCHECK(!reserve);
     os << "}";

@@ -434,6 +434,7 @@ bool rdmaBatchWrite(ibv_qp *qp,
 
 //// Utility.cpp
 ibv_qp_state rdmaQueryQueuePair(ibv_qp *qp);
+void rdmaReportQueuePair2(ibv_qp *qp);
 void rdmaReportQueuePair(ibv_qp *qp);
 void checkDctSupported(struct ibv_context *ctx);
 /**

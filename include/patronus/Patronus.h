@@ -21,9 +21,11 @@
 #include "patronus/memory/slab_allocator.h"
 #include "util/Debug.h"
 #include "util/RetCode.h"
+#include "util/Tracer.h"
 
 namespace patronus
 {
+using TraceView = util::TraceView;
 using namespace define::literals;
 class Patronus;
 struct PatronusConfig
@@ -55,6 +57,13 @@ inline std::ostream &operator<<(std::ostream &os, const PatronusConfig &conf)
     return os;
 }
 
+struct TraceContext
+{
+    uint64_t thread_name_id;
+    uint32_t coro_id;
+    RetrieveTimer timer;
+};
+
 struct RpcContext
 {
     Lease *ret_lease{nullptr};
@@ -71,6 +80,7 @@ struct RWContext
     coro_t coro_id;
     size_t target_node;
     size_t dir_id;
+    util::TraceView trace_view{util::nulltrace};
 };
 
 struct LeaseContext
@@ -160,7 +170,7 @@ public:
                             size_t size,
                             std::chrono::nanoseconds ns,
                             flag_t flag /* AcquireRequestFlag */,
-                            CoroContext *ctx = nullptr);
+                            CoroContext *ctx);
     /**
      * @brief Alloc a piece of remote memory, without any permission binded
      *
@@ -175,7 +185,7 @@ public:
                                uint16_t dir_id,
                                size_t size,
                                uint64_t hint,
-                               CoroContext *ctx = nullptr);
+                               CoroContext *ctx);
     /**
      * @brief @see get_rlease
      */
@@ -224,20 +234,23 @@ public:
                         size_t size,
                         size_t offset,
                         flag_t flag /* RWFlag */,
-                        CoroContext *ctx = nullptr);
+                        CoroContext *ctx,
+                        TraceView = util::nulltrace);
     inline RetCode write(Lease &lease,
                          const char *ibuf,
                          size_t size,
                          size_t offset,
                          flag_t flag /* RWFlag */,
-                         CoroContext *ctx = nullptr);
+                         CoroContext *ctx,
+                         TraceView = util::nulltrace);
     inline RetCode cas(Lease &lease,
                        char *iobuf,
                        size_t offset,
                        uint64_t compare,
                        uint64_t swap,
                        flag_t flag /* RWFlag */,
-                       CoroContext *ctx = nullptr);
+                       CoroContext *ctx,
+                       TraceView = util::nulltrace);
     // below for batch API
     RetCode prepare_write(PatronusBatchContext &batch,
                           Lease &lease,
@@ -335,7 +348,9 @@ public:
 
     PatronusThreadResourceDesc prepare_client_thread(
         bool is_registering_thread);
-    bool apply_client_resource(PatronusThreadResourceDesc &&, bool bind_core);
+    bool apply_client_resource(PatronusThreadResourceDesc &&,
+                               bool bind_core,
+                               TraceView v = util::nulltrace);
     bool has_registered() const;
 
     /**
@@ -691,7 +706,7 @@ private:
         return (ProtectionRegion *) ret;
     }
 
-    bool fast_switch_backup_qp();
+    bool fast_switch_backup_qp(TraceView = util::nulltrace);
 
     // clang-format off
     /**
@@ -742,11 +757,14 @@ private:
     size_t handle_response_messages(const char *msg_buf,
                                     size_t msg_nr,
                                     coro_t *o_coro_buf);
-    size_t handle_rdma_finishes(ibv_wc *buffer,
-                                size_t rdma_nr,
-                                coro_t *o_coro_buf,
-                                std::set<std::pair<size_t, size_t>> &recov);
-    void signal_server_to_recover_qp(size_t node_id, size_t dir_id);
+    size_t handle_rdma_finishes(
+        ibv_wc *buffer,
+        size_t rdma_nr,
+        coro_t *o_coro_buf,
+        std::map<std::pair<size_t, size_t>, TraceView> &recov);
+    void signal_server_to_recover_qp(size_t node_id,
+                                     size_t dir_id,
+                                     TraceView = util::nulltrace);
     void handle_request_acquire(AcquireRequest *, CoroContext *ctx);
     void handle_request_lease_modify(LeaseModifyRequest *, CoroContext *ctx);
     void handle_response_lease_extend(LeaseModifyResponse *);
@@ -826,7 +844,8 @@ private:
                             size_t remote_addr,
                             bool is_read,
                             uint16_t wrid_prefix,
-                            CoroContext *ctx = nullptr);
+                            CoroContext *ctx,
+                            TraceView = util::nulltrace);
     inline RetCode extend_impl(Lease &lease,
                                size_t extend_unit_nr,
                                flag_t flag,
@@ -839,7 +858,8 @@ private:
                      uint64_t compare,
                      uint64_t swap,
                      uint16_t wr_prefix,
-                     CoroContext *ctx = nullptr);
+                     CoroContext *ctx,
+                     TraceView = util::nulltrace);
     Lease lease_modify_impl(Lease &lease,
                             uint64_t hint,
                             RequestType type,
@@ -1030,7 +1050,6 @@ Lease Patronus::get_wlease(uint16_t node_id,
         }
         else
         {
-            CHECK(!bind_gaddr.is_null()) << "** Can not bind to nullptr";
             CHECK_EQ(alloc_hint, 0)
                 << "** API integrity: set alloc_hint to 0 when w/o allocation";
         }
@@ -1224,7 +1243,8 @@ RetCode Patronus::read(Lease &lease,
                        size_t size,
                        size_t offset,
                        flag_t flag,
-                       CoroContext *ctx)
+                       CoroContext *ctx,
+                       TraceView v)
 {
     RetCode ec = RetCode::kOk;
     if ((ec = handle_rwcas_flag(lease, flag, ctx)) != RetCode::kOk)
@@ -1259,22 +1279,25 @@ RetCode Patronus::read(Lease &lease,
     }
     uint64_t remote_addr = lease.base_addr_ + offset;
 
-    return read_write_impl(obuf,
-                           size,
-                           node_id,
-                           dir_id,
-                           rkey,
-                           remote_addr,
-                           true /* is_read */,
-                           WRID_PREFIX_PATRONUS_RW,
-                           ctx);
+    ec = read_write_impl(obuf,
+                         size,
+                         node_id,
+                         dir_id,
+                         rkey,
+                         remote_addr,
+                         true /* is_read */,
+                         WRID_PREFIX_PATRONUS_RW,
+                         ctx,
+                         v);
+    return ec;
 }
 RetCode Patronus::write(Lease &lease,
                         const char *ibuf,
                         size_t size,
                         size_t offset,
                         flag_t flag,
-                        CoroContext *ctx)
+                        CoroContext *ctx,
+                        TraceView v)
 {
     auto ec = handle_rwcas_flag(lease, flag, ctx);
     if (unlikely(ec != RetCode::kOk))
@@ -1303,13 +1326,15 @@ RetCode Patronus::write(Lease &lease,
                          remote_addr,
                          false /* is_read */,
                          WRID_PREFIX_PATRONUS_RW,
-                         ctx);
+                         ctx,
+                         v);
 
     bool with_cache = flag & (flag_t) RWFlag::kWithCache;
     if (ec == RetCode::kOk && with_cache)
     {
         lease.cache_insert(offset, size, ibuf);
     }
+
     return ec;
 }
 
@@ -1319,7 +1344,8 @@ RetCode Patronus::cas(Lease &lease,
                       uint64_t compare,
                       uint64_t swap,
                       flag_t flag,
-                      CoroContext *ctx)
+                      CoroContext *ctx,
+                      TraceView v)
 {
     auto ec = handle_rwcas_flag(lease, flag, ctx);
     if (unlikely(ec != RetCode::kOk))
@@ -1348,7 +1374,8 @@ RetCode Patronus::cas(Lease &lease,
                   compare,
                   swap,
                   WRID_PREFIX_PATRONUS_CAS,
-                  ctx);
+                  ctx,
+                  v);
 
     bool with_cache = flag & (flag_t) RWFlag::kWithCache;
     if (ec == RetCode::kOk && with_cache)

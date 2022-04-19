@@ -9,9 +9,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <list>
+#include <map>
 #include <string>
 #include <unordered_map>
 
+#include "Common.h"
 #include "boost/format.hpp"
 
 #define DEFINE_VARNAME(base, line) DEFINE_VARNAME_CONCAT(base, line)
@@ -256,5 +259,81 @@ public:
 private:
     std::chrono::time_point<std::chrono::steady_clock> now_;
 };
+
+struct RetrieveTimerRecord
+{
+    RetrieveTimerRecord(const std::string &n, uint64_t t) : name(n), ns(t)
+    {
+    }
+    std::string name;
+    uint64_t ns;
+};
+class RetrieveTimer
+{
+public:
+    RetrieveTimer() = default;
+    void init(const std::string &name)
+    {
+        records_.clear();
+        name_ = name;
+        now_ = std::chrono::steady_clock::now();
+    }
+    uint64_t pin(const std::string &name)
+    {
+        auto now = std::chrono::steady_clock::now();
+        auto ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now - now_)
+                .count();
+        now_ = now;
+        records_.emplace_back(name, ns);
+        return ns;
+    }
+    /**
+     * @brief This will not combined pin(s) with same name
+     *
+     * @return std::vector<RetrieveTimerRecord>
+     */
+    std::vector<RetrieveTimerRecord> retrieve_vec() const
+    {
+        std::vector<RetrieveTimerRecord> ret;
+        ret.reserve(records_.size());
+        for (const auto &record : records_)
+        {
+            ret.push_back(record);
+        }
+        return ret;
+    }
+    /**
+     * @brief This will auto-ly combine pin(s) with same name
+     *
+     * @return std::map<std::string, uint64_t>
+     */
+    std::map<std::string, uint64_t> retrieve_map() const
+    {
+        std::map<std::string, uint64_t> ret;
+        for (const auto &record : records_)
+        {
+            ret[record.name] += record.ns;
+        }
+        return ret;
+    }
+
+private:
+    std::string name_;
+    std::list<RetrieveTimerRecord> records_;
+    std::chrono::time_point<std::chrono::steady_clock> now_;
+};
+
+inline std::ostream &operator<<(std::ostream &os, const RetrieveTimer &timer)
+{
+    os << "{RetrieveTimer " << std::endl;
+    for (const auto &record : timer.retrieve_vec())
+    {
+        os << "[" << record.name << "] takes " << record.ns << " ns"
+           << std::endl;
+    }
+    os << "}";
+    return os;
+}
 
 #endif  // _TIMER_H_

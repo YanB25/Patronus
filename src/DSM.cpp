@@ -184,7 +184,7 @@ bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
     return true;
 }
 
-bool DSM::recoverThreadQP(int node_id, size_t dirID)
+bool DSM::recoverThreadQP(int node_id, size_t dirID, util::TraceView v)
 {
     auto tid = get_thread_id();
     ibv_qp *qp = get_th_qp(node_id, dirID);
@@ -203,6 +203,8 @@ bool DSM::recoverThreadQP(int node_id, size_t dirID)
         return false;
     }
     rdmaQueryQueuePair(qp);
+
+    v.pin("client-recovery");
     return true;
 }
 

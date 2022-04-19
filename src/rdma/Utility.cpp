@@ -6,6 +6,23 @@
 
 int kMaxDeviceMemorySize = 0;
 
+void rdmaReportQueuePair2(ibv_qp *qp)
+{
+    struct ibv_qp_attr attr;
+    struct ibv_qp_init_attr init_attr;
+    PLOG_IF(ERROR,
+            ibv_query_qp(qp,
+                         &attr,
+                         IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RNR_RETRY |
+                             IBV_QP_RETRY_CNT,
+                         &init_attr))
+        << "Failed to ibv_query_qp.";
+    LOG(INFO) << "qp state: " << (uint64_t) attr.qp_state
+              << ", qp_timeout: " << (uint64_t) attr.timeout
+              << ", rnr_retry: " << (uint64_t) attr.rnr_retry
+              << ", retry_cnt: " << (uint64_t) attr.retry_cnt;
+}
+
 void rdmaReportQueuePair(ibv_qp *qp)
 {
     auto state = rdmaQueryQueuePair(qp);
@@ -42,7 +59,8 @@ ibv_qp_state rdmaQueryQueuePair(ibv_qp *qp)
 {
     struct ibv_qp_attr attr;
     struct ibv_qp_init_attr init_attr;
-    ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr);
+    PLOG_IF(ERROR, ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr))
+        << "Failed to ibv_query_qp.";
     return attr.qp_state;
 }
 
