@@ -5,7 +5,6 @@
 #include "boost/thread/barrier.hpp"
 #include "patronus/Patronus.h"
 #include "util/PerformanceReporter.h"
-#include "util/Pre.h"
 #include "util/monitor.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
@@ -16,15 +15,15 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint32_t kMachineNr = 2;
 
 using namespace patronus;
-constexpr static size_t kThreadNr = 8;
+constexpr static size_t kThreadNr = 4;
 static_assert(kThreadNr <= RMSG_MULTIPLEXING);
 static_assert(kThreadNr <= kMaxAppThread);
-constexpr static size_t kCoroCnt = 1;
+constexpr static size_t kCoroCnt = 8;
 
-constexpr static size_t kKeyLimit = 1;
+constexpr static size_t kKeyLimit = 100;
 
-constexpr static size_t kTestTime = 500;
-constexpr static auto kLeaseTime = 10ms;
+constexpr static size_t kTestTime =
+    Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
 
 constexpr static size_t kWaitKey = 0;
 
@@ -44,25 +43,15 @@ struct ClientCoro
     CoroCall master;
 };
 thread_local ClientCoro client_coro;
-
-uint64_t locate_key(size_t tid, size_t coro_id)
+struct ClientCommunication
 {
-    std::ignore = tid;
-    std::ignore = coro_id;
-    return 0;
-}
+    bool still_has_work[kCoroCnt];
+    bool finish_cur_task[kCoroCnt];
+    bool finish_all_task[kCoroCnt];
+};
+thread_local ClientCommunication client_comm;
 
-std::atomic<size_t> bench_succ_nr{0};
-std::atomic<size_t> bench_failed_nr{0};
-std::atomic<size_t> bench_total_nr{0};
-
-std::mutex seq_mu;
-Sequence<uint64_t, 10> seq;
-
-void client_worker(Patronus::pointer p,
-                   coro_t coro_id,
-                   CoroYield &yield,
-                   CoroExecutionContext<kCoroCnt> &ex)
+void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
     auto mid = tid;
@@ -73,62 +62,63 @@ void client_worker(Patronus::pointer p,
     OnePassMonitor lease_success_m;
     size_t lease_success_nr{0};
 
-    ChronoTimer timer;
     for (size_t time = 0; time < kTestTime; ++time)
     {
-        auto key = locate_key(tid, coro_id);
+        client_comm.still_has_work[coro_id] = true;
+        client_comm.finish_cur_task[coro_id] = false;
+        client_comm.finish_all_task[coro_id] = false;
+
+        auto key = rand() % kKeyLimit;
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
-        auto flag = (flag_t) AcquireRequestFlag::kWithConflictDetect;
+        auto flag = (flag_t) AcquireRequestFlag::kNoGc |
+                    (flag_t) AcquireRequestFlag::kWithConflictDetect;
         Lease lease = p->get_rlease(kServerNodeId,
                                     dir_id,
                                     GlobalAddress(0, key),
                                     0 /* alloc_hint */,
                                     sizeof(Object),
-                                    kLeaseTime,
+                                    0ns,
                                     flag,
                                     &ctx);
-        bench_total_nr.fetch_add(1);
         if (unlikely(!lease.success()))
         {
-            CHECK(lease.ec() == AcquireRequestStatus::kMagicMwErr ||
-                  lease.ec() == AcquireRequestStatus::kLockedErr)
-                << "Unexpected lease failure: " << lease.ec()
-                << ". Lease: " << lease;
+            LOG(WARNING) << "[bench] client coro " << ctx
+                         << " get_rlease failed. retry. ec: " << lease.ec();
             lease_success_m.collect(0);
-            std::this_thread::sleep_for(kLeaseTime / 10);
-            bench_failed_nr.fetch_add(1);
             continue;
         }
         else
         {
-            bench_succ_nr.fetch_add(1);
             lease_success_m.collect(1);
             lease_success_nr++;
-            // success
-            std::lock_guard<std::mutex> lk(seq_mu);
-            auto now = std::chrono::system_clock::now();
-            auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                          now.time_since_epoch())
-                          .count();
-            seq.push_back(ns);
         }
 
-        std::this_thread::sleep_for(kLeaseTime / 10);
-    }
-    auto ns = timer.pin();
-    ex.worker_finished(coro_id);
+        DVLOG(2) << "[bench] client coro " << ctx << " got lease " << lease;
 
+        DVLOG(2) << "[bench] client coro " << ctx
+                 << " start to relinquish lease ";
+        p->relinquish(lease, 0, 0, &ctx);
+
+        DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
+        client_comm.still_has_work[coro_id] = true;
+        client_comm.finish_cur_task[coro_id] = true;
+        client_comm.finish_all_task[coro_id] = false;
+        ctx.yield_to_master();
+    }
+    client_comm.still_has_work[coro_id] = false;
+    client_comm.finish_cur_task[coro_id] = true;
+    client_comm.finish_all_task[coro_id] = true;
     LOG(INFO) << "[bench] coro: " << ctx
               << ", lease_success_m: " << lease_success_m
-              << ", lease_success_nr: " << lease_success_nr << ". Take " << ns
-              << " ns";
+              << ", lease_success_nr: " << lease_success_nr;
+
+    LOG(WARNING) << "worker coro " << (int) coro_id << ", thread " << tid
+                 << " finished ALL THE TASK. yield to master.";
 
     ctx.yield_to_master();
 }
-void client_master(Patronus::pointer p,
-                   CoroYield &yield,
-                   CoroExecutionContext<kCoroCnt> &ex)
+void client_master(Patronus::pointer p, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
     auto mid = tid;
@@ -142,7 +132,9 @@ void client_master(Patronus::pointer p,
     }
     LOG(INFO) << "Return back to master. start to recv messages";
     coro_t coro_buf[2 * kCoroCnt];
-    while (!ex.is_finished_all())
+    while (!std::all_of(std::begin(client_comm.finish_all_task),
+                        std::end(client_comm.finish_all_task),
+                        [](bool i) { return i; }))
     {
         // try to see if messages arrived
 
@@ -152,6 +144,17 @@ void client_master(Patronus::pointer p,
             auto coro_id = coro_buf[i];
             DVLOG(1) << "[bench] yielding due to CQE";
             mctx.yield_to_worker(coro_id);
+        }
+
+        for (size_t i = 0; i < kCoroCnt; ++i)
+        {
+            if (client_comm.finish_cur_task[i] &&
+                !client_comm.finish_all_task[i])
+            {
+                DVLOG(1) << "[bench] yielding to coro " << (int) i
+                         << " for new task";
+                mctx.yield_to_worker(i);
+            }
         }
     }
 
@@ -163,16 +166,15 @@ void client(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
     LOG(INFO) << "I am client. tid " << tid;
-
-    CoroExecutionContext<kCoroCnt> ex;
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
-        client_coro.workers[i] = CoroCall(
-            [p, i, &ex](CoroYield &yield) { client_worker(p, i, yield, ex); });
+        client_coro.workers[i] =
+            CoroCall([p, i](CoroYield &yield) { client_worker(p, i, yield); });
     }
     client_coro.master =
-        CoroCall([p, &ex](CoroYield &yield) { client_master(p, yield, ex); });
+        CoroCall([p](CoroYield &yield) { client_master(p, yield); });
     client_coro.master();
+    LOG(INFO) << "[bench] thread " << tid << " going to leave client()";
 }
 
 void server(Patronus::pointer p)
@@ -219,6 +221,7 @@ int main(int argc, char *argv[])
         patronus->registerClientThread();
         auto tid = patronus->get_thread_id();
         client(patronus);
+        LOG(INFO) << "[bench] thread " << tid << " finish its work";
         bar.wait();
         LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
         patronus->finished(kWaitKey);
@@ -248,32 +251,6 @@ int main(int argc, char *argv[])
     LOG(INFO) << "[bench] reference: concurrency: " << concurrency
               << ", key_range: " << key_nr
               << ", concurrency/key_range = " << 1.0 * concurrency / key_nr;
-    LOG(INFO) << "[bench] total acquire nr: " << bench_total_nr
-              << ", succeess nr: " << bench_succ_nr
-              << ", failed nr: " << bench_failed_nr;
-
-    uint64_t limit_ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(kLeaseTime)
-            .count();
-    auto s = seq.to_vector();
-
-    LOG(INFO) << "[bench] acquire_time: " << util::pre_vec(s);
-
-    for (size_t i = 0; i < s.size(); ++i)
-    {
-        auto ns = s[i];
-        if (i > 0)
-        {
-            auto last_ns = s[i - 1];
-            auto diff = ns - last_ns;
-            CHECK_GT(diff, limit_ns)
-                << "The " << i - 1 << "-th and " << i << "-th acquire has "
-                << diff << " ns as internal, less than expected " << limit_ns;
-            CHECK_LE(diff, 1.5 * limit_ns)
-                << "The " << i - 1 << "-th and " << i << "-th acquire has "
-                << diff << " ns as internal, >= 1.5 * limit ns.";
-        }
-    }
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

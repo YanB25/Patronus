@@ -58,7 +58,12 @@ public:
         return byte.compare_exchange_strong(
             expect, expect | target_bit, std::memory_order_acquire);
     }
-    void unlock(bucket_t b, slot_t s)
+
+    /**
+     * @brief unlock is always idempotent
+     * - unlocking an unlocked slot is a well-defined behavior
+     */
+    bool unlock(bucket_t b, slot_t s)
     {
         DCHECK_LT(b, bucket_nr());
         DCHECK_LT(s, slot_nr());
@@ -72,22 +77,25 @@ public:
 
         uint8_t expect = byte.load(std::memory_order_relaxed);
         uint8_t target_bit = 1 << slot_bit;
-        DCHECK(expect & target_bit)
-            << "** not locked. bucket: " << b << ", slot: " << s
-            << ", bits: " << std::bitset<8>(expect);
         DVLOG(4) << "[lock] unlocking bucket " << b
                  << ", slot_byte: " << slot_byte << ", bit " << slot_bit
                  << ", expect: " << std::bitset<8>(expect)
                  << ", addr: " << (void *) &byte;
-        while (true)
+        bool locked = expect & target_bit;
+        if (unlikely(!locked))
+        {
+            return false;
+        }
+        while (expect & target_bit)
         {
             bool succ = byte.compare_exchange_strong(
                 expect, expect & (~target_bit), std::memory_order_release);
             if (succ)
             {
-                break;
+                return true;
             }
         }
+        return false;
     }
 
 private:

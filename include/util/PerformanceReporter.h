@@ -450,7 +450,7 @@ public:
     {
         return sequence_.back()[slot_id() - 1];
     }
-    std::vector<T> to_vector()
+    std::vector<T> to_vector() const
     {
         std::vector<T> ret;
         ret.reserve(size_);

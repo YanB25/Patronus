@@ -4,6 +4,7 @@
 #include "patronus/IBOut.h"
 #include "patronus/Time.h"
 #include "util/Debug.h"
+#include "util/Pre.h"
 #include "util/Rand.h"
 
 namespace patronus
@@ -986,6 +987,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
 
     bool with_lock =
         req->flag & (flag_t) AcquireRequestFlag::kWithConflictDetect;
+    bool i_acquire_the_lock = false;
 
     bool with_buf = true;
     bool with_pr = true;
@@ -1021,6 +1023,10 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
             status = AcquireRequestStatus::kLockedErr;
             // err handling
             goto handle_response;
+        }
+        else
+        {
+            i_acquire_the_lock = true;
         }
     }
 
@@ -1427,6 +1433,13 @@ handle_response:
         {
             // freeing nullptr is always well-defined
             patronus_free(object_addr, req->size, req->key /* hint */);
+        }
+        if (with_lock && i_acquire_the_lock)
+        {
+            auto [b, s] = locate_key(req->key);
+            bucket_id = b;
+            slot_id = s;
+            lock_manager_.unlock(bucket_id, slot_id);
         }
     }
 
