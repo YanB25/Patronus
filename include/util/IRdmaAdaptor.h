@@ -2,6 +2,7 @@
 #ifndef SHERMEM_IRDMA_ADAPTOR_H_
 #define SHERMEM_IRDMA_ADAPTOR_H_
 
+#include <chrono>
 #include <memory>
 
 #include "Cache.h"
@@ -16,11 +17,17 @@
 class RemoteMemHandle
 {
 public:
-    RemoteMemHandle(GlobalAddress gaddr, size_t size)
-        : gaddr_(gaddr), size_(size), valid_(true)
+    RemoteMemHandle(GlobalAddress gaddr,
+                    size_t size,
+                    patronus::AcquireRequestStatus ec)
+        : gaddr_(gaddr), size_(size), valid_(true), ec_(ec)
     {
     }
-    RemoteMemHandle() : gaddr_(nullgaddr), size_(0), valid_(false)
+    RemoteMemHandle()
+        : gaddr_(nullgaddr),
+          size_(0),
+          valid_(false),
+          ec_(patronus::AcquireRequestStatus::kReserved)
     {
     }
     GlobalAddress gaddr() const
@@ -54,12 +61,17 @@ public:
         return gaddr_ == rhs.gaddr_ && size_ == rhs.size_ &&
                private_data_ == rhs.private_data_;
     }
+    patronus::AcquireRequestStatus ec() const
+    {
+        return ec_;
+    }
 
 private:
     GlobalAddress gaddr_;
     size_t size_;
     bool valid_{false};
     void *private_data_{nullptr};
+    patronus::AcquireRequestStatus ec_;
 };
 
 inline std::ostream &operator<<(std::ostream &os, const RemoteMemHandle &handle)
@@ -106,6 +118,7 @@ public:
                                          size_t size,
                                          std::chrono::nanoseconds ns,
                                          flag_t flag) = 0;
+    virtual RetCode extend(RemoteMemHandle &, std::chrono::nanoseconds) = 0;
     // free only
     virtual void remote_free(GlobalAddress, size_t size, hint_t) = 0;
     // all rel operations other than free-only

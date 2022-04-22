@@ -13,6 +13,7 @@
 #include "Common.h"
 #include "patronus/RdmaAdaptor.h"
 #include "patronus/memory/patronus_wrapper_allocator.h"
+#include "util/TimeConv.h"
 
 using namespace define::literals;
 namespace patronus::hash
@@ -381,34 +382,108 @@ public:
         }
         return rc;
     }
+    constexpr static size_t subtable_nr()
+    {
+        return kDEntryNr;
+    }
+    std::array<RemoteMemHandle, subtable_nr()> expand_lock_handles_;
+    std::chrono::time_point<std::chrono::steady_clock> lock_handle_last_extend_;
+    bool maybe_expand_try_extend_lock_lease(size_t subtable_idx,
+                                            HashContext *dctx)
+    {
+        const auto &c = conf_.expand;
+        if (unlikely(!c.use_patronus_lock))
+        {
+            return true;
+        }
+        auto now = std::chrono::steady_clock::now();
+        uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          now - lock_handle_last_extend_)
+                          .count();
+        bool should_extend = ns >= util::time::to_ns(c.lock_time_ns) / 2;
+        if (unlikely(should_extend))
+        {
+            auto rc = rdma_adpt_->extend(expand_lock_handles_[subtable_idx],
+                                         c.lock_time_ns);
+            CHECK_EQ(rc, kOk) << "Failed to extend.";
+            lock_handle_last_extend_ = now;
+            if (rc == kOk)
+            {
+                DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                    << "[race][expand] maybe_expand_try_extend_lock_lease: "
+                       "extend SUCCEEDED. ";
+                return true;
+            }
+            else
+            {
+                DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                    << "[race][expand] maybe_expand_try_extend_lock_lease: "
+                       "extend FAILED ";
+                return false;
+            }
+        }
+        else
+        {
+            DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                << "[race][expand] maybe_expand_try_extend_lock_lease: "
+                   "extend SKIP. elapsed "
+                << ns << " ns, not close to expire time.";
+        }
+        return true;
+    }
     RetCode expand_try_lock_subtable_drain(size_t subtable_idx)
     {
-        auto rdma_buf = rdma_adpt_->get_rdma_buffer(8);
-        DCHECK_GE(rdma_buf.size, 8);
-        auto remote = lock_remote_addr(subtable_idx);
-        uint64_t expect = 0;   // no lock
-        uint64_t desired = 1;  // lock
-        auto &dir_mem_handle = get_directory_mem_handle();
-        CHECK_EQ(rdma_adpt_->rdma_cas(
-                     remote, expect, desired, rdma_buf.buffer, dir_mem_handle),
-                 kOk);
-        auto rc = rdma_adpt_->commit();
-        if (unlikely(rc == kRdmaProtectionErr))
+        const auto &c = conf_.expand;
+        if (unlikely(c.use_patronus_lock))
         {
-            return rc;
-        }
-        CHECK_EQ(rc, kOk);
-        uint64_t r = *(uint64_t *) rdma_buf.buffer;
-        CHECK(r == 0 || r == 1)
-            << "Unexpected value read from lock of subtable[" << subtable_idx
-            << "]. Expect 0 or 1, got " << r;
-        if (r == 0)
-        {
-            DCHECK_EQ(desired, 1);
-            cached_meta_.expanding[subtable_idx] = desired;
+            // a little bit hack
+            // get another lease to utilize the lock & fault tolerant semantics
+            expand_lock_handles_[subtable_idx] =
+                rdma_adpt_->acquire_perm(lock_remote_addr(subtable_idx),
+                                         0,
+                                         8,
+                                         c.lock_time_ns,
+                                         c.patronus_lock_flag);
+            if (!expand_lock_handles_[subtable_idx].valid())
+            {
+                CHECK_EQ(expand_lock_handles_[subtable_idx].ec(),
+                         AcquireRequestStatus::kLockedErr);
+                return kRetry;
+            }
+
+            lock_handle_last_extend_ = std::chrono::steady_clock::now();
             return kOk;
         }
-        return kRetry;
+        else
+        {
+            auto rdma_buf = rdma_adpt_->get_rdma_buffer(8);
+            DCHECK_GE(rdma_buf.size, 8);
+            auto remote = lock_remote_addr(subtable_idx);
+            uint64_t expect = 0;   // no lock
+            uint64_t desired = 1;  // lock
+            auto &dir_mem_handle = get_directory_mem_handle();
+            CHECK_EQ(
+                rdma_adpt_->rdma_cas(
+                    remote, expect, desired, rdma_buf.buffer, dir_mem_handle),
+                kOk);
+            auto rc = rdma_adpt_->commit();
+            if (unlikely(rc == kRdmaProtectionErr))
+            {
+                return rc;
+            }
+            CHECK_EQ(rc, kOk);
+            uint64_t r = *(uint64_t *) rdma_buf.buffer;
+            CHECK(r == 0 || r == 1)
+                << "Unexpected value read from lock of subtable["
+                << subtable_idx << "]. Expect 0 or 1, got " << r;
+            if (r == 0)
+            {
+                DCHECK_EQ(desired, 1);
+                cached_meta_.expanding[subtable_idx] = desired;
+                return kOk;
+            }
+            return kRetry;
+        }
     }
     GlobalAddress lock_remote_addr(size_t subtable_idx) const
     {
@@ -419,13 +494,23 @@ public:
     }
     RetCode expand_unlock_subtable_nodrain(size_t subtable_idx)
     {
-        auto rdma_buf = rdma_adpt_->get_rdma_buffer(8);
-        DCHECK_GE(rdma_buf.size, 8);
-        auto remote = lock_remote_addr(subtable_idx);
-        *(uint64_t *) DCHECK_NOTNULL(rdma_buf.buffer) = 0;  // no lock
-        auto &dir_mem_handle = get_directory_mem_handle();
-        return rdma_adpt_->rdma_write(
-            remote, (char *) rdma_buf.buffer, 8, dir_mem_handle);
+        const auto &c = conf_.expand;
+        if (c.use_patronus_lock)
+        {
+            rdma_adpt_->relinquish_perm(
+                expand_lock_handles_[subtable_idx], 0, c.patronus_unlock_flag);
+            return kOk;
+        }
+        else
+        {
+            auto rdma_buf = rdma_adpt_->get_rdma_buffer(8);
+            DCHECK_GE(rdma_buf.size, 8);
+            auto remote = lock_remote_addr(subtable_idx);
+            *(uint64_t *) DCHECK_NOTNULL(rdma_buf.buffer) = 0;  // no lock
+            auto &dir_mem_handle = get_directory_mem_handle();
+            return rdma_adpt_->rdma_write(
+                remote, (char *) rdma_buf.buffer, 8, dir_mem_handle);
+        }
     }
     RetCode expand_write_entry_nodrain(size_t subtable_idx,
                                        GlobalAddress subtable_remote_addr)
@@ -648,6 +733,22 @@ public:
             maybe_drop_trace();
             return rc;
         }
+
+        // NOTE:
+        // Here, right after successfully locking the subtable
+        // we do the fault tolerance test of Patronus
+        // let the client crashes here.
+        if (unlikely(conf_.expand.mock_crash_nr > 0))
+        {
+            LOG(WARNING) << "[rhh] MOCK: client crashed. ";
+            conf_.expand.mock_crash_nr--;
+            if (dctx)
+            {
+                dctx->set_private((void *) RetCode::kMockCrashed);
+            }
+            return kRetry;
+        }
+
         // 1) I think updating the directory cache is definitely necessary
         // while expanding.
         maybe_trace_pin("before 1) update dcache");
@@ -659,11 +760,12 @@ public:
         CHECK_EQ(ret, kOk);
         auto depth = cached_meta_.lds[subtable_idx];
         auto next_subtable_idx = subtable_idx | (1 << depth);
-        // DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
-        //     << "[race][expand] Expanding subtable[" << subtable_idx
-        //     << "] to subtable[" << next_subtable_idx
-        //     << "]. meta: " << cached_meta_;
+        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            << "[race][expand] Expanding subtable[" << subtable_idx
+            << "] to subtable[" << next_subtable_idx
+            << "]. meta: " << cached_meta_;
         auto subtable_remote_addr = cached_meta_.entries[subtable_idx];
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // okay, entered critical section
         auto next_depth = depth + 1;
@@ -686,13 +788,19 @@ public:
                 return rc;
             }
             CHECK_EQ(rc, kOk);
-            DCHECK_EQ(cached_meta_.expanding[subtable_idx], 1);
+            if constexpr (debug())
+            {
+                if (!conf_.expand.use_patronus_lock)
+                {
+                    CHECK_EQ(cached_meta_.expanding[subtable_idx], 1);
+                }
+            }
             cached_meta_.expanding[subtable_idx] = 0;
             maybe_drop_trace();
             return kNoMem;
         }
-
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 2) Expand the directory first
         maybe_trace_pin("before 2) expand directory");
@@ -750,6 +858,7 @@ public:
         }
 
         CHECK_LT(next_subtable_idx, kDEntryNr);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // do some debug checks
         auto cached_meta_next_subtable =
@@ -772,6 +881,7 @@ public:
                          << ", (1<<depth): " << (1 << depth);
         }
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 3) allocate subtable here
         maybe_trace_pin("before 3) allocate subtable");
@@ -792,6 +902,7 @@ public:
             << "] to next subtable[" << next_subtable_idx << "]. Allocated "
             << alloc_size << " at " << new_remote_subtable;
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 4) init subtable: setup the bucket header
         maybe_trace_pin("before 4) init subtable");
@@ -811,6 +922,7 @@ public:
         cached_meta_.lds[next_subtable_idx] = ld;
 
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 5) insert the subtable into the directory AND lock the subtable.
         maybe_trace_pin("before 5) allocate subtable");
@@ -820,7 +932,8 @@ public:
             << " into directory. Update ld to " << ld << " for subtable["
             << subtable_idx << "] and subtable[" << next_subtable_idx << "]";
         rc = expand_try_lock_subtable_drain(next_subtable_idx);
-        if (unlikely(rc != kRdmaProtectionErr))
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        if (unlikely(rc == kRdmaProtectionErr))
         {
             return rc;
         }
@@ -828,6 +941,7 @@ public:
         CHECK_EQ(expand_install_subtable_nodrain(next_subtable_idx,
                                                  new_remote_subtable),
                  kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         rc = expand_update_ld_nodrain(subtable_idx, ld);
         if (unlikely(rc == kRdmaProtectionErr))
@@ -853,6 +967,7 @@ public:
         cached_meta_.lds[next_subtable_idx] = ld;
 
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 6) move data.
         // 6.1) update bucket suffix
@@ -872,6 +987,7 @@ public:
         cached_meta_.lds[subtable_idx] = ld;
 
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
         // Before 6.1) Iterate all the entries in @entries_, check for any
         // recursive updates to the entries.
         // For example, when
@@ -895,6 +1011,7 @@ public:
                      dctx),
                  kOk);
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 6.3) insert all items from the old bucket to the new
         maybe_trace_pin("before 6.3) migrate slots");
@@ -916,6 +1033,7 @@ public:
         }
         CHECK_EQ(rc, kOk);
         CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 7) unlock
         maybe_trace_pin("before 7) unlock");
@@ -923,16 +1041,8 @@ public:
             << "[race][expand] (7) Unlock subtable[" << next_subtable_idx
             << "] and subtable[" << subtable_idx << "]. " << *dctx;
         rc = expand_unlock_subtable_nodrain(next_subtable_idx);
-        if (unlikely(rc == kRdmaProtectionErr))
-        {
-            return rc;
-        }
         CHECK_EQ(rc, kOk);
         rc = expand_unlock_subtable_nodrain(subtable_idx);
-        if (unlikely(rc == kRdmaProtectionErr))
-        {
-            return rc;
-        }
         CHECK_EQ(rc, kOk);
         rc = rdma_adpt_->commit();
         if (unlikely(rc == kRdmaProtectionErr))
@@ -947,7 +1057,6 @@ public:
         {
             print_latest_meta_image(dctx);
         }
-
         return kOk;
     }
     void print_latest_meta_image(HashContext *dctx)
@@ -1647,10 +1756,6 @@ public:
         DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
             << "[race][stable] is_real_match SUCC. " << *dctx;
         return kOk;
-    }
-    constexpr static size_t subtable_nr()
-    {
-        return kDEntryNr;
     }
 
 private:

@@ -315,19 +315,25 @@ constexpr static size_t kLeaseCacheItemLimitNr = 3;
 #define likely(x) __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
 
-inline std::string binary_to_csv_filename(const std::string &bench_path,
-                                          const std::string &exec_meta)
+inline std::string binary_to_csv_filename(
+    const std::string &bench_path,
+    const std::string &exec_meta,
+    const std::map<std::string, std::string> &extra = {})
 {
     std::string root = "../result/";
     auto filename = std::filesystem::path(bench_path).filename().string();
+
+    std::string ret = root + filename + "." + exec_meta + ".";
+    for (const auto &[k, v] : extra)
+    {
+        ret += k + ":" + v + ".";
+    }
     if constexpr (debug())
     {
-        return root + filename + "." + exec_meta + ".DEBUG.csv";
+        ret += "DEBUG.";
     }
-    else
-    {
-        return root + filename + "." + exec_meta + ".csv";
-    }
+    ret += "csv";
+    return ret;
 }
 
 #endif /* __COMMON_H__ */

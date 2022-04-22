@@ -179,7 +179,8 @@ public:
         else
         {
             if (lease.ec() != AcquireRequestStatus::kNoMem &&
-                lease.ec() != AcquireRequestStatus::kNoMw)
+                lease.ec() != AcquireRequestStatus::kNoMw &&
+                lease.ec() != AcquireRequestStatus::kLockedErr)
             {
                 CHECK(false) << "** Unexpected lease failure: " << lease.ec()
                              << ". expect kNoMem or kNoMw. Lease " << lease
@@ -187,6 +188,15 @@ public:
             }
             return alloc_handle(nullgaddr, 0, lease);
         }
+    }
+    RetCode extend(RemoteMemHandle &handle,
+                   std::chrono::nanoseconds ns) override
+    {
+        auto &lease = *(Lease *) handle.private_data();
+        LOG(INFO) << "[debug] !! extend with next_extend_unit_nr: "
+                  << lease.next_extend_unit_nr()
+                  << ". coro: " << pre_coro_ctx(coro_ctx_);
+        return patronus_->extend(lease, ns, 0 /* flag */, coro_ctx_);
     }
     GlobalAddress lease_to_exposed_gaddr(const Lease &lease) const
     {
@@ -516,9 +526,10 @@ private:
     }
     RemoteMemHandle alloc_handle(GlobalAddress gaddr, size_t size, Lease &lease)
     {
+        bool success = lease.success();
         DCHECK_EQ(gaddr.nodeID, 0) << "** gaddr.nodeID here should be zero, "
                                       "because it is client-visible";
-        RemoteMemHandle handle(gaddr, size);
+        RemoteMemHandle handle(gaddr, size, lease.ec());
         auto stored_lease = std::make_unique<Lease>(std::move(lease));
         handle.set_private_data(stored_lease.release());
         if constexpr (debug())
@@ -526,6 +537,10 @@ private:
             CHECK(ongoing_remote_handle_.get().insert(handle).second);
         }
         CHECK(handle.valid());
+        if (unlikely(!success))
+        {
+            handle.set_invalid();
+        }
         return handle;
     }
 };

@@ -15,6 +15,7 @@ enum RetCode
     kRdmaProtectionErr,
     kRdmaExecutionErr,
     kLeaseLocalExpiredErr,
+    kMockCrashed,
 };
 inline std::ostream &operator<<(std::ostream &os, RetCode rc)
 {
@@ -46,6 +47,9 @@ inline std::ostream &operator<<(std::ostream &os, RetCode rc)
         break;
     case kLeaseLocalExpiredErr:
         os << "kLeaseLocalExpiredErr";
+        break;
+    case kMockCrashed:
+        os << "kMockCrashed";
         break;
     default:
         LOG(FATAL) << "Unknown return code " << (int) rc;

@@ -305,12 +305,20 @@ will see an unexpected cases:
 - Fail to reproduce, and reproduce once may takes ~10 minutes
 - Decided to ignore this bug for now.
 
-4/19 4/20 4/21
-For 4/20:
-- See if auto-gc helps fault tolerance of expansion. (without auto-gc, the expansion could fail forever)
-- See if auto-gc boost performance
+4/21, 4/22, 4/23
 For 4/21:
-Begin to write the fxxking paper.
+- See if auto-gc helps fault tolerance of expansion. (without auto-gc, the expansion could fail forever)
+For 4/22:
+- See if auto-gc boost performance
+FOr 4/23:
+- Begin to write the fxxking paper
 
 Then go back:
 Finished the lease-expire related tests.
+
+===============================
+The logic of bench_race_rdma_expand_fault_tolerance is WRONG.
+If we use patronus_lock, we can not rely on meta.locks, because
+- when patronus auto-gc, the lock is freed, but meta.locks is not automatically cleared
+- So, when rhh_config.use_patronus_lock is ON, we should use the totally different logic to handle the lock.
+- BTW, remember to fix the DCHECK(meta.locks) assertion, because we did not actually set meta.lock = 1, so the assertion does not hold

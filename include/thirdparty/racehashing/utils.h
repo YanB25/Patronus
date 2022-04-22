@@ -361,11 +361,20 @@ struct HashContext
     HashContext(size_t tid, bool enabled = true) : tid(tid), enabled_(enabled)
     {
     }
+    void set_private(void *p)
+    {
+        private_ = p;
+    }
+    void *get_private()
+    {
+        return private_;
+    }
     size_t tid;
     std::string key;
     std::string value;
     std::string op;
     bool enabled_;
+    void *private_{nullptr};
 };
 
 static HashContext nulldctx(0, false);

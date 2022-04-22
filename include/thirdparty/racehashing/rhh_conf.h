@@ -87,6 +87,15 @@ struct RaceHashingHandleConfig
         flag_t flag{(flag_t) AcquireRequestFlag::kNoGc};
         std::optional<RemoteMemHandle> dcache_handle{std::nullopt};
     } init;
+
+    struct
+    {
+        bool use_patronus_lock{false};
+        flag_t patronus_lock_flag{(flag_t) AcquireRequestFlag::kReserved};
+        std::chrono::nanoseconds lock_time_ns{0ns};
+        flag_t patronus_unlock_flag{(flag_t) 0};
+        mutable ssize_t mock_crash_nr{0};
+    } expand;
     struct
     {
         uint64_t alloc_hint{0};
@@ -286,6 +295,20 @@ public:
         c.insert_kvblock.free.flag =
             (flag_t) LeaseModifyFlag::kWithDeallocation;
         c.free_kvblock.do_nothing = true;
+        return c;
+    }
+    static RaceHashingHandleConfig get_mw_protected_expand_fault_tolerance(
+        const std::string &name,
+        size_t kvblock_size,
+        ssize_t mock_crash_nr,
+        std::chrono::nanoseconds lock_time_ns)
+    {
+        auto c = get_mw_protected(name, kvblock_size, 1);
+        c.expand.use_patronus_lock = true;
+        c.expand.patronus_lock_flag =
+            (flag_t) AcquireRequestFlag::kWithConflictDetect;
+        c.expand.lock_time_ns = lock_time_ns;
+        c.expand.mock_crash_nr = mock_crash_nr;
         return c;
     }
     static RaceHashingHandleConfig get_mw_protected_bootstrap(

@@ -77,6 +77,10 @@ public:
                "or not.";
         return ret;
     }
+    RetCode extend(RemoteMemHandle &, std::chrono::nanoseconds) override
+    {
+        return kOk;
+    }
     RemoteMemHandle acquire_perm(GlobalAddress gaddr,
                                  hint_t alloc_hint,
                                  size_t size,
@@ -100,13 +104,16 @@ public:
         if (!gaddr.is_null())
         {
             CHECK(!alloc_semantics);
-            return alloc_handle(gaddr, size);
+            return alloc_handle(
+                gaddr, size, patronus::AcquireRequestStatus::kReserved);
         }
         else
         {
             CHECK(alloc_semantics);
             // by semantics, will not hit local overwrite allocators
-            return alloc_handle(do_remote_alloc(size, alloc_hint), size);
+            return alloc_handle(do_remote_alloc(size, alloc_hint),
+                                size,
+                                patronus::AcquireRequestStatus::kReserved);
         }
     }
     void reg_default_allocator(IAllocator::pointer allocator)
@@ -392,10 +399,12 @@ public:
     }
 
 private:
-    RemoteMemHandle alloc_handle(GlobalAddress gaddr, size_t size)
+    RemoteMemHandle alloc_handle(GlobalAddress gaddr,
+                                 size_t size,
+                                 patronus::AcquireRequestStatus ec)
     {
         auto hid = get_handle_id();
-        RemoteMemHandle ret(gaddr, size);
+        RemoteMemHandle ret(gaddr, size, ec);
         ret.set_private_data((void *) hid);
         return ret;
     }
