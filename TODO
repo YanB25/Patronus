@@ -272,7 +272,7 @@ Race Hashing Experiments: (**iPad have detailed discussion**)
         - patronus fast switch to backup v.s. wait for recovery (vanilla)
         - client update dcache
         - client going on
-    - The tolerance of crashed client under expansion
+    [-] The tolerance of crashed client under expansion
         - The fault tolerance of RH: The locking of directory uses lease. When a client failed, the lock is automatically released, and the next client triggers and continues the expansion
         - raw v.s. patronus
 {-} The effectness of auto time out: If the relinquish of kvblock is auto-ed (so we save one message RTT for relinquish). Can we boost the performance?
@@ -307,7 +307,7 @@ will see an unexpected cases:
 
 4/21, 4/22, 4/23
 For 4/21:
-- See if auto-gc helps fault tolerance of expansion. (without auto-gc, the expansion could fail forever)
+[-] See if auto-gc helps fault tolerance of expansion. (without auto-gc, the expansion could fail forever)
 For 4/22:
 - See if auto-gc boost performance
 FOr 4/23:
@@ -315,10 +315,3 @@ FOr 4/23:
 
 Then go back:
 Finished the lease-expire related tests.
-
-===============================
-The logic of bench_race_rdma_expand_fault_tolerance is WRONG.
-If we use patronus_lock, we can not rely on meta.locks, because
-- when patronus auto-gc, the lock is freed, but meta.locks is not automatically cleared
-- So, when rhh_config.use_patronus_lock is ON, we should use the totally different logic to handle the lock.
-- BTW, remember to fix the DCHECK(meta.locks) assertion, because we did not actually set meta.lock = 1, so the assertion does not hold
