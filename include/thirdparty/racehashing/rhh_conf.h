@@ -99,7 +99,8 @@ struct RaceHashingHandleConfig
     struct
     {
         uint64_t alloc_hint{0};
-        flag_t flag{(flag_t) LeaseModifyFlag::kWaitUntilSuccess};
+        // NOTE: no need to kWaitUntilSuccess
+        flag_t flag{(flag_t) 0};
     } dctor;
 
     // the hints
@@ -332,14 +333,15 @@ public:
     {
         auto c = get_basic(name, kvblock_expect_size);
         c.read_kvblock.begin.do_nothing = false;
-        c.read_kvblock.begin.flag = 0;
+        c.read_kvblock.begin.flag = (flag_t) AcquireRequestFlag::kNoBindPR;
         c.read_kvblock.begin.lease_time = 1ms;  // definitely enough
         c.read_kvblock.end.do_nothing = true;
         c.read_kvblock.end.flag = (flag_t) LeaseModifyFlag::kReserved;
         c.insert_kvblock.begin.use_alloc_api = false;
         // with PR, because lease is enabled.
         c.insert_kvblock.begin.flag =
-            (flag_t) AcquireRequestFlag::kWithAllocation;
+            (flag_t) AcquireRequestFlag::kWithAllocation |
+            (flag_t) AcquireRequestFlag::kNoBindPR;
         c.insert_kvblock.begin.lease_time = 1ms;  // definitely enough
         c.insert_kvblock.begin.alloc_hint = hash::config::kAllocHintKVBlock;
         c.insert_kvblock.end.use_alloc_api =

@@ -89,4 +89,47 @@ inline std::ostream &operator<<(std::ostream &os, pre_wrid_prefix p)
     return os;
 }
 
+struct WRID
+{
+    WRID(uint16_t p, uint16_t a16, uint16_t b16, uint16_t c16)
+        : prefix(p), u16_a(a16), u16_b(b16), u16_c(c16)
+    {
+    }
+    WRID(uint64_t v) : val(v)
+    {
+    }
+    WRID(uint16_t p, uint32_t id) : prefix(p), u16_a(0), id(id)
+    {
+    }
+    WRID(uint16_t p, uint16_t a16, uint32_t id) : prefix(p), u16_a(a16), id(id)
+    {
+    }
+    union {
+        struct
+        {
+            uint16_t prefix;
+            uint16_t u16_a;
+            union {
+                struct
+                {
+                    uint16_t u16_b;
+                    uint16_t u16_c;
+                } __attribute__((packed));
+                uint32_t id;
+            };
+        } __attribute__((packed));
+        uint64_t val;
+    };
+} __attribute__((packed));
+inline std::ostream &operator<<(std::ostream &os, WRID wrid)
+{
+    os << "{WRID prefix: " << pre_wrid_prefix(wrid.prefix)
+       << ", a: " << wrid.u16_a << ", b: " << wrid.u16_b
+       << ", c: " << wrid.u16_c << "/ id: " << wrid.id << "/ val: " << wrid.val
+       << "}";
+    return os;
+}
+
+static WRID nullwrid{WRID_PREFIX_RESERVED_1, get_WRID_ID_RESERVED()};
+
 #endif

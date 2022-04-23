@@ -977,9 +977,8 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     // will not actually bind memory window.
     // TODO(patronus): even with no_bind_pr, the PR is also allocated
     // We can optimize this.
-    bool force_no_bind_pr = req->flag & (flag_t) AcquireRequestFlag::kNoBindPR;
-    bool force_no_bind_any =
-        req->flag & (flag_t) AcquireRequestFlag::kNoBindAny;
+    bool no_bind_pr = req->flag & (flag_t) AcquireRequestFlag::kNoBindPR;
+    bool no_bind_any = req->flag & (flag_t) AcquireRequestFlag::kNoBindAny;
     bool with_alloc = req->flag & (flag_t) AcquireRequestFlag::kWithAllocation;
     bool only_alloc = req->flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
 
@@ -989,27 +988,40 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         req->flag & (flag_t) AcquireRequestFlag::kWithConflictDetect;
     bool i_acquire_the_lock = false;
 
-    bool with_buf = true;
-    bool with_pr = true;
-    bool with_lease_ctx = true;
-    if (force_no_bind_any)
+    // below are default settings
+    bool alloc_buf = false;
+    bool alloc_pr = true;
+    bool bind_buf = true;
+    bool bind_pr = true;
+    bool alloc_lease_ctx = true;
+    // if not binding pr, we will even skip allocating it.
+    if (no_bind_pr)
     {
-        with_buf = false;
-        with_pr = false;
+        alloc_pr = false;
+        bind_pr = false;
     }
-    if (force_no_bind_pr)
+    if (no_bind_any)
     {
-        with_pr = false;
+        // same as no_bind_pr
+        alloc_pr = false;
+        bind_pr = false;
+        bind_buf = false;
     }
 
     // NOTE:
     // even if with_alloc is true, does not imply that pr is disabled.
     // e.g. alloc + require(lease semantics)
+    if (with_alloc)
+    {
+        alloc_buf = true;
+    }
     if (only_alloc)
     {
-        with_pr = false;
-        with_buf = false;
-        with_lease_ctx = false;
+        alloc_buf = true;
+        alloc_pr = false;
+        bind_buf = false;
+        bind_pr = false;
+        alloc_lease_ctx = false;
     }
 
     if (with_lock)
@@ -1030,7 +1042,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         }
     }
 
-    if (with_alloc || only_alloc)
+    if (alloc_buf)
     {
         // allocation
         object_addr = patronus_alloc(req->size, req->key /* hint */);
@@ -1059,7 +1071,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
         DCHECK_EQ(object_addr, dsm_->dsm_offset_to_addr(object_dsm_offset));
     }
 
-    if (likely(with_pr))
+    if (likely(alloc_pr))
     {
         protection_region = get_protection_region();
         protection_region_id =
@@ -1091,7 +1103,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
             rw_ctx->ready = true;
 
             auto *rdma_ctx = DCHECK_NOTNULL(dsm_->get_rdma_context(dirID));
-            if (with_buf)
+            if (bind_buf)
             {
                 buffer_mr = createMemoryRegion(
                     (uint64_t) object_addr, req->size, rdma_ctx);
@@ -1102,7 +1114,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                     goto handle_response;
                 }
             }
-            if (with_pr)
+            if (bind_pr)
             {
                 header_mr = createMemoryRegion(
                     (uint64_t) header_addr, sizeof(ProtectionRegion), rdma_ctx);
@@ -1129,7 +1141,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                                   : IBV_ACCESS_CUSTOM_REMOTE_RW;
 
             size_t bind_req_nr = 0;
-            if (with_buf && !with_pr)
+            if (bind_buf && !bind_pr)
             {
                 // only binding buffer. not to bind ProtectionRegion
                 bind_req_nr = 1;
@@ -1156,7 +1168,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                 wrs[0].send_flags = IBV_SEND_SIGNALED;
                 wrs[0].wr_id = signal_wrid.val;
             }
-            else if (with_buf && with_pr)
+            else if (bind_buf && bind_pr)
             {
                 // bind buffer & ProtectionRegion
                 // for buffer
@@ -1204,9 +1216,9 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
             }
             else
             {
-                CHECK(!with_pr && !with_buf)
-                    << "invalid configuration. with_pr: " << with_pr
-                    << ", with_buf: " << with_buf;
+                CHECK(!bind_pr && !bind_buf)
+                    << "invalid configuration. bind_pr: " << bind_pr
+                    << ", bind_buf: " << bind_buf;
             }
             if constexpr (::config::kEnableSkipMagicMw)
             {
@@ -1219,7 +1231,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                     }
                 }
             }
-            if (likely(with_pr || with_buf))
+            if (likely(bind_pr || bind_buf))
             {
                 ibv_send_wr *bad_wr;
                 int ret = ibv_post_send(qp, wrs, &bad_wr);
@@ -1233,12 +1245,13 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
                 }
                 if (likely(ctx != nullptr))
                 {
-                    ctx->yield_to_master();
+                    ctx->yield_to_master(signal_wrid);
                 }
             }
             else
             {
                 // skip all the actual binding, and set result to true
+                rw_ctx->ready = true;
                 *rw_ctx->success = true;
             }
         }
@@ -1246,6 +1259,7 @@ void Patronus::handle_request_acquire(AcquireRequest *req, CoroContext *ctx)
     }
     case RequestType::kAcquireNoLease:
     {
+        rw_ctx->ready = true;
         *rw_ctx->success = true;
         break;
     }
@@ -1290,7 +1304,7 @@ handle_response:
     {
         // set to a scaring value so that we know it is invalid.
         LeaseIdT lease_id = std::numeric_limits<LeaseIdT>::max();
-        if (likely(with_lease_ctx))
+        if (likely(alloc_lease_ctx))
         {
             auto *lease_ctx = get_lease_context();
             lease_ctx->client_cid = req->cid;
@@ -1301,11 +1315,12 @@ handle_response:
             lease_ctx->dir_id = dirID;
             lease_ctx->addr_to_bind = (uint64_t) object_addr;
             lease_ctx->buffer_size = req->size;
-            lease_ctx->with_pr = with_pr;
-            lease_ctx->with_buf = with_buf;
+            DCHECK_EQ(alloc_pr, bind_pr) << "currently stick to this constrain";
+            lease_ctx->with_pr = bind_pr;
+            lease_ctx->with_buf = bind_buf;
             lease_ctx->hint = req->key;  // key is hint when allocation is on
 
-            if (likely(with_pr))
+            if (likely(alloc_pr))
             {
                 lease_ctx->protection_region_id = protection_region_id;
                 // set to valid until linked to lease_ctx
@@ -1325,7 +1340,7 @@ handle_response:
         }
 
         auto ns_per_unit = req->required_ns;
-        if (with_buf)
+        if (bind_buf)
         {
             uint32_t buffer_rkey = use_mr ? buffer_mr->rkey : buffer_mw->rkey;
             resp_msg->rkey_0 = buffer_rkey;
@@ -1334,7 +1349,7 @@ handle_response:
         {
             resp_msg->rkey_0 = 0;
         }
-        if (with_pr)
+        if (bind_pr)
         {
             uint32_t header_rkey = use_mr ? header_mr->rkey : header_mw->rkey;
             resp_msg->rkey_header = header_rkey;
@@ -1352,7 +1367,7 @@ handle_response:
             << "reserved flag should not be set. Possible corrupted message";
 
         compound_uint64_t aba_unit_to_ddl(0);
-        if (likely(with_pr))
+        if (likely(alloc_pr))
         {
             aba_unit_to_ddl = protection_region->aba_unit_nr_to_ddl.load(
                 std::memory_order_acq_rel);
@@ -1364,28 +1379,21 @@ handle_response:
         // success, so register Lease expiring logic here.
         bool no_gc = req->flag & (flag_t) AcquireRequestFlag::kNoGc;
 
-        // can not enable gc while disable pr.
-        bool invalid = !no_gc && !with_pr;
-        CHECK(!invalid) << "Invalid flag: if enable auto-gc (no_gc: " << no_gc
-                        << "), could not disable pr (with_pr: " << with_pr
-                        << "). force_no_bind_pr: " << force_no_bind_pr
-                        << ", force_no_bind_any: " << force_no_bind_any;
+        // NOTE: we allow enable gc while disable pr.
 
-        if (likely(!no_gc && with_pr))
+        if (likely(!no_gc))
         {
+            CHECK(alloc_lease_ctx);
             auto patronus_now = time_syncer_->patronus_now();
             auto patronus_ddl_term = patronus_now.term() + ns_per_unit;
 
-            // NOTE:
-            // We have to wait until success, because
-            // a flood of auto-unbind will overwhelm the QP
-            auto flag = (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
+            auto flag = (flag_t) 0;
 
             ddl_manager_.push(
                 patronus_ddl_term,
                 [this, lease_id, cid = req->cid, aba_unit_to_ddl, flag](
                     CoroContext *ctx) {
-                    DCHECK_GT(aba_unit_to_ddl.u32_2, 0);
+                    // DCHECK_GT(aba_unit_to_ddl.u32_2, 0);
 
                     task_gc_lease(
                         lease_id, cid, aba_unit_to_ddl, flag /* flag */, ctx);
@@ -1395,10 +1403,15 @@ handle_response:
             resp_msg->ns_per_unit = ns_per_unit;
             resp_msg->aba_id = aba_unit_to_ddl.u32_1;
 
-            protection_region->begin_term = patronus_now.term();
-            protection_region->ns_per_unit = req->required_ns;
-            DCHECK_GT(aba_unit_to_ddl.u32_2, 0);
-            memset(&(protection_region->meta), 0, sizeof(ProtectionRegionMeta));
+            if (alloc_pr)
+            {
+                protection_region->begin_term = patronus_now.term();
+                protection_region->ns_per_unit = req->required_ns;
+                DCHECK_GT(aba_unit_to_ddl.u32_2, 0);
+                memset(&(protection_region->meta),
+                       0,
+                       sizeof(ProtectionRegionMeta));
+            }
         }
         else
         {
@@ -2307,7 +2320,7 @@ void Patronus::server_coro_master(CoroYield &yield,
                      << ", ready at " << (void *) &rw_ctx->ready
                      << ", rw_ctx at " << (void *) rw_ctx << ", ready is "
                      << rw_ctx->ready;
-            mctx.yield_to_worker(coro_id);
+            mctx.yield_to_worker(coro_id, wrid);
         }
 
         // handle any DDL Tasks
@@ -2361,6 +2374,15 @@ void Patronus::task_gc_lease(uint64_t lease_id,
 
     bool with_pr = lease_ctx->with_pr;
     bool with_buf = lease_ctx->with_buf;
+
+    static thread_local size_t unsignaled_idx__{0};
+    size_t expect_unbind_nr = (!!with_pr) + (!!with_buf);
+    unsignaled_idx__ += expect_unbind_nr;
+    if (unlikely(unsignaled_idx__ >= config::kUnsignaledUnbindRateLimit))
+    {
+        unsignaled_idx__ = 0;
+        wait_success = true;
+    }
 
     uint64_t protection_region_id = 0;
     ProtectionRegion *protection_region = nullptr;
@@ -2600,7 +2622,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                 DCHECK(ctx != nullptr);
                 if (unlikely(wait_success))
                 {
-                    ctx->yield_to_master();
+                    ctx->yield_to_master(signal_wrid);
                 }
             }
         }

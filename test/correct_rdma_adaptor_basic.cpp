@@ -176,7 +176,8 @@ void client_worker(Patronus::pointer p,
             }
         }
 
-        auto rel_flag = (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
+        // auto rel_flag = (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
+        auto rel_flag = (flag_t) 0;
         rdma_adpt->relinquish_perm(handle, 0 /* hint */, rel_flag);
 
         auto rc = rdma_adpt->put_all_rdma_buffer();

@@ -835,7 +835,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
         // for (size_t thread_nr : {16})
         // for (size_t thread_nr : {8, 16})
-        for (size_t thread_nr : {1, 4, 8, 16})
+        // for (size_t thread_nr : {1, 4, 8, 16})
+        for (size_t thread_nr : {8})
         {
             LOG_IF(INFO, is_master)
                 << "[bench] benching multiple threads for " << rhh_conf;
@@ -865,79 +866,6 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                     p, bar, is_master, multithread_conf, key);
             }
         }
-
-        // {
-        //     LOG_IF(INFO, is_master)
-        //         << "[bench] benching multiple threads for " << rhh_conf;
-        //     key++;
-        //     auto w_conf = BenchConfigFactory::get_modify_heavy_config(
-        //         "write_heavy",
-        //         4 /* initial_subtable_nr */,
-        //         10_M,
-        //         kThreadNr,
-        //         kMaxCoroNr,
-        //         rhh_conf.kvblock_expect_size);
-        //     if (is_client)
-        //     {
-        //         for (const auto &bench_conf : w_conf)
-        //         {
-        //             bench_conf.validate();
-        //             LOG_IF(INFO, is_master)
-        //                 << "[sub-conf] running conf: " << bench_conf;
-        //             benchmark_client<4, 16, 16>(
-        //                 p, bar, is_master, bench_conf, rhh_conf, key);
-        //         }
-        //     }
-        //     else
-        //     {
-        //         benchmark_server<4, 16, 16>(p, bar, is_master, w_conf,
-        //         key);
-        //     }
-        // }
-
-        // LOG_IF(INFO, is_master) << "[bench] benching expansion mw";
-        // {
-        //     constexpr size_t capacity = RaceHashing<4, 16,
-        //     16>::max_capacity(); key++; auto expand_mw_conf =
-        //     BenchConfigFactory::get_expand_config(
-        //         "expand(mw)", capacity, false /* st use mr */);
-        //     if (is_client)
-        //     {
-        //         for (const auto &conf : expand_mw_conf)
-        //         {
-        //             LOG_IF(INFO, is_master) << "[bench] running conf: "
-        //             << conf; benchmark_client<4, 16, 16>(p, bar,
-        //             is_master, conf, key);
-        //         }
-        //     }
-        //     else
-        //     {
-        //         benchmark_server<4, 16, 16>(p, bar, is_master,
-        //         expand_mw_conf, key);
-        //     }
-        // }
-
-        // LOG_IF(INFO, is_master) << "[bench] benching expansion mr";
-        // {
-        //     constexpr size_t capacity = RaceHashing<4, 16,
-        //     16>::max_capacity(); key++; auto expand_mr_conf =
-        //     BenchConfigFactory::get_expand_config(
-        //         "expand(mr)", capacity, true /* st use mr*/);
-        //     if (is_client)
-        //     {
-        //         for (const auto &conf : expand_mr_conf)
-        //         {
-        //             LOG_IF(INFO, is_master) << "[bench] running conf: "
-        //             << conf; benchmark_client<4, 16, 16>(p, bar,
-        //             is_master, conf, key);
-        //         }
-        //     }
-        //     else
-        //     {
-        //         benchmark_server<4, 16, 16>(p, bar, is_master,
-        //         expand_mr_conf, key);
-        //     }
-        // }
     }
 }
 

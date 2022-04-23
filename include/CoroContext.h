@@ -51,16 +51,18 @@ public:
         return thread_id_;
     }
 
-    void yield_to_master() const
+    void yield_to_master(WRID wr_id = nullwrid) const
     {
-        DVLOG(4) << "[Coro] " << *this << " yielding to master.";
+        DVLOG(4) << "[Coro] " << *this << " yielding to master for " << wr_id;
         DCHECK(is_worker()) << *this;
         (*yield_)(*master_);
-        DVLOG(4) << "[Coro] " << *this << " yielded back from master.";
+        DVLOG(4) << "[Coro] " << *this
+                 << " yielded back from master, expecting " << wr_id;
     }
-    void yield_to_worker(coro_t wid)
+    void yield_to_worker(coro_t wid, WRID wr_id = nullwrid)
     {
-        DVLOG(4) << "[Coro] " << *this << " yielding to worker " << (int) wid;
+        DVLOG(4) << "[Coro] " << *this << " yielding to worker " << (int) wid
+                 << " for " << wr_id;
         DCHECK(is_master()) << *this;
         (*yield_)(workers_[wid]);
         DVLOG(4) << "[Coro] " << *this << " yielded back from worker "

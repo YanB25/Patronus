@@ -378,7 +378,7 @@ std::ostream &operator<<(std::ostream &os, const AcquireRequest &req)
     os << "{AcquireRequest type: " << req.type << ", cid: " << req.cid
        << ", key: " << req.key << ", size: " << req.size
        << ", require_ns: " << req.required_ns << ", dir_id: " << req.dir_id
-       << "}";
+       << ", flag: " << AcquireRequestFlagOut(req.flag) << "}";
     return os;
 }
 
