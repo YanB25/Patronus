@@ -273,6 +273,30 @@ constexpr bool debug()
 
 namespace config
 {
+constexpr static size_t kMachineNr = 4;
+static const std::vector<size_t> __kServerNodeIds{0};
+static const std::vector<size_t> __kClientNodeIds{1, 2, 3};
+inline bool is_server(size_t nid)
+{
+    auto it =
+        std::find(__kServerNodeIds.cbegin(), __kServerNodeIds.cend(), nid);
+    return it != __kServerNodeIds.cend();
+}
+inline bool is_client(size_t nid)
+{
+    auto it =
+        std::find(__kClientNodeIds.cbegin(), __kClientNodeIds.cend(), nid);
+    return it != __kClientNodeIds.cend();
+}
+inline std::vector<size_t> get_client_nids()
+{
+    return __kClientNodeIds;
+}
+inline std::vector<size_t> get_server_nids()
+{
+    return __kServerNodeIds;
+}
+
 using namespace define::literals;
 
 // about enabling monitors, sacrifying performance
