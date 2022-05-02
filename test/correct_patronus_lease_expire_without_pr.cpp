@@ -22,8 +22,6 @@ static_assert(kThreadNr <= RMSG_MULTIPLEXING);
 static_assert(kThreadNr <= kMaxAppThread);
 constexpr static size_t kCoroCnt = 1;
 
-constexpr static size_t kKeyLimit = 1;
-
 constexpr static size_t kTestTime = 100_K;
 constexpr static auto kLeaseTime = 1ms;
 
