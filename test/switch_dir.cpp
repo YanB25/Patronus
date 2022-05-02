@@ -4,6 +4,7 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "util/monitor.h"
+#include "gflags/gflags.h"
 
 // Two nodes
 // one node issues cas operations

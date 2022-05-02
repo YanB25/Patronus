@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Common.h"
+#include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "util/PerformanceReporter.h"
 using namespace std::chrono_literals;

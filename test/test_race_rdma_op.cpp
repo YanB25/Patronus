@@ -3,6 +3,7 @@
 #include <set>
 
 #include "Common.h"
+#include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "patronus/Patronus.h"
 #include "patronus/RdmaAdaptor.h"

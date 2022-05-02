@@ -3,6 +3,7 @@
 #include <random>
 
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "util/Pre.h"
 #include "util/Rand.h"

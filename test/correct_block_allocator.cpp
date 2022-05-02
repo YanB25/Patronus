@@ -3,6 +3,7 @@
 
 #include "HugePageAlloc.h"
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "patronus/memory/slab_allocator.h"
 #include "util/monitor.h"

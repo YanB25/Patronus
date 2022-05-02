@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "Rdma.h"
+#include "gflags/gflags.h"
 #include "glog/logging.h"
 
 using namespace define::literals;

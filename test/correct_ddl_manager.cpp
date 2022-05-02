@@ -3,6 +3,7 @@
 #include <chrono>
 
 #include "Common.h"
+#include "gflags/gflags.h"
 #include "patronus/DDLManager.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");

@@ -28,6 +28,7 @@ find_package(
     REQUIRED
     coroutine
     system
+    thread
 )
 
 set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)

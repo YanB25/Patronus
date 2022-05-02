@@ -3,6 +3,7 @@
 #include <chrono>
 
 #include "Common.h"
+#include "gflags/gflags.h"
 #include "patronus/DDLManager.h"
 #include "util/Rand.h"
 

@@ -4,6 +4,7 @@
 #include <thread>
 
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"

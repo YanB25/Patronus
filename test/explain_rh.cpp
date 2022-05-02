@@ -9,6 +9,7 @@
 #include "thirdparty/racehashing/hashtable.h"
 #include "thirdparty/racehashing/hashtable_handle.h"
 #include "util/monitor.h"
+#include "gflags/gflags.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 

@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "glog/logging.h"
+#include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "patronus/RdmaAdaptor.h"
 #include "patronus/memory/direct_allocator.h"

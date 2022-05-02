@@ -4,6 +4,7 @@
 
 #include "Common.h"
 #include "boost/thread/barrier.hpp"
+#include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "patronus/Patronus.h"
 #include "patronus/RdmaAdaptor.h"

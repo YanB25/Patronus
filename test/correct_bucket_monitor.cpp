@@ -2,6 +2,7 @@
 #include <random>
 
 #include "Common.h"
+#include "gflags/gflags.h"
 #include "util/PerformanceReporter.h"
 #include "util/Rand.h"
 

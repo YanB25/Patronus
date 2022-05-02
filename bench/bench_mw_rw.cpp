@@ -4,6 +4,7 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "boost/thread/barrier.hpp"
+#include "gflags/gflags.h"
 #include "util/Rand.h"
 #include "util/monitor.h"
 

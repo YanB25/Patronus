@@ -7,6 +7,7 @@
 #include "Timer.h"
 #include "boost/thread/barrier.hpp"
 #include "util/monitor.h"
+#include "gflags/gflags.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 

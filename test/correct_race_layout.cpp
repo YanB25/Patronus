@@ -3,6 +3,7 @@
 #include <set>
 
 #include "Common.h"
+#include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "patronus/Type.h"
 #include "patronus/memory/direct_allocator.h"

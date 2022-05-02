@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "Common.h"
+#include "gflags/gflags.h"
 #include "patronus/LockManager.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
@@ -91,76 +92,73 @@ void test_multithread(size_t thread_nr)
     std::vector<std::thread> threads;
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        threads.emplace_back(
-            [&m]()
+        threads.emplace_back([&m]() {
+            std::set<std::pair<size_t, size_t>> book;
+
+            for (size_t i = 0; i < kTestSize; ++i)
             {
-                std::set<std::pair<size_t, size_t>> book;
+                bool insert = rand() % 2 == 0;
 
-                for (size_t i = 0; i < kTestSize; ++i)
+                if (insert)
                 {
-                    bool insert = rand() % 2 == 0;
-
-                    if (insert)
+                    auto bucket_id = rand() % m.bucket_nr();
+                    auto slot_id = rand() % m.slot_nr();
+                    if (book.count({bucket_id, slot_id}) == 1)
                     {
-                        auto bucket_id = rand() % m.bucket_nr();
-                        auto slot_id = rand() % m.slot_nr();
-                        if (book.count({bucket_id, slot_id}) == 1)
-                        {
-                            DVLOG(1) << "Locking (" << bucket_id << ", "
-                                     << slot_id << ")";
-                            // has
-                            CHECK(!m.try_lock(bucket_id, slot_id))
-                                << "** locking twice should fail: " << bucket_id
-                                << ", " << slot_id;
-                        }
-                        else
-                        {
-                            DVLOG(1) << "Locking (" << bucket_id << ", "
-                                     << slot_id << ")";
-                            // may not have
-                            bool succ = m.try_lock(bucket_id, slot_id);
-                            if (succ)
-                            {
-                                book.insert({bucket_id, slot_id});
-                            }
-                        }
+                        DVLOG(1) << "Locking (" << bucket_id << ", " << slot_id
+                                 << ")";
+                        // has
+                        CHECK(!m.try_lock(bucket_id, slot_id))
+                            << "** locking twice should fail: " << bucket_id
+                            << ", " << slot_id;
                     }
                     else
                     {
-                        if (unlikely(book.empty()))
+                        DVLOG(1) << "Locking (" << bucket_id << ", " << slot_id
+                                 << ")";
+                        // may not have
+                        bool succ = m.try_lock(bucket_id, slot_id);
+                        if (succ)
                         {
-                            continue;
+                            book.insert({bucket_id, slot_id});
                         }
-                        auto nth = rand() % book.size();
-                        auto it = book.begin();
-                        for (size_t t = 0; t < nth; ++t)
-                        {
-                            it++;
-                        }
-                        if (it == book.end())
-                        {
-                            LOG(FATAL)
-                                << "nth " << nth << " reach book.size() "
-                                << book.size() << "< so it == book.end()";
-                        }
-                        auto bucket_id = it->first;
-                        auto slot_id = it->second;
-                        DVLOG(1) << "Unlocking (" << bucket_id << ", "
-                                 << slot_id << ")";
-                        m.unlock(bucket_id, slot_id);
-                        book.erase(it);
                     }
                 }
-
-                while (!book.empty())
+                else
                 {
+                    if (unlikely(book.empty()))
+                    {
+                        continue;
+                    }
+                    auto nth = rand() % book.size();
                     auto it = book.begin();
+                    for (size_t t = 0; t < nth; ++t)
+                    {
+                        it++;
+                    }
+                    if (it == book.end())
+                    {
+                        LOG(FATAL) << "nth " << nth << " reach book.size() "
+                                   << book.size() << "< so it == book.end()";
+                    }
                     auto bucket_id = it->first;
                     auto slot_id = it->second;
+                    DVLOG(1)
+                        << "Unlocking (" << bucket_id << ", " << slot_id << ")";
                     m.unlock(bucket_id, slot_id);
                     book.erase(it);
                 }
-            });
+            }
+
+            while (!book.empty())
+            {
+                auto it = book.begin();
+                auto bucket_id = it->first;
+                auto slot_id = it->second;
+                m.unlock(bucket_id, slot_id);
+                book.erase(it);
+            }
+        });
     }
     for (auto &t : threads)
     {

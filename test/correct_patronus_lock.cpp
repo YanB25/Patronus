@@ -3,6 +3,7 @@
 
 #include "Timer.h"
 #include "boost/thread/barrier.hpp"
+#include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"

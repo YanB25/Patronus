@@ -3,6 +3,7 @@
 
 #include "DSM.h"
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "util/monitor.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");

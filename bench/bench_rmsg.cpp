@@ -6,6 +6,7 @@
 #include "DSM.h"
 #include "PerThread.h"
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "util/Rand.h"
 #include "util/monitor.h"
 

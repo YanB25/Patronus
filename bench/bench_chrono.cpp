@@ -4,6 +4,7 @@
 #include "Common.h"
 #include "DSM.h"
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"
 

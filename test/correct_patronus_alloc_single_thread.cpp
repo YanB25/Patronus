@@ -4,6 +4,7 @@
 #include <thread>
 
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "patronus/memory/patronus_wrapper_allocator.h"
 #include "util/Rand.h"

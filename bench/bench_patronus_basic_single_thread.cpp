@@ -2,6 +2,7 @@
 #include <random>
 
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "util/Rand.h"
 #include "util/monitor.h"

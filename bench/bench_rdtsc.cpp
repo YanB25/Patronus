@@ -3,6 +3,7 @@
 
 #include "DSM.h"
 #include "Timer.h"
+#include "gflags/gflags.h"
 #include "util/monitor.h"
 
 constexpr static size_t kTestTime = 100 * define::M;
