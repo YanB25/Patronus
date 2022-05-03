@@ -4,16 +4,13 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "gflags/gflags.h"
+#include "glog/logging.h"
 #include "util/monitor.h"
 
 // Two nodes
 // one node issues cas operations
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
-
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kCoroCnt = 8;
 thread_local CoroCall workers[kCoroCnt];
@@ -60,16 +57,18 @@ struct EchoMessage
 {
     CID cid;
     uint64_t val;
+    bool finished;
 } __attribute__((packed));
 
 size_t send_nr = 0;
-bool client_finish = false;
 
 void client_worker(std::shared_ptr<DSM> dsm,
                    coro_t coro_id,
                    CoroYield &yield,
                    std::queue<void *> &messages)
 {
+    auto nid = dsm->get_node_id();
+    auto server_nid = ::config::get_server_nids()[0];
     auto tid = dsm->get_thread_id();
     auto mid = tid;
 
@@ -78,7 +77,7 @@ void client_worker(std::shared_ptr<DSM> dsm,
     auto *rdma_buf = dsm->get_rdma_buffer().buffer;
     auto *my_buf = rdma_buf + ReliableConnection::kMessageSize * coro_id;
     auto *send_msg = (EchoMessage *) my_buf;
-    send_msg->cid.node_id = kClientNodeId;
+    send_msg->cid.node_id = nid;
     send_msg->cid.mid = mid;
     send_msg->cid.thread_id = tid;
     send_msg->cid.coro_id = coro_id;
@@ -88,9 +87,9 @@ void client_worker(std::shared_ptr<DSM> dsm,
     {
         VLOG(2) << "[bench] client tid " << tid << " mid " << mid << " coro "
                 << (int) coro_id << " sending val " << send_msg->val;
-
+        send_msg->finished = (i + 1 == kMsgNr);
         dsm->reliable_send(
-            (char *) send_msg, sizeof(EchoMessage), kServerNodeId, tid);
+            (char *) send_msg, sizeof(EchoMessage), server_nid, tid);
         yield(master);
         CHECK(!messages.empty());
         void *recv_msg_addr = messages.front();
@@ -98,11 +97,11 @@ void client_worker(std::shared_ptr<DSM> dsm,
         auto *recv_msg = (EchoMessage *) recv_msg_addr;
         CHECK_EQ(recv_msg->val, send_msg->val + 1);
         send_nr++;
-        if (send_nr == kCoroCnt * kMsgNr)
-        {
-            client_finish = true;
-        }
     }
+    LOG(INFO) << "[bench] client tid " << send_msg->cid.thread_id
+              << ", coro id: " << send_msg->cid.coro_id << " at node " << nid
+              << " Finished.";
+
     LOG(WARNING) << "[bench] tid " << tid << " coro " << (int) coro_id
                  << " exit. sent " << kMsgNr << ". go back to server";
     yield(master);
@@ -178,7 +177,7 @@ void server(std::shared_ptr<DSM> dsm)
     auto mid = tid;
     auto *rdma_buffer = dsm->get_rdma_buffer().buffer;
 
-    size_t expect_nr = kCoroCnt * kMsgNr;
+    size_t expect_nr = kCoroCnt * kMsgNr * ::config::get_client_nids().size();
     size_t recv_nr = 0;
     while (recv_nr < expect_nr)
     {
@@ -193,6 +192,7 @@ void server(std::shared_ptr<DSM> dsm)
         {
             char *base_addr = buffer + ReliableConnection::kMessageSize * i;
             auto *recv_msg = (EchoMessage *) base_addr;
+            auto client_nid = recv_msg->cid.node_id;
             auto *send_buffer_addr =
                 rdma_buffer + ReliableConnection::kMessageSize * i;
             memcpy(send_buffer_addr, base_addr, sizeof(EchoMessage));
@@ -203,7 +203,7 @@ void server(std::shared_ptr<DSM> dsm)
                     << (int) recv_msg->cid.coro_id << ", val " << recv_msg->val;
             dsm->reliable_send((char *) send_msg,
                                sizeof(EchoMessage),
-                               kClientNodeId,
+                               client_nid,
                                recv_msg->cid.mid);
         }
     }
@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     DSMConfig config;
-    config.machineNR = kMachineNr;
+    config.machineNR = ::config::kMachineNr;
 
     auto dsm = DSM::getInstance(config);
 
@@ -231,7 +231,7 @@ int main(int argc, char *argv[])
 
     // let client spining
     auto nid = dsm->getMyNodeID();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         client(dsm);
     }
@@ -239,6 +239,8 @@ int main(int argc, char *argv[])
     {
         server(dsm);
     }
+
+    dsm->keeper_barrier("finished_all", 100ms);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

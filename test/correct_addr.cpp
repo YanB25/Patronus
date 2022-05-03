@@ -11,21 +11,7 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 using namespace patronus;
-
-void client(Patronus::pointer p)
-{
-    auto tid = p->get_thread_id();
-    LOG(INFO) << "I am client. tid " << tid;
-}
-void server(Patronus::pointer p)
-{
-    auto tid = p->get_thread_id();
-    LOG(INFO) << "I am server. tid " << tid;
-}
 
 int main(int argc, char *argv[])
 {
@@ -35,7 +21,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
     auto dsm = patronus->get_dsm();

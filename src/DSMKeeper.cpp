@@ -402,7 +402,7 @@ void DSMKeeper::initRouteRule()
 
 uint64_t DSMKeeper::sum(const std::string &sum_key, uint64_t value)
 {
-    std::string key_prefix = std::string("sum-") + sum_key;
+    std::string key_prefix = std::string("__sum:") + sum_key;
 
     std::string key = key_prefix + std::to_string(this->getMyNodeID());
     memSet(key.c_str(), key.size(), (char *) &value, sizeof(value), 100us);

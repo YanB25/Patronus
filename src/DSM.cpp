@@ -51,7 +51,9 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
 
     keeper->barrier("DSM-init", 1ms);
 
-    LOG(WARNING) << "[system] DSM ready. node_id: " << get_node_id();
+    auto nid = get_node_id();
+    LOG(WARNING) << "[system] DSM ready. node_id: " << nid << ". "
+                 << (::config::is_client(nid) ? "Client" : "Server");
 
     explain();
 

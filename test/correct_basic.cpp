@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
         dsm->reliable_recv(0, nullptr);
         dsm->reconnectThreadToDir(kServerNodeId, 0);
     }
-    else
+    else if (nid == kServerNodeId)
     {
         dsm->reinitializeDir(0);
         dsm->reliable_send(nullptr, 0, kClientNodeId, 0);
