@@ -28,7 +28,7 @@ void ReliableSendMessageConnection::send(size_t threadID,
     static thread_local size_t send_signaleds_[RMSG_MULTIPLEXING]{};
 
     // TODO: should be calculated carefully.
-    constexpr static size_t kCqeAllowedSize = 32;
+    constexpr static size_t kCqeAllowedSize = 64;
 
     msg_send_index_++;
     bool signal = false;
@@ -82,8 +82,8 @@ void ReliableSendMessageConnection::send(size_t threadID,
         send_signaleds_[targetID]++;
     }
 
-    PLOG_IF(FATAL, !succ) << "** Send with RDMA_SEND failed. wrid: " << wrid
-                          << ". At targetID: " << targetID
+    PLOG_IF(FATAL, !succ) << "** Send with RDMA_SEND failed. wrid: "
+                          << WRID(wrid) << ". At targetID: " << targetID
                           << ", issued_signaled: " << send_signaleds_[targetID]
                           << " (effectively "
                           << send_signaleds_[targetID] * kSendBatch << ") "

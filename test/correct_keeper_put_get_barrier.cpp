@@ -17,9 +17,6 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 // Two nodes
 // one node issues cas operations
 
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
 constexpr static uint64_t kWaitKey = 0;
 
 using namespace patronus;
@@ -63,20 +60,20 @@ void test_basic_server(Patronus::pointer p)
     p->put("magic2", "magic2!", 100us);
 }
 
-void test_bulk_put(Patronus::pointer p)
-{
-    for (size_t i = 0; i < 1000; ++i)
-    {
-        p->put(std::to_string(i), std::to_string(i), 10us);
-    }
-}
-void test_bulk_get(Patronus::pointer p)
+void test_bulk_get_client(Patronus::pointer p)
 {
     for (size_t i = 0; i < 1000; ++i)
     {
         auto k = std::to_string(i);
         auto v = p->get(k, 10us);
         CHECK_EQ(k, v);
+    }
+}
+void test_bulk_put_server(Patronus::pointer p)
+{
+    for (size_t i = 0; i < 1000; ++i)
+    {
+        p->put(std::to_string(i), std::to_string(i), 10us);
     }
 }
 
@@ -98,7 +95,7 @@ void client(Patronus::pointer p)
     LOG(INFO) << "[bench] begin basic test";
     test_basic_client(p);
     LOG(INFO) << "[bench] PASS basic test";
-    test_bulk_put(p);
+    test_bulk_get_client(p);
     LOG(INFO) << "[bench] PASS bulk test";
     test_complex_barrier(p);
 
@@ -110,7 +107,7 @@ void server(Patronus::pointer p)
     LOG(INFO) << "[bench] begin basic test";
     test_basic_server(p);
     LOG(INFO) << "[bench] PASS basic test";
-    test_bulk_get(p);
+    test_bulk_put_server(p);
     LOG(INFO) << "[bench] PASS bulk test";
     test_complex_barrier(p);
 
@@ -127,12 +124,12 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
     auto nid = patronus->get_node_id();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         patronus->registerClientThread();
         client(patronus);

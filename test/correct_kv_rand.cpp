@@ -8,12 +8,7 @@
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"
 
-// Two nodes
-// one node issues cas operations
-
 DEFINE_string(exec_meta, "", "The meta data of this execution");
-
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 
 using namespace patronus;
 

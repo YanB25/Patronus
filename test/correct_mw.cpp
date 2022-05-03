@@ -239,9 +239,14 @@ int main(int argc, char *argv[])
     {
         client(dsm);
     }
-    else
+    else if (nid == kServerNodeId)
     {
         server(dsm);
+    }
+    else
+    {
+        LOG(WARNING) << "[bench] nid " << nid << " skip";
+        return 0;
     }
 
     LOG(INFO) << "finished. ctrl+C to quit.";

@@ -17,9 +17,6 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 // Two nodes
 // one node issues cas operations
 
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kAllocBufferSize = 64;
 
 using namespace patronus;
@@ -54,6 +51,7 @@ void client_worker(Patronus::pointer p,
                    CoroExecutionContextWith<kCoroCnt, uint64_t> &ex,
                    CoroYield &yield)
 {
+    auto server_nid = ::config::get_server_nids().front();
     auto tid = p->get_thread_id();
     auto dir_id = tid;
 
@@ -65,8 +63,8 @@ void client_worker(Patronus::pointer p,
     {
         DVLOG(2) << "[bench] client coro " << ctx << " start to alloc gaddr ";
 
-        auto gaddr = p->alloc(
-            kServerNodeId, kDirID, kAllocBufferSize, 0 /* hint */, &ctx);
+        auto gaddr =
+            p->alloc(server_nid, kDirID, kAllocBufferSize, 0 /* hint */, &ctx);
         CHECK(!gaddr.is_null());
 
         DVLOG(2) << "[bench] client coro " << ctx << " got gaddr " << gaddr;
@@ -87,7 +85,7 @@ void client_worker(Patronus::pointer p,
         auto gaddr = allocated_gaddrs[addr_idx];
 
         auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
-        auto lease = p->get_wlease(kServerNodeId,
+        auto lease = p->get_wlease(server_nid,
                                    kDirID,
                                    gaddr,
                                    0 /* alloc_hint */,
@@ -130,7 +128,7 @@ void client_worker(Patronus::pointer p,
         refill_slab_conf.block_ratio = {1.0};
         refill_slab_conf.refill_allocator =
             mem::PatronusWrapperAllocator::new_instance(
-                p, kServerNodeId, dir_id, kSpecificHint);
+                p, server_nid, dir_id, kSpecificHint);
         refill_slab_conf.refill_block_size = kRefillBlockSize;
         auto refill_allocator =
             mem::RefillableSlabAllocator::new_instance(refill_slab_conf);
@@ -205,8 +203,6 @@ void client_master(Patronus::pointer p,
     CHECK_GE(specific_test_allocated_bytes, kReserveBuffersize)
         << "** RefillableAllocator does not work well: It does not allocate as "
            "much as expected.";
-    p->finished(kWaitKey);
-    LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
 void client(Patronus::pointer p)
@@ -261,7 +257,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
     config.block_class = {kAllocBufferSize};
     config.block_ratio = {1.0};
 
@@ -271,11 +267,13 @@ int main(int argc, char *argv[])
 
     // let client spining
     auto nid = patronus->get_node_id();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         patronus->registerClientThread();
         sleep(1);
         client(patronus);
+        patronus->finished(kWaitKey);
+        LOG(WARNING) << "[bench] all worker finish their work. exiting...";
     }
     else
     {
