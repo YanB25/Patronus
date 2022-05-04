@@ -508,7 +508,9 @@ public:
     template <typename T>
     void barrier(const std::string &key, const T &sleep_time)
     {
+        VLOG(1) << "[DSM] Entering Barrier " << key;
         keeper->barrier(key, sleep_time);
+        VLOG(1) << "[DSM] Leaving Barrier " << key;
     }
 
     // ClockManager &clock_manager()
@@ -563,18 +565,15 @@ public:
                          uint16_t node_id,
                          size_t dir_id)
     {
-        // return iCon_->reliable_send(node_id, buf, size, dir_id);
-        CHECK(false) << buf << size << node_id << dir_id;
-    }
-    void unreliable_recv(char *ibuf, size_t limit = 1)
-    {
-        // return dirCon[dir_id]->recv(ibuf, limit);
-        CHECK(false) << ibuf << limit;
+        return umsg_->send(get_thread_id(), buf, size, node_id, dir_id);
     }
     size_t unreliable_try_recv(char *ibuf, size_t limit = 1)
     {
-        // return dirCon[dir_id]->try_recv(ibuf, limit);
-        CHECK(false) << ibuf << limit;
+        return umsg_->try_recv(get_thread_id(), ibuf, limit);
+    }
+    void unreliable_recv(char *ibuf, size_t limit = 1)
+    {
+        return umsg_->recv(get_thread_id(), ibuf, limit);
     }
     inline uint32_t get_icon_lkey();
 
@@ -626,7 +625,7 @@ private:
     std::atomic<size_t> cur_dir_{0};
 
     // ClockManager clock_manager_;
-    // std::unique_ptr<ReliableConnection> reliable_msg_;
+    std::unique_ptr<UnreliableConnection<kMaxAppThread>> umsg_;
 
 public:
     bool is_register()

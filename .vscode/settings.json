@@ -72,7 +72,8 @@
         "filesystem": "cpp",
         "*.def": "cpp",
         "*.inc": "cpp",
-        "*.gen": "cpp"
+        "*.gen": "cpp",
+        "bit": "cpp"
     },
     "C_Cpp.default.compilerArgs": [
         "--std=c++17"

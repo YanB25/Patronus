@@ -85,7 +85,8 @@ bool rdmaSend(ibv_qp *qp,
               uint32_t remoteQPN /* remote dct_number */,
               bool isSignaled,
               bool isInlined,
-              uint64_t wr_id)
+              uint64_t wr_id,
+              std::optional<uint32_t> imm)
 {
     struct ibv_sge sg;
     struct ibv_send_wr wr;
@@ -93,7 +94,15 @@ bool rdmaSend(ibv_qp *qp,
 
     fillSgeWr(sg, wr, source, size, lkey);
 
-    wr.opcode = IBV_WR_SEND;
+    if (imm.has_value())
+    {
+        wr.opcode = IBV_WR_SEND_WITH_IMM;
+        wr.imm_data = imm.value();
+    }
+    else
+    {
+        wr.opcode = IBV_WR_SEND;
+    }
 
     wr.wr.ud.ah = ah;
     wr.wr.ud.remote_qpn = remoteQPN;

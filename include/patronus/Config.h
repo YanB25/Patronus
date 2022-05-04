@@ -4,7 +4,7 @@
 
 #include "Common.h"
 #include "umsg/Config.h"
-#include "umsg/UnreliableMessageConnection.h"
+#include "umsg/UnreliableConnection.h"
 
 namespace config::patronus
 {

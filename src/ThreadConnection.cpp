@@ -4,7 +4,7 @@
 
 #include "Connection.h"
 #include "Timer.h"
-#include "umsg/UnreliableMessageConnection.h"
+#include "umsg/UnreliableConnection.h"
 
 ThreadConnection::ThreadConnection(
     uint16_t threadID,

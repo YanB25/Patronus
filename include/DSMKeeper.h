@@ -9,7 +9,7 @@
 
 #include "Keeper.h"
 #include "Timer.h"
-#include "umsg/UnreliableMessageConnection.h"
+#include "umsg/UnreliableConnection.h"
 
 struct ThreadConnection;
 struct DirectoryConnection;
@@ -26,6 +26,12 @@ struct ExPerThread
     uint32_t dm_rkey;  // for directory on-chip memory
 } __attribute__((packed));
 
+struct ExUnreliable
+{
+    uint16_t lid;
+    uint8_t gid[16];
+    uint32_t qpn;
+} __attribute__((packed));
 /**
  * @brief an exchange data used in building connection for each `pair` of
  * machines in the system. Keep the struct POD to be memcpy-able
@@ -68,6 +74,7 @@ struct ExchangeMeta
      */
     uint32_t dirRcQpn2app[NR_DIRECTORY][kMaxAppThread];
 
+    ExUnreliable umsgs[kMaxAppThread];
 } __attribute__((packed));
 
 class DSMKeeper : public Keeper
@@ -76,15 +83,17 @@ public:
     static std::unique_ptr<DSMKeeper> newInstance(
         std::vector<std::unique_ptr<ThreadConnection>> &thCon,
         std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
+        UnreliableConnection<kMaxAppThread> &umsg,
         std::vector<RemoteConnection> &remoteCon,
         uint32_t maxServer = 12)
     {
         return future::make_unique<DSMKeeper>(
-            thCon, dirCon, remoteCon, maxServer);
+            thCon, dirCon, umsg, remoteCon, maxServer);
     }
 
     DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
               std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
+              UnreliableConnection<kMaxAppThread> &umsg,
               std::vector<RemoteConnection> &remoteCon,
               uint32_t maxServer = MAX_MACHINE);
 
@@ -120,9 +129,10 @@ public:
                        int remoteID,
                        int dirID,
                        const ExchangeMeta &exMeta);
-    // void connectReliableMsg(ReliableConnection &cond,
-    //                         int remoteID,
-    //                         const ExchangeMeta &);
+
+    void connectUnreliableMsg(UnreliableConnection<kMaxAppThread> &umsg,
+                              int remoteID);
+
     void updateRemoteConnectionForDir(RemoteConnection &,
                                       const ExchangeMeta &exMeta,
                                       size_t dirID);
@@ -137,6 +147,7 @@ private:
 
     std::vector<std::unique_ptr<ThreadConnection>> &thCon;
     std::vector<std::unique_ptr<DirectoryConnection>> &dirCon;
+    UnreliableConnection<kMaxAppThread> &umsg;
     std::vector<RemoteConnection> &remoteCon;
 
     // remoteID => remoteMetaData

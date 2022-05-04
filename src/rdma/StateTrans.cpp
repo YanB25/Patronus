@@ -81,11 +81,11 @@ bool modifyQPtoInit(struct ibv_qp *qp, RdmaContext *context)
         break;
 
     case IBV_EXP_QPT_DC_INI:
-        LOG(ERROR) << "implement me:)";
+        LOG(FATAL) << "implement me:)";
         break;
 
     default:
-        LOG(ERROR) << "implement me:)";
+        LOG(FATAL) << "implement me:)";
     }
 
     if (ibv_modify_qp(qp,
@@ -164,6 +164,7 @@ bool modifyQPtoRTS(struct ibv_qp *qp)
 bool modifyUDtoRTS(struct ibv_qp *qp, RdmaContext *context)
 {
     // assert(qp->qp_type == IBV_QPT_UD);
+    CHECK_EQ(qp->qp_type, IBV_QPT_UD);
 
     struct ibv_qp_attr attr;
     memset(&attr, 0, sizeof(attr));

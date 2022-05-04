@@ -9,6 +9,30 @@
 #include "RawMessageConnection.h"
 #include "ThreadConnection.h"
 
+struct UDConnection
+{
+    uint32_t QPN[kMaxAppThread];
+    ibv_ah *AH[kMaxAppThread][kMaxAppThread];
+    void destroy()
+    {
+        for (size_t i = 0; i < kMaxAppThread; ++i)
+        {
+            for (size_t j = 0; j < kMaxAppThread; ++j)
+            {
+                if (AH[i][j])
+                {
+                    // LOG(INFO)
+                    //     << "[debug] trying to free dirToAppAh[" << i << "]["
+                    //     << j << "] val " << (void *) dirToAppAh[i][j];
+                    PLOG_IF(ERROR, ibv_destroy_ah(AH[i][j]))
+                        << "failed to destroy ah";
+                    AH[i][j] = nullptr;
+                }
+            }
+        }
+    }
+};
+
 /**
  * @brief RemoteConnection is a combination of @see ThreadConnection
  * and @see DirectoryConnection
@@ -34,6 +58,8 @@ struct RemoteConnection
     uint32_t appRKey[kMaxAppThread];
     uint32_t appMessageQPN[kMaxAppThread];
     ibv_ah *dirToAppAh[NR_DIRECTORY][kMaxAppThread];
+
+    UDConnection ud_conn;
     void destroy()
     {
         for (size_t i = 0; i < NR_DIRECTORY; ++i)
@@ -57,6 +83,7 @@ struct RemoteConnection
                 }
             }
         }
+        ud_conn.destroy();
     }
 };
 

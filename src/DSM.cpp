@@ -9,6 +9,7 @@
 #include "Rdma.h"
 #include "Timer.h"
 #include "Util.h"
+#include "umsg/UnreliableConnection.h"
 
 thread_local int DSM::thread_id_ = -1;
 thread_local int DSM::thread_name_id_ = -1;
@@ -335,10 +336,14 @@ void DSM::initRDMAConnection()
     }
     timer.pin("dirCons " + std::to_string(NR_DIRECTORY));
 
+    umsg_ = std::make_unique<UnreliableConnection<kMaxAppThread>>(
+        cache.data, cache.size, remoteInfo);
+
     timer.pin("keeper init");
 
     // thCon, dirCon, remoteInfo set up here.
-    keeper = DSMKeeper::newInstance(thCon, dirCon, remoteInfo, conf.machineNR);
+    keeper = DSMKeeper::newInstance(
+        thCon, dirCon, *umsg_, remoteInfo, conf.machineNR);
     timer.pin("keeper init");
 
     myNodeID = keeper->getMyNodeID();

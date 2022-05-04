@@ -9,7 +9,7 @@
 #include "Rdma.h"
 #include "city.h"
 #include "umsg/Config.h"
-#include "umsg/UnreliableMessageConnection.h"
+#include "umsg/UnreliableConnection.h"
 
 template <size_t kEndpointNr>
 class UnreliableRecvMessageConnection
@@ -48,7 +48,6 @@ public:
         CHECK(destroyMemoryRegion(recv_mr_));
         CHECK(hugePageFree(msg_pool_, kMessageBufferSize));
     }
-    void recv(char *ibuf, size_t msg_limit = 1);
     /**
      * @brief try to recv any buffered messages
      *
@@ -56,7 +55,8 @@ public:
      * @param msg_limit The number of messages at most the ibuf can store
      * @return size_t The number of messages actually received.
      */
-    size_t try_recv(size_t ep_id, char *ibuf, size_t msg_limit = 1);
+    size_t try_recv(size_t i_ep_id, char *ibuf, size_t msg_limit = 1);
+    void recv(size_t i_ep_id, char *ibuf, size_t msg_limit = 1);
     void init();
 
 private:
@@ -99,8 +99,6 @@ void UnreliableRecvMessageConnection<kEndpointNr>::fills(ibv_sge &sge,
 
     sge.addr = (uint64_t) msg_pool_ +
                get_msg_pool_idx(th_id, batch_id) * kPostMessageSize;
-    DCHECK_EQ(sge.addr % 64, 0) << "Should be cacheline aligned. otherwise the "
-                                   "performance is not optimized.";
 
     sge.length = kPostMessageSize;
     sge.lkey = lkey_;
@@ -111,7 +109,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::fills(ibv_sge &sge,
     wr.num_sge = 1;
     if ((batch_id + 1) % kPostRecvBufferBatch == 0)
     {
-        DVLOG(10) << "[rmsg-recv] recvs[" << th_id << "][" << batch_id
+        DVLOG(10) << "[umsg-recv] recvs[" << th_id << "][" << batch_id
                   << "] set next to "
                   << "nullptr. Current k " << batch_id << " @"
                   << (void *) sge.addr;
@@ -119,7 +117,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::fills(ibv_sge &sge,
     }
     else
     {
-        DVLOG(10) << "[rmesg-recv] recvs[" << th_id << "][" << batch_id
+        DVLOG(10) << "[umesg-recv] recvs[" << th_id << "][" << batch_id
                   << "] set next to "
                   << "recvs[" << th_id << "][" << batch_id + 1
                   << "]. Current k " << batch_id << " @" << (void *) sge.addr;
@@ -153,13 +151,14 @@ void UnreliableRecvMessageConnection<kEndpointNr>::init()
     {
         for (size_t i = 0; i < kPostRecvBufferAdvanceBatch; ++i)
         {
-            if (ibv_post_recv(
-                    QPs_[ep_id], &recvs[ep_id][i * kPostRecvBufferBatch], &bad))
+            ibv_recv_wr *post_wr = &recvs[ep_id][i * kPostRecvBufferBatch];
+            if (ibv_post_recv(QPs_[ep_id], post_wr, &bad))
             {
                 PLOG(ERROR) << "Receive failed.";
             }
-            DVLOG(3) << "[rmsg] posting recvs[" << ep_id << "]["
-                     << i * kPostRecvBufferBatch << "]";
+            DVLOG(3) << "[umsg] posting recvs[" << ep_id << "]["
+                     << i * kPostRecvBufferBatch << "] with WRID "
+                     << WRID(post_wr->wr_id);
         }
     }
 
@@ -184,9 +183,40 @@ size_t UnreliableRecvMessageConnection<kEndpointNr>::try_recv(size_t ep_id,
 
     for (size_t i = 0; i < actually_polled; ++i)
     {
-        handle_wc(ibuf + i * kPostMessageSize, wc[i]);
+        handle_wc(ibuf + i * kUserMessageSize, wc[i]);
     }
     return actually_polled;
+}
+
+template <size_t kEndpointNr>
+void UnreliableRecvMessageConnection<kEndpointNr>::recv(size_t ep_id,
+                                                        char *ibuf,
+                                                        size_t msg_limit)
+{
+    DCHECK(inited_);
+    msg_limit = std::min(msg_limit, kRecvLimit);
+
+    static thread_local ibv_wc wc[kRecvLimit];
+
+    size_t actual_polled = 0;
+    while (actual_polled < msg_limit)
+    {
+        auto expect = msg_limit - actual_polled;
+        DCHECK_GT(expect, 0);
+        auto got = ibv_poll_cq(recv_cqs_[ep_id], expect, wc + actual_polled);
+        if (unlikely(got < 0))
+        {
+            PLOG(FATAL) << "Failed to ibv_poll_cq. ";
+            return;
+        }
+        actual_polled += got;
+    }
+    DCHECK_EQ(actual_polled, msg_limit);
+
+    for (size_t i = 0; i < actual_polled; ++i)
+    {
+        handle_wc(ibuf + i * kUserMessageSize, wc[i]);
+    }
 }
 
 template <size_t kEndpointNr>
@@ -195,7 +225,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
 {
     if (unlikely(wc.status != IBV_WC_SUCCESS))
     {
-        PLOG(FATAL) << "[rmsg] Failed to handle wc: " << WRID(wc.wr_id)
+        PLOG(FATAL) << "[umsg] Failed to handle wc: " << WRID(wc.wr_id)
                     << ", status: " << wc.status;
         return;
     }
@@ -225,14 +255,15 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
         buf += 40;
         memcpy(ibuf, buf, actual_size);
 
-        auto get = CityHash64(buf, actual_size);
-        DVLOG(3) << "[Rmsg] Recved msg from ep_id " << th_id << ", cur_idx "
-                 << cur_idx << ", it is " << std::hex << get << " @"
-                 << (void *) buf;
+        DVLOG(3) << "[umsg] Recved msg size " << actual_size << " from ep_id "
+                 << th_id << ", batch_id: " << batch_id << ", cur_idx "
+                 << cur_idx << ", hash is " << std::hex
+                 << CityHash64(buf, actual_size) << " @" << (void *) buf
+                 << ". WRID: " << wrid;
     }
     else
     {
-        DVLOG(3) << "[Rmsg] Recved msg, wr: " << wrid << ", cur_idx "
+        DVLOG(3) << "[umsg] Recved msg, wr: " << wrid << ", cur_idx "
                  << cur_idx;
     }
 
@@ -242,7 +273,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
             ((cur_idx + 1) % kRecvBuffer) +
             (kPostRecvBufferAdvanceBatch - 1) * kPostRecvBufferBatch;
         ibv_recv_wr *bad;
-        DVLOG(3) << "[rmsg] Posting another " << kPostRecvBufferBatch
+        DVLOG(3) << "[umsg] Posting another " << kPostRecvBufferBatch
                  << " recvs, th_id " << th_id << ". cur_idx " << cur_idx
                  << " i.e. recvs[" << th_id << "]["
                  << (post_buf_idx % kRecvBuffer) << "]";

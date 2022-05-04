@@ -8,9 +8,14 @@ const char *DSMKeeper::ServerPrefix = "SPre";
 
 DSMKeeper::DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
                      std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
+                     UnreliableConnection<kMaxAppThread> &umsg,
                      std::vector<RemoteConnection> &remoteCon,
                      uint32_t maxServer)
-    : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
+    : Keeper(maxServer),
+      thCon(thCon),
+      dirCon(dirCon),
+      umsg(umsg),
+      remoteCon(remoteCon)
 {
     ContTimer<config::kMonitorControlPath> timer("DSMKeeper::DSMKeeper(...)");
 
@@ -35,6 +40,7 @@ DSMKeeper::DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
     initRouteRule();
     timer.pin("initRouteRule");
 
+    umsg.recv_->init();
     timer.pin("init reliable recv");
     timer.report();
 }
@@ -75,6 +81,15 @@ void DSMKeeper::initLocalMeta()
                16 * sizeof(uint8_t));
 
         exchangeMeta.dirUdQpn[i] = dirCon[i]->message->getQPN();
+    }
+
+    for (size_t i = 0; i < kMaxAppThread; ++i)
+    {
+        exchangeMeta.umsgs[i].qpn = umsg.get_qp(i)->qp_num;
+        exchangeMeta.umsgs[i].lid = umsg.context().lid;
+        memcpy((char *) exchangeMeta.umsgs[i].gid,
+               (char *) (&umsg.context().gid),
+               16 * sizeof(uint8_t));
     }
 }
 
@@ -186,33 +201,12 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
     }
 }
 
-// void DSMKeeper::connectReliableMsg(ReliableConnection &cond,
-//                                    int remoteID,
-//                                    const ExchangeMeta &exMeta)
-// {
-//     if constexpr (!config::kEnableReliableMessage)
-//     {
-//         return;
-//     }
-//     for (size_t i = 0; i < cond.QPs().size(); ++i)
-//     {
-//         auto &qp = cond.QPs()[i][remoteID];
-//         auto &ctx = cond.context();
-//         CHECK_EQ(qp->qp_type, IBV_QPT_RC);
-//         CHECK(modifyQPtoInit(qp, &ctx));
-//         CHECK(modifyQPtoRTR(qp,
-//                             exMeta.ex_reliable.qpn[i],
-//                             exMeta.ex_reliable.lid,
-//                             exMeta.ex_reliable.gid,
-//                             &ctx));
-//         CHECK(modifyQPtoRTS(qp));
-
-//         DVLOG(5) << "[debug] Send connect to remote " << remoteID
-//                  << ", mid: " << i << ", hash(rrecv): " << std::hex
-//                  << djb2_digest((char *) &exMeta.ex_reliable,
-//                                 sizeof(exMeta.ex_reliable));
-//     }
-// }
+void DSMKeeper::connectUnreliableMsg(UnreliableConnection<kMaxAppThread> &umsg,
+                                     int remoteID)
+{
+    std::ignore = umsg;
+    std::ignore = remoteID;
+}
 
 void DSMKeeper::connectThread(ThreadConnection &th,
                               int remoteID,
@@ -309,9 +303,6 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
         }
     }
 
-    // for reliable msg
-    // connectReliableMsg(reliableCon, remoteID, exMeta);
-
     // init remote connections
     auto &remote = remoteCon[remoteID];
     remote.dsmBase = exMeta.dsmBase;
@@ -354,6 +345,29 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
             remote.dirToAppAh[k][i] = DCHECK_NOTNULL(
                 ibv_create_ah(CHECK_NOTNULL(dirCon[k]->ctx.pd), &ahAttr));
         }
+    }
+
+    // umsg
+    for (size_t to = 0; to < kMaxAppThread; ++to)
+    {
+        for (size_t from = 0; from < kMaxAppThread; ++from)
+        {
+            struct ibv_ah_attr ah_attr;
+            fillAhAttr(&ah_attr,
+                       exMeta.umsgs[to].lid,
+                       exMeta.umsgs[to].gid,
+                       &umsg.context());
+            auto *ah =
+                ibv_create_ah(CHECK_NOTNULL(umsg.context().pd), &ah_attr);
+            if (unlikely(ah == nullptr))
+            {
+                LOG(FATAL) << "failed in ibv_create_ah. umsg.context.pd: "
+                           << (void *) umsg.context().pd
+                           << ", errno: " << errno;
+            }
+            remote.ud_conn.AH[from][to] = ah;
+        }
+        remote.ud_conn.QPN[to] = exMeta.umsgs[to].qpn;
     }
 }
 

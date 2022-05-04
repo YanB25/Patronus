@@ -22,6 +22,7 @@
 
 #include "Common.h"
 
+
 #define MAX_POST_LIST 32
 #define DCT_ACCESS_KEY 3185
 #define UD_PKEY 0x11111111
@@ -239,7 +240,8 @@ bool rdmaSend(ibv_qp *qp,
               uint32_t remoteQPN,
               bool isSignaled = false,
               bool isInlined = false,
-              uint64_t wr_id = 0);
+              uint64_t wr_id = 0,
+              std::optional<uint32_t> imm = std::nullopt);
 
 /**
  * @brief rdma send for RC and UC
