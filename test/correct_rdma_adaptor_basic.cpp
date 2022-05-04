@@ -3,8 +3,8 @@
 #include <set>
 
 #include "Common.h"
-#include "glog/logging.h"
 #include "gflags/gflags.h"
+#include "glog/logging.h"
 #include "patronus/Patronus.h"
 #include "patronus/RdmaAdaptor.h"
 #include "patronus/memory/direct_allocator.h"
@@ -257,7 +257,6 @@ void client_master(Patronus::pointer p,
                    CoroExecutionContext<kCoroCnt> &exe_ctx)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     CoroContext mctx(tid, &yield, exe_ctx.workers());
     CHECK(mctx.is_master());
@@ -271,7 +270,7 @@ void client_master(Patronus::pointer p,
     coro_t coro_buf[2 * kCoroCnt];
     while (!exe_ctx.is_finished_all())
     {
-        auto nr = p->try_get_client_continue_coros(mid, coro_buf, 2 * kCoroCnt);
+        auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
@@ -326,7 +325,7 @@ void server(Patronus::pointer p)
         user_reserved_buf.buffer, user_reserved_buf.size, slab_conf);
     p->reg_allocator(kAllocHintA, slab_allocator);
 
-    p->server_serve(tid, kWaitKey);
+    p->server_serve(kWaitKey);
 
     p->patronus_free(addr, 4_KB, 0 /* hint */);
 }

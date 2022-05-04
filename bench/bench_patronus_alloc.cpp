@@ -69,7 +69,6 @@ void bench_alloc_thread_coro_master(Patronus::pointer patronus,
                                     size_t coro_nr)
 {
     auto tid = patronus->get_thread_id();
-    auto mid = tid;
 
     CoroContext mctx(tid, &yield, coro_comm.workers);
     CHECK(mctx.is_master());
@@ -130,8 +129,8 @@ void bench_alloc_thread_coro_master(Patronus::pointer patronus,
             //         << ", task_per_sync: " << task_per_sync;
         }
 
-        auto nr = patronus->try_get_client_continue_coros(
-            mid, coro_buf, 2 * kCoroCnt);
+        auto nr =
+            patronus->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
 
         for (size_t i = 0; i < nr; ++i)
         {
@@ -556,10 +555,10 @@ void server(Patronus::pointer patronus, bool is_master)
     }
 
     auto tid = patronus->get_thread_id();
-    auto mid = tid;
-    LOG(INFO) << "[coro] server thread tid " << tid << " for mid " << mid;
 
-    patronus->server_serve(mid, kWaitKey);
+    LOG(INFO) << "[coro] server thread tid " << tid;
+
+    patronus->server_serve(kWaitKey);
 }
 
 void client(Patronus::pointer patronus,

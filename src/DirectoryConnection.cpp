@@ -21,7 +21,6 @@ DirectoryConnection::DirectoryConnection(
                      "DirectoryConnection::DirectoryConnection()");
 
     CHECK(createContext(&ctx));
-    // dinfo("[dirCon] dirID: %d, ctx->pd: %p", dirID, ctx.pd);
     timer.pin("createContext");
 
     cq =
@@ -66,6 +65,7 @@ DirectoryConnection::DirectoryConnection(
         }
     }
     timer.pin("create QPs");
+
     timer.pin("reliable recv");
     timer.report();
 }
@@ -89,6 +89,7 @@ DirectoryConnection::~DirectoryConnection()
             CHECK(destroyQueuePair(qp));
         }
     }
+
     timer.pin("destroy QPs");
     if (dirID == 0)
     {

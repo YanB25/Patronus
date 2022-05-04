@@ -304,7 +304,6 @@ void test_basic_client_master(
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     CoroContext mctx(tid, &yield, ex.workers());
     CHECK(mctx.is_master());
@@ -328,7 +327,6 @@ void test_basic_client_master(
     while (true)
     {
         tid = p->get_thread_id();
-        mid = tid;
         if ((ssize_t) ex.get_private_data().thread_remain_task <=
             2 * ssize_t(coro_nr))
         {
@@ -345,8 +343,7 @@ void test_basic_client_master(
                 }
             }
         }
-        auto nr =
-            p->try_get_client_continue_coros(mid, coro_buf, 2 * kMaxCoroNr);
+        auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kMaxCoroNr);
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
@@ -442,9 +439,6 @@ void benchmark_server(Patronus::pointer p,
     {
         CHECK_EQ(conf.thread_nr, thread_nr);
     }
-    auto tid = p->get_thread_id();
-    auto mid = tid;
-
     if (is_master)
     {
         p->finished(key);
@@ -456,7 +450,7 @@ void benchmark_server(Patronus::pointer p,
         p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
     }
 
-    p->server_serve(mid, key);
+    p->server_serve(key);
     bar.wait();
 }
 

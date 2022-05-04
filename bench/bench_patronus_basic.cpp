@@ -26,7 +26,6 @@ constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kTestTime = 1 * define::M;
 constexpr static size_t kThreadNr = 4;
 static_assert(kThreadNr <= kMaxAppThread);
-static_assert(kThreadNr <= RMSG_MULTIPLEXING);
 
 // this script will use the fatest path:
 // server no auto gc, client no lease checking, relinquish no unbind.
@@ -90,8 +89,8 @@ Perthread<BenchInformation> bench_infos;
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
-    auto dir_id = mid;
+
+    auto dir_id = tid % NR_DIRECTORY;
 
     CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
@@ -223,7 +222,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 void client_master(Patronus::pointer p, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     CoroContext mctx(tid, &yield, client_coro.workers);
     CHECK(mctx.is_master());
@@ -238,7 +236,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
                         std::end(client_comm.finish_all_task),
                         [](bool i) { return i; }))
     {
-        auto nr = p->try_get_client_continue_coros(mid, coro_buf, 2 * kCoroCnt);
+        auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
 
         for (size_t i = 0; i < nr; ++i)
         {
@@ -318,11 +316,10 @@ void client(Patronus::pointer p)
 void server(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
-    LOG(INFO) << "[bench] server thread tid " << tid << " for mid " << mid;
+    LOG(INFO) << "[bench] server thread tid " << tid;
 
-    p->server_serve(mid, kWaitKey);
+    p->server_serve(kWaitKey);
 }
 
 int main(int argc, char *argv[])
@@ -344,7 +341,7 @@ int main(int argc, char *argv[])
     if (nid == kClientNodeId)
     {
         auto dsm = patronus->get_dsm();
-        dsm->reliable_recv(0, nullptr, 1);
+        patronus->keeper_barrier("begin", 100ms);
 
         for (size_t i = 0; i < kThreadNr - 1; ++i)
         {
@@ -399,7 +396,7 @@ int main(int argc, char *argv[])
 
         auto dsm = patronus->get_dsm();
         // sync
-        dsm->reliable_send(nullptr, 0, kClientNodeId, 0);
+        patronus->keeper_barrier("begin", 100ms);
         patronus->finished(kWaitKey);
         server(patronus);
     }

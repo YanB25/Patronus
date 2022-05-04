@@ -134,7 +134,6 @@ void client_master(Patronus::pointer p,
                    CoroExecutionContext<kCoroCnt> &exe)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     CoroContext mctx(tid, &yield, exe.workers());
     CHECK(mctx.is_master());
@@ -148,7 +147,7 @@ void client_master(Patronus::pointer p,
     coro_t coro_buf[2 * kCoroCnt];
     while (!exe.is_finished_all())
     {
-        auto nr = p->try_get_client_continue_coros(mid, coro_buf, 2 * kCoroCnt);
+        auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
@@ -226,7 +225,7 @@ void server(Patronus::pointer p, size_t initial_subtable)
 
     LOG(INFO) << "[bench] meta gaddr is " << meta_gaddr;
 
-    p->server_serve(tid, kWaitKey);
+    p->server_serve(kWaitKey);
 
     p->patronus_free(
         conf.g_kvblock_pool_addr, conf.g_kvblock_pool_size, 0 /* hint */);

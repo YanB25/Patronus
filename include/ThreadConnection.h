@@ -6,7 +6,6 @@
 
 #include "Common.h"
 #include "RawMessageConnection.h"
-#include "ReliableMessageConnection.h"
 
 struct RemoteConnection;
 

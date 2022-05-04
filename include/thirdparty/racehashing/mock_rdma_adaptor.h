@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #include "./conf.h"

@@ -144,8 +144,8 @@ std::ostream &operator<<(std::ostream &os, const AdminFlag &f)
 std::ostream &operator<<(std::ostream &os, const ClientID &cid)
 {
     os << "{CID node: " << cid.node_id << ", tid: " << cid.thread_id
-       << ", mid: " << (int) cid.mid << ", coro: " << (int) cid.coro_id
-       << ", rpc_ctx_id: " << cid.rpc_ctx_id << "}";
+       << ", coro: " << (int) cid.coro_id << ", rpc_ctx_id: " << cid.rpc_ctx_id
+       << "}";
     return os;
 }
 

@@ -166,24 +166,6 @@ If failed, especially because
 - @cur_unit_nr upper bits mismatch: ABA problem. The lease expired and the server has already granted the PR to other clients.
 - @cur_unit_nr lower bits mismatch (but upper bits match): BUG.
 
-
-==== NOTE ====
-@NR_DIRECTORY == @RMSG_MULTIPLEXING
-
-tid == from_mid == to_mid. 
-tid == from_mid because the clients need to poll the @from_mid for completed requests.
-from_mid == to_mid, because the rmsg is designed so (per-thread).
-
-to_mid(0) is also used to handle admin requests.
-
-A server thread may handle any @key.
-
-[0, @NR_DIRECTORY) dir_id is one-to-one mapped to [0, @RMSG_MULTIPLEXING) to_mid
-
-correct_addr
-correct_time_syncer_rmsg_test
-
-
 ===== CRITICAL BUG ======
 FAIL correct_time_syncer_rmsg_test.cpp
 [-] currently allow 50us abs_average drift and pass.

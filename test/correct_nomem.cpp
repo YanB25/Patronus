@@ -42,6 +42,8 @@ void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
     printf("buf %p == expect!\n", lhs_buf);
 }
 
+static size_t barrier_entered_{0};
+
 void server(std::shared_ptr<DSM> dsm)
 {
     size_t remain_sync = kRpcNr;
@@ -52,16 +54,16 @@ void server(std::shared_ptr<DSM> dsm)
         for (size_t i = 0; i < should_sync; ++i)
         {
             uint32_t rkey = 0xabcdef;
-            dsm->reliable_send(
+            dsm->unreliable_send(
                 (char *) &rkey, sizeof(uint32_t), kClientNodeId, 0);
             index++;
         }
         // wait and sync
-        dsm->reliable_recv(0, nullptr, 1);
+        dsm->keeper_barrier(std::to_string(barrier_entered_++), 10ms);
         remain_sync -= should_sync;
     }
 
-    dsm->reliable_recv(0, nullptr, 1);
+    dsm->keeper_barrier("finished", 100ms);
 }
 // Notice: TLS object is created only once for each combination of type and
 // thread. Only use this when you prefer multiple callers share the same
@@ -94,10 +96,10 @@ void client(std::shared_ptr<DSM> dsm)
         size_t should_recv = std::min(remain_mw, kSyncBatch);
         for (size_t i = 0; i < should_recv; ++i)
         {
-            dsm->reliable_recv(0, recv_buffer, 1);
+            dsm->unreliable_recv(recv_buffer, 1);
             [[maybe_unused]] uint32_t rkey = *(uint32_t *) recv_buffer;
         }
-        dsm->reliable_send(nullptr, 0, kServerNodeId, 0);
+        dsm->keeper_barrier(std::to_string(barrier_entered_++), 10ms);
         remain_mw -= should_recv;
 
         done_work += should_recv;
@@ -135,7 +137,7 @@ void client(std::shared_ptr<DSM> dsm)
     }
 
     LOG(INFO) << "finished bind_mw total " << cnt << ", dir " << NR_DIRECTORY;
-    dsm->reliable_send(nullptr, 0, kServerNodeId, 0);
+    dsm->keeper_barrier("finished", 100ms);
 }
 int main(int argc, char *argv[])
 {

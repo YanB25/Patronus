@@ -7,6 +7,7 @@
 #include "PerThread.h"
 #include "Timer.h"
 #include "gflags/gflags.h"
+#include "umsg/Config.h"
 #include "util/Rand.h"
 #include "util/monitor.h"
 
@@ -22,14 +23,13 @@ constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t kPingpoingCnt = 100 * define::K;
 constexpr static size_t kBurnCnt = 100 * define::M;
-constexpr static size_t kThreadNr = RMSG_MULTIPLEXING - 1;
-// constexpr static size_t kThreadNr = RMSG_MULTIPLEXING;
+constexpr static size_t kThreadNr = kMaxAppThread - 1;
 // constexpr static size_t kThreadNr = 1;
 // constexpr static size_t kBenchMsgSize = 16;
 
 struct BenchMsg
 {
-    uint16_t mid;
+    uint16_t tid;
 } __attribute__((packed));
 
 void client_pingpong_correct(std::shared_ptr<DSM> dsm)
@@ -42,9 +42,9 @@ void client_pingpong_correct(std::shared_ptr<DSM> dsm)
     {
         uint64_t magic = fast_pseudo_rand_int();
         *(uint64_t *) buf = magic;
-        dsm->reliable_send(buf, sizeof(uint64_t), kServerNodeId, 0);
+        dsm->unreliable_send(buf, sizeof(uint64_t), kServerNodeId, 0);
 
-        dsm->reliable_recv(0, recv_buf);
+        dsm->unreliable_recv(recv_buf);
         uint64_t get = *(uint64_t *) recv_buf;
         CHECK_EQ(get, magic)
             << "Pingpoing content mismatch for " << i << "-th test";
@@ -59,8 +59,8 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
 
     // @kTokenNr token, each of which get ReliableConnection::kRecvBuffer /
     constexpr size_t msg_each_token =
-        ReliableConnection::kPostRecvBufferBatch / kTokenNr;
-    CHECK_EQ(ReliableConnection::kPostRecvBufferBatch % kTokenNr, 0);
+        config::umsg::kPostRecvBufferBatch / kTokenNr;
+    CHECK_EQ(config::umsg::kPostRecvBufferBatch % kTokenNr, 0);
 
     Timer t;
     t.begin();
@@ -71,24 +71,22 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
         threads.emplace_back([dsm, &count = counts[i]]() {
             dsm->registerThread();
             auto tid = dsm->get_thread_id();
-            auto mid = tid % RMSG_MULTIPLEXING;
-            LOG(WARNING) << "[bench] threadID " << tid << ", mid " << mid;
-
-            CHECK_NE(mid, 0);
+            auto to_dir_id = tid % NR_DIRECTORY;
 
             auto rdma_buffer = dsm->get_rdma_buffer();
             auto *buf = rdma_buffer.buffer;
             DCHECK_LT(sizeof(BenchMsg), rdma_buffer.size);
             auto *send_msg = (BenchMsg *) buf;
-            send_msg->mid = mid;
+            send_msg->tid = tid;
 
             size_t sent = 0;
-            char buffer[ReliableConnection::kMessageSize *
-                        ReliableConnection::kRecvLimit];
+            char buffer[config::umsg::kUserMessageSize *
+                        config::umsg::kRecvLimit];
             int64_t token = kTokenNr;
             for (size_t t = 0; t < kBurnCnt; ++t)
             {
-                dsm->reliable_send(buf, sizeof(BenchMsg), kServerNodeId, mid);
+                dsm->unreliable_send(
+                    buf, sizeof(BenchMsg), kServerNodeId, to_dir_id);
                 sent++;
                 if (sent % msg_each_token == 0)
                 {
@@ -99,26 +97,26 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                             << " at " << msg_each_token << ", wait for ack.";
                     do
                     {
-                        size_t recv_nr = dsm->reliable_try_recv(
-                            mid, buffer, ReliableConnection::kRecvLimit);
+                        size_t recv_nr = dsm->unreliable_try_recv(
+                            buffer, config::umsg::kRecvLimit);
                         // handle possbile recv token
                         for (size_t r = 0; r < recv_nr; ++r)
                         {
                             void *msg_addr =
-                                buffer + ReliableConnection::kMessageSize * r;
+                                buffer + config::umsg::kUserMessageSize * r;
                             auto *recv_msg = (BenchMsg *) msg_addr;
+                            std::ignore = recv_msg;
                             VLOG(3) << "[wait] tid " << tid
-                                    << " recv continue msg for mid "
-                                    << recv_msg->mid << ". add one token";
+                                    << " recv continue msg from TODO. add one "
+                                       "token";
                             token++;
                         }
                         if (token <= 0)
                         {
-                            VLOG(1) << "[wait] tid " << tid << " mid " << mid
-                                    << " blocked.";
+                            VLOG(1) << "[wait] tid " << tid << " blocked.";
                         }
                     } while (token <= 0);
-                    VLOG(3) << "[wait] tid " << tid << " from mid " << mid
+                    VLOG(3) << "[wait] tid " << tid
                             << " has enough token. current: " << token;
                 }
             }
@@ -179,32 +177,33 @@ void server_burn(std::shared_ptr<DSM> dsm,
         threads.emplace_back([dsm, &gots, &finished]() {
             dsm->registerThread();
             auto tid = dsm->get_thread_id();
-            auto mid = tid % RMSG_MULTIPLEXING;
 
-            CHECK_NE(mid, 0);
-
-            char buffer[ReliableConnection::kMessageSize *
-                        ReliableConnection::kRecvLimit];
+            char buffer[config::umsg::kUserMessageSize *
+                        config::umsg::kRecvLimit];
             auto *rdma_buf = dsm->get_rdma_buffer().buffer;
             memset(rdma_buf, 0, sizeof(BenchMsg));
-            size_t recv_msg_nr = 0;
+            constexpr size_t credit_for_token =
+                config::umsg::kPostRecvBufferBatch / kTokenNr;
             while (!finished.load(std::memory_order_relaxed))
             {
-                auto get = dsm->reliable_try_recv(
-                    mid, buffer, ReliableConnection::kRecvLimit);
-                gots[mid].fetch_add(get, std::memory_order_relaxed);
-                recv_msg_nr += get;
-                constexpr size_t credit_for_token =
-                    ReliableConnection::kPostRecvBufferBatch / kTokenNr;
-                if (recv_msg_nr >= credit_for_token)
+                auto get =
+                    dsm->unreliable_try_recv(buffer, config::umsg::kRecvLimit);
+                for (size_t m = 0; m < get; ++m)
                 {
-                    recv_msg_nr -= credit_for_token;
-                    VLOG(3)
-                        << "[wait] server tid " << tid << " let go mid " << mid;
-                    dsm->reliable_send((char *) rdma_buf,
-                                       sizeof(BenchMsg),
-                                       kClientNodeId,
-                                       mid);
+                    auto &msg =
+                        *(BenchMsg *) (buffer +
+                                       config::umsg::kUserMessageSize * m);
+                    auto from_tid = msg.tid;
+                    gots[from_tid].fetch_add(1, std::memory_order_relaxed);
+                    if (gots[from_tid] >= credit_for_token)
+                    {
+                        gots[from_tid] -= credit_for_token;
+                        VLOG(3) << "[wait] server tid " << tid << " let go";
+                        dsm->unreliable_send((char *) rdma_buf,
+                                             sizeof(BenchMsg),
+                                             kClientNodeId,
+                                             from_tid);
+                    }
                 }
             }
         });
@@ -236,20 +235,18 @@ void server_pingpong_correct(std::shared_ptr<DSM> dsm)
     auto *buf = dsm->get_rdma_buffer().buffer;
     for (size_t i = 0; i < kPingpoingCnt; ++i)
     {
-        dsm->reliable_recv(0, recv_buf, 0);
+        dsm->unreliable_recv(recv_buf, 1);
         uint64_t get = *(uint64_t *) recv_buf;
 
         *(uint64_t *) buf = get;
-        dsm->reliable_send(buf, sizeof(uint64_t), kClientNodeId, 0);
+        dsm->unreliable_send(buf, sizeof(uint64_t), kClientNodeId, 0);
     }
 }
 
 void client_wait(std::shared_ptr<DSM> dsm)
 {
-    // sync
-    auto *buf = dsm->get_rdma_buffer().buffer;
-    dsm->reliable_recv(0, nullptr);
-    dsm->reliable_send(buf, 0, kServerNodeId, 0);
+    static size_t entered_{0};
+    dsm->keeper_barrier(std::to_string(entered_++), 10ms);
 }
 
 void client(std::shared_ptr<DSM> dsm)
@@ -265,9 +262,8 @@ void client(std::shared_ptr<DSM> dsm)
 
 void server_wait(std::shared_ptr<DSM> dsm)
 {
-    auto *buffer = dsm->get_rdma_buffer().buffer;
-    dsm->reliable_send(buffer, 0, kClientNodeId, 0);
-    dsm->reliable_recv(0, nullptr);
+    static size_t entered_{0};
+    dsm->keeper_barrier(std::to_string(entered_++), 10ms);
 }
 
 void server(std::shared_ptr<DSM> dsm)
@@ -288,6 +284,7 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     rdmaQueryDevice();
+    CHECK(false) << "TODO: see if its correct";
 
     DSMConfig config;
     config.machineNR = kMachineNr;

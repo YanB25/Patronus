@@ -5,6 +5,7 @@
 #include "Timer.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
+#include "umsg/Config.h"
 #include "util/monitor.h"
 
 // Two nodes
@@ -46,7 +47,6 @@ struct CID
         {
             uint16_t node_id;
             uint16_t thread_id;
-            uint8_t mid;
             coro_t coro_id;
         } __attribute__((packed));
         uint64_t cid;
@@ -70,26 +70,25 @@ void client_worker(std::shared_ptr<DSM> dsm,
     auto nid = dsm->get_node_id();
     auto server_nid = ::config::get_server_nids()[0];
     auto tid = dsm->get_thread_id();
-    auto mid = tid;
+    auto dir_id = tid % NR_DIRECTORY;
 
     CoroContext ctx(tid, &yield, &master, coro_id);
 
     auto *rdma_buf = dsm->get_rdma_buffer().buffer;
-    auto *my_buf = rdma_buf + ReliableConnection::kMessageSize * coro_id;
+    auto *my_buf = rdma_buf + config::umsg::kUserMessageSize * coro_id;
     auto *send_msg = (EchoMessage *) my_buf;
     send_msg->cid.node_id = nid;
-    send_msg->cid.mid = mid;
     send_msg->cid.thread_id = tid;
     send_msg->cid.coro_id = coro_id;
     send_msg->val = rand();
 
     for (size_t i = 0; i < kMsgNr; ++i)
     {
-        VLOG(2) << "[bench] client tid " << tid << " mid " << mid << " coro "
-                << (int) coro_id << " sending val " << send_msg->val;
+        VLOG(2) << "[bench] client tid " << tid << ", coro " << (int) coro_id
+                << " sending val " << send_msg->val;
         send_msg->finished = (i + 1 == kMsgNr);
-        dsm->reliable_send(
-            (char *) send_msg, sizeof(EchoMessage), server_nid, tid);
+        dsm->unreliable_send(
+            (char *) send_msg, sizeof(EchoMessage), server_nid, dir_id);
         yield(master);
         CHECK(!messages.empty());
         void *recv_msg_addr = messages.front();
@@ -112,7 +111,6 @@ void client_master(std::shared_ptr<DSM> dsm,
                    std::vector<std::queue<void *>> &msg_queues)
 {
     auto tid = dsm->get_thread_id();
-    auto mid = tid;
 
     size_t expect_nr = kMsgNr * kCoroCnt;
     size_t recv_nr = 0;
@@ -124,17 +122,15 @@ void client_master(std::shared_ptr<DSM> dsm,
 
     while (recv_nr < expect_nr)
     {
-        char buffer[ReliableConnection::kMessageSize *
-                    ReliableConnection::kRecvLimit];
-        size_t nr =
-            dsm->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
+        char buffer[config::umsg::kUserMessageSize * config::umsg::kRecvLimit];
+        size_t nr = dsm->unreliable_try_recv(buffer, config::umsg::kRecvLimit);
         recv_nr += nr;
         VLOG_IF(1, nr > 0) << "[bench] client tid " << tid
                            << " coro master recv_nr: " << recv_nr;
         for (size_t i = 0; i < nr; ++i)
         {
-            auto *base_addr = buffer + ReliableConnection::kMessageSize * i;
-            VLOG(2) << "[bench] client tid " << tid << " mid " << mid
+            auto *base_addr = buffer + config::umsg::kUserMessageSize * i;
+            VLOG(2) << "[bench] client tid " << tid
                     << " coro: master. recv from addr " << (void *) base_addr;
             auto *recv_msg = (EchoMessage *) base_addr;
             auto coro_id = recv_msg->cid.coro_id;
@@ -173,38 +169,33 @@ void client(std::shared_ptr<DSM> dsm)
 }
 void server(std::shared_ptr<DSM> dsm)
 {
-    auto tid = dsm->get_thread_id();
-    auto mid = tid;
     auto *rdma_buffer = dsm->get_rdma_buffer().buffer;
 
     size_t expect_nr = kCoroCnt * kMsgNr * ::config::get_client_nids().size();
     size_t recv_nr = 0;
     while (recv_nr < expect_nr)
     {
-        char buffer[ReliableConnection::kMessageSize *
-                    ReliableConnection::kRecvLimit];
-        size_t nr =
-            dsm->reliable_try_recv(mid, buffer, ReliableConnection::kRecvLimit);
+        char buffer[config::umsg::kUserMessageSize * config::umsg::kRecvLimit];
+        size_t nr = dsm->unreliable_try_recv(buffer, config::umsg::kRecvLimit);
         recv_nr += nr;
-        VLOG_IF(1, nr > 0) << "[bench] server recv from mid " << mid
-                           << " current cnt: " << recv_nr;
+        VLOG_IF(1, nr > 0) << "[bench] server recv. current cnt: " << recv_nr;
         for (size_t i = 0; i < nr; ++i)
         {
-            char *base_addr = buffer + ReliableConnection::kMessageSize * i;
+            char *base_addr = buffer + config::umsg::kUserMessageSize * i;
             auto *recv_msg = (EchoMessage *) base_addr;
             auto client_nid = recv_msg->cid.node_id;
             auto *send_buffer_addr =
-                rdma_buffer + ReliableConnection::kMessageSize * i;
+                rdma_buffer + config::umsg::kUserMessageSize * i;
             memcpy(send_buffer_addr, base_addr, sizeof(EchoMessage));
             auto *send_msg = (EchoMessage *) send_buffer_addr;
             send_msg->val += 1;
             CHECK_LT(recv_msg->cid.coro_id, kCoroCnt);
-            VLOG(2) << "[bench] server recv from mid " << mid << ", coro "
+            VLOG(2) << "[bench] server recv from coro "
                     << (int) recv_msg->cid.coro_id << ", val " << recv_msg->val;
-            dsm->reliable_send((char *) send_msg,
-                               sizeof(EchoMessage),
-                               client_nid,
-                               recv_msg->cid.mid);
+            dsm->unreliable_send((char *) send_msg,
+                                 sizeof(EchoMessage),
+                                 client_nid,
+                                 recv_msg->cid.thread_id);
         }
     }
 }
@@ -219,6 +210,7 @@ int main(int argc, char *argv[])
     LOG(INFO) << "Support color ? " << getenv("TERM");
 
     rdmaQueryDevice();
+    CHECK(false) << "TODO: revise the codes";
 
     DSMConfig config;
     config.machineNR = ::config::kMachineNr;

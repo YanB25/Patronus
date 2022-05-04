@@ -18,7 +18,7 @@ constexpr uint32_t kMachineNr = 2;
 
 using namespace patronus;
 constexpr static size_t kThreadNr = 8;
-static_assert(kThreadNr <= RMSG_MULTIPLEXING);
+
 static_assert(kThreadNr <= kMaxAppThread);
 constexpr static size_t kCoroCnt = 1;
 
@@ -66,8 +66,8 @@ void client_worker(Patronus::pointer p,
                    CoroExecutionContext<kCoroCnt> &ex)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
-    auto dir_id = mid;
+
+    auto dir_id = tid % NR_DIRECTORY;
 
     CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
@@ -132,7 +132,6 @@ void client_master(Patronus::pointer p,
                    CoroExecutionContext<kCoroCnt> &ex)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     CoroContext mctx(tid, &yield, client_coro.workers);
     CHECK(mctx.is_master());
@@ -147,7 +146,7 @@ void client_master(Patronus::pointer p,
     {
         // try to see if messages arrived
 
-        auto nr = p->try_get_client_continue_coros(mid, coro_buf, 2 * kCoroCnt);
+        auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
@@ -179,11 +178,10 @@ void client(Patronus::pointer p)
 void server(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     LOG(INFO) << "I am server. tid " << tid;
 
-    p->server_serve(mid, kWaitKey);
+    p->server_serve(kWaitKey);
 }
 
 int main(int argc, char *argv[])

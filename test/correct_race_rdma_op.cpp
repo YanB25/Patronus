@@ -386,7 +386,6 @@ void test_basic_client_master(Patronus::pointer p,
                               CoroExecutionContext<kMaxCoroNr> &ex)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     CoroContext mctx(tid, &yield, ex.workers());
     CHECK(mctx.is_master());
@@ -400,8 +399,7 @@ void test_basic_client_master(Patronus::pointer p,
     coro_t coro_buf[2 * kMaxCoroNr];
     while (!ex.is_finished_all())
     {
-        auto nr =
-            p->try_get_client_continue_coros(mid, coro_buf, 2 * kMaxCoroNr);
+        auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kMaxCoroNr);
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
@@ -474,7 +472,6 @@ void test_basic_server(Patronus::pointer p,
 {
     using RaceHashingT = RaceHashing<kE, kB, kS>;
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     typename RaceHashingT::pointer rh;
     if (tid < thread_nr)
@@ -493,7 +490,7 @@ void test_basic_server(Patronus::pointer p,
     }
     bar.wait();
 
-    p->server_serve(mid, key);
+    p->server_serve(key);
     bar.wait();
 }
 

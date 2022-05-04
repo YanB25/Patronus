@@ -2,6 +2,7 @@
 #include <chrono>
 #include <iostream>
 #include <random>
+
 #include "gflags/gflags.h"
 template <typename T, typename U>
 std::ostream &operator<<(std::ostream &os,
@@ -35,7 +36,7 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-constexpr static size_t kMid = 0;
+constexpr static size_t kDirId = 0;
 constexpr static size_t kTestTime = 1_M;
 constexpr static size_t kTimeDriftLimit = 50_K;  // 50us
 
@@ -60,8 +61,8 @@ void client(Patronus::pointer p)
         msg.time = patronus_now.term();
 
         auto before_send_recv = std::chrono::steady_clock::now();
-        dsm->reliable_send(buf, sizeof(msg), kServerNodeId, kMid);
-        dsm->reliable_recv(kMid, recv_buffer, 1);
+        dsm->unreliable_send(buf, sizeof(msg), kServerNodeId, kDirId);
+        dsm->unreliable_recv(recv_buffer, 1);
         auto after_send_recv = std::chrono::steady_clock::now();
         auto send_recv_ns =
             std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -101,7 +102,7 @@ void server(Patronus::pointer p)
     char recv_buf[1024];
     for (size_t i = 0; i < kTestTime; ++i)
     {
-        dsm->reliable_recv(kMid, recv_buf);
+        dsm->unreliable_recv(recv_buf);
         auto &msg = *(BenchMessage *) recv_buf;
         auto that_patronus_time = time::PatronusTime(msg.time);
         auto patronus_now = syncer.patronus_now();
@@ -116,7 +117,7 @@ void server(Patronus::pointer p)
         auto &send_msg = *(BenchMessage *) buf;
         patronus_now = syncer.patronus_now();
         send_msg.time = patronus_now.term();
-        dsm->reliable_send(buf, sizeof(BenchMessage), kClientNodeId, kMid);
+        dsm->unreliable_send(buf, sizeof(BenchMessage), kClientNodeId, kDirId);
     }
 
     LOG(INFO) << "Network time different: " << m;

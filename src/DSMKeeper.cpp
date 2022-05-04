@@ -1,7 +1,7 @@
 #include "DSMKeeper.h"
 
 #include "Connection.h"
-#include "ReliableReceiver.h"
+#include "umsg/UnreliableReceiver.h"
 
 const char *DSMKeeper::OK = "OK";
 const char *DSMKeeper::ServerPrefix = "SPre";
@@ -9,13 +9,8 @@ const char *DSMKeeper::ServerPrefix = "SPre";
 DSMKeeper::DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
                      std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
                      std::vector<RemoteConnection> &remoteCon,
-                     ReliableConnection &reliableCon,
                      uint32_t maxServer)
-    : Keeper(maxServer),
-      thCon(thCon),
-      dirCon(dirCon),
-      reliableCon(reliableCon),
-      remoteCon(remoteCon)
+    : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
 {
     ContTimer<config::kMonitorControlPath> timer("DSMKeeper::DSMKeeper(...)");
 
@@ -40,10 +35,6 @@ DSMKeeper::DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
     initRouteRule();
     timer.pin("initRouteRule");
 
-    if constexpr (config::kEnableReliableMessage)
-    {
-        reliableCon.recv_->init();
-    }
     timer.pin("init reliable recv");
     timer.report();
 }
@@ -63,17 +54,6 @@ void DSMKeeper::initLocalMeta()
                16 * sizeof(uint8_t));
 
         exchangeMeta.appUdQpn[i] = thCon[i]->message->getQPN();
-    }
-
-    // reliable
-    if constexpr (config::kEnableReliableMessage)
-    {
-        auto &reliable_ctx = reliableCon.context();
-        exchangeMeta.ex_reliable.lid = reliable_ctx.lid;
-        exchangeMeta.ex_reliable.rkey = reliableCon.rkey();
-        memcpy((char *) exchangeMeta.ex_reliable.gid,
-               (char *) (&reliable_ctx.gid),
-               sizeof(uint8_t) * 16);
     }
 
     // per thread DIR
@@ -195,16 +175,6 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
         }
     }
 
-    // for reliable message
-    if constexpr (config::kEnableReliableMessage)
-    {
-        for (size_t i = 0; i < reliableCon.QPs().size(); ++i)
-        {
-            exchangeMeta.ex_reliable.qpn[i] =
-                reliableCon.QPs()[i][remoteID]->qp_num;
-        }
-    }
-
     for (int i = 0; i < kMaxAppThread; ++i)
     {
         const auto &c = thCon[i];
@@ -216,33 +186,33 @@ void DSMKeeper::setExchangeMeta(uint16_t remoteID)
     }
 }
 
-void DSMKeeper::connectReliableMsg(ReliableConnection &cond,
-                                   int remoteID,
-                                   const ExchangeMeta &exMeta)
-{
-    if constexpr (!config::kEnableReliableMessage)
-    {
-        return;
-    }
-    for (size_t i = 0; i < cond.QPs().size(); ++i)
-    {
-        auto &qp = cond.QPs()[i][remoteID];
-        auto &ctx = cond.context();
-        CHECK_EQ(qp->qp_type, IBV_QPT_RC);
-        CHECK(modifyQPtoInit(qp, &ctx));
-        CHECK(modifyQPtoRTR(qp,
-                            exMeta.ex_reliable.qpn[i],
-                            exMeta.ex_reliable.lid,
-                            exMeta.ex_reliable.gid,
-                            &ctx));
-        CHECK(modifyQPtoRTS(qp));
+// void DSMKeeper::connectReliableMsg(ReliableConnection &cond,
+//                                    int remoteID,
+//                                    const ExchangeMeta &exMeta)
+// {
+//     if constexpr (!config::kEnableReliableMessage)
+//     {
+//         return;
+//     }
+//     for (size_t i = 0; i < cond.QPs().size(); ++i)
+//     {
+//         auto &qp = cond.QPs()[i][remoteID];
+//         auto &ctx = cond.context();
+//         CHECK_EQ(qp->qp_type, IBV_QPT_RC);
+//         CHECK(modifyQPtoInit(qp, &ctx));
+//         CHECK(modifyQPtoRTR(qp,
+//                             exMeta.ex_reliable.qpn[i],
+//                             exMeta.ex_reliable.lid,
+//                             exMeta.ex_reliable.gid,
+//                             &ctx));
+//         CHECK(modifyQPtoRTS(qp));
 
-        DVLOG(5) << "[debug] Send connect to remote " << remoteID
-                 << ", mid: " << i << ", hash(rrecv): " << std::hex
-                 << djb2_digest((char *) &exMeta.ex_reliable,
-                                sizeof(exMeta.ex_reliable));
-    }
-}
+//         DVLOG(5) << "[debug] Send connect to remote " << remoteID
+//                  << ", mid: " << i << ", hash(rrecv): " << std::hex
+//                  << djb2_digest((char *) &exMeta.ex_reliable,
+//                                 sizeof(exMeta.ex_reliable));
+//     }
+// }
 
 void DSMKeeper::connectThread(ThreadConnection &th,
                               int remoteID,
@@ -340,7 +310,7 @@ void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)
     }
 
     // for reliable msg
-    connectReliableMsg(reliableCon, remoteID, exMeta);
+    // connectReliableMsg(reliableCon, remoteID, exMeta);
 
     // init remote connections
     auto &remote = remoteCon[remoteID];

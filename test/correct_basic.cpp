@@ -40,13 +40,13 @@ int main(int argc, char *argv[])
     auto nid = dsm->getMyNodeID();
     if (nid == kClientNodeId)
     {
-        dsm->reliable_recv(0, nullptr);
+        dsm->keeper_barrier("sync", 100ms);
         dsm->reconnectThreadToDir(kServerNodeId, 0);
     }
     else if (nid == kServerNodeId)
     {
         dsm->reinitializeDir(0);
-        dsm->reliable_send(nullptr, 0, kClientNodeId, 0);
+        dsm->keeper_barrier("sync", 100ms);
     }
 
     LOG(INFO) << "finished. ctrl+C to quit.";

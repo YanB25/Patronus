@@ -7,8 +7,10 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "ReliableMessageConnection.h"
+#include "Common.h"
 #include "patronus/Time.h"
+#include "umsg/Config.h"
+#include "umsg/UnreliableMessageConnection.h"
 #include "util/Debug.h"
 
 namespace patronus
@@ -54,7 +56,6 @@ struct ClientID
         {
             uint16_t node_id;
             uint16_t thread_id;
-            uint8_t mid;
             coro_t coro_id;
             uint16_t rpc_ctx_id;
             // below two idx is used for internal management
@@ -119,7 +120,7 @@ struct AcquireRequest
     uint16_t flag;  // should be AcquireRequestFlag
     Debug<uint64_t> digest;
 } __attribute__((packed));
-static_assert(sizeof(AcquireRequest) < ReliableConnection::kMessageSize);
+static_assert(sizeof(AcquireRequest) < config::umsg::kUserMessageSize);
 static_assert(NR_DIRECTORY <
               std::numeric_limits<decltype(AcquireRequest::dir_id)>::max());
 static_assert(sizeof(AcquireRequest::flag) >= sizeof(AcquireRequestFlag));
@@ -140,7 +141,7 @@ struct AcquireResponse
     uint32_t aba_id;
     AcquireRequestStatus status;
 } __attribute__((packed));
-static_assert(sizeof(AcquireResponse) < ReliableConnection::kMessageSize);
+static_assert(sizeof(AcquireResponse) < config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp);
 
 enum class AdminFlag : uint8_t
@@ -160,7 +161,7 @@ struct AdminRequest
     uint16_t dir_id;
     uint64_t data;  // used by p->barrier()
 } __attribute__((packed));
-static_assert(sizeof(AdminRequest) < ReliableConnection::kMessageSize);
+static_assert(sizeof(AdminRequest) < config::umsg::kUserMessageSize);
 static_assert(sizeof(AdminRequest::flag) >= sizeof(AdminFlag));
 std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);
 
@@ -199,7 +200,7 @@ struct LeaseModifyRequest
     uint32_t size; /* when only_dealloc is ON */
     Debug<uint64_t> digest;
 } __attribute__((packed));
-static_assert(sizeof(LeaseModifyRequest) < ReliableConnection::kMessageSize);
+static_assert(sizeof(LeaseModifyRequest) < config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req);
 static_assert(sizeof(LeaseModifyRequest::flag) >= sizeof(LeaseModifyFlag));
 
@@ -212,7 +213,7 @@ struct LeaseModifyResponse
     Debug<uint64_t> digest;
 
 } __attribute__((packed));
-static_assert(sizeof(LeaseModifyResponse) < ReliableConnection::kMessageSize);
+static_assert(sizeof(LeaseModifyResponse) < config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &req);
 
 enum class RWFlag : uint8_t

@@ -34,7 +34,6 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-constexpr static size_t kMid = 0;
 constexpr static size_t kMagic = 0xaabbccdd11223355;
 
 struct ClockInfo
@@ -119,7 +118,7 @@ void server(DSM::pointer dsm)
         }
     });
 
-    dsm->reliable_recv(kMid, nullptr, 1);
+    dsm->keeper_barrier("finish", 100ms);
 
     finish = true;
     t.join();
@@ -151,7 +150,7 @@ int main(int argc, char *argv[])
             std::this_thread::sleep_for(10s);
             client(dsm);
         }
-        dsm->reliable_send(nullptr, 0, kServerNodeId, kMid);
+        dsm->keeper_barrier("finish", 100ms);
     }
     else
     {

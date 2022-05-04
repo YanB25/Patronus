@@ -2,6 +2,7 @@
 #ifndef PATRONUS_H_
 #define PATRONUS_H_
 
+#include <mutex>
 #include <set>
 #include <unordered_set>
 
@@ -143,8 +144,6 @@ public:
     Patronus(const Patronus &) = delete;
     Patronus(const PatronusConfig &conf);
     ~Patronus();
-
-    void barrier(uint64_t key);
 
     /**
      * @brief Get the rlease object
@@ -340,11 +339,9 @@ public:
      * @brief give the server thread to Patronus.
      *
      */
-    void server_serve(size_t mid, uint64_t key);
+    void server_serve(uint64_t key);
 
-    size_t try_get_client_continue_coros(size_t mid,
-                                         coro_t *coro_buf,
-                                         size_t limit);
+    size_t try_get_client_continue_coros(coro_t *coro_buf, size_t limit);
 
     PatronusThreadResourceDesc prepare_client_thread(
         bool is_registering_thread);
@@ -386,9 +383,9 @@ public:
                                  size_t msg_nr,
                                  CoroContext *ctx = nullptr);
 
-    size_t reliable_try_recv(size_t from_mid, char *ibuf, size_t limit = 1)
+    size_t unreliable_try_recv(char *ibuf, size_t limit = 1)
     {
-        return dsm_->reliable_try_recv(from_mid, ibuf, limit);
+        return dsm_->unreliable_try_recv(ibuf, limit);
     }
     Buffer get_rdma_buffer_8B()
     {
@@ -480,7 +477,7 @@ public:
         auto slot_id = hash % slot_nr;
         return {bucket_id, slot_id};
     }
-    constexpr size_t admin_mid() const
+    constexpr size_t admin_dir_id() const
     {
         return 0;
     }
@@ -798,7 +795,7 @@ private:
                        CoroContext *ctx = nullptr);
 
     // server coroutines
-    void server_coro_master(CoroYield &yield, size_t mid, uint64_t key);
+    void server_coro_master(CoroYield &yield, uint64_t key);
     void server_coro_worker(coro_t coro_id, CoroYield &yield, uint64_t key);
 
     // helpers, actual impls
@@ -879,12 +876,6 @@ private:
     inline bool valid_total_buffer_offset(size_t buffer_offset) const;
 
     void validate_buffers();
-
-    /**
-     * @brief call me only if u know what u are doing.
-     * Do not call out of ctor of Patronus
-     */
-    void internal_barrier();
 
     // owned by both
     DSM::pointer dsm_;

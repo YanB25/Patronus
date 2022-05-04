@@ -335,13 +335,10 @@ void DSM::initRDMAConnection()
     }
     timer.pin("dirCons " + std::to_string(NR_DIRECTORY));
 
-    reliable_msg_ = std::make_unique<ReliableConnection>(
-        cache.data, cache.size, conf.machineNR);
     timer.pin("keeper init");
 
     // thCon, dirCon, remoteInfo set up here.
-    keeper = DSMKeeper::newInstance(
-        thCon, dirCon, remoteInfo, *reliable_msg_, conf.machineNR);
+    keeper = DSMKeeper::newInstance(thCon, dirCon, remoteInfo, conf.machineNR);
     timer.pin("keeper init");
 
     myNodeID = keeper->getMyNodeID();

@@ -28,7 +28,7 @@ struct ServerCoroContext
     ServerCoroCommunication comm;
     ThreadUnsafePool<ServerCoroTask, define::kMaxCoroNr * MAX_MACHINE>
         task_pool;
-    std::unique_ptr<ThreadUnsafeBufferPool<ReliableConnection::kMaxRecvBuffer>>
+    std::unique_ptr<ThreadUnsafeBufferPool<config::umsg::kMaxRecvBuffer>>
         buffer_pool;
 };
 

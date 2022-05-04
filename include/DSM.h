@@ -558,20 +558,23 @@ public:
         cur_dir_ = dir;
     }
 
-    void reliable_send(const char *buf,
-                       size_t size,
-                       uint16_t node_id,
-                       size_t mid)
+    void unreliable_send(const char *buf,
+                         size_t size,
+                         uint16_t node_id,
+                         size_t dir_id)
     {
-        reliable_msg_->send(thread_id_, buf, size, node_id, mid);
+        // return iCon_->reliable_send(node_id, buf, size, dir_id);
+        CHECK(false) << buf << size << node_id << dir_id;
     }
-    void reliable_recv(size_t from_mid, char *ibuf, size_t limit = 1)
+    void unreliable_recv(char *ibuf, size_t limit = 1)
     {
-        reliable_msg_->recv(from_mid, ibuf, limit);
+        // return dirCon[dir_id]->recv(ibuf, limit);
+        CHECK(false) << ibuf << limit;
     }
-    size_t reliable_try_recv(size_t from_mid, char *ibuf, size_t limit = 1)
+    size_t unreliable_try_recv(char *ibuf, size_t limit = 1)
     {
-        return reliable_msg_->try_recv(from_mid, ibuf, limit);
+        // return dirCon[dir_id]->try_recv(ibuf, limit);
+        CHECK(false) << ibuf << limit;
     }
     inline uint32_t get_icon_lkey();
 
@@ -623,7 +626,7 @@ private:
     std::atomic<size_t> cur_dir_{0};
 
     // ClockManager clock_manager_;
-    std::unique_ptr<ReliableConnection> reliable_msg_;
+    // std::unique_ptr<ReliableConnection> reliable_msg_;
 
 public:
     bool is_register()

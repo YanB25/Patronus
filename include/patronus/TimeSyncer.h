@@ -54,7 +54,7 @@ class TimeSyncer
     constexpr static size_t kMagic = 0xaabbccdd10103232;
     constexpr static size_t kRequiredContConvergeEpoch = 5;
     constexpr static int64_t kSyncTimeBoundNs = 1_K;  // 1us
-    constexpr static uint64_t kMid = 0;
+    constexpr static uint64_t kDirId = 0;
 
 public:
     constexpr static time::ns_t kCommunicationLatencyNs = 2_K;  // 2us

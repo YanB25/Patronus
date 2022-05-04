@@ -3,8 +3,8 @@
 #include <glog/logging.h>
 
 #include "Connection.h"
-#include "ReliableMessageConnection.h"
 #include "Timer.h"
+#include "umsg/UnreliableMessageConnection.h"
 
 ThreadConnection::ThreadConnection(
     uint16_t threadID,
@@ -39,16 +39,23 @@ ThreadConnection::ThreadConnection(
     cacheLKey = cacheMR->lkey;
 
     // dir, RC
+    const size_t qps_max_depth = 128;
     for (int i = 0; i < NR_DIRECTORY; ++i)
     {
         QPs.emplace_back(machineNR);
         for (size_t k = 0; k < machineNR; ++k)
         {
-            CHECK(createQueuePair(
-                &QPs.back()[k], IBV_QPT_RC, cq, &ctx, 128, 0, nullptr));
+            CHECK(createQueuePair(&QPs.back()[k],
+                                  IBV_QPT_RC,
+                                  cq,
+                                  &ctx,
+                                  qps_max_depth,
+                                  0,
+                                  nullptr));
         }
     }
     timer.pin("CreateQPs");
+
     timer.pin("InitReliableSend");
 
     timer.report();
@@ -75,6 +82,7 @@ ThreadConnection::~ThreadConnection()
             CHECK(destroyQueuePair(qp));
         }
     }
+
     timer.pin("destroy QPs");
     CHECK(destroyMemoryRegion(cacheMR));
     timer.pin("destroy MRs");

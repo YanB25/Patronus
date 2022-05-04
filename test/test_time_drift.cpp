@@ -2,6 +2,7 @@
 #include <chrono>
 #include <iostream>
 #include <random>
+
 #include "gflags/gflags.h"
 template <typename T, typename U>
 std::ostream &operator<<(std::ostream &os,
@@ -34,7 +35,7 @@ constexpr uint16_t kClientNodeId = 0;
 constexpr uint16_t kServerNodeId = 1;
 constexpr uint32_t kMachineNr = 2;
 
-constexpr static size_t kMid = 0;
+constexpr static size_t kDirId = 0;
 constexpr static ssize_t kTestSecond = 60;
 
 struct BenchMessage
@@ -86,8 +87,8 @@ void client(Patronus::pointer p)
         msg.time = get_current_ns();
 
         auto before_send_recv = std::chrono::steady_clock::now();
-        dsm->reliable_send(buf, sizeof(msg), kServerNodeId, kMid);
-        dsm->reliable_recv(kMid, recv_buffer, 1);
+        dsm->unreliable_send(buf, sizeof(msg), kServerNodeId, kDirId);
+        dsm->unreliable_recv(recv_buffer, 1);
         auto after_send_recv = std::chrono::steady_clock::now();
         auto send_recv_ns =
             std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -110,7 +111,7 @@ void client(Patronus::pointer p)
     }
     auto &msg = *(BenchMessage *) buf;
     msg.time = 0;
-    dsm->reliable_send(buf, sizeof(msg), kServerNodeId, kMid);
+    dsm->unreliable_send(buf, sizeof(msg), kServerNodeId, kDirId);
 
     for (size_t i = 0; i < diff_ns_ms.size(); ++i)
     {
@@ -141,7 +142,7 @@ void server(Patronus::pointer p)
             std::chrono::duration_cast<std::chrono::seconds>(now - begin_now)
                 .count();
 
-        dsm->reliable_recv(kMid, recv_buf);
+        dsm->unreliable_recv(recv_buf);
         auto &msg = *(BenchMessage *) recv_buf;
         auto that_ns = msg.time;
         auto now_ns = get_current_ns();
@@ -159,7 +160,7 @@ void server(Patronus::pointer p)
         auto &send_msg = *(BenchMessage *) buf;
         now_ns = get_current_ns();
         send_msg.time = now_ns;
-        dsm->reliable_send(buf, sizeof(BenchMessage), kClientNodeId, kMid);
+        dsm->unreliable_send(buf, sizeof(BenchMessage), kClientNodeId, kDirId);
     }
 
     for (size_t i = 0; i < diff_ns_ms.size(); ++i)

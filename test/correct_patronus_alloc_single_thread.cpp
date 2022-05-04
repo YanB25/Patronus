@@ -173,7 +173,6 @@ void client_master(Patronus::pointer p,
                    CoroYield &yield)
 {
     auto tid = p->get_thread_id();
-    auto mid = tid;
 
     CoroContext mctx(tid, &yield, workers);
     CHECK(mctx.is_master());
@@ -188,7 +187,7 @@ void client_master(Patronus::pointer p,
     {
         // try to see if messages arrived
 
-        auto nr = p->try_get_client_continue_coros(mid, coro_buf, 2 * kCoroCnt);
+        auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
         for (size_t i = 0; i < nr; ++i)
         {
             auto coro_id = coro_buf[i];
@@ -244,7 +243,7 @@ void server(Patronus::pointer p)
         p->reg_allocator(kSpecificHint, slab_allocator);
     }
 
-    p->server_serve(tid, kWaitKey);
+    p->server_serve(kWaitKey);
 }
 
 int main(int argc, char *argv[])

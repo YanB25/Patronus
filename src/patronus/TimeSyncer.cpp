@@ -72,14 +72,13 @@ void TimeSyncer::signal_finish()
             *(SyncFinishedMessage *) (buf + sizeof(SyncFinishedMessage) * nid);
         sync_finish_message.type = RequestType::kTimeSync;
         sync_finish_message.cid.coro_id = kNotACoro;
-        sync_finish_message.cid.mid = kMid;
         sync_finish_message.cid.node_id = dsm_->get_node_id();
         sync_finish_message.cid.thread_id = dsm_->get_thread_id();
         sync_finish_message.self_epsilon = clock_info_.self_epsilon;
-        dsm_->reliable_send((char *) &sync_finish_message,
-                            sizeof(SyncFinishedMessage),
-                            nid,
-                            kMid);
+        dsm_->unreliable_send((char *) &sync_finish_message,
+                              sizeof(SyncFinishedMessage),
+                              nid,
+                              kDirId);
     }
 }
 
@@ -196,7 +195,7 @@ void TimeSyncer::wait_finish()
             }
         }
         // can not exit, try to recv message
-        if (dsm_->reliable_try_recv(kMid, recv_buf, 1))
+        if (dsm_->unreliable_try_recv(recv_buf, 1))
         {
             const auto &sync_finished_message =
                 *(SyncFinishedMessage *) recv_buf;

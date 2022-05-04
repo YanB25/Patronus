@@ -38,7 +38,7 @@
 
 #define LATENCY_WINDOWS 1000000
 
-#define MAX_MACHINE 8
+#define MAX_MACHINE 4
 
 #define ADD_ROUND(x, n) ((x) = ((x) + 1) % (n))
 
@@ -57,12 +57,11 @@
 
 #define DIR_MESSAGE_NR 128
 
-#define RMSG_MULTIPLEXING (NR_DIRECTORY)
 // }
 
 // { app thread
 // #define kMaxAppThread 26
-constexpr static ssize_t kMaxAppThread = std::max(26, NR_DIRECTORY);
+constexpr static ssize_t kMaxAppThread = 32;
 
 /**
  * Equivalent to c++14 [[maybe_unused]]
