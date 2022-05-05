@@ -4,41 +4,41 @@
 
 namespace patronus
 {
-std::ostream &operator<<(std::ostream &os, const RequestType &t)
+std::ostream &operator<<(std::ostream &os, const RpcType &t)
 {
     switch (t)
     {
-    case RequestType::kAcquireRLease:
+    case RpcType::kAcquireRLeaseReq:
     {
-        os << "AcR";
+        os << "AcR-req";
         break;
     }
-    case RequestType::kAcquireWLease:
+    case RpcType::kAcquireWLeaseReq:
     {
-        os << "AcW";
+        os << "AcW-req";
         break;
     }
-    case RequestType::kUpgrade:
+    case RpcType::kAcquireLeaseResp:
     {
-        os << "U";
+        os << "AcW-resp";
         break;
     }
-    case RequestType::kRelinquish:
+    case RpcType::kRelinquishReq:
     {
-        os << "Rel";
+        os << "Rel-req";
         break;
     }
-    case RequestType::kExtend:
+    case RpcType::kRelinquishResp:
     {
-        os << "Ex";
+        os << "Rel-resp";
         break;
     }
-    case RequestType::kAdmin:
+    case RpcType::kAdmin:
     {
         os << "Adm";
         break;
     }
-    case RequestType::kTimeSync:
+    case RpcType::kTimeSync:
     {
         os << "TimeSync";
         break;
@@ -387,7 +387,8 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
     os << "{AcquireResponse type: " << resp.type << ", cid: " << resp.cid
        << ", lease_id: " << resp.lease_id << ", rkey_0: " << resp.rkey_0
        << ", rkey_header: " << resp.rkey_header << ", buffer_base "
-       << resp.buffer_base << ", header_base: " << resp.header_base
+       << (void *) resp.buffer_base
+       << ", header_base: " << (void *) resp.header_base
        << ", begin_term: " << resp.begin_term
        << ", ns_per_unit: " << resp.ns_per_unit << ", status: " << resp.status
        << " }";
@@ -412,8 +413,7 @@ std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req)
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &resp)
 {
     os << "{LeaseModifyResponse type: " << resp.type << ", cid : " << resp.cid
-       << ", lease_id: " << resp.lease_id << ", success: " << resp.success
-       << " }";
+       << ", success: " << resp.success << " }";
     return os;
 }
 

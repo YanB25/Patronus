@@ -35,14 +35,14 @@ inline std::ostream &operator<<(std::ostream &os, const ClockInfo &clock)
 
 struct SyncFinishedMessage
 {
-    enum RequestType type;
+    enum RpcType type;
     ClientID cid;
     int64_t self_epsilon;
 };
 inline std::ostream &operator<<(std::ostream &os,
                                 const SyncFinishedMessage &msg)
 {
-    CHECK_EQ(msg.type, RequestType::kTimeSync);
+    CHECK_EQ(msg.type, RpcType::kTimeSync);
     os << "{SyncFinishedMessage cid: " << msg.cid
        << ", self_epsilon: " << msg.self_epsilon << "}";
     return os;

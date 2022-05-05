@@ -14,9 +14,6 @@ using namespace std::chrono_literals;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-// Two nodes
-// one node issues cas operations
-
 constexpr static size_t kAllocBufferSize = 64;
 
 using namespace patronus;
@@ -24,7 +21,6 @@ constexpr static size_t kCoroCnt = 8;
 thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
 
-constexpr static size_t kDirID = 0;
 constexpr static uint64_t kWaitKey = 0;
 
 // for the specific experiments for refill
@@ -34,17 +30,12 @@ constexpr static size_t kAllocSize = 1_MB;
 
 // constexpr static size_t kTestTime =
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY;
-constexpr static size_t kTestTime = 100_K;
-// constexpr static size_t kTestTime = 1000;
+// constexpr static size_t kTestTime = 100_K;
+constexpr static size_t kTestTime = 1_K;
 
 constexpr static uint64_t kSpecificHint = 3;
 
 using namespace std::chrono_literals;
-
-// struct ClientCommunication
-// {
-//     bool finish_all_task[kCoroCnt];
-// } client_comm;
 
 void client_worker(Patronus::pointer p,
                    coro_t coro_id,
@@ -53,9 +44,11 @@ void client_worker(Patronus::pointer p,
 {
     auto server_nid = ::config::get_server_nids().front();
     auto tid = p->get_thread_id();
-    auto dir_id = tid;
+    auto dir_id = tid % NR_DIRECTORY;
 
     CoroContext ctx(tid, &yield, &master, coro_id);
+
+    LOG(INFO) << "[bench] client " << ctx << " started to bench.";
 
     std::vector<GlobalAddress> allocated_gaddrs;
 
@@ -64,7 +57,7 @@ void client_worker(Patronus::pointer p,
         DVLOG(2) << "[bench] client coro " << ctx << " start to alloc gaddr ";
 
         auto gaddr =
-            p->alloc(server_nid, kDirID, kAllocBufferSize, 0 /* hint */, &ctx);
+            p->alloc(server_nid, dir_id, kAllocBufferSize, 0 /* hint */, &ctx);
         CHECK(!gaddr.is_null());
 
         DVLOG(2) << "[bench] client coro " << ctx << " got gaddr " << gaddr;
@@ -86,7 +79,7 @@ void client_worker(Patronus::pointer p,
 
         auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
         auto lease = p->get_wlease(server_nid,
-                                   kDirID,
+                                   dir_id,
                                    gaddr,
                                    0 /* alloc_hint */,
                                    kAllocBufferSize,
@@ -97,7 +90,7 @@ void client_worker(Patronus::pointer p,
         {
             CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr)
                 << "** lease failed. Unexpected failure: " << lease.ec()
-                << ". Lease: " << lease;
+                << ". Lease: " << lease << ". at " << time << "-th";
             continue;
         }
 
@@ -106,7 +99,8 @@ void client_worker(Patronus::pointer p,
         auto w_flag = (flag_t) RWFlag::kNoLocalExpireCheck;
         auto ec =
             p->write(lease, rdma_buf.buffer, kAllocBufferSize, 0, w_flag, &ctx);
-        CHECK_EQ(ec, kOk);
+        CHECK_EQ(ec, kOk) << "Failed to write. lease: " << lease << " at test "
+                          << time << "-th";
 
         auto rel_flag = (flag_t) 0;
         p->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
@@ -117,7 +111,7 @@ void client_worker(Patronus::pointer p,
     {
         CHECK(!gaddr.is_null());
         p->dealloc(
-            gaddr, kDirID, kAllocBufferSize /* size */, 0 /* hint */, &ctx);
+            gaddr, dir_id, kAllocBufferSize /* size */, 0 /* hint */, &ctx);
     }
 
     // now test the refill allocator
@@ -154,7 +148,7 @@ void client_worker(Patronus::pointer p,
         }
         LOG(INFO) << "[bench] finish allocation. freeing... coro: " << ctx;
         ex.get_private_data() += allocated_nr * kAllocSize;
-        LOG(WARNING) << "[bench] not freeing slab allocator. Strict mode does "
+        LOG(WARNING) << "[bench] not freeing slab allocator. Strict mode does"
                         "not allowing we to do this.";
         // for (auto *buf : allocated_buffers)
         // {
@@ -186,7 +180,6 @@ void client_master(Patronus::pointer p,
     while (!ex.is_finished_all())
     {
         // try to see if messages arrived
-
         auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
         for (size_t i = 0; i < nr; ++i)
         {
@@ -198,10 +191,6 @@ void client_master(Patronus::pointer p,
     auto specific_test_allocated_bytes = ex.get_private_data();
     LOG(INFO) << "[bench] refillable allocator test finished. allocated bytes: "
               << specific_test_allocated_bytes;
-
-    CHECK_GE(specific_test_allocated_bytes, kReserveBuffersize)
-        << "** RefillableAllocator does not work well: It does not allocate as "
-           "much as expected.";
 }
 
 void client(Patronus::pointer p)
@@ -260,16 +249,16 @@ int main(int argc, char *argv[])
     config.block_class = {kAllocBufferSize};
     config.block_ratio = {1.0};
 
+    LOG(INFO) << "[time] before patronus instance";
     auto patronus = Patronus::ins(config);
-
-    sleep(1);
+    LOG(INFO) << "[time] after patronus instance";
 
     // let client spining
     auto nid = patronus->get_node_id();
     if (::config::is_client(nid))
     {
         patronus->registerClientThread();
-        sleep(1);
+        patronus->keeper_barrier("begin", 100ms);
         client(patronus);
         patronus->finished(kWaitKey);
         LOG(WARNING) << "[bench] all worker finish their work. exiting...";
@@ -278,6 +267,7 @@ int main(int argc, char *argv[])
     {
         patronus->registerServerThread();
         patronus->finished(kWaitKey);
+        patronus->keeper_barrier("begin", 100ms);
         server(patronus);
     }
 

@@ -570,6 +570,9 @@ private:
     constexpr static size_t kTotalProtectionRegionNr =
         kProtectionRegionPerThreadNr * kMaxAppThread;
 
+    thread_local static uint64_t per_qp_mw_post_idx_[MAX_MACHINE]
+                                                    [kMaxAppThread];
+
     void explain(const PatronusConfig &);
 
     constexpr static id_t key_hash(id_t key)
@@ -764,8 +767,6 @@ private:
                                      TraceView = util::nulltrace);
     void handle_request_acquire(AcquireRequest *, CoroContext *ctx);
     void handle_request_lease_modify(LeaseModifyRequest *, CoroContext *ctx);
-    void handle_response_lease_extend(LeaseModifyResponse *);
-    void handle_response_lease_upgrade(LeaseModifyResponse *);
 
     // for servers
     void handle_response_acquire(AcquireResponse *);
@@ -804,7 +805,7 @@ private:
                          id_t key,
                          size_t size,
                          time::ns_t ns,
-                         RequestType type,
+                         RpcType type,
                          flag_t flag,
                          CoroContext *ctx = nullptr);
 
@@ -859,7 +860,7 @@ private:
                      TraceView = util::nulltrace);
     Lease lease_modify_impl(Lease &lease,
                             uint64_t hint,
-                            RequestType type,
+                            RpcType type,
                             time::ns_t ns,
                             flag_t flag /* LeaseModificationFlag */,
                             CoroContext *ctx = nullptr);
@@ -912,7 +913,6 @@ private:
         ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
         protection_region_pool_;
     static thread_local DDLManager ddl_manager_;
-    static thread_local size_t allocated_mw_nr_;
     static thread_local bool has_registered_;
     constexpr static uint32_t magic = 0b1010101010;
     constexpr static uint16_t mask = 0b1111111111;
@@ -956,7 +956,7 @@ GlobalAddress Patronus::alloc(uint16_t node_id,
                                 hint /* key & hint */,
                                 size,
                                 0,
-                                RequestType::kAcquireWLease,
+                                RpcType::kAcquireWLeaseReq,
                                 flag,
                                 ctx);
     return get_gaddr(lease);
@@ -1010,7 +1010,7 @@ Lease Patronus::get_rlease(uint16_t node_id,
                           addr_or_alloc_hint,
                           size,
                           ns,
-                          RequestType::kAcquireRLease,
+                          RpcType::kAcquireRLeaseReq,
                           flag,
                           ctx);
 }
@@ -1062,18 +1062,11 @@ Lease Patronus::get_wlease(uint16_t node_id,
                           addr_or_alloc_hint,
                           size,
                           ns,
-                          RequestType::kAcquireWLease,
+                          RpcType::kAcquireWLeaseReq,
                           flag,
                           ctx);
 }
 
-Lease Patronus::upgrade(Lease &lease, flag_t flag, CoroContext *ctx)
-{
-    debug_validate_lease_modify_flag(flag);
-    // return lease_modify_impl(
-    //     lease, RequestType::kUpgrade, 0 /* term */, flag, ctx);
-    CHECK(false) << "deprecated " << lease << flag << pre_coro_ctx(ctx);
-}
 RetCode Patronus::extend_impl(Lease &lease,
                               size_t extend_unit_nr,
                               flag_t flag,
@@ -1169,7 +1162,7 @@ void Patronus::dealloc(GlobalAddress gaddr,
     auto flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind |
                 (flag_t) LeaseModifyFlag::kOnlyDeallocation;
     lease_modify_impl(
-        lease, hint, RequestType::kRelinquish, 0 /* term */, flag, ctx);
+        lease, hint, RpcType::kRelinquishReq, 0 /* term */, flag, ctx);
 }
 void Patronus::relinquish(Lease &lease,
                           uint64_t hint,
@@ -1182,7 +1175,7 @@ void Patronus::relinquish(Lease &lease,
     debug_validate_lease_modify_flag(flag);
     // TODO(Patronus): the term is set to 0 here.
     lease_modify_impl(
-        lease, hint, RequestType::kRelinquish, 0 /* term */, flag, ctx);
+        lease, hint, RpcType::kRelinquishReq, 0 /* term */, flag, ctx);
 }
 
 RetCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)

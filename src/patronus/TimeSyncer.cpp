@@ -70,7 +70,7 @@ void TimeSyncer::signal_finish()
                   rdma_buffer.size);
         auto &sync_finish_message =
             *(SyncFinishedMessage *) (buf + sizeof(SyncFinishedMessage) * nid);
-        sync_finish_message.type = RequestType::kTimeSync;
+        sync_finish_message.type = RpcType::kTimeSync;
         sync_finish_message.cid.coro_id = kNotACoro;
         sync_finish_message.cid.node_id = dsm_->get_node_id();
         sync_finish_message.cid.thread_id = dsm_->get_thread_id();
@@ -199,7 +199,7 @@ void TimeSyncer::wait_finish()
         {
             const auto &sync_finished_message =
                 *(SyncFinishedMessage *) recv_buf;
-            DCHECK_EQ(sync_finished_message.type, RequestType::kTimeSync);
+            DCHECK_EQ(sync_finished_message.type, RpcType::kTimeSync);
             auto target_nid = sync_finished_message.cid.node_id;
             DCHECK_NE(target_nid, nid);
             auto target_epsilon = sync_finished_message.self_epsilon;

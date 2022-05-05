@@ -21,18 +21,18 @@ using chrono_time_t = std::chrono::time_point<std::chrono::steady_clock>;
 using flag_t = uint64_t;
 
 // force enum to be sizeof(uint8_t)
-enum class RequestType : uint8_t
+enum class RpcType : uint8_t
 {
-    kAcquireRLease,
-    kAcquireWLease,
-    kAcquireNoLease,  // for debug purpose
-    kUpgrade,
-    kRelinquish,
-    kExtend,
+    kAcquireRLeaseReq,
+    kAcquireWLeaseReq,
+    kAcquireNoLeaseReq,  // for debug purpose
+    kAcquireLeaseResp,
+    kRelinquishReq,
+    kRelinquishResp,
     kAdmin,
     kTimeSync,
 };
-std::ostream &operator<<(std::ostream &os, const RequestType &t);
+std::ostream &operator<<(std::ostream &os, const RpcType &t);
 
 enum class AcquireRequestStatus : uint8_t
 {
@@ -81,7 +81,7 @@ std::ostream &operator<<(std::ostream &os, const ClientID &cid);
 
 struct BaseMessage
 {
-    enum RequestType type;
+    enum RpcType type;
     ClientID cid;
     char others[0];
 } __attribute__((packed));
@@ -110,7 +110,7 @@ struct AcquireRequestFlagOut
 std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag);
 struct AcquireRequest
 {
-    enum RequestType type;
+    enum RpcType type;
     ClientID cid;
     id_t key;
     size_t size;
@@ -128,7 +128,7 @@ std::ostream &operator<<(std::ostream &os, const AcquireRequest &req);
 
 struct AcquireResponse
 {
-    enum RequestType type;
+    enum RpcType type;
     ClientID cid;
     uint32_t rkey_0;
     uint32_t rkey_header;
@@ -154,7 +154,7 @@ std::ostream &operator<<(std::ostream &os, const AdminFlag &f);
 
 struct AdminRequest
 {
-    enum RequestType type;
+    enum RpcType type;
     ClientID cid;
     uint8_t flag;  // enum AdminFlag
     Debug<uint64_t> digest;
@@ -190,7 +190,7 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag);
 
 struct LeaseModifyRequest
 {
-    enum RequestType type;
+    enum RpcType type;
     ClientID cid;
     id_t lease_id;
     time::ns_t ns;
@@ -206,9 +206,8 @@ static_assert(sizeof(LeaseModifyRequest::flag) >= sizeof(LeaseModifyFlag));
 
 struct LeaseModifyResponse
 {
-    enum RequestType type;
+    enum RpcType type;
     ClientID cid;
-    uint64_t lease_id;
     bool success;
     Debug<uint64_t> digest;
 

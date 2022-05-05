@@ -9,15 +9,12 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-// Two nodes
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 using namespace patronus;
-constexpr static size_t kThreadNr = 4;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
 
-static_assert(kThreadNr <= kMaxAppThread);
+static_assert(kClientThreadNr <= kMaxAppThread);
+static_assert(kServerThreadNr <= NR_DIRECTORY);
 constexpr static size_t kCoroCnt = 8;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
@@ -69,9 +66,10 @@ inline uint64_t gen_magic(size_t thread_id, size_t coro_id)
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
+    auto server_nid = ::config::get_server_nids().front();
 
-    auto dir_id = tid;
-    CHECK_LT(dir_id, NR_DIRECTORY);
+    auto dir_id = tid % kServerThreadNr;
+    CHECK_LT(dir_id, kServerThreadNr);
 
     CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
@@ -88,7 +86,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto locate_offset = bench_locator(coro_key);
-        Lease lease = p->get_rlease(kServerNodeId,
+        Lease lease = p->get_rlease(server_nid,
                                     dir_id,
                                     GlobalAddress(0, locate_offset),
                                     0 /* alloc_hint */,
@@ -98,8 +96,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     &ctx);
         if (unlikely(!lease.success()))
         {
-            LOG(WARNING) << "[bench] client coro " << ctx
-                         << " get_rlease failed. retry.";
+            // DLOG(ERROR) << "[bench] client coro " << ctx
+            //             << " get_rlease failed. retry. Got: " << lease;
             continue;
         }
 
@@ -117,10 +115,13 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           0 /* offset */,
                           0 /* flag */,
                           &ctx);
-        CHECK_EQ(ec, RetCode::kOk)
-            << "[bench] client coro " << ctx
-            << " read FAILED. This should not happen, because we "
-               "filter out the invalid mws.";
+        if (unlikely(ec != RetCode::kOk))
+        {
+            LOG(ERROR) << "[bench] client " << ctx
+                       << " read FAILED. lease: " << lease << " at " << time
+                       << "-th";
+            continue;
+        }
 
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
         Object magic_object = *(Object *) rdma_buf.buffer;
@@ -132,7 +133,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
-        p->relinquish(lease, 0, 0, &ctx);
+        // auto rel_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        auto rel_flag = 0;
+        p->relinquish(lease, 0, rel_flag, &ctx);
 
         p->put_rdma_buffer(rdma_buf);
 
@@ -168,8 +171,6 @@ void client_master(Patronus::pointer p, CoroYield &yield)
                         std::end(client_comm.finish_all_task),
                         [](bool i) { return i; }))
     {
-        // try to see if messages arrived
-
         auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
         for (size_t i = 0; i < nr; ++i)
         {
@@ -226,7 +227,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
@@ -234,15 +235,15 @@ int main(int argc, char *argv[])
     // let client spining
     auto nid = patronus->get_node_id();
 
-    boost::barrier bar(kThreadNr);
-    if (nid == kClientNodeId)
+    boost::barrier client_bar(kClientThreadNr);
+    if (::config::is_client(nid))
     {
         auto dsm = patronus->get_dsm();
         patronus->keeper_barrier("begin", 100ms);
 
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kClientThreadNr - 1; ++i)
         {
-            threads.emplace_back([patronus, &bar]() {
+            threads.emplace_back([patronus, &bar = client_bar]() {
                 patronus->registerClientThread();
                 auto tid = patronus->get_thread_id();
                 client(patronus);
@@ -254,13 +255,13 @@ int main(int argc, char *argv[])
         auto tid = patronus->get_thread_id();
         client(patronus);
         LOG(INFO) << "[bench] thread " << tid << " finish its work";
-        bar.wait();
+        client_bar.wait();
         LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
         patronus->finished(kWaitKey);
     }
     else
     {
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
         {
             threads.emplace_back([patronus]() {
                 patronus->registerServerThread();
@@ -272,7 +273,7 @@ int main(int argc, char *argv[])
         patronus->registerServerThread();
 
         auto internal_buf = patronus->get_server_internal_buffer();
-        for (size_t t = 0; t < kThreadNr + 1; ++t)
+        for (size_t t = 0; t < kClientThreadNr + 1; ++t)
         {
             for (size_t i = 0; i < kCoroCnt; ++i)
             {
