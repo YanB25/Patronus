@@ -273,6 +273,7 @@ constexpr bool debug()
 namespace config
 {
 constexpr static size_t kMachineNr = 4;
+static_assert(kMachineNr <= MAX_MACHINE);
 static const std::vector<size_t> __kServerNodeIds{0};
 static const std::vector<size_t> __kClientNodeIds{1, 2, 3};
 inline bool is_server(size_t nid)

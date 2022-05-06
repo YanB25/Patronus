@@ -289,8 +289,6 @@ void client(Patronus::pointer p)
 void server(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
-    //
-
     LOG(INFO) << "I am server. tid " << tid;
 
     p->server_serve(kWaitKey);
