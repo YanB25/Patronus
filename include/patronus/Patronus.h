@@ -274,6 +274,10 @@ public:
                         flag_t flag,
                         CoroContext *ctx = nullptr);
     RetCode commit(PatronusBatchContext &batch, CoroContext *ctx = nullptr);
+    auto patronus_now() const
+    {
+        return time_syncer_->patronus_now();
+    }
 
     // handy cluster-wide put/get. Not very performance, but convenient
     template <typename V,
@@ -919,7 +923,7 @@ private:
 
     // for admin management
     std::array<std::array<std::atomic<bool>, MAX_MACHINE>, kMaxSyncKey>
-        finished_;
+        finished_{};
     std::array<std::atomic<bool>, kMaxSyncKey> should_exit_{false};
 
     // for barrier

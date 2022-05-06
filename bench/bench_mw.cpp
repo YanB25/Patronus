@@ -8,17 +8,11 @@
 #include "util/monitor.h"
 
 constexpr uint16_t kClientNodeId = 0;
-// constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
 
 constexpr static size_t dirID = 0;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
-{
-    LOG(INFO) << "client: TODO";
-}
 std::atomic<size_t> window_nr_;
 std::atomic<size_t> window_size_;
 // 0 for sequential addr
@@ -151,7 +145,7 @@ int main(int argc, char *argv[])
         .add_dependent_throughput("bind-mw");
 
     DSMConfig config;
-    config.machineNR = kMachineNr;
+    config.machineNR = ::config::kMachineNr;
 
     auto dsm = DSM::getInstance(config);
 
@@ -163,7 +157,7 @@ int main(int argc, char *argv[])
     auto nid = dsm->getMyNodeID();
     if (nid == kClientNodeId)
     {
-        client(dsm);
+        LOG(INFO) << "client do nothing";
     }
     else
     {
@@ -205,9 +199,6 @@ int main(int argc, char *argv[])
         m.to_csv("memory-window");
     }
 
+    dsm->keeper_barrier("finished", 100ms);
     LOG(INFO) << "finished. ctrl+C to quit.";
-    while (1)
-    {
-        sleep(1);
-    }
 }

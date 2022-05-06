@@ -2,6 +2,7 @@
 #include <chrono>
 #include <iostream>
 #include <random>
+
 #include "gflags/gflags.h"
 template <typename T, typename U>
 std::ostream &operator<<(std::ostream &os,
@@ -30,9 +31,6 @@ std::ostream &operator<<(std::ostream &os,
 using namespace define::literals;
 using namespace std::chrono_literals;
 using namespace patronus;
-
-constexpr uint16_t kClientNodeId = 0;
-constexpr uint32_t kMachineNr = 2;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -84,13 +82,13 @@ int main(int argc, char *argv[])
     // DSMConfig config;
     // config.machineNR = kMachineNr;
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
     auto nid = patronus->get_node_id();
     // let client spining
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         client(patronus);
     }

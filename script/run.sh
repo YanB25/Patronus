@@ -30,8 +30,10 @@ for (( i=1; i<${#vms[@]}; i++ )); do
     echo [start service on ${vms[$i]} \(inet ${inets[$i]}\) ...]
     # ./ssh.sh ${inets[$i]} "cd ${BIN_DIR}; nohup ${BIN_DIR}/$1 1>${WORK_DIR}/LOG 2>&1 &"
     nohup ssh root@${inets[$i]} "cd ${BIN_DIR}; source /etc/profile; export TERM='linux'; ${GLOG_FLAGS} unbuffer ${BIN_DIR}/$cmd $@ ${EXEC_META_FLAGS} 1>${WORK_DIR}/LOG 2>&1" &
+    # nohup ssh root@${inets[$i]} "cd ${BIN_DIR}; source /etc/profile; export TERM='linux'; ldd ${BIN_DIR}/$cmd $@ ${EXEC_META_FLAGS} 1>${WORK_DIR}/LOG 2>&1" &
 done
 
 ./ssh.sh ${inets[0]} "cd ${BIN_DIR}; source /etc/profile; export TERM='linux'; ${GLOG_FLAGS} unbuffer ${BIN_DIR}/$cmd ${EXEC_META_FLAGS} $@ 2>&1 | tee ../LOG"
+# ./ssh.sh ${inets[0]} "cd ${BIN_DIR}; source /etc/profile; export TERM='linux'; ldd ${BIN_DIR}/$cmd ${EXEC_META_FLAGS} $@ 2>&1 | tee ../LOG"
 # echo [Waiting peers to finish]
 # wait

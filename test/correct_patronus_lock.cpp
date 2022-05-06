@@ -10,17 +10,11 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-// Two nodes
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 using namespace patronus;
-constexpr static size_t kThreadNr = 4;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = kServerThreadNr;
 
-static_assert(kThreadNr <= kMaxAppThread);
 constexpr static size_t kCoroCnt = 8;
-
 constexpr static size_t kKeyLimit = 100;
 
 constexpr static size_t kTestTime =
@@ -55,6 +49,7 @@ thread_local ClientCommunication client_comm;
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
+    auto server_nid = ::config::get_server_nids().front();
 
     auto dir_id = tid % NR_DIRECTORY;
 
@@ -74,7 +69,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto flag = (flag_t) AcquireRequestFlag::kNoGc |
                     (flag_t) AcquireRequestFlag::kWithConflictDetect;
-        Lease lease = p->get_rlease(kServerNodeId,
+        Lease lease = p->get_rlease(server_nid,
                                     dir_id,
                                     GlobalAddress(0, key),
                                     0 /* alloc_hint */,
@@ -84,8 +79,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     &ctx);
         if (unlikely(!lease.success()))
         {
-            LOG(WARNING) << "[bench] client coro " << ctx
-                         << " get_rlease failed. retry. ec: " << lease.ec();
+            // LOG(WARNING) << "[bench] client coro " << ctx
+            //              << " get_rlease failed. retry. ec: " << lease.ec();
             lease_success_m.collect(0);
             continue;
         }
@@ -194,7 +189,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
@@ -204,12 +199,12 @@ int main(int argc, char *argv[])
     // let client spining
     auto nid = patronus->get_node_id();
 
-    boost::barrier bar(kThreadNr);
-    if (nid == kClientNodeId)
+    boost::barrier client_bar(kClientThreadNr);
+    if (::config::is_client(nid))
     {
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kClientThreadNr - 1; ++i)
         {
-            threads.emplace_back([patronus, &bar]() {
+            threads.emplace_back([patronus, &bar = client_bar]() {
                 patronus->registerClientThread();
                 auto tid = patronus->get_thread_id();
                 client(patronus);
@@ -221,13 +216,13 @@ int main(int argc, char *argv[])
         auto tid = patronus->get_thread_id();
         client(patronus);
         LOG(INFO) << "[bench] thread " << tid << " finish its work";
-        bar.wait();
+        client_bar.wait();
         LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
         patronus->finished(kWaitKey);
     }
     else
     {
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
         {
             threads.emplace_back([patronus]() {
                 patronus->registerServerThread();
@@ -245,7 +240,8 @@ int main(int argc, char *argv[])
         t.join();
     }
 
-    double concurrency = kThreadNr * kCoroCnt;
+    double concurrency =
+        ::config::get_client_nids().size() * kClientThreadNr * kCoroCnt;
     double key_nr = kKeyLimit;
     LOG(INFO) << "[bench] reference: concurrency: " << concurrency
               << ", key_range: " << key_nr

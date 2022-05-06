@@ -18,10 +18,10 @@ using namespace patronus::hash;
 using namespace define::literals;
 using namespace patronus;
 
-[[maybe_unused]] constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-constexpr static size_t kThreadNr = 8;
+[[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
+[[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
+constexpr static size_t kClientThreadNr = 8;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kMaxCoroNr = 16;
 constexpr static size_t kKVBlockExpectSize = 64;
 
@@ -127,7 +127,7 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     using HandleT = typename RaceHashing<kE, kB, kS>::Handle;
 
     auto tid = p->get_thread_id();
-    auto dir_id = tid;
+    auto dir_id = tid % kServerThreadNr;
 
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
     LOG(INFO) << "Getting from race:meta_gaddr got " << meta_gaddr;
@@ -374,10 +374,17 @@ void test_basic_client_worker(Patronus::pointer p,
         CHECK_EQ(rhh->del(k, &dctx), kOk) << dctx;
     }
 
+    // deliberately dctor here
+    // because the dctor of rhh needs coroutine.
+    // otherwise, will introduce coroutine switch back during dctor of
+    // coroutine.
+    rhh.reset();
+
     // coro finished
     LOG(INFO) << "tid " << tid << " coro: " << ctx << " finished. ";
     ex.worker_finished(coro_id);
     ctx.yield_to_master();
+    CHECK(false) << "going back to worker. with finished works";
 }
 
 void test_basic_client_master(Patronus::pointer p,
@@ -416,6 +423,7 @@ void test_basic_client(Patronus::pointer p,
                        const BenchConfig &conf,
                        uint64_t key)
 {
+    auto nid = p->get_node_id();
     auto coro_nr = conf.coro_nr;
     auto thread_nr = conf.thread_nr;
     bool first_enter = conf.first_enter;
@@ -430,28 +438,35 @@ void test_basic_client(Patronus::pointer p,
     bar.wait();
 
     LOG(INFO) << "[bench] tid " << tid << " Start to bench...";
-    if (tid < thread_nr)
+    if (nid == kClientNodeId)
     {
-        CoroExecutionContext<kMaxCoroNr> ex;
-        for (size_t i = coro_nr; i < kMaxCoroNr; ++i)
+        if (tid < thread_nr)
         {
-            // no that coro, so directly finished.
-            ex.worker_finished(i);
-        }
-        for (size_t i = 0; i < coro_nr; ++i)
-        {
-            ex.worker(i) =
-                CoroCall([p, coro_id = i, &conf, &ex](CoroYield &yield) {
-                    test_basic_client_worker<kE, kB, kS>(
-                        p, coro_id, yield, conf, ex);
-                });
-        }
-        auto &master = ex.master();
-        master = CoroCall([p, &ex, coro_nr](CoroYield &yield) {
-            test_basic_client_master(p, yield, coro_nr, ex);
-        });
+            CoroExecutionContext<kMaxCoroNr> ex;
+            for (size_t i = coro_nr; i < kMaxCoroNr; ++i)
+            {
+                // no that coro, so directly finished.
+                ex.worker_finished(i);
+            }
+            for (size_t i = 0; i < coro_nr; ++i)
+            {
+                ex.worker(i) =
+                    CoroCall([p, coro_id = i, &conf, &ex](CoroYield &yield) {
+                        test_basic_client_worker<kE, kB, kS>(
+                            p, coro_id, yield, conf, ex);
+                    });
+            }
+            auto &master = ex.master();
+            master = CoroCall([p, &ex, coro_nr](CoroYield &yield) {
+                test_basic_client_master(p, yield, coro_nr, ex);
+            });
 
-        master();
+            master();
+        }
+    }
+    else
+    {
+        LOG(INFO) << "[bench] skipped " << nid;
     }
 
     bar.wait();
@@ -531,7 +546,7 @@ void client(Patronus::pointer p, boost::barrier &bar)
 
     LOG_IF(INFO, master) << "[bench] Test basic multiple thread";
     auto multithread_conf = BenchConfigFactory::get_single_round_config(
-        1_K, kThreadNr, kMaxCoroNr, false);
+        1_K, kClientThreadNr, kMaxCoroNr, false);
     for (const auto &conf : multithread_conf)
     {
         test_basic_client<4, 64, 64>(p, bar, master, conf, 3 /* key */);
@@ -539,7 +554,7 @@ void client(Patronus::pointer p, boost::barrier &bar)
 
     LOG_IF(INFO, master) << "[bench] Test multi-round complex workload";
     auto multi_round_conf = BenchConfigFactory::get_multi_round_config(
-        100_K /* fill */, 1_K /* test */, kThreadNr, kMaxCoroNr);
+        100_K /* fill */, 1_K /* test */, kClientThreadNr, kMaxCoroNr);
     for (const auto &conf : multi_round_conf)
     {
         test_basic_client<32, 4, 4>(p, bar, master, conf, 5 /* key */);
@@ -558,9 +573,9 @@ void server(Patronus::pointer p, boost::barrier &bar)
     test_basic_server<128, 4, 4>(
         p, bar, 1, is_master, 1 /* subtable_nr */, 2 /* key */);
     test_basic_server<4, 64, 64>(
-        p, bar, kThreadNr, is_master, 4 /* subtable_nr */, 3 /* key */);
+        p, bar, kServerThreadNr, is_master, 4 /* subtable_nr */, 3 /* key */);
     test_basic_server<32, 4, 4>(
-        p, bar, kThreadNr, is_master, 1 /* subtable_nr */, 5 /* key */);
+        p, bar, kServerThreadNr, is_master, 1 /* subtable_nr */, 5 /* key */);
 }
 
 int main(int argc, char *argv[])
@@ -569,7 +584,7 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     PatronusConfig pconfig;
-    pconfig.machine_nr = kMachineNr;
+    pconfig.machine_nr = ::config::kMachineNr;
     pconfig.block_class = {2_MB, 4_KB};
     pconfig.block_ratio = {0.5, 0.5};
     pconfig.reserved_buffer_size = 2_GB;
@@ -579,13 +594,13 @@ int main(int argc, char *argv[])
     auto patronus = Patronus::ins(pconfig);
 
     std::vector<std::thread> threads;
-    boost::barrier bar(kThreadNr);
     auto nid = patronus->get_node_id();
 
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
+        boost::barrier bar(kClientThreadNr);
         patronus->registerClientThread();
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kClientThreadNr - 1; ++i)
         {
             threads.emplace_back([patronus, &bar]() {
                 patronus->registerClientThread();
@@ -593,11 +608,17 @@ int main(int argc, char *argv[])
             });
         }
         client(patronus, bar);
+
+        for (auto &t : threads)
+        {
+            t.join();
+        }
     }
     else
     {
+        boost::barrier bar(kServerThreadNr);
         patronus->registerServerThread();
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
         {
             threads.emplace_back([patronus, &bar]() {
                 patronus->registerServerThread();
@@ -605,11 +626,11 @@ int main(int argc, char *argv[])
             });
         }
         server(patronus, bar);
-    }
 
-    for (auto &t : threads)
-    {
-        t.join();
+        for (auto &t : threads)
+        {
+            t.join();
+        }
     }
 
     patronus->keeper_barrier("finished", 100ms);

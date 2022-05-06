@@ -14,16 +14,6 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-constexpr uint16_t kClientNodeId = 0;
-// constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
-constexpr static size_t dirID = 0;
-
-void client([[maybe_unused]] std::shared_ptr<DSM> dsm)
-{
-    LOG(INFO) << "client: TODO";
-}
 std::atomic<size_t> window_nr_;
 std::atomic<size_t> window_size_;
 // 0 for sequential addr
@@ -36,6 +26,10 @@ std::atomic<size_t> batch_post_send_size_;
 std::atomic<size_t> alloc_mw_ns;
 std::atomic<size_t> free_mw_ns;
 std::atomic<size_t> bind_mw_ns;
+
+constexpr static size_t kTargetClientId = 0;
+
+constexpr static size_t kDirID = 0;
 
 void server(std::shared_ptr<DSM> dsm,
             size_t mw_nr,
@@ -57,7 +51,7 @@ void server(std::shared_ptr<DSM> dsm,
         mws.resize(mw_nr);
         for (size_t i = 0; i < mw_nr; ++i)
         {
-            mws[i] = dsm->alloc_mw(dirID);
+            mws[i] = dsm->alloc_mw(kDirID);
         }
         alloc_mw_ns += timer.end(mw_nr);
         timer.print();
@@ -80,7 +74,7 @@ void server(std::shared_ptr<DSM> dsm,
         while (remain_nr > 0)
         {
             size_t work_nr = std::min(remain_nr, batch_post_send_size);
-            ibv_qp *qp = dsm->dirCon[dirID]->QPs[0][kClientNodeId];
+            ibv_qp *qp = dsm->dirCon[kDirID]->QPs[0][kTargetClientId];
             for (size_t s = 0; s < signal_batch; ++s)
             {
                 for (size_t i = 0; i < work_nr; ++i)
@@ -108,7 +102,7 @@ void server(std::shared_ptr<DSM> dsm,
                         buffer_start = buffer + (i % window_nr) * window_size;
                     }
 
-                    auto *mr = dsm->dirCon[dirID]->dsmMR;
+                    auto *mr = dsm->dirCon[kDirID]->dsmMR;
                     bool last = i + 1 == work_nr;
                     bind_mw_wrs[i].wr_id = 0;
                     bind_mw_wrs[i].next = last ? nullptr : &bind_mw_wrs[i + 1];
@@ -135,7 +129,7 @@ void server(std::shared_ptr<DSM> dsm,
             size_t polled = 0;
             while (polled < signal_batch)
             {
-                polled += dsm->try_poll_dir_cq(wc_buffer, dirID, 1024);
+                polled += dsm->try_poll_dir_cq(wc_buffer, kDirID, 1024);
             }
             remain_nr -= signal_batch * batch_post_send_size;
         }
@@ -180,57 +174,46 @@ int main(int argc, char *argv[])
         .add_dependent_throughput("bind-mw");
 
     DSMConfig config;
-    config.machineNR = kMachineNr;
+    config.machineNR = ::config::kMachineNr;
 
     auto dsm = DSM::getInstance(config);
 
-    sleep(1);
-
     dsm->registerThread();
 
-    // let client spining
-    auto nid = dsm->getMyNodeID();
-    if (nid == kClientNodeId)
+    // 150 us to alloc one mw.
+    // 10000000 mws need 16 min, so we don't bench it.
+    std::vector<size_t> window_nr_arr{1000, 10000};
+    // std::vector<size_t> window_size_arr{
+    //     1, 2ull * define::MB, 512 * define::MB};
+    std::vector<bool> random_addr_arr{true, false};
+    // for (auto window_nr : window_nr_arr)
+    for (auto window_nr : {8192})
     {
-        client(dsm);
-    }
-    else
-    {
-        // 150 us to alloc one mw.
-        // 10000000 mws need 16 min, so we don't bench it.
-        std::vector<size_t> window_nr_arr{1000, 10000};
-        // std::vector<size_t> window_size_arr{
-        //     1, 2ull * define::MB, 512 * define::MB};
-        std::vector<bool> random_addr_arr{true, false};
-        // for (auto window_nr : window_nr_arr)
-        for (auto window_nr : {8192})
+        for (auto window_size : {2 * define::MB})
+        // for (auto window_size : {64})
         {
-            for (auto window_size : {2 * define::MB})
-            // for (auto window_size : {64})
+            // for (int random_addr : {0, 1, 2})
+            for (int random_addr : {2})
             {
-                // for (int random_addr : {0, 1, 2})
-                for (int random_addr : {2})
+                for (size_t signal_batch : {2})
                 {
-                    for (size_t signal_batch : {2})
+                    for (size_t batch_post_send_size : {1, 4, 8, 16})
+                    // for (size_t batch_post_send_size : {1, 10, 100})
                     {
-                        for (size_t batch_post_send_size : {1, 4, 8, 16})
-                        // for (size_t batch_post_send_size : {1, 10, 100})
-                        {
-                            window_nr_ = window_nr;
-                            window_size_ = window_size;
-                            random_addr_ = random_addr;
-                            batch_post_send_size_ = batch_post_send_size;
-                            signal_batch_size_ = signal_batch;
+                        window_nr_ = window_nr;
+                        window_size_ = window_size;
+                        random_addr_ = random_addr;
+                        batch_post_send_size_ = batch_post_send_size;
+                        signal_batch_size_ = signal_batch;
 
-                            server(dsm,
-                                   window_nr,
-                                   window_size,
-                                   random_addr,
-                                   signal_batch,
-                                   batch_post_send_size);
-                            bench.snapshot();
-                            bench.clear();
-                        }
+                        server(dsm,
+                               window_nr,
+                               window_size,
+                               random_addr,
+                               signal_batch,
+                               batch_post_send_size);
+                        bench.snapshot();
+                        bench.clear();
                     }
                 }
             }
@@ -239,9 +222,6 @@ int main(int argc, char *argv[])
         m.to_csv("memory-window");
     }
 
+    dsm->keeper_barrier("finished", 100ms);
     LOG(INFO) << "finished. ctrl+C to quit.";
-    while (1)
-    {
-        sleep(1);
-    }
 }

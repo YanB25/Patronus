@@ -29,7 +29,7 @@ public:
 
 struct Comm
 {
-    std::array<bool, kTestTime> finished;
+    std::array<bool, kTestTime> finished{};
     CoroCall workers[kCoroNr];
     CoroCall master;
     bool all_finished{false};
@@ -43,7 +43,7 @@ void coro_large_stack_master(CoroYield &yield)
     Timer timer;
     timer.begin();
 
-    std::array<char, kLargeStackSize> large;
+    std::array<char, kLargeStackSize> large{};
 
     while (!comm.all_finished)
     {

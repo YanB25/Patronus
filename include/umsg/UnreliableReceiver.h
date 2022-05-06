@@ -72,11 +72,11 @@ private:
     /**
      * @brief maintain QPs[kEndpointNr]
      */
-    std::array<ibv_qp *, kEndpointNr> &QPs_;
+    std::array<ibv_qp *, kEndpointNr> &QPs_{};
     /**
      * @brief maintain receive CQs[kEndpointNr]
      */
-    std::array<ibv_cq *, kEndpointNr> recv_cqs_;
+    std::array<ibv_cq *, kEndpointNr> recv_cqs_{};
     RdmaContext &ctx_;
 
     size_t get_msg_pool_idx(size_t epID, size_t batch_id)

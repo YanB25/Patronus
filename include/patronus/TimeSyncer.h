@@ -197,25 +197,25 @@ public:
         return !definitely_lt(lhs, rhs) && !definitely_gt(lhs, rhs);
     }
 
-    // static std::chrono::time_point<std::chrono::system_clock> chrono_now()
-    // {
-    //     return std::chrono::system_clock::now();
-    // }
-    // static std::chrono::time_point<std::chrono::system_clock> chrono_later(
-    //     uint64_t ns)
-    // {
-    //     return std::chrono::system_clock::now() +
-    //     std::chrono::nanoseconds(ns);
-    // }
-    static std::chrono::time_point<std::chrono::steady_clock> chrono_now()
+    static std::chrono::time_point<std::chrono::system_clock> chrono_now()
     {
-        return std::chrono::steady_clock::now();
+        return std::chrono::system_clock::now();
     }
-    static std::chrono::time_point<std::chrono::steady_clock> chrono_later(
+    static std::chrono::time_point<std::chrono::system_clock> chrono_later(
         uint64_t ns)
     {
-        return std::chrono::steady_clock::now() + std::chrono::nanoseconds(ns);
+        return std::chrono::system_clock::now() + std::chrono::nanoseconds(ns);
     }
+    // static std::chrono::time_point<std::chrono::steady_clock> chrono_now()
+    // {
+    //     return std::chrono::steady_clock::now();
+    // }
+    // static std::chrono::time_point<std::chrono::steady_clock> chrono_later(
+    //     uint64_t ns)
+    // {
+    //     return std::chrono::steady_clock::now() +
+    //     std::chrono::nanoseconds(ns);
+    // }
 
 private:
     /**
@@ -245,7 +245,7 @@ private:
     std::atomic<bool> expose_finish_{false};
     std::thread time_exposer_;
 
-    std::array<bool, MAX_MACHINE> node_finished_;
+    std::array<bool, MAX_MACHINE> node_finished_{};
     uint64_t global_epsilon_{0};
 };
 }  // namespace patronus::time

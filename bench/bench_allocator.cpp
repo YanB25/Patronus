@@ -20,7 +20,6 @@
 using namespace define::literals;
 using namespace patronus;
 
-constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kMwPoolTotalSize = 8192;
 constexpr static auto kMemoryLimit = 16_GB;
 
@@ -1076,7 +1075,7 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     DSMConfig config;
-    config.machineNR = kMachineNr;
+    config.machineNR = ::config::kMachineNr;
     config.dsmSize = 4_GB;
     config.dsmReserveSize = 0;
 

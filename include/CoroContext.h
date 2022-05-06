@@ -163,7 +163,7 @@ public:
     }
 
 private:
-    std::array<CoroCall, kCoroCnt> workers_;
+    std::array<CoroCall, kCoroCnt> workers_{};
     CoroCall master_;
     std::array<bool, kCoroCnt> finish_all_{};
     T t_;

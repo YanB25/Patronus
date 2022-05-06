@@ -60,9 +60,9 @@ private:
     // for both
     RdmaContext ctx_;
 
-    std::array<ibv_qp *, kEndpointNr> QPs_;
-    std::array<ibv_cq *, kEndpointNr> send_cqs_;
-    std::array<ibv_cq *, kEndpointNr> recv_cqs_;
+    std::array<ibv_qp *, kEndpointNr> QPs_{};
+    std::array<ibv_cq *, kEndpointNr> send_cqs_{};
+    std::array<ibv_cq *, kEndpointNr> recv_cqs_{};
     // for sender
 
     ibv_mr *send_mr_{nullptr};

@@ -8,13 +8,6 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-// Two nodes
-// one node issues cas operations
-
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
@@ -28,22 +21,21 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     DSMConfig config;
-    config.machineNR = kMachineNr;
+    config.machineNR = ::config::kMachineNr;
 
     auto dsm = DSM::getInstance(config);
 
-    sleep(1);
-
     dsm->registerThread();
+    auto server_nid = ::config::get_server_nids().front();
 
     // let client spining
     auto nid = dsm->getMyNodeID();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         dsm->keeper_barrier("sync", 100ms);
-        dsm->reconnectThreadToDir(kServerNodeId, 0);
+        dsm->reconnectThreadToDir(server_nid, 0);
     }
-    else if (nid == kServerNodeId)
+    else
     {
         dsm->reinitializeDir(0);
         dsm->keeper_barrier("sync", 100ms);

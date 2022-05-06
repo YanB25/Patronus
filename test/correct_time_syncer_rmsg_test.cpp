@@ -32,10 +32,6 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 using namespace define::literals;
 using namespace patronus;
 
-constexpr uint16_t kClientNodeId = 0;
-constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 constexpr static size_t kDirId = 0;
 constexpr static size_t kTestTime = 1_M;
 constexpr static size_t kTimeDriftLimit = 50_K;  // 50us
@@ -43,14 +39,17 @@ constexpr static size_t kTimeDriftLimit = 50_K;  // 50us
 struct BenchMessage
 {
     uint64_t time;
+    uint32_t from_nid;
 };
 
 void client(Patronus::pointer p)
 {
     LOG(INFO) << "Client begin test";
+    auto server_nid = ::config::get_server_nids().front();
     OnePassMonitor m;
     OnePassMonitor send_recv_m;
     auto dsm = p->get_dsm();
+    auto nid = p->get_node_id();
     auto &syncer = p->time_syncer();
     auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buffer[1024];
@@ -58,10 +57,11 @@ void client(Patronus::pointer p)
     {
         auto &msg = *(BenchMessage *) buf;
         auto patronus_now = syncer.patronus_now();
+        msg.from_nid = nid;
         msg.time = patronus_now.term();
 
         auto before_send_recv = std::chrono::steady_clock::now();
-        dsm->unreliable_send(buf, sizeof(msg), kServerNodeId, kDirId);
+        dsm->unreliable_send(buf, sizeof(msg), server_nid, kDirId);
         dsm->unreliable_recv(recv_buffer, 1);
         auto after_send_recv = std::chrono::steady_clock::now();
         auto send_recv_ns =
@@ -100,7 +100,7 @@ void server(Patronus::pointer p)
     auto &syncer = p->time_syncer();
     auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buf[1024];
-    for (size_t i = 0; i < kTestTime; ++i)
+    for (size_t i = 0; i < kTestTime * ::config::get_client_nids().size(); ++i)
     {
         dsm->unreliable_recv(recv_buf);
         auto &msg = *(BenchMessage *) recv_buf;
@@ -117,7 +117,8 @@ void server(Patronus::pointer p)
         auto &send_msg = *(BenchMessage *) buf;
         patronus_now = syncer.patronus_now();
         send_msg.time = patronus_now.term();
-        dsm->unreliable_send(buf, sizeof(BenchMessage), kClientNodeId, kDirId);
+        auto from_nid = msg.from_nid;
+        dsm->unreliable_send(buf, sizeof(BenchMessage), from_nid, kDirId);
     }
 
     LOG(INFO) << "Network time different: " << m;
@@ -141,13 +142,13 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
     // let client spining
     auto nid = patronus->get_node_id();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         client(patronus);
     }

@@ -26,13 +26,6 @@ constexpr static size_t kAllocSize = 4_KB;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-[[maybe_unused]] constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
-using RaceHashingT = RaceHashing<1, 2, 2>;
-using RaceHandleT = typename RaceHashingT::Handle;
-
 void client_worker(Patronus::pointer p,
                    size_t coro_id,
                    CoroYield &yield,
@@ -42,11 +35,12 @@ void client_worker(Patronus::pointer p,
 
     auto gaddr = p->get_object<GlobalAddress>("p:gaddr", 1ms);
     auto dir_id = 0;
+    auto server_nid = ::config::get_server_nids().front();
 
     LOG(INFO) << "Client get gaddr: " << gaddr;
 
     auto rdma_adpt =
-        patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, &ctx);
+        patronus::RdmaAdaptor::new_instance(server_nid, dir_id, p, &ctx);
 
     // checking acquire_perm
     {
@@ -336,16 +330,17 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
     config.alloc_buffer_size = 16_MB;
     config.block_class = {4_KB};
     config.block_ratio = {1.0};
 
     auto patronus = Patronus::ins(config);
     auto nid = patronus->get_node_id();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         patronus->registerClientThread();
+        patronus->keeper_barrier("begin", 100ms);
         client(patronus);
         patronus->finished(kWaitKey);
     }
@@ -353,6 +348,7 @@ int main(int argc, char *argv[])
     {
         patronus->registerServerThread();
         patronus->finished(kWaitKey);
+        patronus->keeper_barrier("begin", 100ms);
         server(patronus);
     }
     LOG(INFO) << "finished. ctrl+C to quit.";

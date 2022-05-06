@@ -31,8 +31,8 @@ void report_rate()
 {
     std::vector<std::thread> threads;
     bindCore(0);
-    std::array<double, kThreadNr> rdtsc_per_ns;
-    std::array<double, kThreadNr> ns_per_rdtsc;
+    std::array<double, kThreadNr> rdtsc_per_ns{};
+    std::array<double, kThreadNr> ns_per_rdtsc{};
 
     for (size_t i = 0; i < kThreadNr; ++i)
     {

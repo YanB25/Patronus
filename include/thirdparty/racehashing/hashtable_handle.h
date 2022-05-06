@@ -386,7 +386,7 @@ public:
     {
         return kDEntryNr;
     }
-    std::array<RemoteMemHandle, subtable_nr()> expand_lock_handles_;
+    std::array<RemoteMemHandle, subtable_nr()> expand_lock_handles_{};
     std::chrono::time_point<std::chrono::steady_clock> lock_handle_last_extend_;
     bool maybe_expand_try_extend_lock_lease(size_t subtable_idx,
                                             HashContext *dctx)
@@ -1792,7 +1792,7 @@ private:
     bool auto_expand_;
     bool auto_update_dir_;
     IRdmaAdaptor::pointer rdma_adpt_;
-    std::array<RemoteMemHandle, subtable_nr()> subtable_mem_handles_;
+    std::array<RemoteMemHandle, subtable_nr()> subtable_mem_handles_{};
     RemoteMemHandle kvblock_mem_handle_;
     RemoteMemHandle directory_mem_handle_;
 

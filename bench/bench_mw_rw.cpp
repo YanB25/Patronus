@@ -8,17 +8,8 @@
 #include "util/Rand.h"
 #include "util/monitor.h"
 
-// Two nodes
-// one node issues cas operations
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-constexpr uint16_t kClientNodeId = 0;
-constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
-constexpr static size_t dirID = 0;
-
-// TODO: strange bug: if mw_idx & mask == magic, will error
 uint32_t magic = 0b1010101010;
 uint16_t mask = 0b1111111111;
 
@@ -42,6 +33,8 @@ std::atomic<size_t> rkey_fail_y;
 std::atomic<size_t> expr_id{0};
 std::atomic<RWType> bench_type{kWO};
 
+constexpr static size_t dirID = 0;
+
 void loop_expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 {
     while (memcmp(lhs_buf, rhs_buf, size) != 0)
@@ -64,6 +57,7 @@ void expect(const char *lhs_buf, const char *rhs_buf, size_t size)
 std::vector<uint32_t> recv_rkeys(std::shared_ptr<DSM> dsm, size_t size)
 {
     LOG(INFO) << "[master] Recving mws " << size << " from server.";
+    auto server_nid = ::config::get_server_nids().front();
     std::vector<uint32_t> ret;
     ret.reserve(size);
     size_t remain_mw = size;
@@ -75,7 +69,7 @@ std::vector<uint32_t> recv_rkeys(std::shared_ptr<DSM> dsm, size_t size)
             uint32_t rkey = *(uint32_t *) dsm->recv();
             ret.push_back(rkey);
         }
-        dsm->send(nullptr, 0, kServerNodeId);
+        dsm->send(nullptr, 0, server_nid);
         remain_mw -= should_recv;
     }
     LOG(INFO) << "Finish recving " << size << " mws";
@@ -106,8 +100,10 @@ void send_rkeys(std::shared_ptr<DSM> dsm, std::vector<ibv_mw *> &mws)
             //         mws[index]->pd);
             //     mws[index]->rkey = 0;
             // }
-            dsm->send(
-                (char *) &mws[index]->rkey, sizeof(uint32_t), kClientNodeId);
+            CHECK(false) << "the 0 below should be client_nid";
+            dsm->send((char *) &mws[index]->rkey,
+                      sizeof(uint32_t),
+                      0 /* client_nid */);
             index++;
         }
         // wait and sync
@@ -129,8 +125,9 @@ void bind_rkeys(std::shared_ptr<DSM> dsm,
 
     for (size_t t = 0; t < mws.size(); ++t)
     {
+        CHECK(false) << "TODO: below should be correct client_nid";
         dsm->bind_memory_region_sync(
-            mws[t], kClientNodeId, 0, buffer, size, dirID, 0);
+            mws[t], 0 /* client_nid */, 0, buffer, size, dirID, 0);
     }
 }
 
@@ -152,9 +149,10 @@ void client_burn(std::shared_ptr<DSM> dsm,
     auto *buffer = dsm->get_rdma_buffer().buffer;
     size_t dsm_size = size;
     size_t io_rng = dsm_size / io_size;
+    auto server_nid = ::config::get_server_nids().front();
 
     GlobalAddress gaddr;
-    gaddr.nodeID = kServerNodeId;
+    gaddr.nodeID = server_nid;
 
     auto handler = [sequantial, warmup](ibv_wc *wc) {
         Data data;
@@ -268,8 +266,9 @@ void client_burn(std::shared_ptr<DSM> dsm,
 
 std::vector<uint32_t> prepare_client(std::shared_ptr<DSM> dsm, uint32_t mw_nr)
 {
+    auto server_nid = config::get_server_nids().front();
     LOG(INFO) << "requiring: mw_nr: " << mw_nr;
-    dsm->send((char *) &mw_nr, sizeof(uint32_t), kServerNodeId);
+    dsm->send((char *) &mw_nr, sizeof(uint32_t), server_nid);
     auto rkeys = recv_rkeys(dsm, mw_nr);
     CHECK(rkeys.size() == mw_nr);
     return rkeys;
@@ -283,12 +282,10 @@ void client(std::shared_ptr<DSM> dsm,
             RWType bt,
             boost::barrier &client_bar)
 {
-    // dinfo("[%zu] get rkeys.size() %zu", tid, rkeys.size());
+    auto server_nid = config::get_server_nids().front();
 
     size_t mw_per_thread = std::max(rkeys.size() / thread_nr, size_t(1));
     CHECK_LE(mw_per_thread, rkeys.size());
-    // size_t rkey_start_idx = mw_per_thread * tid;
-    // size_t rkey_end_idx = mw_per_thread * (tid + 1);
 
     client_bar.wait();
 
@@ -315,7 +312,7 @@ void client(std::shared_ptr<DSM> dsm,
     {
         uint8_t ig = 0xfc;
         DLOG(INFO) << "client 0 sending 0xfc ...";
-        dsm->send((char *) &ig, sizeof(ig), kServerNodeId);
+        dsm->send((char *) &ig, sizeof(ig), server_nid);
     }
 }
 void cleanup_server(std::shared_ptr<DSM> dsm, std::vector<ibv_mw *> &mws)
@@ -371,14 +368,17 @@ void server(std::shared_ptr<DSM> dsm, size_t thread_nr)
         {
             for (size_t dir = 0; dir < NR_DIRECTORY; ++dir)
             {
-                if (rdmaQueryQueuePair(dsm->get_dir_qp(
-                        kClientNodeId, tid, dir)) == IBV_QPS_ERR)
+                for (auto client_nid : ::config::get_client_nids())
                 {
-                    Timer timer;
-                    LOG(INFO) << ("Benchmarking latency of QP recovery");
-                    timer.begin();
-                    CHECK(dsm->recoverDirQP(kClientNodeId, tid, dir));
-                    timer.end_print(1);
+                    if (rdmaQueryQueuePair(dsm->get_dir_qp(
+                            client_nid, tid, dir)) == IBV_QPS_ERR)
+                    {
+                        Timer timer;
+                        LOG(INFO) << ("Benchmarking latency of QP recovery");
+                        timer.begin();
+                        CHECK(dsm->recoverDirQP(client_nid, tid, dir));
+                        timer.end_print(1);
+                    }
                 }
             }
             fflush(stdout);
@@ -398,9 +398,12 @@ void thread_main(std::shared_ptr<DSM> dsm,
                  size_t size,
                  size_t io_size,
                  RWType bt,
-                 boost::barrier &client_bar)
+                 boost::barrier &client_bar,
+                 bool is_client)
 {
-    if (nid == kClientNodeId)
+    CHECK(false) << "TODO: std::ignore = nid";
+    std::ignore = nid;
+    if (is_client)
     {
         // let client spining
         if (tid == master_tid)
@@ -429,16 +432,15 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     constexpr static size_t kSize = 2 * define::GB;
 
-    fflush(stdout);
-
     rdmaQueryDevice();
 
     DSMConfig config;
-    config.machineNR = kMachineNr;
+    config.machineNR = ::config::kMachineNr;
+
+    CHECK(false) << "TODO: too old and don't want to run this file.";
 
     auto dsm = DSM::getInstance(config);
-
-    sleep(1);
+    auto nid = dsm->get_node_id();
 
     std::vector<std::thread> threads;
 
@@ -456,9 +458,13 @@ int main(int argc, char *argv[])
         .add_column("rkey-warmup-fail-nr", &rkey_warmup_fail_y)
         .add_column("rkey-fail-nr", &rkey_fail_y);
 
+    dsm->keeper_barrier("begin", 100ms);
+
+    bool is_client = ::config::is_client(nid);
+
     for (size_t i = 0; i < kMaxThread; ++i)
     {
-        threads.emplace_back([dsm, &client_bar, &b]() {
+        threads.emplace_back([dsm, &client_bar, &b, is_client]() {
             dsm->registerThread();
             auto nid = dsm->getMyNodeID();
             uint64_t tid = dsm->get_thread_id();
@@ -494,9 +500,7 @@ int main(int argc, char *argv[])
                                     bench_type = bt;
                                     expr_id.fetch_add(1);
                                 }
-                                LOG_IF(
-                                    INFO,
-                                    tid == master_tid && nid == kClientNodeId)
+                                LOG_IF(INFO, tid == master_tid && is_client)
                                     << "Benchmarking mw: " << window_nr
                                     << ", thread: " << thread_nr
                                     << ", "
@@ -510,7 +514,8 @@ int main(int argc, char *argv[])
                                             kSize,
                                             io_size,
                                             bt,
-                                            client_bar);
+                                            client_bar,
+                                            is_client);
                                 if (tid == master_tid)
                                 {
                                     b.snapshot();
@@ -528,7 +533,7 @@ int main(int argc, char *argv[])
         t.join();
     }
 
-    if (dsm->get_node_id() == kClientNodeId)
+    if (is_client)
     {
         b.report(std::cout);
         bench::BenchManager::ins().to_csv("mw-rw-scalability");

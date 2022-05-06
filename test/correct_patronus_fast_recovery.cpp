@@ -24,10 +24,10 @@ using namespace hmdf;
 
 [[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
-constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kTotalThreadNr = 16;
 constexpr static size_t kPreparedThreadNr = 4;
 constexpr static size_t kWorkerThreadNr = 12;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kMaxCoroNr = 8;
 
 static_assert(kTotalThreadNr >= kPreparedThreadNr + kWorkerThreadNr);
@@ -122,7 +122,7 @@ void test_basic_client_worker(
 {
     std::ignore = conf;
     auto tid = p->get_thread_id();
-    auto dir_id = tid;
+    auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
     size_t rdma_protection_nr = 0;
@@ -152,7 +152,7 @@ void test_basic_client_worker(
         }
 
         tid = p->get_thread_id();
-        dir_id = tid;
+        dir_id = tid % kServerThreadNr;
 
         auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
                        (flag_t) AcquireRequestFlag::kNoBindPR;
@@ -272,6 +272,7 @@ void benchmark_client(Patronus::pointer p,
     auto thread_nr = conf.thread_nr;
     bool first_enter = conf.first_enter;
     bool server_should_leave = conf.server_should_leave;
+    auto nid = p->get_node_id();
     CHECK_LE(coro_nr, kMaxCoroNr);
 
     auto tname = p->get_thread_name_id();
@@ -288,30 +289,38 @@ void benchmark_client(Patronus::pointer p,
 
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
-    if (tname < thread_nr)
+    if (likely(nid == kClientNodeId))
     {
-        ex.get_private_data().thread_remain_task = 0;
-        for (size_t i = coro_nr; i < kMaxCoroNr; ++i)
+        if (tname < thread_nr)
         {
-            // no that coro, so directly finished.
-            ex.worker_finished(i);
-        }
-        for (size_t i = 0; i < coro_nr; ++i)
-        {
-            ex.worker(i) =
-                CoroCall([p, coro_id = i, &ex, &conf](CoroYield &yield) {
-                    test_basic_client_worker(p, coro_id, yield, conf, ex);
+            ex.get_private_data().thread_remain_task = 0;
+            for (size_t i = coro_nr; i < kMaxCoroNr; ++i)
+            {
+                // no that coro, so directly finished.
+                ex.worker_finished(i);
+            }
+            for (size_t i = 0; i < coro_nr; ++i)
+            {
+                ex.worker(i) =
+                    CoroCall([p, coro_id = i, &ex, &conf](CoroYield &yield) {
+                        test_basic_client_worker(p, coro_id, yield, conf, ex);
+                    });
+            }
+            auto &master = ex.master();
+            master = CoroCall(
+                [p, &ex, test_nr = conf.test_nr, coro_nr](CoroYield &yield) {
+                    test_basic_client_master(
+                        p, yield, test_nr, g_total_test_nr, coro_nr, ex);
                 });
-        }
-        auto &master = ex.master();
-        master = CoroCall(
-            [p, &ex, test_nr = conf.test_nr, coro_nr](CoroYield &yield) {
-                test_basic_client_master(
-                    p, yield, test_nr, g_total_test_nr, coro_nr, ex);
-            });
 
-        master();
+            master();
+        }
     }
+    else
+    {
+        LOG(WARNING) << "[bench] nid " << nid << " skipped";
+    }
+
     bar.wait();
     auto ns = timer.pin();
 
@@ -327,7 +336,7 @@ void benchmark_client(Patronus::pointer p,
         p->finished(key);
     }
 
-    if (is_master && conf.should_report)
+    if (is_master && conf.should_report && nid == kClientNodeId)
     {
         col_idx.push_back(conf.name);
         col_x_thread_nr.push_back(conf.thread_nr);
@@ -403,7 +412,8 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     PatronusConfig pconfig;
-    pconfig.machine_nr = kMachineNr;
+    // deliberately 2.
+    pconfig.machine_nr = ::config::kMachineNr;
     pconfig.block_class = {2_MB, 8_KB};
     pconfig.block_ratio = {0.5, 0.5};
     pconfig.reserved_buffer_size = 2_GB;
@@ -414,14 +424,12 @@ int main(int argc, char *argv[])
 
     auto nid = patronus->get_node_id();
 
-    bool is_client = nid == kClientNodeId;
-
     LOG(WARNING)
         << "TODO: This benchmark can not re-enter. Only one sub-conf "
            "to run, otherwise will introduce undefined behaviour. The reason "
            "is that fast switching QP will introduce the change of tid.";
 
-    if (is_client)
+    if (::config::is_client(nid))
     {
         std::vector<std::thread> threads;
         boost::barrier bar(kWorkerThreadNr);
@@ -454,12 +462,12 @@ int main(int argc, char *argv[])
     else
     {
         std::vector<std::thread> threads;
-        boost::barrier bar(kTotalThreadNr);
+        boost::barrier bar(kServerThreadNr);
         patronus->registerServerThread();
         CHECK_EQ(patronus->get_thread_id(), patronus->get_thread_name_id());
         // server should register total thread
         // to handle backup QPs
-        for (size_t i = 0; i < kTotalThreadNr - 1; ++i)
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
         {
             threads.emplace_back([patronus, &bar]() {
                 patronus->registerServerThread();

@@ -11,15 +11,10 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-// Two nodes
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 using namespace patronus;
-constexpr static size_t kThreadNr = 8;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = kServerThreadNr;
 
-static_assert(kThreadNr <= kMaxAppThread);
 constexpr static size_t kCoroCnt = 1;
 
 constexpr static size_t kTestTime = 100_K;
@@ -61,14 +56,15 @@ void client_worker(Patronus::pointer p,
                    CoroExecutionContext<kCoroCnt> &ex)
 {
     auto tid = p->get_thread_id();
-
-    auto dir_id = tid;
+    auto dir_id = tid % kServerThreadNr;
+    auto server_nid = ::config::get_server_nids().front();
 
     CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
     OnePassMonitor lease_success_m;
     size_t lease_success_nr{0};
 
+    OnePassMonitor latency_m;
     ChronoTimer timer;
     for (size_t time = 0; time < kTestTime; ++time)
     {
@@ -76,7 +72,9 @@ void client_worker(Patronus::pointer p,
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto flag = (flag_t) AcquireRequestFlag::kNoBindPR;
-        Lease lease = p->get_rlease(kServerNodeId,
+        auto before = p->patronus_now();
+        ChronoTimer timer;
+        Lease lease = p->get_rlease(server_nid,
                                     dir_id,
                                     GlobalAddress(0, key),
                                     0 /* alloc_hint */,
@@ -84,10 +82,17 @@ void client_worker(Patronus::pointer p,
                                     kLeaseTime,
                                     flag,
                                     &ctx);
+        auto end = p->patronus_now();
+        auto elaps_ns = timer.pin();
+        if (time >= 5)
+        {
+            latency_m.collect(elaps_ns);
+        }
+
         bench_total_nr.fetch_add(1);
         if (unlikely(!lease.success()))
         {
-            CHECK(lease.ec() == AcquireRequestStatus::kMagicMwErr)
+            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr)
                 << "Unexpected lease failure: " << lease.ec()
                 << ". Lease: " << lease;
             lease_success_m.collect(0);
@@ -99,16 +104,26 @@ void client_worker(Patronus::pointer p,
         memset(rdma_buf.buffer, 0, sizeof(Object));
 
         CHECK_LT(sizeof(Object), rdma_buf.size);
+        // auto r_flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        auto r_flag = 0;
         auto ec = p->read(lease,
                           rdma_buf.buffer,
                           sizeof(Object),
                           0 /* offset */,
-                          0 /* flag */,
+                          r_flag /* flag */,
                           &ctx);
+        auto lease_ddl = lease.ddl_term();
         CHECK_EQ(ec, RetCode::kOk)
             << "[bench] client coro " << ctx
             << " read FAILED. This should not happen, because we "
-               "filter out the invalid mws.";
+               "filter out the invalid mws. failed at "
+            << time << " -th test. Before: " << before << ", end: " << end
+            << ", elaps: " << (end - before)
+            << ", (ddl - before): " << (lease_ddl - before)
+            << " (ddl - end): " << (lease_ddl - end)
+            << ". Acquire takes: " << elaps_ns << ", history: " << latency_m;
+        auto rel_flag = (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
+        p->relinquish(lease, 0, rel_flag, &ctx);
         p->put_rdma_buffer(rdma_buf);
     }
     auto ns = timer.pin();
@@ -117,7 +132,7 @@ void client_worker(Patronus::pointer p,
     LOG(INFO) << "[bench] coro: " << ctx
               << ", lease_success_m: " << lease_success_m
               << ", lease_success_nr: " << lease_success_nr << ". Take " << ns
-              << " ns";
+              << " ns. History Latency: " << latency_m;
 
     ctx.yield_to_master();
 }
@@ -183,7 +198,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
@@ -193,12 +208,12 @@ int main(int argc, char *argv[])
     // let client spining
     auto nid = patronus->get_node_id();
 
-    boost::barrier bar(kThreadNr);
-    if (nid == kClientNodeId)
+    boost::barrier client_bar(kClientThreadNr);
+    if (::config::is_client(nid))
     {
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kClientThreadNr - 1; ++i)
         {
-            threads.emplace_back([patronus, &bar]() {
+            threads.emplace_back([patronus, &bar = client_bar]() {
                 patronus->registerClientThread();
                 auto tid = patronus->get_thread_id();
                 client(patronus);
@@ -209,13 +224,13 @@ int main(int argc, char *argv[])
         patronus->registerClientThread();
         auto tid = patronus->get_thread_id();
         client(patronus);
-        bar.wait();
+        client_bar.wait();
         LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
         patronus->finished(kWaitKey);
     }
     else
     {
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
         {
             threads.emplace_back([patronus]() {
                 patronus->registerServerThread();

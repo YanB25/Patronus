@@ -9,15 +9,10 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-// Two nodes
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 using namespace patronus;
-constexpr static size_t kThreadNr = 4;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = kMaxAppThread;
 
-static_assert(kThreadNr <= kMaxAppThread);
 constexpr static size_t kCoroCnt = 8;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
@@ -57,28 +52,32 @@ struct ClientCommunication
 };
 thread_local ClientCommunication client_comm;
 
-inline size_t gen_coro_key(size_t thread_id, size_t coro_id)
+inline size_t gen_coro_key(size_t nid, size_t thread_id, size_t coro_id)
 {
-    return kCoroStartKey + thread_id * kCoroCnt + coro_id;
+    return kCoroStartKey + nid * kCoroCnt * kMaxAppThread +
+           thread_id * kCoroCnt + coro_id;
 }
-inline uint64_t gen_magic(size_t thread_id, size_t coro_id)
+inline uint64_t gen_magic(size_t nid, size_t thread_id, size_t coro_id)
 {
-    return kMagic + thread_id * kCoroCnt + coro_id;
+    return kMagic + nid * kCoroCnt * kMaxAppThread + thread_id * kCoroCnt +
+           coro_id;
 }
 
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
+    auto nid = p->get_node_id();
+    auto server_nid = ::config::get_server_nids().front();
 
-    auto dir_id = tid;
+    auto dir_id = tid % kServerThreadNr;
     CHECK_LT(dir_id, NR_DIRECTORY);
 
     CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
     LOG(INFO) << "[bench] tid " << tid << ", coro: " << ctx;
 
-    size_t coro_key = gen_coro_key(tid, coro_id);
-    size_t coro_expect_magic = gen_magic(tid, coro_id);
+    size_t coro_key = gen_coro_key(nid, tid, coro_id);
+    size_t coro_expect_magic = gen_magic(nid, tid, coro_id);
 
     for (size_t time = 0; time < kTestTime; ++time)
     {
@@ -88,7 +87,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto locate_offset = bench_locator(coro_key);
-        Lease lease = p->get_wlease(kServerNodeId,
+        Lease lease = p->get_wlease(server_nid,
                                     dir_id,
                                     GlobalAddress(0, locate_offset),
                                     0 /* alloc_hint */,
@@ -240,7 +239,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
@@ -248,15 +247,15 @@ int main(int argc, char *argv[])
     // let client spining
     auto nid = patronus->get_node_id();
 
-    boost::barrier bar(kThreadNr);
-    if (nid == kClientNodeId)
+    boost::barrier client_bar(kClientThreadNr);
+    if (::config::is_client(nid))
     {
         auto dsm = patronus->get_dsm();
         patronus->keeper_barrier("begin", 100ms);
 
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kClientThreadNr - 1; ++i)
         {
-            threads.emplace_back([patronus, &bar]() {
+            threads.emplace_back([patronus, &bar = client_bar]() {
                 patronus->registerClientThread();
                 auto tid = patronus->get_thread_id();
                 client(patronus);
@@ -268,13 +267,13 @@ int main(int argc, char *argv[])
         auto tid = patronus->get_thread_id();
         client(patronus);
         LOG(INFO) << "[bench] thread " << tid << " finish its work";
-        bar.wait();
+        client_bar.wait();
         LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
         patronus->finished(kWaitKey);
     }
     else
     {
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
         {
             threads.emplace_back([patronus]() {
                 patronus->registerServerThread();
@@ -286,28 +285,31 @@ int main(int argc, char *argv[])
         patronus->registerServerThread();
 
         auto internal_buf = patronus->get_server_internal_buffer();
-        for (size_t t = 0; t < kThreadNr + 1; ++t)
+        for (size_t m = 0; m < MAX_MACHINE; ++m)
         {
-            for (size_t i = 0; i < kCoroCnt; ++i)
+            for (size_t t = 0; t < kClientThreadNr + 1; ++t)
             {
-                auto thread_id = t;
-                auto coro_id = i;
-                auto coro_magic = gen_magic(thread_id, coro_id);
-                auto coro_key = gen_coro_key(thread_id, coro_id);
-                auto coro_offset = bench_locator(coro_key);
+                for (size_t i = 0; i < kCoroCnt; ++i)
+                {
+                    auto thread_id = t;
+                    auto coro_id = i;
+                    auto coro_magic = gen_magic(m, thread_id, coro_id);
+                    auto coro_key = gen_coro_key(m, thread_id, coro_id);
+                    auto coro_offset = bench_locator(coro_key);
 
-                auto *server_internal_buf = internal_buf.buffer;
-                Object *where = (Object *) &server_internal_buf[coro_offset];
-                where->target = coro_magic;
+                    auto *server_internal_buf = internal_buf.buffer;
+                    Object *where =
+                        (Object *) &server_internal_buf[coro_offset];
+                    where->target = coro_magic;
 
-                DLOG(INFO) << "[bench] server setting " << coro_magic
-                           << " to offset " << coro_offset
-                           << ". actual addr: " << (void *) &(where->target)
-                           << " for coro " << coro_id << ", thread "
-                           << thread_id;
+                    DLOG(INFO)
+                        << "[bench] server setting " << coro_magic
+                        << " to offset " << coro_offset
+                        << ". actual addr: " << (void *) &(where->target)
+                        << " for coro " << coro_id << ", thread " << thread_id;
+                }
             }
         }
-
         auto dsm = patronus->get_dsm();
         patronus->keeper_barrier("begin", 100ms);
 

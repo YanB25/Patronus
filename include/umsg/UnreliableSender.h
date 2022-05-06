@@ -48,8 +48,8 @@ public:
 private:
     ssize_t poll_cq(size_t ep_id);
 
-    std::array<ibv_qp *, kEndpointNr> &QPs_;
-    std::array<ibv_cq *, kEndpointNr> send_cqs_;
+    std::array<ibv_qp *, kEndpointNr> &QPs_{};
+    std::array<ibv_cq *, kEndpointNr> send_cqs_{};
     const std::vector<RemoteConnection> &remote_infos_;
     RdmaContext &ctx_;
     size_t send_depth_{0};

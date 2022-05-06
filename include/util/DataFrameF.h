@@ -69,6 +69,31 @@ auto gen_F_ops()
     return gen_F<A, B, R>([](A a, B b) { return (R)(1e9 * a / b); });
 }
 
+template <typename T>
+auto gen_replace_F_mul(const T &t)
+{
+    return [t](const std::string &, T &val) {
+        val *= t;
+        return true;
+    };
+}
+template <typename T>
+auto gen_replace_F_div(const T &t)
+{
+    return [t](const std::string &, T &val) {
+        val /= t;
+        return true;
+    };
+}
+template <typename T>
+auto gen_replace_F_lambda(const std::function<void(T &)> &lambda)
+{
+    return [lambda](const std::string &, T &val) {
+        lambda(val);
+        return true;
+    };
+}
+
 }  // namespace hmdf
 
 #endif

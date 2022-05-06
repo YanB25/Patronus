@@ -35,8 +35,8 @@ struct RaceHashingMeta
     // Take care before chaning the type
     // client need the sizeof(T) to work right
     std::array<GlobalAddress, kDEntryNr> entries;
-    std::array<uint32_t, kDEntryNr> lds;
-    std::array<std::atomic<uint64_t>, kDEntryNr> expanding;
+    std::array<uint32_t, kDEntryNr> lds{};
+    std::array<std::atomic<uint64_t>, kDEntryNr> expanding{};
     std::atomic<uint64_t> gd;
 
     GlobalAddress kvblock_pool_gaddr;

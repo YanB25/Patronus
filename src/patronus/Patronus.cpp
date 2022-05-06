@@ -2161,6 +2161,13 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         // NOTE2: aba is deprecated: no need
     }
 
+    // okay:
+    // when we reach here, we definitely should do the GC
+    // nothing stops us
+    // NOTE: set valid = false here
+    // otherwise, concurrent relinquish will gc twice.
+    DCHECK_NOTNULL(lease_ctx)->valid = false;
+
     RWContext *rw_ctx = nullptr;
     uint64_t rw_ctx_id = 0;
     bool ctx_success = false;

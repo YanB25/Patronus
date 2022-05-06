@@ -16,9 +16,6 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 // Two nodes
 // one node issues cas operations
 
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
 constexpr static size_t kTestTime = 1_K;
 constexpr static uint64_t kWaitKey = 0;
 
@@ -60,6 +57,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
     auto dir_id = tid;
+    auto server_nid = ::config::get_server_nids().front();
 
     auto &syncer = p->time_syncer();
 
@@ -80,7 +78,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     {
         auto key = rand() % max_key;
         auto locate_offset = bench_locator(key);
-        Lease lease = p->get_rlease(kServerNodeId,
+        Lease lease = p->get_rlease(server_nid,
                                     dir_id,
                                     GlobalAddress(0, locate_offset),
                                     0 /* alloc_hint */,
@@ -257,7 +255,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
@@ -265,10 +263,10 @@ int main(int argc, char *argv[])
 
     // let client spining
     auto nid = patronus->get_node_id();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         patronus->registerClientThread();
-        sleep(2);
+        patronus->keeper_barrier("begin", 100ms);
         client(patronus);
         patronus->finished(kWaitKey);
     }
@@ -276,6 +274,7 @@ int main(int argc, char *argv[])
     {
         patronus->registerServerThread();
         patronus->finished(kWaitKey);
+        patronus->keeper_barrier("begin", 100ms);
         server(patronus);
     }
 

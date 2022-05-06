@@ -101,6 +101,7 @@ public:
     template <typename T>
     void barrier(const std::string &barrierKey, const T &sleep_time)
     {
+        auto nr = getServerNR();
         std::string key = std::string("__barrier:") + barrierKey;
         auto nid = getMyNodeID();
         if (nid == 0)
@@ -114,7 +115,11 @@ public:
                 key.c_str(), key.size(), nullptr, sleep_time * (nid + 1));
             uint64_t v = std::stoull(ret);
             free(ret);
-            if (v == getServerNR())
+            CHECK_LE(v, nr) << "[keeper] Got entered server_nr more than "
+                               "requested. Re-enter of barrier detected, which "
+                               " does not behave correctly.key : "
+                            << barrierKey << ", nr: " << nr;
+            if (v == nr)
             {
                 return;
             }

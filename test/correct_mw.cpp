@@ -8,9 +8,8 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-constexpr uint16_t kClientNodeId = 0;
-constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
+constexpr uint16_t kClientNodeId = 1;
+constexpr uint16_t kServerNodeId = 0;
 
 constexpr static size_t kMagic = 0xffffffffffffffff;
 constexpr static size_t kMagic2 = 0xabcdef1234567890;
@@ -222,7 +221,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     DSMConfig config;
-    config.machineNR = kMachineNr;
+    config.machineNR = ::config::kMachineNr;
 
     auto dsm = DSM::getInstance(config);
 
@@ -243,7 +242,6 @@ int main(int argc, char *argv[])
     else
     {
         LOG(WARNING) << "[bench] nid " << nid << " skip";
-        return 0;
     }
 
     LOG(INFO) << "finished. ctrl+C to quit.";

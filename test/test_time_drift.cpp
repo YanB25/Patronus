@@ -56,8 +56,8 @@ uint64_t get_current_ns()
 
 void client(Patronus::pointer p)
 {
-    std::array<OnePassIntegerMonitor, kTestSecond> diff_ns_ms;
-    std::array<bool, kTestSecond> entered;
+    std::array<OnePassIntegerMonitor, kTestSecond> diff_ns_ms{};
+    std::array<bool, kTestSecond> entered{};
     entered.fill(false);
 
     OnePassIntegerMonitor send_recv_m;
@@ -132,7 +132,7 @@ void server(Patronus::pointer p)
     auto *buf = dsm->get_rdma_buffer().buffer;
     char recv_buf[1024];
 
-    std::array<OnePassIntegerMonitor, kTestSecond> diff_ns_ms;
+    std::array<OnePassIntegerMonitor, kTestSecond> diff_ns_ms{};
     auto begin_now = std::chrono::steady_clock::now();
 
     while (true)

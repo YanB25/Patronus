@@ -12,13 +12,6 @@ using namespace std::chrono_literals;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-// Two nodes
-// one node issues cas operations
-
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 using namespace patronus;
 constexpr static size_t kCoroCnt = 1;
 thread_local CoroCall workers[kCoroCnt];
@@ -59,6 +52,7 @@ struct ClientCommunication
 void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
+    auto server_nid = ::config::get_server_nids().front();
 
     CoroContext ctx(tid, &yield, &master, coro_id);
 
@@ -73,7 +67,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto locate_offset = bench_locator(coro_key);
-        Lease lease = p->get_rlease(kServerNodeId,
+        Lease lease = p->get_rlease(server_nid,
                                     kDirID,
                                     GlobalAddress(0, locate_offset),
                                     0 /* alloc_hint */,
@@ -115,10 +109,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /* offset */,
                               0 /* flag */,
                               &ctx);
-            CHECK_EQ(ec, RetCode::kOk)
-                << "[bench] client coro " << ctx
-                << " read FAILED. This should not happen, because we "
-                   "filter out the invalid mws.";
+            CHECK_EQ(ec, kOk)
+                << "** should not failed this read, since we filter out "
+                   "invalid mw, and machines does not crash QP each others";
         }
 
         DVLOG(2) << "[bench] client coro " << ctx << " read finished";
@@ -240,7 +233,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
@@ -248,16 +241,17 @@ int main(int argc, char *argv[])
 
     // let client spining
     auto nid = patronus->get_node_id();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
         patronus->registerClientThread();
-        sleep(1);
+        patronus->keeper_barrier("begin", 100ms);
         client(patronus);
     }
     else
     {
         patronus->registerServerThread();
         patronus->finished(kWaitFlag);
+        patronus->keeper_barrier("begin", 100ms);
         server(patronus);
     }
 

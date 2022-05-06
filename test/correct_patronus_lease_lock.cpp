@@ -11,17 +11,13 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-// Two nodes
-constexpr uint16_t kClientNodeId = 0;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
-
 using namespace patronus;
-constexpr static size_t kThreadNr = 8;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = kServerThreadNr;
 
-static_assert(kThreadNr <= kMaxAppThread);
+constexpr static size_t kClientNodeId = 1;
+
 constexpr static size_t kCoroCnt = 1;
-
 constexpr static size_t kKeyLimit = 1;
 
 constexpr static size_t kTestTime = 500;
@@ -46,8 +42,9 @@ struct ClientCoro
 };
 thread_local ClientCoro client_coro;
 
-uint64_t locate_key(size_t tid, size_t coro_id)
+uint64_t locate_key(size_t nid, size_t tid, size_t coro_id)
 {
+    std::ignore = nid;
     std::ignore = tid;
     std::ignore = coro_id;
     return 0;
@@ -65,7 +62,9 @@ void client_worker(Patronus::pointer p,
                    CoroYield &yield,
                    CoroExecutionContext<kCoroCnt> &ex)
 {
+    auto nid = p->get_node_id();
     auto tid = p->get_thread_id();
+    auto server_nid = ::config::get_server_nids().front();
 
     auto dir_id = tid % NR_DIRECTORY;
 
@@ -77,11 +76,11 @@ void client_worker(Patronus::pointer p,
     ChronoTimer timer;
     for (size_t time = 0; time < kTestTime; ++time)
     {
-        auto key = locate_key(tid, coro_id);
+        auto key = locate_key(nid, tid, coro_id);
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
         auto flag = (flag_t) AcquireRequestFlag::kWithConflictDetect;
-        Lease lease = p->get_rlease(kServerNodeId,
+        Lease lease = p->get_rlease(server_nid,
                                     dir_id,
                                     GlobalAddress(0, key),
                                     0 /* alloc_hint */,
@@ -161,18 +160,23 @@ void client_master(Patronus::pointer p,
 
 void client(Patronus::pointer p)
 {
+    auto nid = p->get_node_id();
     auto tid = p->get_thread_id();
     LOG(INFO) << "I am client. tid " << tid;
 
-    CoroExecutionContext<kCoroCnt> ex;
-    for (size_t i = 0; i < kCoroCnt; ++i)
+    if (likely(nid == kClientNodeId))
     {
-        client_coro.workers[i] = CoroCall(
-            [p, i, &ex](CoroYield &yield) { client_worker(p, i, yield, ex); });
+        CoroExecutionContext<kCoroCnt> ex;
+        for (size_t i = 0; i < kCoroCnt; ++i)
+        {
+            client_coro.workers[i] = CoroCall([p, i, &ex](CoroYield &yield) {
+                client_worker(p, i, yield, ex);
+            });
+        }
+        client_coro.master = CoroCall(
+            [p, &ex](CoroYield &yield) { client_master(p, yield, ex); });
+        client_coro.master();
     }
-    client_coro.master =
-        CoroCall([p, &ex](CoroYield &yield) { client_master(p, yield, ex); });
-    client_coro.master();
 }
 
 void server(Patronus::pointer p)
@@ -192,22 +196,20 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
-
-    sleep(1);
 
     std::vector<std::thread> threads;
     // let client spining
     auto nid = patronus->get_node_id();
 
-    boost::barrier bar(kThreadNr);
-    if (nid == kClientNodeId)
+    boost::barrier client_bar(kClientThreadNr);
+    if (::config::is_client(nid))
     {
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kClientThreadNr - 1; ++i)
         {
-            threads.emplace_back([patronus, &bar]() {
+            threads.emplace_back([patronus, &bar = client_bar]() {
                 patronus->registerClientThread();
                 auto tid = patronus->get_thread_id();
                 client(patronus);
@@ -218,13 +220,13 @@ int main(int argc, char *argv[])
         patronus->registerClientThread();
         auto tid = patronus->get_thread_id();
         client(patronus);
-        bar.wait();
+        client_bar.wait();
         LOG(INFO) << "[bench] joined. thread " << tid << " call p->finished()";
         patronus->finished(kWaitKey);
     }
     else
     {
-        for (size_t i = 0; i < kThreadNr - 1; ++i)
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
         {
             threads.emplace_back([patronus]() {
                 patronus->registerServerThread();
@@ -242,7 +244,8 @@ int main(int argc, char *argv[])
         t.join();
     }
 
-    double concurrency = kThreadNr * kCoroCnt;
+    double concurrency =
+        ::config::get_client_nids().size() * kClientThreadNr * kCoroCnt;
     double key_nr = kKeyLimit;
     LOG(INFO) << "[bench] reference: concurrency: " << concurrency
               << ", key_range: " << key_nr
@@ -273,6 +276,8 @@ int main(int argc, char *argv[])
                 << diff << " ns as internal, >= 1.5 * limit ns.";
         }
     }
+
+    patronus->keeper_barrier("finished", 100ms);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

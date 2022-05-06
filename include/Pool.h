@@ -51,8 +51,10 @@ public:
     }
     void debug_validity_put(void *addr)
     {
-        DCHECK_EQ(outer_.get().erase(addr), 1);
-        DCHECK(inner_.get().insert(addr).second);
+        DCHECK_EQ(outer_.get().erase(addr), 1)
+            << "addr " << addr << " not out-going buffer.";
+        DCHECK(inner_.get().insert(addr).second)
+            << "internal err: addr " << addr << " insert failed.";
     }
     void *get()
     {
@@ -65,8 +67,8 @@ public:
         on_going_++;
         if constexpr (debug())
         {
-            debug_validity_check(ret);
             debug_validity_get(ret);
+            debug_validity_check(ret);
         }
         return ret;
     }
@@ -84,8 +86,8 @@ public:
         on_going_--;
         if constexpr (debug())
         {
-            debug_validity_check(buf);
             debug_validity_put(buf);
+            debug_validity_check(buf);
         }
     }
 
@@ -174,8 +176,8 @@ public:
         on_going_++;
         if constexpr (debug())
         {
-            debug_validity_check(ret);
             debug_validity_get(ret);
+            debug_validity_check(ret);
         }
         return ret;
     }
@@ -185,8 +187,8 @@ public:
         on_going_--;
         if constexpr (debug())
         {
-            debug_validity_check(obj);
             debug_validity_put(obj);
+            debug_validity_check(obj);
         }
     }
     uint64_t obj_to_id(T *obj)

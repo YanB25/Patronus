@@ -30,7 +30,7 @@ public:
 
 struct Comm
 {
-    std::array<bool, kTestTime> finished;
+    std::array<bool, kTestTime> finished{};
     std::vector<coro2_t::push_type> workers;
     bool all_finished{false};
     size_t finished_nr{0};
@@ -40,7 +40,7 @@ struct Comm
 void coro_large_stack_worker(coro_t coro_id, coro2_t::pull_type &out)
 {
     Scope scope;
-    std::array<char, kLargeStackSize> buffer;
+    std::array<char, kLargeStackSize> buffer{};
     for (size_t i = 0; i < kTestTime; ++i)
     {
         comm.yielded_nr++;
