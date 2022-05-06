@@ -56,11 +56,16 @@ public:
      * @return size_t The number of messages actually received.
      */
     size_t try_recv(size_t i_ep_id, char *ibuf, size_t msg_limit = 1);
+    using ptr_t = uint64_t;
+    size_t try_recv_no_cpy(size_t i_ep_id,
+                           ptr_t *ptr_buf,
+                           size_t msg_limit = 1);
     void recv(size_t i_ep_id, char *ibuf, size_t msg_limit = 1);
     void init();
 
 private:
     void handle_wc(char *ibuf, const ibv_wc &wc);
+    void handle_wc_no_cpy(ptr_t *ret_ptr, const ibv_wc &wc);
     void fills(ibv_sge &sge, ibv_recv_wr &wr, size_t ep_id, size_t batch_id);
 
     bool inited_{false};
@@ -189,6 +194,29 @@ size_t UnreliableRecvMessageConnection<kEndpointNr>::try_recv(size_t ep_id,
 }
 
 template <size_t kEndpointNr>
+size_t UnreliableRecvMessageConnection<kEndpointNr>::try_recv_no_cpy(
+    size_t ep_id, ptr_t *ptr_buf, size_t msg_limit)
+{
+    DCHECK(inited_);
+    msg_limit = std::min(msg_limit, kRecvLimit);
+
+    static thread_local ibv_wc wc[kRecvLimit];
+
+    size_t actually_polled = ibv_poll_cq(recv_cqs_[ep_id], msg_limit, wc);
+    if (unlikely(actually_polled < 0))
+    {
+        PLOG(ERROR) << "failed to ibv_poll_cq";
+        return 0;
+    }
+
+    for (size_t i = 0; i < actually_polled; ++i)
+    {
+        handle_wc_no_cpy(&ptr_buf[i], wc[i]);
+    }
+    return actually_polled;
+}
+
+template <size_t kEndpointNr>
 void UnreliableRecvMessageConnection<kEndpointNr>::recv(size_t ep_id,
                                                         char *ibuf,
                                                         size_t msg_limit)
@@ -254,6 +282,74 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
         // add the header
         buf += 40;
         memcpy(ibuf, buf, actual_size);
+
+        DVLOG(3) << "[umsg] Recved msg size " << actual_size << " from ep_id "
+                 << th_id << ", batch_id: " << batch_id << ", cur_idx "
+                 << cur_idx << ", hash is " << std::hex
+                 << CityHash64(buf, actual_size) << " @" << (void *) buf
+                 << ". WRID: " << wrid;
+    }
+    else
+    {
+        DVLOG(3) << "[umsg] Recved msg, wr: " << wrid << ", cur_idx "
+                 << cur_idx;
+    }
+
+    if (unlikely((cur_idx + 1) % kPostRecvBufferBatch == 0))
+    {
+        size_t post_buf_idx =
+            ((cur_idx + 1) % kRecvBuffer) +
+            (kPostRecvBufferAdvanceBatch - 1) * kPostRecvBufferBatch;
+        ibv_recv_wr *bad;
+        DVLOG(3) << "[umsg] Posting another " << kPostRecvBufferBatch
+                 << " recvs, th_id " << th_id << ". cur_idx " << cur_idx
+                 << " i.e. recvs[" << th_id << "]["
+                 << (post_buf_idx % kRecvBuffer) << "]";
+
+        PLOG_IF(
+            ERROR,
+            ibv_post_recv(
+                QPs_[th_id], &recvs[th_id][post_buf_idx % kRecvBuffer], &bad))
+            << "failed to post recv";
+    }
+}
+
+template <size_t kEndpointNr>
+void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc_no_cpy(
+    ptr_t *ret_ptr, const ibv_wc &wc)
+{
+    if (unlikely(wc.status != IBV_WC_SUCCESS))
+    {
+        PLOG(FATAL) << "[umsg] Failed to handle wc: " << WRID(wc.wr_id)
+                    << ", status: " << wc.status;
+        return;
+    }
+    auto wrid = WRID(wc.wr_id);
+    auto prefix = wrid.prefix;
+    DCHECK_EQ(prefix, WRID_PREFIX_RELIABLE_RECV);
+    auto th_id = wrid.u16_a;
+    std::ignore = wrid.u16_b;
+    auto batch_id = wrid.u16_c;
+
+    DCHECK_LT(th_id, kEndpointNr);
+    DCHECK_LT(batch_id, kRecvBuffer);
+
+    size_t cur_idx = msg_recv_index_[th_id]++;
+    auto actual_size = wc.imm_data;
+
+    if (likely(ret_ptr != nullptr))
+    {
+        DCHECK_EQ(cur_idx % kRecvBuffer, batch_id)
+            << "I thought they are equal. in fact, I think the WRID "
+               "information is ground truth";
+
+        char *buf =
+            (char *) msg_pool_ +
+            get_msg_pool_idx(th_id, cur_idx % kRecvBuffer) * kPostMessageSize;
+        // add the header
+        buf += 40;
+        // memcpy(ibuf, buf, actual_size);
+        (*ret_ptr) = (ptr_t) buf;
 
         DVLOG(3) << "[umsg] Recved msg size " << actual_size << " from ep_id "
                  << th_id << ", batch_id: " << batch_id << ", cur_idx "

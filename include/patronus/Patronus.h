@@ -136,6 +136,8 @@ public:
     constexpr static uint64_t kDefaultHint = 0;
     constexpr static size_t kMaxSyncKey = 128;
 
+    using umsg_ptr_t = UnreliableConnection<kMaxAppThread>::ptr_t;
+
     static pointer ins(const PatronusConfig &conf)
     {
         return std::make_shared<Patronus>(conf);
@@ -387,10 +389,6 @@ public:
                                  size_t msg_nr,
                                  CoroContext *ctx = nullptr);
 
-    size_t unreliable_try_recv(char *ibuf, size_t limit = 1)
-    {
-        return dsm_->unreliable_try_recv(ibuf, limit);
-    }
     Buffer get_rdma_buffer_8B()
     {
         CHECK(!self_managing_client_rdma_buffer_);

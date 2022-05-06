@@ -610,7 +610,7 @@ void benchmark(Patronus::pointer patronus,
 
     size_t key = 0;
     // for (size_t thread_nr : {1, 2, 4, 8, 16})
-    for (size_t thread_nr : {1, 8})
+    for (size_t thread_nr : {1, 2, 4, 8})
     // for (size_t thread_nr : {1, 2})
     {
         CHECK_LE(thread_nr, kMaxAppThread);

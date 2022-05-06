@@ -41,6 +41,11 @@ public:
     {
         return recv_->try_recv(i_ep_id, ibuf, limit);
     }
+    using ptr_t = typename UnreliableRecvMessageConnection<kEndpointNr>::ptr_t;
+    size_t try_recv_no_cpy(size_t i_ep_id, ptr_t *ptr_buf, size_t msg_limit = 1)
+    {
+        return recv_->try_recv_no_cpy(i_ep_id, ptr_buf, msg_limit);
+    }
     void recv(size_t i_ep_id, char *ibuf, size_t limit = 1)
     {
         return recv_->recv(i_ep_id, ibuf, limit);

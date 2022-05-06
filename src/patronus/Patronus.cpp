@@ -1901,7 +1901,7 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
     {
         // handle received messages
         char *buffer = (char *) CHECK_NOTNULL(buffer_pool.get());
-        size_t nr = unreliable_try_recv(buffer, config::umsg::kRecvLimit);
+        size_t nr = dsm_->unreliable_try_recv(buffer, config::umsg::kRecvLimit);
         if (likely(nr > 0))
         {
             DVLOG(4) << "[patronus] server recv messages " << nr;
