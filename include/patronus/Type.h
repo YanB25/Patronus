@@ -139,6 +139,7 @@ struct AcquireResponse
     uint32_t ns_per_unit;
     uint16_t lease_id;
     uint32_t aba_id;
+    uint32_t post_qp_id;
     AcquireRequestStatus status;
 } __attribute__((packed));
 static_assert(sizeof(AcquireResponse) < config::umsg::kUserMessageSize);

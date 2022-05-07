@@ -667,6 +667,11 @@ public:
     GlobalAddress alloc(size_t size);
     void free(GlobalAddress addr);
 
+    size_t get_icon_nr() const
+    {
+        return thCon.size();
+    }
+
     void rpc_call_dir(const RawMessage &m,
                       uint16_t node_id,
                       uint16_t dir_id = 0)

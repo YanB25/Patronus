@@ -21,7 +21,8 @@
 // The outer-most benchmark only prefix
 #define WRID_PREFIX_BENCHMARK_ONLY 12
 #define WRID_PREFIX_RESERVED_1 13
-#define WRID_PREFIX_RESERVED_2 14
+#define WRID_PREFIX_PATRONUS_BIND_MW_MAGIC_ERR 14
+#define WRID_PREFIX_PATRONUS_BATCH 15
 
 constexpr uint32_t get_WRID_ID_RESERVED()
 {
@@ -79,8 +80,11 @@ inline std::ostream &operator<<(std::ostream &os, pre_wrid_prefix p)
     case WRID_PREFIX_RESERVED_1:
         os << "RESERVED_1";
         return os;
-    case WRID_PREFIX_RESERVED_2:
-        os << "RESERVED_2";
+    case WRID_PREFIX_PATRONUS_BIND_MW_MAGIC_ERR:
+        os << "PATRONUS_BIND_MW_MAGIC_ERR";
+        return os;
+    case WRID_PREFIX_PATRONUS_BATCH:
+        os << "PATRONUS_BATCH";
         return os;
     default:
         os << "UNKNOWN";

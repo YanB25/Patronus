@@ -14,6 +14,7 @@
 #include "patronus/Coro.h"
 #include "patronus/DDLManager.h"
 #include "patronus/Lease.h"
+#include "patronus/LeaseContext.h"
 #include "patronus/LockManager.h"
 #include "patronus/ProtectionRegion.h"
 #include "patronus/TimeSyncer.h"
@@ -82,30 +83,6 @@ struct RWContext
     size_t target_node;
     size_t dir_id;
     util::TraceView trace_view{util::nulltrace};
-};
-
-struct LeaseContext
-{
-    // correctness related fields:
-    // will refuse relinquish requests from unrelated clients.
-    ClientID client_cid;
-    bool valid;
-    // end
-    ibv_mw *buffer_mw;
-    ibv_mw *header_mw;
-    ibv_mr *buffer_mr;
-    ibv_mr *header_mr;
-    size_t dir_id{size_t(-1)};
-    uint64_t addr_to_bind{0};
-    size_t buffer_size{0};
-    size_t protection_region_id;
-    // about with_conflict_detect
-    bool with_conflict_detect{false};
-    bool with_pr{true};
-    bool with_buf{true};
-    uint64_t key_bucket_id{0};
-    uint64_t key_slot_id{0};
-    uint64_t hint{0};
 };
 
 struct PatronusThreadResourceDesc
@@ -385,9 +362,22 @@ public:
         return dsm_->get_server_buffer();
     }
 
-    void handle_request_messages(const char *msg_buf,
-                                 size_t msg_nr,
-                                 CoroContext *ctx = nullptr);
+    // void handle_request_messages(const char *msg_buf,
+    //                              size_t msg_nr,
+    //                              CoroContext *ctx = nullptr);
+    void prepare_handle_request_messages(const char *msg_buf,
+                                         size_t msg_nr,
+                                         CoroContext *ctx);
+    void commit_handle_request_messages(CoroContext *ctx);
+    void post_handle_request_messages(const char *msg_buf,
+                                      size_t msg_nr,
+                                      CoroContext *ctx);
+    void post_handle_request_acquire(AcquireRequest *req,
+                                     HandleReqContext &req_ctx,
+                                     CoroContext *ctx);
+    void post_handle_request_lease_modify(LeaseModifyRequest *req,
+                                          HandleReqContext &req_ctx,
+                                          CoroContext *ctx);
 
     Buffer get_rdma_buffer_8B()
     {
@@ -572,8 +562,14 @@ private:
     constexpr static size_t kTotalProtectionRegionNr =
         kProtectionRegionPerThreadNr * kMaxAppThread;
 
-    thread_local static uint64_t per_qp_mw_post_idx_[MAX_MACHINE]
-                                                    [kMaxAppThread];
+    // kMaxCoroNr
+    thread_local static std::vector<ServerCoroBatchExecutionContext>
+        coro_batch_ex_ctx_;
+    ServerCoroBatchExecutionContext &coro_ex_ctx(size_t coro_id)
+    {
+        DCHECK_LT(coro_id, kMaxCoroNr);
+        return coro_batch_ex_ctx_[coro_id];
+    }
 
     void explain(const PatronusConfig &);
 
@@ -767,8 +763,12 @@ private:
     void signal_server_to_recover_qp(size_t node_id,
                                      size_t dir_id,
                                      TraceView = util::nulltrace);
-    void handle_request_acquire(AcquireRequest *, CoroContext *ctx);
-    void handle_request_lease_modify(LeaseModifyRequest *, CoroContext *ctx);
+    void prepare_handle_request_acquire(AcquireRequest *,
+                                        HandleReqContext &req_ctx,
+                                        CoroContext *ctx);
+    void prepare_handle_request_lease_modify(LeaseModifyRequest *,
+                                             HandleReqContext &req_ctx,
+                                             CoroContext *ctx);
 
     // for servers
     void handle_response_acquire(AcquireResponse *);
@@ -778,6 +778,9 @@ private:
     void handle_admin_barrier(AdminRequest *req, CoroContext *ctx);
     void handle_request_lease_relinquish(LeaseModifyRequest *,
                                          CoroContext *ctx);
+    void prepare_handle_request_lease_relinquish(LeaseModifyRequest *,
+                                                 HandleReqContext &req_ctx,
+                                                 CoroContext *ctx);
     void handle_request_lease_extend(LeaseModifyRequest *, CoroContext *ctx);
     void handle_request_lease_upgrade(LeaseModifyRequest *, CoroContext *ctx);
 
@@ -796,6 +799,12 @@ private:
                        compound_uint64_t expect_unit_nr,
                        flag_t flag /* LeaseModifyFlag */,
                        CoroContext *ctx = nullptr);
+
+    void prepare_gc_lease(uint64_t lease_id,
+                          HandleReqContext &req_ctx,
+                          ClientID cid,
+                          flag_t flag,
+                          CoroContext *ctx = nullptr);
 
     // server coroutines
     void server_coro_master(CoroYield &yield, uint64_t key);
@@ -867,7 +876,6 @@ private:
                             flag_t flag /* LeaseModificationFlag */,
                             CoroContext *ctx = nullptr);
     inline void fill_bind_mw_wr(ibv_send_wr &wr,
-                                ibv_send_wr *next_wr,
                                 ibv_mw *mw,
                                 ibv_mr *mr,
                                 uint64_t addr,
@@ -1373,14 +1381,12 @@ RetCode Patronus::cas(Lease &lease,
 }
 
 void Patronus::fill_bind_mw_wr(ibv_send_wr &wr,
-                               ibv_send_wr *next_wr,
                                ibv_mw *mw,
                                ibv_mr *mr,
                                uint64_t addr,
                                size_t length,
                                int access_flag)
 {
-    wr.next = next_wr;
     wr.sg_list = nullptr;
     wr.num_sge = 0;
     wr.opcode = IBV_WR_BIND_MW;

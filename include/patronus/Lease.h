@@ -90,6 +90,7 @@ public:
         ddl_term_ = rhs.ddl_term_;
         no_gc_ = rhs.no_gc_;
         cur_unit_nr_ = rhs.cur_unit_nr_;
+        post_qp_idx_ = rhs.post_qp_idx_;
 
         status_ = AcquireRequestStatus::kReserved;
         ready_ = false;
@@ -187,6 +188,7 @@ private:
     size_t cur_unit_nr_{1};
 
     LeaseCache<::config::kLeaseCacheItemLimitNr> cache_;
+    uint32_t post_qp_idx_{0};
 };
 
 std::ostream &operator<<(std::ostream &os, const Lease &lease);

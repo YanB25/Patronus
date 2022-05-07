@@ -11,17 +11,20 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 using namespace patronus;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
+// constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
+constexpr static size_t kClientThreadNr = 4 * NR_DIRECTORY;
 
 static_assert(kClientThreadNr <= kMaxAppThread);
 static_assert(kServerThreadNr <= NR_DIRECTORY);
 constexpr static size_t kCoroCnt = 8;
+// constexpr static size_t kCoroCnt = 1;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
 
-constexpr static size_t kTestTime =
-    Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
+// constexpr static size_t kTestTime =
+//     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
+constexpr static size_t kTestTime = 10_K;
 
 constexpr static size_t kWaitKey = 0;
 
@@ -96,8 +99,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     &ctx);
         if (unlikely(!lease.success()))
         {
-            // DLOG(ERROR) << "[bench] client coro " << ctx
-            //             << " get_rlease failed. retry. Got: " << lease;
+            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr);
+            DLOG(ERROR) << "[bench] client coro " << ctx
+                        << " get_rlease failed. retry. Got: " << lease;
             continue;
         }
 
@@ -117,9 +121,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           &ctx);
         if (unlikely(ec != RetCode::kOk))
         {
-            LOG(ERROR) << "[bench] client " << ctx
-                       << " read FAILED. lease: " << lease << " at " << time
-                       << "-th";
+            CHECK(false) << "[bench] client READ failed. lease " << lease
+                         << ", ctx: " << ctx << " at " << time << "-th";
             continue;
         }
 
@@ -296,11 +299,8 @@ int main(int argc, char *argv[])
         }
 
         auto dsm = patronus->get_dsm();
-
         patronus->keeper_barrier("begin", 100ms);
-
         patronus->finished(kWaitKey);
-
         server(patronus);
     }
 
@@ -309,5 +309,6 @@ int main(int argc, char *argv[])
         t.join();
     }
 
+    patronus->keeper_barrier("finished", 100ms);
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

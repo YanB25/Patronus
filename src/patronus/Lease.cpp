@@ -18,7 +18,7 @@ std::ostream &operator<<(std::ostream &os, const Lease &lease)
        << ", ddl_term: " << lease.ddl_term_ << "} (status: " << lease.status_
        << ", id: " << lease.id_ << ", ready: " << lease.ready_
        << ", no_gc: " << lease.no_gc_ << ", cur_unit_nr: " << lease.cur_unit_nr_
-       << ")";
+       << ", post_qp_idx: " << lease.post_qp_idx_ << ")";
     return os;
 }
 // Lease::Lease(Lease &&rhs)
