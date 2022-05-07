@@ -12,7 +12,7 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 using namespace patronus;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 // constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
-constexpr static size_t kClientThreadNr = 4 * NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = NR_DIRECTORY;
 
 static_assert(kClientThreadNr <= kMaxAppThread);
 static_assert(kServerThreadNr <= NR_DIRECTORY);
@@ -100,8 +100,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         if (unlikely(!lease.success()))
         {
             CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr);
-            DLOG(ERROR) << "[bench] client coro " << ctx
-                        << " get_rlease failed. retry. Got: " << lease;
+            // DLOG(ERROR) << "[bench] client coro " << ctx
+            //             << " get_rlease failed. retry. Got: " << lease;
             continue;
         }
 

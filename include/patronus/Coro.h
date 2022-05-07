@@ -7,6 +7,7 @@
 #include "Common.h"
 #include "DSM.h"
 #include "Pool.h"
+#include "patronus/Config.h"
 #include "patronus/Lease.h"
 #include "patronus/LeaseContext.h"
 #include "patronus/ProtectionRegion.h"
@@ -18,7 +19,17 @@ struct ServerCoroTask
 {
     const char *buf{nullptr};  // msg buffer
     size_t msg_nr{0};
+    size_t fetched_nr{0};
+    ssize_t active_coro_nr{0};
 };
+
+inline std::ostream &operator<<(std::ostream &os, const ServerCoroTask &task)
+{
+    os << "{Task: buf: " << (void *) task.buf << ", msg_nr: " << task.msg_nr
+       << ", fetch_nr: " << task.fetched_nr
+       << ", active_coro_nr: " << task.active_coro_nr << "}";
+    return os;
+}
 
 struct ServerCoroCommunication
 {
@@ -68,8 +79,21 @@ struct HandleReqContext
     } acquire;
     struct
     {
+        bool do_nothing;
         patronus::LeaseContext *lease_ctx;
         bool with_dealloc;
+        bool with_pr;
+        uint64_t protection_region_id;
+        ProtectionRegion *protection_region;
+        bool with_conflict_detect;
+        uint64_t key_bucket_id;
+        uint64_t key_slot_id;
+        uint64_t addr_to_bind;
+        size_t buffer_size;
+        uint64_t hint;
+        ibv_mw *buffer_mw;
+        ibv_mw *header_mw;
+        uint32_t dir_id;
     } relinquish;
     struct
     {
@@ -81,17 +105,24 @@ struct HandleReqContext
 class ServerCoroBatchExecutionContext
 {
 public:
-    constexpr static size_t kWrNr = 2 * config::umsg::kRecvLimit;
-
+    // buffer_mw & header_mw: the max ibv_post_send nr is twice the number of
+    // message
+    constexpr static size_t kBatchLimit =
+        2 * config::patronus::kHandleRequestBatchLimit;
+    static size_t batch_limit()
+    {
+        return kBatchLimit;
+    }
     size_t fetch_wr()
     {
         auto ret = wr_idx_;
         wr_idx_++;
+        DCHECK_LE(wr_idx_, kBatchLimit) << "** overflow fetch_mw. " << *this;
         return ret;
     }
     ibv_send_wr &wr(size_t wr_id)
     {
-        DCHECK_LT(wr_id, wr_idx_);
+        DCHECK_LT(wr_id, wr_idx_) << "** overflow fetch_mw. " << *this;
         return wrs_[wr_id];
     }
     void clear()
@@ -100,20 +131,24 @@ public:
         memset(req_ctx_, 0, sizeof(HandleReqContext) * req_idx_);
         wr_idx_ = 0;
         req_idx_ = 0;
-        success_ = false;
     }
     void init(DSM::pointer dsm)
     {
         dsm_ = dsm;
     }
-    bool &success()
+    size_t wr_size() const
     {
-        return success_;
+        return wr_idx_;
+    }
+    size_t req_size() const
+    {
+        return req_idx_;
     }
     size_t fetch_req_idx()
     {
         auto ret = req_idx_;
         req_idx_++;
+        DCHECK_LE(req_idx_, kBatchLimit) << "** overflow fetch_mw. " << *this;
         return ret;
     }
     HandleReqContext &req_ctx(size_t req_id)
@@ -149,9 +184,9 @@ public:
             }
         }
 
-        LOG(INFO) << "[debug] !! posting to QP[" << rr_machine_idx_ << "]["
-                  << rr_thread_idx_ << "]. posted: " << wr_idx_
-                  << ", req_nr: " << req_idx_;
+        // LOG(INFO) << "[debug] !! posting to QP[" << rr_machine_idx_ << "]["
+        //           << rr_thread_idx_ << "]. posted: " << wr_idx_
+        //           << ", req_nr: " << req_idx_;
 
         auto *qp = get_qp_rr();
         auto ret = ibv_post_send(qp, wrs_, &bad_wr_);
@@ -187,14 +222,15 @@ public:
         DCHECK_LT(wr_idx, wr_idx_);
         return id_per_qp[wr_idx];
     }
+    friend std::ostream &operator<<(std::ostream &os,
+                                    const ServerCoroBatchExecutionContext &ctx);
 
 private:
     size_t wr_idx_{0};
-    ibv_send_wr wrs_[kWrNr]{};
-    uint64_t id_per_qp[kWrNr]{};
+    ibv_send_wr wrs_[kBatchLimit]{};
+    uint64_t id_per_qp[kBatchLimit]{};
     size_t req_idx_{0};
-    HandleReqContext req_ctx_[kWrNr]{};
-    bool success_{false};
+    HandleReqContext req_ctx_[kBatchLimit]{};
 
     DSM::pointer dsm_;
     ibv_send_wr *bad_wr_;
@@ -206,6 +242,15 @@ private:
     static thread_local uint64_t tl_per_qp_mw_post_idx_[MAX_MACHINE]
                                                        [kMaxAppThread];
 };
+
+inline std::ostream &operator<<(std::ostream &os,
+                                const ServerCoroBatchExecutionContext &ctx)
+{
+    os << "{ex_ctx: wr_size: " << ctx.wr_size()
+       << ", req_size: " << ctx.req_size() << ", rr_tid: " << ctx.rr_thread_idx_
+       << ", rr_nid: " << ctx.rr_machine_idx_ << "}";
+    return os;
+}
 
 };  // namespace patronus
 #endif

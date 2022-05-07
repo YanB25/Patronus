@@ -395,12 +395,19 @@ template <typename T>
 inline std::ostream &operator<<(std::ostream &os,
                                 const OnePassBucketMonitor<T> &m)
 {
-    os << "{min: " << m.min() << ", max: " << m.max()
-       << ", median: " << m.percentile(0.5) << ", p8: " << m.percentile(0.8)
-       << ", p9: " << m.percentile(0.9) << ", p99: " << m.percentile(0.99)
-       << ", p999: " << m.percentile(0.999) << ", max: " << m.max()
-       << ". collected " << m.data_nr() << " data, underflow "
-       << m.underflow_nr() << ", overflow: " << m.overflow_nr() << "}";
+    if (unlikely(m.data_nr() == 0))
+    {
+        os << "{no data}";
+    }
+    else
+    {
+        os << "{min: " << m.min() << ", max: " << m.max()
+           << ", median: " << m.percentile(0.5) << ", p8: " << m.percentile(0.8)
+           << ", p9: " << m.percentile(0.9) << ", p99: " << m.percentile(0.99)
+           << ", p999: " << m.percentile(0.999) << ", max: " << m.max()
+           << ". collected " << m.data_nr() << " data, underflow "
+           << m.underflow_nr() << ", overflow: " << m.overflow_nr() << "}";
+    }
     return os;
 }
 

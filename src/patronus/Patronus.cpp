@@ -5,6 +5,7 @@
 #include "patronus/Time.h"
 #include "umsg/Config.h"
 #include "util/Debug.h"
+#include "util/PerformanceReporter.h"
 #include "util/Pre.h"
 #include "util/Rand.h"
 
@@ -321,7 +322,7 @@ RetCode Patronus::read_write_impl(char *iobuf,
 
     auto *rw_context = get_rw_context();
     uint16_t rw_ctx_id = get_rw_context_id(rw_context);
-    rw_context->success = &ret;
+    rw_context->wc_status = IBV_WC_SUCCESS;
     rw_context->ready = false;
     rw_context->coro_id = coro_id;
     rw_context->target_node = gaddr.nodeID;
@@ -456,8 +457,6 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
                            CoroContext *ctx,
                            TraceView v)
 {
-    bool ret = false;
-
     GlobalAddress gaddr;
     gaddr.nodeID = node_id;
     DCHECK_NE(gaddr.nodeID, get_node_id())
@@ -470,7 +469,7 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
     }
     auto *rw_context = get_rw_context();
     uint16_t rw_ctx_id = get_rw_context_id(rw_context);
-    rw_context->success = &ret;
+    rw_context->wc_status = IBV_WC_SUCCESS;
     rw_context->ready = false;
     rw_context->coro_id = coro_id;
     rw_context->target_node = gaddr.nodeID;
@@ -503,15 +502,18 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
         << "** Should have been ready when switching back to worker " << ctx
         << ", rw_ctx_id: " << rw_ctx_id << ", ready at "
         << (void *) &rw_context->ready;
+    auto wc_status = rw_context->wc_status;
+    bool success = wc_status == IBV_WC_SUCCESS;
     if constexpr (debug())
     {
         memset(rw_context, 0, sizeof(RWContext));
     }
     put_rw_context(rw_context);
 
-    if (unlikely(!ret))
+    if (unlikely(!success))
     {
         DVLOG(4) << "[patronus] CAS failed by protection. wr_id: " << wrid
+                 << ", wc_status: " << ibv_wc_status_str(wc_status)
                  << "coro: " << (ctx ? *ctx : nullctx);
         return RetCode::kRdmaProtectionErr;
     }
@@ -717,11 +719,19 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
     return cur_idx;
 }
 
-void Patronus::prepare_handle_request_messages(const char *msg_buf,
-                                               size_t msg_nr,
-                                               CoroContext *ctx)
+void Patronus::prepare_handle_request_messages(
+    const char *msg_buf,
+    size_t msg_nr,
+    ServerCoroBatchExecutionContext &ex_ctx,
+    CoroContext *ctx)
 {
-    auto &ex_ctx = coro_ex_ctx(ctx->coro_id());
+    DCHECK_EQ(ex_ctx.wr_size(), 0)
+        << "** ex_ctx " << (void *) &ex_ctx << " for coro " << pre_coro_ctx(ctx)
+        << " wr not empty";
+    DCHECK_EQ(ex_ctx.req_size(), 0)
+        << "** ex_ctx " << (void *) &ex_ctx << " for coro " << pre_coro_ctx(ctx)
+        << " req not empty";
+
     for (size_t i = 0; i < msg_nr; ++i)
     {
         auto *base = (BaseMessage *) (msg_buf + i * kMessageSize);
@@ -784,6 +794,9 @@ void Patronus::prepare_handle_request_messages(const char *msg_buf,
         }
         }
     }
+    DCHECK_EQ(ex_ctx.req_size(), msg_nr)
+        << "** ex_ctx " << (void *) &ex_ctx << " for coro " << pre_coro_ctx(ctx)
+        << " req size mismatch";
 }
 
 // void Patronus::handle_request_messages(const char *msg_buf,
@@ -1807,16 +1820,21 @@ void Patronus::prepare_handle_request_lease_relinquish(
     req_ctx.lease_id = req->lease_id;
 }
 
-void Patronus::post_handle_request_messages(const char *msg_buf,
-                                            size_t msg_nr,
-                                            CoroContext *ctx)
+void Patronus::post_handle_request_messages(
+    const char *msg_buf,
+    size_t msg_nr,
+    ServerCoroBatchExecutionContext &ex_ctx,
+    CoroContext *ctx)
 {
-    auto &execution_ctx = coro_ex_ctx(ctx->coro_id());
+    DCHECK_EQ(ex_ctx.req_size(), msg_nr)
+        << "** req size not matched. ex_ctx: " << &ex_ctx
+        << ", coro: " << pre_coro_ctx(ctx);
+
     for (size_t i = 0; i < msg_nr; ++i)
     {
         auto *base = (BaseMessage *) (msg_buf + i * kMessageSize);
         auto request_type = base->type;
-        auto &req_ctx = execution_ctx.req_ctx(i);
+        auto &req_ctx = ex_ctx.req_ctx(i);
         switch (request_type)
         {
         case RpcType::kAcquireNoLeaseReq:
@@ -1927,10 +1945,10 @@ size_t Patronus::handle_rdma_finishes(
 
         if (likely(wc.status == IBV_WC_SUCCESS))
         {
-            *(rw_context->success) = true;
+            rw_context->wc_status = IBV_WC_SUCCESS;
             DVLOG(4) << "[patronus] handle rdma finishes SUCCESS for coro "
                      << (int) coro_id << ". set "
-                     << (void *) rw_context->success << " to true.";
+                     << (void *) rw_context->wc_status << " to IBV_WC_SUCCESS";
         }
         else
         {
@@ -1938,7 +1956,7 @@ size_t Patronus::handle_rdma_finishes(
                          << " for node " << node_id << ", dir: " << dir_id
                          << ", coro_id: " << (int) coro_id
                          << ". detail: " << wc;
-            *(rw_context->success) = false;
+            rw_context->wc_status = wc.status;
             recov.emplace(std::make_pair(node_id, dir_id),
                           rw_context->trace_view);
             fail_nr++;
@@ -2355,6 +2373,9 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
             __buffer.data(), config::umsg::kMaxRecvBuffer * kServerBufferNr);
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
+    OnePassBucketMonitor batch_m(
+        (uint64_t) 0, (uint64_t) config::umsg::kRecvLimit, (uint64_t) 1);
+
     while (likely(!should_exit(wait_key) || likely(!task_queue.empty())) ||
            likely(!std::all_of(std::begin(comm.finished),
                                std::end(comm.finished),
@@ -2369,7 +2390,10 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
             auto *task = task_pool.get();
             task->buf = DCHECK_NOTNULL(buffer);
             task->msg_nr = nr;
+            task->fetched_nr = 0;
+            task->active_coro_nr = 0;
             comm.task_queue.push(task);
+            batch_m.collect(nr);
         }
         else
         {
@@ -2436,14 +2460,14 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
                 LOG(WARNING) << "[patronus] server got failed wc: " << wrid
                              << " for coro " << (int) coro_id << ". " << mctx;
                 // need_recovery = true;
-                *(rw_ctx->success) = false;
+                rw_ctx->wc_status = wc.status;
             }
             else
             {
                 DVLOG(4) << "[patronus] server got dir CQE for coro "
                          << (int) coro_id << ". wr_id: " << wrid << ". "
                          << mctx;
-                *(rw_ctx->success) = true;
+                rw_ctx->wc_status = IBV_WC_SUCCESS;
             }
             rw_ctx->ready.store(true, std::memory_order_release);
 
@@ -2461,6 +2485,7 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
                                     [](bool b) { return b; });
     CHECK(all_finished) << "** Master coroutine trying to exist with "
                            "unfinished worker coroutine.";
+    LOG(INFO) << "[debug] batch_m: " << batch_m;
 }
 
 void Patronus::post_handle_request_acquire(AcquireRequest *req,
@@ -2494,11 +2519,6 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
     DCHECK_NE(status, AcquireRequestStatus::kReserved);
     if (status == AcquireRequestStatus::kSuccess)
     {
-        bool succ = coro_ex_ctx(ctx->coro_id()).success();
-        if (unlikely(!succ))
-        {
-            status = AcquireRequestStatus::kBindErr;
-        }
         if constexpr (::config::kEnableSkipMagicMw)
         {
             constexpr static uint32_t magic = 0b1010101010;
@@ -2721,35 +2741,44 @@ void Patronus::post_handle_request_lease_modify(LeaseModifyRequest *req,
                           req->cid.thread_id);
     put_rdma_message_buffer(resp_buf);
 
+    if (req_ctx.relinquish.do_nothing)
+    {
+        return;
+    }
+
     LeaseContext *lease_ctx = req_ctx.relinquish.lease_ctx;
     bool with_dealloc = req_ctx.relinquish.with_dealloc;
-    bool with_pr = lease_ctx->with_pr;
-    uint64_t pr_id = lease_ctx->protection_region_id;
-    ProtectionRegion *protection_region = get_protection_region(pr_id);
+    bool with_pr = req_ctx.relinquish.with_pr;
+    ProtectionRegion *protection_region = req_ctx.relinquish.protection_region;
+    bool with_conflict_detect = req_ctx.relinquish.with_conflict_detect;
+    uint64_t key_bucket_id = req_ctx.relinquish.key_bucket_id;
+    uint64_t key_slot_id = req_ctx.relinquish.key_slot_id;
+    uint64_t addr_to_bind = req_ctx.relinquish.addr_to_bind;
+    size_t buffer_size = req_ctx.relinquish.buffer_size;
+    uint64_t hint = req_ctx.relinquish.hint;
+    auto dir_id = req_ctx.relinquish.dir_id;
+    auto *buffer_mw = req_ctx.relinquish.buffer_mw;
+    auto *header_mw = req_ctx.relinquish.header_mw;
 
-    bool with_conflict_detect = lease_ctx->with_conflict_detect;
     if (with_conflict_detect)
     {
-        auto bucket_id = lease_ctx->key_bucket_id;
-        auto slot_id = lease_ctx->key_slot_id;
+        auto bucket_id = key_bucket_id;
+        auto slot_id = key_slot_id;
         lock_manager_.unlock(bucket_id, slot_id);
     }
 
     if (with_dealloc)
     {
-        auto *addr = (void *) lease_ctx->addr_to_bind;
-        auto size = lease_ctx->buffer_size;
-        auto hint = lease_ctx->hint;
-        patronus_free(addr, size, hint);
+        patronus_free((void *) addr_to_bind, buffer_size, hint);
     }
 
-    if (lease_ctx->buffer_mw)
+    if (buffer_mw)
     {
-        put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
+        put_mw(dir_id, buffer_mw);
     }
-    if (lease_ctx->header_mw)
+    if (header_mw)
     {
-        put_mw(lease_ctx->dir_id, lease_ctx->header_mw);
+        put_mw(dir_id, header_mw);
     }
 
     // TODO(patronus): not considering any checks here
@@ -2786,6 +2815,10 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
     bool use_mr = flag & (flag_t) LeaseModifyFlag::kUseMR;
 
     auto *lease_ctx = get_lease_context(lease_id);
+    req_ctx.relinquish.lease_ctx = lease_ctx;
+    req_ctx.relinquish.with_dealloc = with_dealloc;
+
+    req_ctx.relinquish.do_nothing = true;
     if (unlikely(lease_ctx == nullptr))
     {
         DVLOG(4) << "[patronus][gc_lease] skip relinquish. lease_id "
@@ -2801,6 +2834,7 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
                  << ". lease_ctx at " << (void *) lease_ctx;
         return;
     }
+    req_ctx.relinquish.do_nothing = false;
 
     bool with_pr = lease_ctx->with_pr;
     bool with_buf = lease_ctx->with_buf;
@@ -2928,7 +2962,19 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
 
     req_ctx.relinquish.lease_ctx = lease_ctx;
     req_ctx.relinquish.with_dealloc = with_dealloc;
-    req_ctx.lease_id = lease_id;
+    req_ctx.relinquish.with_pr = with_pr;
+    req_ctx.relinquish.protection_region_id = protection_region_id;
+    req_ctx.relinquish.protection_region = protection_region;
+    req_ctx.relinquish.with_conflict_detect =
+        DCHECK_NOTNULL(lease_ctx)->with_conflict_detect;
+    req_ctx.relinquish.key_bucket_id = lease_ctx->key_bucket_id;
+    req_ctx.relinquish.key_slot_id = lease_ctx->key_slot_id;
+    req_ctx.relinquish.addr_to_bind = lease_ctx->addr_to_bind;
+    req_ctx.relinquish.buffer_size = lease_ctx->buffer_size;
+    req_ctx.relinquish.hint = lease_ctx->hint;
+    req_ctx.relinquish.buffer_mw = lease_ctx->buffer_mw;
+    req_ctx.relinquish.header_mw = lease_ctx->header_mw;
+    req_ctx.relinquish.dir_id = lease_ctx->dir_id;
 }
 
 void Patronus::task_gc_lease(uint64_t lease_id,
@@ -3220,31 +3266,64 @@ void Patronus::server_coro_worker(coro_t coro_id,
     auto &task_pool = server_coro_ctx_.task_pool;
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
-    LOG(WARNING) << "NOTE: split coroutine with DDL manager & message handlers";
+    // LOG(WARNING) << "NOTE: split coroutine with DDL manager & message
+    // handlers";
+
+    auto &ex_ctx = coro_ex_ctx(coro_id);
 
     while (likely(!should_exit(wait_key) || !task_queue.empty()))
     {
         DCHECK(!task_queue.empty());
-        // yes, one task for one coroutine
         auto task = task_queue.front();
-        task_queue.pop();
-        DCHECK_NE(task->msg_nr, 0);
+        task->active_coro_nr++;
+        DCHECK_GT(task->msg_nr, 0);
+        size_t remain_task_nr = task->msg_nr - task->fetched_nr;
+        DCHECK_GE(remain_task_nr, 0);
+        size_t acquire_task = std::min(
+            remain_task_nr, config::patronus::kHandleRequestBatchLimit);
+        auto *msg_buf = task->buf + kMessageSize * task->fetched_nr;
+
+        task->fetched_nr += acquire_task;
+        DCHECK_LE(task->fetched_nr, task->msg_nr);
+
+        DVLOG(4) << "[patronus] server acquiring task @" << (void *) task
+                 << ": " << *task << ", handle " << acquire_task
+                 << ". coro: " << ctx;
+
+        if (task->fetched_nr == task->msg_nr)
+        {
+            // pop the task from the queue
+            // so that the following coroutine will not be able to access this
+            // task however, the task is still ACTIVE, becase
+            // @task->active_coro_nr coroutines are still sharing the task
+            task_queue.pop();
+        }
+
+        ex_ctx.clear();
+        // LOG(INFO) << "[debug] !! ex_ctx " << (void *) &ex_ctx
+        //           << ", cleared. wr_size: " << ex_ctx.wr_size()
+        //           << ", req_size: " << ex_ctx.req_size();
+
         DVLOG(4) << "[patronus] server handling task @" << (void *) task
-                 << ", message_nr " << task->msg_nr << ". coro: " << ctx;
+                 << ", message_nr " << task->msg_nr << ", handle "
+                 << acquire_task << ". coro: " << ctx;
         // prepare never switches
-        prepare_handle_request_messages(task->buf, task->msg_nr, &ctx);
+        prepare_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
         // NOTE: worker coroutine poll tasks here
         // NOTE: we combine wrs, so put do_task here.
         ddl_manager_.do_task(time_syncer_->patronus_now().term(), &ctx);
-        commit_handle_request_messages(&ctx);
-        post_handle_request_messages(task->buf, task->msg_nr, &ctx);
+        commit_handle_request_messages(ex_ctx, &ctx);
+        post_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
 
-        coro_ex_ctx(coro_id).clear();
+        task->active_coro_nr--;
 
-        DVLOG(4) << "[patronus] server handling callback of task @"
-                 << (void *) task;
-        buffer_pool.put((void *) task->buf);
-        task_pool.put(task);
+        if (task->active_coro_nr == 0 && (task->fetched_nr == task->msg_nr))
+        {
+            DVLOG(4) << "[patronus] server handling callback of task @"
+                     << (void *) task << ": " << *task << ". coro: " << ctx;
+            buffer_pool.put((void *) task->buf);
+            task_pool.put(task);
+        }
 
         DVLOG(4) << "[patronus] server " << ctx
                  << " finished current task. yield to master.";
@@ -3256,18 +3335,17 @@ void Patronus::server_coro_worker(coro_t coro_id,
     ctx.yield_to_master();
 }
 
-void Patronus::commit_handle_request_messages(CoroContext *ctx)
+void Patronus::commit_handle_request_messages(
+    ServerCoroBatchExecutionContext &ex_ctx, CoroContext *ctx)
 {
-    auto &execution_ctx = coro_ex_ctx(ctx->coro_id());
-
     auto *rw_ctx = DCHECK_NOTNULL(get_rw_context());
     uint64_t rw_ctx_id = rw_context_.obj_to_id(rw_ctx);
     rw_ctx->coro_id = ctx ? ctx->coro_id() : kNotACoro;
     rw_ctx->dir_id = get_thread_id();
     rw_ctx->ready = false;
-    rw_ctx->success = &execution_ctx.success();
+    rw_ctx->wc_status = IBV_WC_SUCCESS;
 
-    bool has_work = execution_ctx.commit(WRID_PREFIX_PATRONUS_BATCH, rw_ctx_id);
+    bool has_work = ex_ctx.commit(WRID_PREFIX_PATRONUS_BATCH, rw_ctx_id);
     if (has_work)
     {
         ctx->yield_to_master();
@@ -3514,15 +3592,16 @@ RetCode Patronus::commit(PatronusBatchContext &batch, CoroContext *ctx)
     RetCode rc = kOk;
     RWContext *rw_context = nullptr;
     uint16_t rw_ctx_id = 0;
+    auto wc_status = IBV_WC_SUCCESS;
+    bool ret_success = true;
 
     if (unlikely(batch.empty()))
     {
         return kOk;
     }
-    bool ret_success = false;
     rw_context = DCHECK_NOTNULL(get_rw_context());
     rw_ctx_id = get_rw_context_id(rw_context);
-    rw_context->success = &ret_success;
+    rw_context->wc_status = IBV_WC_SUCCESS;
     rw_context->ready = false;
     rw_context->coro_id = ctx ? ctx->coro_id() : kNotACoro;
     // We have to fill the below two fields
@@ -3536,6 +3615,9 @@ RetCode Patronus::commit(PatronusBatchContext &batch, CoroContext *ctx)
     {
         goto ret;
     }
+
+    wc_status = rw_context->wc_status;
+    ret_success = wc_status = IBV_WC_SUCCESS;
 
     DCHECK(rw_context->ready)
         << "** When commit finished, should have been ready. rw_ctx at "

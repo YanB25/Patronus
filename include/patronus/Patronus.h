@@ -77,7 +77,8 @@ struct RpcContext
 
 struct RWContext
 {
-    bool *success{nullptr};
+    // bool *success{nullptr};
+    ibv_wc_status wc_status{IBV_WC_SUCCESS};
     std::atomic<bool> ready{false};
     coro_t coro_id;
     size_t target_node;
@@ -367,10 +368,13 @@ public:
     //                              CoroContext *ctx = nullptr);
     void prepare_handle_request_messages(const char *msg_buf,
                                          size_t msg_nr,
+                                         ServerCoroBatchExecutionContext &,
                                          CoroContext *ctx);
-    void commit_handle_request_messages(CoroContext *ctx);
+    void commit_handle_request_messages(ServerCoroBatchExecutionContext &,
+                                        CoroContext *ctx);
     void post_handle_request_messages(const char *msg_buf,
                                       size_t msg_nr,
+                                      ServerCoroBatchExecutionContext &ex_ctx,
                                       CoroContext *ctx);
     void post_handle_request_acquire(AcquireRequest *req,
                                      HandleReqContext &req_ctx,
@@ -592,6 +596,8 @@ private:
             mw_pool_[dirID].push(mw);
         }
     }
+
+public:
     char *get_rdma_message_buffer()
     {
         return (char *) rdma_message_buffer_pool_->get();
@@ -612,6 +618,8 @@ private:
             rdma_message_buffer_pool_->put(buf);
         }
     }
+
+private:
     RpcContext *get_rpc_context()
     {
         return rpc_context_.get();

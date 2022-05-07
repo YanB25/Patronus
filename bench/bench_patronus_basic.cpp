@@ -12,6 +12,7 @@
 #include "glog/logging.h"
 #include "patronus/All.h"
 #include "util/DataFrameF.h"
+#include "util/PerformanceReporter.h"
 #include "util/Rand.h"
 #include "util/TimeConv.h"
 
@@ -23,6 +24,7 @@ constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
 constexpr static size_t kTestTimePerThread = 1_M;
+// constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
 std::vector<size_t> col_x_alloc_size;
@@ -31,17 +33,25 @@ std::vector<size_t> col_x_coro_nr;
 std::vector<size_t> col_x_lease_time_ns;
 std::vector<size_t> col_alloc_nr;
 std::vector<size_t> col_alloc_ns;
+std::vector<uint64_t> col_lat_min;
+std::vector<uint64_t> col_lat_p5;
+std::vector<uint64_t> col_lat_p9;
+std::vector<uint64_t> col_lat_p99;
 
 using namespace hmdf;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-constexpr static size_t kCoroCnt = 16;  // max
+constexpr static size_t kCoroCnt = 32;  // max
 struct CoroCommunication
 {
     CoroCall workers[kCoroCnt];
     CoroCall master;
     ssize_t thread_remain_task;
+    double lat_min;
+    double lat_p5;
+    double lat_p9;
+    double lat_p99;
     std::vector<bool> finish_all;
 };
 
@@ -236,7 +246,11 @@ void reg_result(const std::string &name,
                 size_t block_size,
                 size_t thread_nr,
                 size_t coro_nr,
-                std::chrono::nanoseconds acquire_ns)
+                std::chrono::nanoseconds acquire_ns,
+                double lat_min,
+                double lat_p5,
+                double lat_p9,
+                double lat_p99)
 {
     col_idx.push_back(name);
     col_x_alloc_size.push_back(block_size);
@@ -246,6 +260,10 @@ void reg_result(const std::string &name,
     col_x_lease_time_ns.push_back(ns);
     col_alloc_nr.push_back(test_times);
     col_alloc_ns.push_back(total_ns);
+    col_lat_min.push_back(lat_min);
+    col_lat_p5.push_back(lat_p5);
+    col_lat_p9.push_back(lat_p9);
+    col_lat_p99.push_back(lat_p99);
 }
 
 void bench_alloc_thread_coro_master(Patronus::pointer patronus,
@@ -346,6 +364,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     size_t coro_id,
                                     CoroYield &yield,
                                     CoroCommunication &coro_comm,
+                                    bool is_master,
                                     size_t alloc_size,
                                     flag_t acquire_flag,
                                     flag_t relinquish_flag,
@@ -360,11 +379,21 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
     size_t fail_nr = 0;
     size_t succ_nr = 0;
 
+    auto min = util::time::to_ns(0ns);
+    auto max = util::time::to_ns(10ms);
+    auto range = util::time::to_ns(1us);
+    OnePassBucketMonitor lat_m(min, max, range);
+
     ChronoTimer timer;
+    ChronoTimer op_timer;
     while (coro_comm.thread_remain_task > 0)
     {
         bool succ = true;
-        VLOG(4) << "[coro] tid " << tid << " get_rlease. coro: " << ctx;
+        // VLOG(4) << "[coro] tid " << tid << " get_rlease. coro: " << ctx;
+        if (is_master && coro_id == 0)
+        {
+            op_timer.pin();
+        }
         auto lease = patronus->get_rlease(server_nid,
                                           dir_id,
                                           nullgaddr,
@@ -378,18 +407,35 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         if (succ)
         {
             succ_nr++;
-            VLOG(4) << "[coro] tid " << tid << " relinquish. coro: " << ctx;
             patronus->relinquish(lease, 0 /* hint */, relinquish_flag, &ctx);
             coro_comm.thread_remain_task--;
+            // LOG_IF(INFO, succ_nr % 10_K == 0)
+            //     << "[detail] finished 10K succeess. total: " << succ_nr
+            //     << ". coro: " << ctx;
         }
         else
         {
             fail_nr++;
-            DVLOG(4) << "[coro] tid " << tid
-                     << "get_rlease failed. coro: " << ctx;
+            // LOG_IF(INFO, fail_nr % 1_K == 0)
+            //     << "[detail] finished 1K failed. total: " << fail_nr
+            //     << ". coro: " << ctx;
+            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr)
+                << "** only this kind of error is possible.";
+        }
+        if (is_master && coro_id == 0)
+        {
+            auto ns = op_timer.pin();
+            lat_m.collect(ns);
         }
     }
     auto total_ns = timer.pin();
+    if (is_master && coro_id == 0)
+    {
+        coro_comm.lat_min = lat_m.min();
+        coro_comm.lat_p5 = lat_m.percentile(0.5);
+        coro_comm.lat_p9 = lat_m.percentile(0.9);
+        coro_comm.lat_p99 = lat_m.percentile(0.99);
+    }
 
     coro_comm.finish_all[coro_id] = true;
 
@@ -400,14 +446,23 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
     CHECK(false) << "yield back to me.";
 }
 
-void bench_alloc_thread_coro(Patronus::pointer patronus,
-                             size_t alloc_size,
-                             size_t test_times,
-                             std::atomic<ssize_t> &work_nr,
-                             size_t coro_nr,
-                             flag_t acquire_flag,
-                             flag_t relinquish_flag,
-                             std::chrono::nanoseconds acquire_ns)
+struct BenchResult
+{
+    double lat_min;
+    double lat_p5;
+    double lat_p9;
+    double lat_p99;
+};
+
+BenchResult bench_alloc_thread_coro(Patronus::pointer patronus,
+                                    size_t alloc_size,
+                                    size_t test_times,
+                                    bool is_master,
+                                    std::atomic<ssize_t> &work_nr,
+                                    size_t coro_nr,
+                                    flag_t acquire_flag,
+                                    flag_t relinquish_flag,
+                                    std::chrono::nanoseconds acquire_ns)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
@@ -425,11 +480,13 @@ void bench_alloc_thread_coro(Patronus::pointer patronus,
                                          alloc_size,
                                          acquire_flag,
                                          relinquish_flag,
-                                         acquire_ns](CoroYield &yield) {
+                                         acquire_ns,
+                                         is_master](CoroYield &yield) {
             bench_alloc_thread_coro_worker(patronus,
                                            coro_id,
                                            yield,
                                            coro_comm,
+                                           is_master,
                                            alloc_size,
                                            acquire_flag,
                                            relinquish_flag,
@@ -445,32 +502,37 @@ void bench_alloc_thread_coro(Patronus::pointer patronus,
         });
 
     coro_comm.master();
+    return BenchResult{coro_comm.lat_min,
+                       coro_comm.lat_p5,
+                       coro_comm.lat_p9,
+                       coro_comm.lat_p99};
 }
 
-void bench_template_coro(Patronus::pointer patronus,
-                         size_t test_times,
-                         size_t alloc_size,
-                         size_t coro_nr,
-                         std::atomic<ssize_t> &work_nr,
-                         flag_t acquire_flag,
-                         flag_t relinquish_flag,
-                         std::chrono::nanoseconds acquire_ns)
-{
-    auto tid = patronus->get_thread_id();
-    auto dir_id = tid % kServerThreadNr;
-    CHECK_LT(dir_id, NR_DIRECTORY)
-        << "Failed to run this case. Two threads should not share the same "
-           "directory, otherwise the one thread will poll CQE from other "
-           "threads.";
-    bench_alloc_thread_coro(patronus,
-                            alloc_size,
-                            test_times,
-                            work_nr,
-                            coro_nr,
-                            acquire_flag,
-                            relinquish_flag,
-                            acquire_ns);
-}
+// void bench_template_coro(Patronus::pointer patronus,
+//                          size_t test_times,
+//                          size_t alloc_size,
+//                          size_t coro_nr,
+//                          std::atomic<ssize_t> &work_nr,
+//                          flag_t acquire_flag,
+//                          flag_t relinquish_flag,
+//                          std::chrono::nanoseconds acquire_ns)
+// {
+//     auto tid = patronus->get_thread_id();
+//     auto dir_id = tid % kServerThreadNr;
+//     CHECK_LT(dir_id, NR_DIRECTORY)
+//         << "Failed to run this case. Two threads should not share the same "
+//            "directory, otherwise the one thread will poll CQE from other "
+//            "threads.";
+//     bench_alloc_thread_coro(patronus,
+//                             alloc_size,
+//                             test_times,
+//                             is_master,
+//                             work_nr,
+//                             coro_nr,
+//                             acquire_flag,
+//                             relinquish_flag,
+//                             acquire_ns);
+// }
 
 void bench_template(const std::string &name,
                     Patronus::pointer patronus,
@@ -499,17 +561,19 @@ void bench_template(const std::string &name,
     ChronoTimer timer;
 
     auto tid = patronus->get_thread_id();
+    BenchResult r;
 
     if (tid < thread_nr)
     {
-        bench_alloc_thread_coro(patronus,
-                                alloc_size,
-                                test_times,
-                                work_nr,
-                                coro_nr,
-                                acquire_flag,
-                                relinquish_flag,
-                                acquire_ns);
+        r = bench_alloc_thread_coro(patronus,
+                                    alloc_size,
+                                    test_times,
+                                    is_master,
+                                    work_nr,
+                                    coro_nr,
+                                    acquire_flag,
+                                    relinquish_flag,
+                                    acquire_ns);
     }
 
     bar.wait();
@@ -522,7 +586,11 @@ void bench_template(const std::string &name,
                    alloc_size,
                    thread_nr,
                    coro_nr,
-                   acquire_ns);
+                   acquire_ns,
+                   r.lat_min,
+                   r.lat_p5,
+                   r.lat_p9,
+                   r.lat_p99);
     }
     bar.wait();
 }
@@ -540,6 +608,12 @@ void run_benchmark_server(Patronus::pointer patronus,
 
     auto tid = patronus->get_thread_id();
     LOG(INFO) << "[coro] server thread tid " << tid;
+
+    LOG(INFO) << "[bench] BENCH: " << conf.name
+              << ", thread_nr: " << conf.thread_nr
+              << ", alloc_size: " << conf.block_size
+              << ", coro_nr: " << conf.coro_nr << ", report: " << conf.report;
+
     patronus->server_serve(key);
 }
 std::atomic<ssize_t> shared_task_nr;
@@ -610,14 +684,14 @@ void benchmark(Patronus::pointer patronus,
 
     size_t key = 0;
     // for (size_t thread_nr : {1, 2, 4, 8, 16})
-    for (size_t thread_nr : {1, 2, 4, 8})
-    // for (size_t thread_nr : {1, 2})
+    // for (size_t thread_nr : {1, 4, 16})
+    for (size_t thread_nr : {1, 16})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t block_size : {64ul, 2_MB, 128_MB})
         for (size_t block_size : {64ul})
         {
-            for (size_t coro_nr : {16})
+            for (size_t coro_nr : {1, 32})
             {
                 auto total_test_times = kTestTimePerThread * thread_nr;
 
@@ -805,6 +879,11 @@ int main(int argc, char *argv[])
     df.load_column<double>("alloc ops(cluster)",
                            df.get_column<double>("alloc ops(total)"));
     df.replace<double>("alloc ops(cluster)", replace_mul_f);
+
+    df.load_column<uint64_t>("lat min(ns)", std::move(col_lat_min));
+    df.load_column<uint64_t>("lat p5(ns)", std::move(col_lat_p5));
+    df.load_column<uint64_t>("lat p9(ns)", std::move(col_lat_p9));
+    df.load_column<uint64_t>("lat p99(ns)", std::move(col_lat_p99));
 
     auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
     df.write<std::ostream, std::string, size_t, double>(std::cout,
