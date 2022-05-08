@@ -11,12 +11,11 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 using namespace patronus;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-// constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
-constexpr static size_t kClientThreadNr = NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
 
 static_assert(kClientThreadNr <= kMaxAppThread);
 static_assert(kServerThreadNr <= NR_DIRECTORY);
-constexpr static size_t kCoroCnt = 8;
+constexpr static size_t kCoroCnt = 1;
 // constexpr static size_t kCoroCnt = 1;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
@@ -122,7 +121,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         if (unlikely(ec != RetCode::kOk))
         {
             CHECK(false) << "[bench] client READ failed. lease " << lease
-                         << ", ctx: " << ctx << " at " << time << "-th";
+                         << ", ctx: " << ctx << " at " << time
+                         << "-th. Failure: " << ec;
             continue;
         }
 

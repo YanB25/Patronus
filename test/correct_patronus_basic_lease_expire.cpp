@@ -20,6 +20,9 @@ constexpr static size_t kCoroCnt = 1;
 thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
 
+constexpr static size_t kMachineNr = 2;
+constexpr static size_t kClientNodeId = 1;
+
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
 constexpr static uint64_t kWaitKey = 0;
@@ -235,7 +238,12 @@ void client_master(Patronus::pointer p, CoroYield &yield)
 void client(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
+    auto nid = p->get_node_id();
     LOG(INFO) << "I am client. tid " << tid;
+    if (nid != kClientNodeId)
+    {
+        return;
+    }
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
         workers[i] =
@@ -266,7 +274,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = ::config::kMachineNr;
+    config.machine_nr = kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
@@ -285,6 +293,8 @@ int main(int argc, char *argv[])
         patronus->keeper_barrier("begin", 100ms);
         server(patronus);
     }
+
+    patronus->keeper_barrier("finished", 100ms);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

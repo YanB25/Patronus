@@ -109,8 +109,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                                     &ctx);
         if (unlikely(!lease.success()))
         {
-            LOG(WARNING) << "[bench] client coro " << ctx
-                         << " get_rlease failed. retry.";
+            // LOG(WARNING) << "[bench] client coro " << ctx
+            //              << " get_rlease failed. retry.";
+            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr);
             continue;
         }
 

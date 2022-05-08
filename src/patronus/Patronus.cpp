@@ -307,8 +307,6 @@ RetCode Patronus::read_write_impl(char *iobuf,
                                   CoroContext *ctx,
                                   TraceView v)
 {
-    bool ret = false;
-
     GlobalAddress gaddr;
     gaddr.nodeID = node_id;
     DCHECK_NE(gaddr.nodeID, get_node_id())
@@ -364,13 +362,29 @@ RetCode Patronus::read_write_impl(char *iobuf,
         << "** Should have been ready when switching back to worker " << ctx
         << ", rw_ctx_id: " << rw_ctx_id << ", ready at "
         << (void *) &rw_context->ready;
+
+    auto wc_status = rw_context->wc_status;
+
+    DCHECK(wc_status == IBV_WC_SUCCESS || wc_status == IBV_WC_WR_FLUSH_ERR ||
+           wc_status == IBV_WC_REM_ACCESS_ERR || wc_status == IBV_WC_REM_OP_ERR)
+        << "** unexpected status " << ibv_wc_status_str(wc_status) << " ["
+        << (int) wc_status << "]";
+
     if constexpr (debug())
     {
         memset(rw_context, 0, sizeof(RWContext));
     }
 
     put_rw_context(rw_context);
-    return ret ? RetCode::kOk : RetCode::kRdmaProtectionErr;
+
+    if (wc_status == IBV_WC_SUCCESS)
+    {
+        return kOk;
+    }
+    else
+    {
+        return kRdmaProtectionErr;
+    }
 }
 
 RetCode Patronus::protection_region_rw_impl(Lease &lease,
@@ -1024,7 +1038,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
         slot_id = s;
         if (!lock_manager_.try_lock(bucket_id, slot_id))
         {
-            req_ctx.status = AcquireRequestStatus::kLockedErr;
+            status = AcquireRequestStatus::kLockedErr;
             goto out;
         }
         else
@@ -1064,7 +1078,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
 
     if (likely(alloc_pr))
     {
-        protection_region = get_protection_region();
+        protection_region = DCHECK_NOTNULL(get_protection_region());
         protection_region_id =
             protection_region_pool_->buf_to_id(protection_region);
         header_addr = protection_region;
@@ -1083,7 +1097,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                     (uint64_t) object_addr, req->size, rdma_ctx);
                 if (unlikely(buffer_mr == nullptr))
                 {
-                    req_ctx.status = AcquireRequestStatus::kRegMrErr;
+                    status = AcquireRequestStatus::kRegMrErr;
                     goto out;
                 }
             }
@@ -1093,7 +1107,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                     (uint64_t) header_addr, sizeof(ProtectionRegion), rdma_ctx);
                 if (unlikely(header_mr == nullptr))
                 {
-                    req_ctx.status = AcquireRequestStatus::kRegMrErr;
+                    status = AcquireRequestStatus::kRegMrErr;
                     goto out;
                 }
             }
@@ -1116,7 +1130,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                 buffer_mw = get_mw(dirID);
                 if (unlikely(buffer_mw == nullptr))
                 {
-                    req_ctx.status = AcquireRequestStatus::kNoMw;
+                    status = AcquireRequestStatus::kNoMw;
                     goto out;
                 }
                 auto buffer_wr_idx = ex_ctx.fetch_wr();
@@ -1145,7 +1159,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                 header_mw = get_mw(dirID);
                 if (unlikely(buffer_mw == nullptr || header_mw == nullptr))
                 {
-                    req_ctx.status = AcquireRequestStatus::kNoMw;
+                    status = AcquireRequestStatus::kNoMw;
                     goto out;
                 }
                 auto buffer_wr_idx = ex_ctx.fetch_wr();
@@ -3300,9 +3314,6 @@ void Patronus::server_coro_worker(coro_t coro_id,
         }
 
         ex_ctx.clear();
-        // LOG(INFO) << "[debug] !! ex_ctx " << (void *) &ex_ctx
-        //           << ", cleared. wr_size: " << ex_ctx.wr_size()
-        //           << ", req_size: " << ex_ctx.req_size();
 
         DVLOG(4) << "[patronus] server handling task @" << (void *) task
                  << ", message_nr " << task->msg_nr << ", handle "
@@ -3616,14 +3627,14 @@ RetCode Patronus::commit(PatronusBatchContext &batch, CoroContext *ctx)
         goto ret;
     }
 
-    wc_status = rw_context->wc_status;
-    ret_success = wc_status = IBV_WC_SUCCESS;
-
     DCHECK(rw_context->ready)
         << "** When commit finished, should have been ready. rw_ctx at "
         << (void *) rw_context << ", ready at " << (void *) &rw_context->ready
         << ", rw_ctx_id: " << rw_ctx_id << ", expect wrid: " << wr_id
         << ", coro: " << pre_coro_ctx(ctx);
+
+    wc_status = rw_context->wc_status;
+    ret_success = (wc_status == IBV_WC_SUCCESS);
 
     if (likely(ret_success))
     {

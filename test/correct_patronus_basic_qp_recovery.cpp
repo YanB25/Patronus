@@ -25,6 +25,9 @@ constexpr static size_t kTestTime = 10_K;
 constexpr static size_t kFaultNr = 100;
 constexpr static size_t kFaultEvery = kTestTime / kFaultNr;
 
+constexpr static size_t kMachineNr = 2;
+constexpr static size_t kClientNodeId = 1;
+
 constexpr static uint64_t kWaitFlag = 0;
 
 using namespace std::chrono_literals;
@@ -144,42 +147,49 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 void client_master(Patronus::pointer p, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
+    auto nid = p->get_node_id();
 
-    CoroContext mctx(tid, &yield, workers);
-    CHECK(mctx.is_master());
-
-    for (size_t i = 0; i < kCoroCnt; ++i)
+    if (nid == kClientNodeId)
     {
-        mctx.yield_to_worker(i);
-    }
-    LOG(INFO) << "Return back to master. start to recv messages";
-    coro_t coro_buf[2 * kCoroCnt];
-    while (!std::all_of(std::begin(client_comm.finish_all_task),
-                        std::end(client_comm.finish_all_task),
-                        [](bool i) { return i; }))
-    {
-        // try to see if messages arrived
-
-        auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
-        for (size_t i = 0; i < nr; ++i)
-        {
-            auto coro_id = coro_buf[i];
-            DVLOG(1) << "[bench] yielding due to CQE";
-            mctx.yield_to_worker(coro_id);
-        }
+        CoroContext mctx(tid, &yield, workers);
+        CHECK(mctx.is_master());
 
         for (size_t i = 0; i < kCoroCnt; ++i)
         {
-            if (client_comm.finish_cur_task[i] &&
-                !client_comm.finish_all_task[i])
+            mctx.yield_to_worker(i);
+        }
+        LOG(INFO) << "Return back to master. start to recv messages";
+        coro_t coro_buf[2 * kCoroCnt];
+        while (!std::all_of(std::begin(client_comm.finish_all_task),
+                            std::end(client_comm.finish_all_task),
+                            [](bool i) { return i; }))
+        {
+            // try to see if messages arrived
+
+            auto nr = p->try_get_client_continue_coros(coro_buf, 2 * kCoroCnt);
+            for (size_t i = 0; i < nr; ++i)
             {
-                DVLOG(1) << "[bench] yielding to coro " << (int) i
-                         << " for new task";
-                mctx.yield_to_worker(i);
+                auto coro_id = coro_buf[i];
+                DVLOG(1) << "[bench] yielding due to CQE";
+                mctx.yield_to_worker(coro_id);
+            }
+
+            for (size_t i = 0; i < kCoroCnt; ++i)
+            {
+                if (client_comm.finish_cur_task[i] &&
+                    !client_comm.finish_all_task[i])
+                {
+                    DVLOG(1) << "[bench] yielding to coro " << (int) i
+                             << " for new task";
+                    mctx.yield_to_worker(i);
+                }
             }
         }
     }
-
+    else
+    {
+        LOG(INFO) << "[bench] nid " << nid << " skipped";
+    }
     p->finished(kWaitFlag);
     LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
@@ -254,6 +264,8 @@ int main(int argc, char *argv[])
         patronus->keeper_barrier("begin", 100ms);
         server(patronus);
     }
+
+    patronus->keeper_barrier("finished", 100ms);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
