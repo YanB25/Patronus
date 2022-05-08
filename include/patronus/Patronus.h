@@ -77,7 +77,6 @@ struct RpcContext
 
 struct RWContext
 {
-    // bool *success{nullptr};
     ibv_wc_status wc_status{IBV_WC_SUCCESS};
     std::atomic<bool> ready{false};
     coro_t coro_id;
@@ -363,9 +362,6 @@ public:
         return dsm_->get_server_buffer();
     }
 
-    // void handle_request_messages(const char *msg_buf,
-    //                              size_t msg_nr,
-    //                              CoroContext *ctx = nullptr);
     void prepare_handle_request_messages(const char *msg_buf,
                                          size_t msg_nr,
                                          ServerCoroBatchExecutionContext &,

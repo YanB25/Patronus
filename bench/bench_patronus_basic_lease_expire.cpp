@@ -26,6 +26,7 @@ constexpr static size_t kCoroStartKey = 1024;
 constexpr static size_t kTestTime = 1 * define::M;
 constexpr static size_t kThreadNr = 4;
 static_assert(kThreadNr <= kMaxAppThread);
+static_assert(kThreadNr <= NR_DIRECTORY);
 
 constexpr static size_t kWaitKey = 0;
 
@@ -80,7 +81,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 {
     auto tid = p->get_thread_id();
 
-    auto dir_id = tid % NR_DIRECTORY;
+    auto dir_id = tid;
 
     CoroContext ctx(tid, &yield, &client_coro.master, coro_id);
 
