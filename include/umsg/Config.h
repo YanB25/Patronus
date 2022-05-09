@@ -18,6 +18,9 @@ static_assert(kRecvBuffer <= 32768,
               "sure, please refer to the actual manual");
 
 // better be cahceline alinged. e.g. multiple of 64
+// 8: the batch size
+// 8 * 64: 8 element in a batch, each of which 64B
+// constexpr static size_t kUserMessageSize = 8 + 8 * 64;
 constexpr static size_t kUserMessageSize = 64;
 constexpr static size_t kPostMessageSize = kUserMessageSize + 40;
 /**
@@ -29,6 +32,8 @@ constexpr static size_t kRecvLimit = kPostRecvBufferBatch;
 constexpr static size_t kMaxRecvBuffer = kPostMessageSize * kRecvLimit;
 
 constexpr static size_t kMaxInlinedSize = 32;
+
+constexpr static size_t kSenderMaxBatchSize = 32;
 
 namespace sender
 {

@@ -22,6 +22,7 @@
 #include "patronus/memory/allocator.h"
 #include "patronus/memory/slab_allocator.h"
 #include "util/Debug.h"
+#include "util/PerformanceReporter.h"
 #include "util/RetCode.h"
 #include "util/Tracer.h"
 
@@ -892,6 +893,10 @@ private:
 
     void validate_buffers();
 
+    void debug_analysis_per_qp_batch(const char *msg_buf,
+                                     size_t msg_nr,
+                                     OnePassBucketMonitor<double> &m);
+
     // owned by both
     DSM::pointer dsm_;
     time::TimeSyncer::pointer time_syncer_;
@@ -1524,6 +1529,57 @@ inline std::ostream &operator<<(std::ostream &os,
     os << "}";
 
     return os;
+}
+
+inline void Patronus::debug_analysis_per_qp_batch(
+    const char *msg_buf, size_t msg_nr, OnePassBucketMonitor<double> &batch_m)
+{
+    size_t batch_nr[MAX_MACHINE][kMaxAppThread]{};
+
+    for (size_t i = 0; i < msg_nr; ++i)
+    {
+        auto *base = (BaseMessage *) (msg_buf + i * kMessageSize);
+        auto request_type = base->type;
+        switch (request_type)
+        {
+        case RpcType::kAcquireNoLeaseReq:
+        case RpcType::kAcquireRLeaseReq:
+        case RpcType::kAcquireWLeaseReq:
+        {
+            auto *msg = (AcquireRequest *) base;
+            batch_nr[msg->cid.node_id][msg->cid.thread_id]++;
+            break;
+        }
+        case RpcType::kRelinquishReq:
+        {
+            auto *msg = (LeaseModifyRequest *) base;
+            batch_nr[msg->cid.node_id][msg->cid.thread_id]++;
+            break;
+        }
+        case RpcType::kAdmin:
+        {
+            auto *msg = (AdminRequest *) base;
+            batch_nr[msg->cid.node_id][msg->cid.thread_id]++;
+            // do nothing
+            break;
+        }
+        default:
+        {
+            LOG(FATAL) << "Unknown or invalid request type " << request_type
+                       << ". Possible corrupted message";
+        }
+        }
+    }
+    for (size_t m = 0; m < MAX_MACHINE; ++m)
+    {
+        for (size_t t = 0; t < kMaxAppThread; ++t)
+        {
+            if (batch_nr[m][t])
+            {
+                batch_m.collect(batch_nr[m][t]);
+            }
+        }
+    }
 }
 
 }  // namespace patronus

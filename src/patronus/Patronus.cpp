@@ -2660,11 +2660,12 @@ void Patronus::server_coro_worker(coro_t coro_id,
     auto &task_pool = server_coro_ctx_.task_pool;
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
-    // LOG(WARNING) << "NOTE: split coroutine with DDL manager & message
-    // handlers";
+    // uint64_t min = 0;
+    // uint64_t max = config::umsg::kRecvLimit;
+    // uint64_t rng = 1;
+    // OnePassBucketMonitor<double> per_qp_batch_m(min, max, rng);
 
     auto &ex_ctx = coro_ex_ctx(coro_id);
-
     while (likely(!should_exit(wait_key) || !task_queue.empty()))
     {
         DCHECK(!task_queue.empty());
@@ -2706,6 +2707,8 @@ void Patronus::server_coro_worker(coro_t coro_id,
         commit_handle_request_messages(ex_ctx, &ctx);
         post_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
 
+        // debug_analysis_per_qp_batch(msg_buf, acquire_task, per_qp_batch_m);
+
         task->active_coro_nr--;
 
         if (task->active_coro_nr == 0 && (task->fetched_nr == task->msg_nr))
@@ -2719,6 +2722,8 @@ void Patronus::server_coro_worker(coro_t coro_id,
         DVLOG(4) << "[patronus] server " << ctx
                  << " finished current task. yield to master.";
         comm.finished[coro_id] = true;
+
+        // LOG_EVERY_N(INFO, 1000) << "per_qp_batch_m: " << per_qp_batch_m;
         ctx.yield_to_master();
     }
 

@@ -559,6 +559,19 @@ public:
         CHECK_LT(dir, dirCon.size());
         cur_dir_ = dir;
     }
+    bool unreliable_prepare_send(const char *buf,
+                                 size_t size,
+                                 uint16_t node_id,
+                                 size_t dir_id)
+    {
+        DCHECK(false) << "Empirically: batching does not make performance "
+                         "better. Please do not use me.";
+        return umsg_->prepare_send(get_thread_id(), buf, size, node_id, dir_id);
+    }
+    void unreliable_commit_send()
+    {
+        return umsg_->commit_send(get_thread_id());
+    }
 
     void unreliable_send(const char *buf,
                          size_t size,

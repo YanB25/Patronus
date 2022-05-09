@@ -291,5 +291,5 @@ will see an unexpected cases:
 
 [-] See what happen if RMSG delete the copy. Could it be better
     - no better. not significant
-2. See if we can boost performance by batching in server-side. I think it is very necessary.
-3. Optimize bench_patronus_basic. Dont be so long, then 
+[2] See if we can boost performance by batching in server-side. I think it is very necessary.
+    - only 30% better, not significantly better

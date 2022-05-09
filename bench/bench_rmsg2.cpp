@@ -211,7 +211,7 @@ void bench_alloc_thread_coro(Patronus::pointer patronus,
 
 void run_benchmark_server(Patronus::pointer patronus)
 {
-    auto tid = patronus->get_thread_id();
+    // auto tid = patronus->get_thread_id();
     auto dsm = patronus->get_dsm();
 
     std::vector<char> buffer;

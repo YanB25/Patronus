@@ -8,6 +8,7 @@
 #include <iostream>
 
 #include "Common.h"
+#include "patronus/Config.h"
 #include "patronus/Time.h"
 #include "umsg/Config.h"
 #include "umsg/UnreliableConnection.h"
@@ -215,6 +216,26 @@ struct LeaseModifyResponse
 } __attribute__((packed));
 static_assert(sizeof(LeaseModifyResponse) < config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &req);
+
+struct BatchBaseMessage
+{
+    enum RpcType type;
+    ClientID cid;
+    char others[64 - sizeof(type) - sizeof(cid)];
+} __attribute__((packed));
+static_assert(sizeof(BatchBaseMessage) == 64);
+
+// struct BatchResponse
+// {
+//     uint64_t batch_size;
+//     BatchBaseMessage messages[config::patronus::kMaxResponseBatchSize];
+// } __attribute__((packed));
+// static_assert(sizeof(BatchResponse) <= config::umsg::kUserMessageSize);
+// inline std::ostream &operator<<(std::ostream &os, const BatchResponse &resp)
+// {
+//     os << "{BatchResp size: " << resp.batch_size << ", ...}";
+//     return os;
+// }
 
 enum class RWFlag : uint8_t
 {

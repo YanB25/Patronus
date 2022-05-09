@@ -22,6 +22,11 @@ public:
         t_ = rhs.t_;
         return *this;
     }
+    const T &operator=(const Aligned &rhs) const
+    {
+        t_ = rhs.t_;
+        return *this;
+    }
     Aligned(Aligned &&rhs) : t_(std::move(rhs.t_))
     {
     }
@@ -51,6 +56,34 @@ private:
 
     using aligned_t = typename std::aligned_storage<sizeof(T), kAligned>::type;
     aligned_t t_;
+};
+
+template <typename T, size_t kSize, size_t kAlignment = 64>
+class AlignedArray
+{
+public:
+    AlignedArray()
+    {
+        for (size_t i = 0; i < kSize; ++i)
+        {
+            arr_[i].get() = T{};
+        }
+    }
+    const T &operator[](size_t idx) const
+    {
+        return arr_[idx].get();
+    }
+    T &operator[](size_t idx)
+    {
+        return arr_[idx].get();
+    }
+    size_t size() const
+    {
+        return arr_.size();
+    }
+
+private:
+    std::array<Aligned<T, kAlignment>, kSize> arr_;
 };
 
 template <typename T>

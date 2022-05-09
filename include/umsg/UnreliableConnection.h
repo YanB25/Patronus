@@ -37,6 +37,18 @@ public:
     {
         send_->send(i_ep_id, buf, size, node_id, target_ep_id);
     }
+    bool prepare_send(size_t i_ep_id,
+                      const char *buf,
+                      size_t size,
+                      uint16_t node_id,
+                      size_t target_ep_id)
+    {
+        return send_->prepare_send(i_ep_id, buf, size, node_id, target_ep_id);
+    }
+    void commit_send(size_t i_ep_id)
+    {
+        send_->commit_send(i_ep_id);
+    }
     size_t try_recv(size_t i_ep_id, char *ibuf, size_t limit = 1)
     {
         return recv_->try_recv(i_ep_id, ibuf, limit);
