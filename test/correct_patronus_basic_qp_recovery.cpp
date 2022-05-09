@@ -25,7 +25,6 @@ constexpr static size_t kTestTime = 10_K;
 constexpr static size_t kFaultNr = 100;
 constexpr static size_t kFaultEvery = kTestTime / kFaultNr;
 
-constexpr static size_t kMachineNr = 2;
 constexpr static size_t kClientNodeId = 1;
 
 constexpr static uint64_t kWaitFlag = 0;
