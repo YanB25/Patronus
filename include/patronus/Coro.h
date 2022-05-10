@@ -107,8 +107,9 @@ class ServerCoroBatchExecutionContext
 public:
     // buffer_mw & header_mw: the max ibv_post_send nr is twice the number of
     // message
+    // The auto-relinquish experiments may also contain ones. So double again.
     constexpr static size_t kBatchLimit =
-        2 * config::patronus::kHandleRequestBatchLimit;
+        4 * config::patronus::kHandleRequestBatchLimit;
     static size_t batch_limit()
     {
         return kBatchLimit;
@@ -136,9 +137,17 @@ public:
     {
         dsm_ = dsm;
     }
+    static size_t max_wr_size()
+    {
+        return kBatchLimit;
+    }
     size_t wr_size() const
     {
         return wr_idx_;
+    }
+    size_t wr_remain_size() const
+    {
+        return kBatchLimit - wr_idx_;
     }
     size_t req_size() const
     {
@@ -183,10 +192,6 @@ public:
                 DCHECK(!(wr.send_flags & IBV_SEND_SIGNALED));
             }
         }
-
-        // LOG(INFO) << "[debug] !! posting to QP[" << rr_machine_idx_ << "]["
-        //           << rr_thread_idx_ << "]. posted: " << wr_idx_
-        //           << ", req_nr: " << req_idx_;
 
         auto *qp = get_qp_rr();
         auto ret = ibv_post_send(qp, wrs_, &bad_wr_);

@@ -405,8 +405,7 @@ void benchmark_client(Patronus::pointer p,
         auto rng =
             std::chrono::duration_cast<std::chrono::nanoseconds>(1us).count();
         OnePassBucketMonitor late_ns(min, max, rng);
-        LOG(INFO) << "[debug] !! acquire_time: "
-                  << util::pre_set(tc.acquire_time_, 100);
+  
         uint64_t before_time = 0;
         for (auto time : tc.acquire_time_)
         {

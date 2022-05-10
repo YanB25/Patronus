@@ -63,6 +63,7 @@ struct BenchConfig
     size_t task_nr;
     flag_t acquire_flag;
     flag_t relinquish_flag;
+    bool do_not_call_relinquish{false};
     std::chrono::nanoseconds acquire_ns;
     std::string name;
     bool report;
@@ -104,6 +105,26 @@ public:
         conf.acquire_ns = acquire_ns;
         return pipeline({conf, conf});
     }
+    static std::vector<BenchConfig> get_alloc_only(const std::string &name,
+                                                   size_t thread_nr,
+                                                   size_t coro_nr,
+                                                   size_t block_size,
+                                                   size_t task_nr)
+    {
+        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                              (flag_t) AcquireRequestFlag::kNoBindAny |
+                              (flag_t) AcquireRequestFlag::kWithAllocation;
+        flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind |
+                                 (flag_t) LeaseModifyFlag::kWithDeallocation;
+        auto acquire_ns = 0ns;
+
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.acquire_flag = acquire_flag;
+        conf.relinquish_flag = relinquish_flag;
+        conf.acquire_ns = acquire_ns;
+        return pipeline({conf, conf});
+    }
     static std::vector<BenchConfig> get_rlease_one_bind(const std::string &name,
                                                         size_t thread_nr,
                                                         size_t coro_nr,
@@ -119,6 +140,61 @@ public:
         conf.acquire_flag = acquire_flag;
         conf.relinquish_flag = relinquish_flag;
         conf.acquire_ns = acquire_ns;
+        return pipeline({conf, conf});
+    }
+    static std::vector<BenchConfig> get_rlease_one_bind_one_unbind(
+        const std::string &name,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t block_size,
+        size_t task_nr)
+    {
+        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                              (flag_t) AcquireRequestFlag::kNoBindPR;
+        flag_t relinquish_flag = (flag_t) 0;
+        auto acquire_ns = 0ns;
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.acquire_flag = acquire_flag;
+        conf.relinquish_flag = relinquish_flag;
+        conf.acquire_ns = acquire_ns;
+        return pipeline({conf, conf});
+    }
+    static std::vector<BenchConfig> get_rlease_one_bind_one_unbind_over_mr(
+        const std::string &name,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t block_size,
+        size_t task_nr)
+    {
+        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                              (flag_t) AcquireRequestFlag::kNoBindPR |
+                              (flag_t) AcquireRequestFlag::kUseMR;
+        flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kUseMR;
+        auto acquire_ns = 0ns;
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.acquire_flag = acquire_flag;
+        conf.relinquish_flag = relinquish_flag;
+        conf.acquire_ns = acquire_ns;
+        return pipeline({conf, conf});
+    }
+    static std::vector<BenchConfig> get_rlease_one_bind_one_unbind_autogc(
+        const std::string &name,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t block_size,
+        size_t task_nr)
+    {
+        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoBindPR;
+        flag_t relinquish_flag = (flag_t) 0;
+        auto acquire_ns = 1ns;
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.acquire_flag = acquire_flag;
+        conf.relinquish_flag = relinquish_flag;
+        conf.acquire_ns = acquire_ns;
+        conf.do_not_call_relinquish = true;
         return pipeline({conf, conf});
     }
     static std::vector<BenchConfig> get_rlease_no_unbind(
@@ -172,7 +248,7 @@ public:
         conf.acquire_ns = acquire_ns;
         return pipeline({conf, conf});
     }
-    static std::vector<BenchConfig> get_rlease_full_auto_gc(
+    static std::vector<BenchConfig> get_rlease_full_autogc(
         const std::string &name,
         size_t thread_nr,
         size_t coro_nr,
@@ -187,6 +263,7 @@ public:
         conf.acquire_flag = acquire_flag;
         conf.relinquish_flag = relinquish_flag;
         conf.acquire_ns = acquire_ns;
+        conf.do_not_call_relinquish = true;
         return pipeline({conf, conf});
     }
     static std::vector<BenchConfig> get_rlease_alloc(const std::string &name,
@@ -368,7 +445,8 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     size_t alloc_size,
                                     flag_t acquire_flag,
                                     flag_t relinquish_flag,
-                                    std::chrono::nanoseconds acquire_ns)
+                                    std::chrono::nanoseconds acquire_ns,
+                                    bool do_not_call_relinquish)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
@@ -407,7 +485,11 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         if (succ)
         {
             succ_nr++;
-            patronus->relinquish(lease, 0 /* hint */, relinquish_flag, &ctx);
+            if (!do_not_call_relinquish)
+            {
+                patronus->relinquish(
+                    lease, 0 /* hint */, relinquish_flag, &ctx);
+            }
             coro_comm.thread_remain_task--;
             // LOG_IF(INFO, succ_nr % 10_K == 0)
             //     << "[detail] finished 10K succeess. total: " << succ_nr
@@ -462,7 +544,8 @@ BenchResult bench_alloc_thread_coro(Patronus::pointer patronus,
                                     size_t coro_nr,
                                     flag_t acquire_flag,
                                     flag_t relinquish_flag,
-                                    std::chrono::nanoseconds acquire_ns)
+                                    std::chrono::nanoseconds acquire_ns,
+                                    bool do_not_call_relinquish)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
@@ -474,24 +557,27 @@ BenchResult bench_alloc_thread_coro(Patronus::pointer patronus,
 
     for (size_t i = 0; i < coro_nr; ++i)
     {
-        coro_comm.workers[i] = CoroCall([patronus,
-                                         coro_id = i,
-                                         &coro_comm,
-                                         alloc_size,
-                                         acquire_flag,
-                                         relinquish_flag,
-                                         acquire_ns,
-                                         is_master](CoroYield &yield) {
-            bench_alloc_thread_coro_worker(patronus,
-                                           coro_id,
-                                           yield,
-                                           coro_comm,
-                                           is_master,
-                                           alloc_size,
-                                           acquire_flag,
-                                           relinquish_flag,
-                                           acquire_ns);
-        });
+        coro_comm.workers[i] =
+            CoroCall([patronus,
+                      coro_id = i,
+                      &coro_comm,
+                      alloc_size,
+                      acquire_flag,
+                      relinquish_flag,
+                      acquire_ns,
+                      is_master,
+                      do_not_call_relinquish](CoroYield &yield) {
+                bench_alloc_thread_coro_worker(patronus,
+                                               coro_id,
+                                               yield,
+                                               coro_comm,
+                                               is_master,
+                                               alloc_size,
+                                               acquire_flag,
+                                               relinquish_flag,
+                                               acquire_ns,
+                                               do_not_call_relinquish);
+            });
     }
 
     coro_comm.master =
@@ -546,7 +632,8 @@ void bench_template(const std::string &name,
                     bool report,
                     flag_t acquire_flag,
                     flag_t relinquish_flag,
-                    std::chrono::nanoseconds acquire_ns)
+                    std::chrono::nanoseconds acquire_ns,
+                    bool do_not_call_relinquish)
 
 {
     if (is_master)
@@ -573,7 +660,8 @@ void bench_template(const std::string &name,
                                     coro_nr,
                                     acquire_flag,
                                     relinquish_flag,
-                                    acquire_ns);
+                                    acquire_ns,
+                                    do_not_call_relinquish);
     }
 
     bar.wait();
@@ -642,7 +730,8 @@ void run_benchmark_client(Patronus::pointer patronus,
                    conf.report,
                    conf.acquire_flag,
                    conf.relinquish_flag,
-                   conf.acquire_ns);
+                   conf.acquire_ns,
+                   conf.do_not_call_relinquish);
     bar.wait();
     if (is_master)
     {
@@ -685,13 +774,15 @@ void benchmark(Patronus::pointer patronus,
     size_t key = 0;
     // for (size_t thread_nr : {1, 2, 4, 8, 16})
     // for (size_t thread_nr : {1, 4, 16})
-    for (size_t thread_nr : {1, 16})
+    // for (size_t thread_nr : {1, 16})
+    for (size_t thread_nr : {16})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t block_size : {64ul, 2_MB, 128_MB})
         for (size_t block_size : {64ul})
         {
-            for (size_t coro_nr : {1, 32})
+            // for (size_t coro_nr : {1, 32})
+            for (size_t coro_nr : {32})
             {
                 auto total_test_times = kTestTimePerThread * thread_nr;
 
@@ -706,6 +797,16 @@ void benchmark(Patronus::pointer patronus,
                         patronus, configs, bar, is_client, is_master, key);
                 }
                 {
+                    auto configs =
+                        BenchConfigFactory::get_alloc_only("alloc w/o(*)",
+                                                           thread_nr,
+                                                           coro_nr,
+                                                           block_size,
+                                                           total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
                     auto configs = BenchConfigFactory::get_rlease_one_bind(
                         "w(buf) w/o(pr unbind gc)",
                         thread_nr,
@@ -715,71 +816,70 @@ void benchmark(Patronus::pointer patronus,
                     run_benchmark(
                         patronus, configs, bar, is_client, is_master, key);
                 }
-                // {
-                //     auto configs = BenchConfigFactory::get_rlease_no_unbind(
-                //         "w(pr buf) w/o(unbind gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs = BenchConfigFactory::get_rlease_full(
-                //         "w(pr buf unbind) w/o(gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs =
-                //     BenchConfigFactory::get_rlease_full_over_mr(
-                //         "w(pr buf unbind [MR]) w/o(gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         // MR is so slow
-                //         total_test_times / 20);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs =
-                //     BenchConfigFactory::get_rlease_full_auto_gc(
-                //         "w(pr buf unbind gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs =
-                //         BenchConfigFactory::get_rlease_alloc("alloc
-                //         w(unbind)",
-                //                                              thread_nr,
-                //                                              coro_nr,
-                //                                              block_size,
-                //                                              total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs =
-                //         BenchConfigFactory::get_rlease_alloc_no_unbind(
-                //             "alloc w/o(unbind)",
-                //             thread_nr,
-                //             coro_nr,
-                //             block_size,
-                //             total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
+                {
+                    auto configs =
+                        BenchConfigFactory::get_rlease_one_bind_one_unbind(
+                            "w(buf unbind) w/o(pr gc)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::
+                        get_rlease_one_bind_one_unbind_over_mr(
+                            "[MR] w(buf unbind) w/o(pr gc)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times / 100);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::
+                        get_rlease_one_bind_one_unbind_autogc(
+                            "w(buf unbind gc) w/o(pr)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_full(
+                        "w(buf pr unbind) w/o(gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_full_over_mr(
+                        "[MR] w(buf pr unbind) w/o(gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        // MR is so slow
+                        total_test_times / 100);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_full_autogc(
+                        "w(buf pr unbind gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
             }
         }
     }

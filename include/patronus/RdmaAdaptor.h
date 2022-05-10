@@ -193,9 +193,6 @@ public:
                    std::chrono::nanoseconds ns) override
     {
         auto &lease = *(Lease *) handle.private_data();
-        LOG(INFO) << "[debug] !! extend with next_extend_unit_nr: "
-                  << lease.next_extend_unit_nr()
-                  << ". coro: " << pre_coro_ctx(coro_ctx_);
         return patronus_->extend(lease, ns, 0 /* flag */, coro_ctx_);
     }
     GlobalAddress lease_to_exposed_gaddr(const Lease &lease) const

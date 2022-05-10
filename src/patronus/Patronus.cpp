@@ -2460,7 +2460,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         // indicate that server will by no means GC the lease
         bool force_gc = flag & (flag_t) LeaseModifyFlag::kForceUnbind;
         bool client_already_exteded = unit_nr_to_ddl != expect_unit_nr_to_ddl;
-        DVLOG(4) << "[patronus][gc_lease] determine the behaviour: force_gc: "
+        DVLOG(4) << "[patronus][gc_lease] determine the behaviour : force_gc : "
                  << force_gc
                  << ", client_already_extended: " << client_already_exteded
                  << " (pr->aba_unit_nr_to_ddl: " << aba_unit_nr_to_ddl
@@ -2703,7 +2703,14 @@ void Patronus::server_coro_worker(coro_t coro_id,
         prepare_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
         // NOTE: worker coroutine poll tasks here
         // NOTE: we combine wrs, so put do_task here.
-        ddl_manager_.do_task(time_syncer_->patronus_now().term(), &ctx);
+        DCHECK_GE(2 * ex_ctx.wr_remain_size(), ex_ctx.max_wr_size())
+            << "** By design, we give ex_ctx the double capacity to handle 1) "
+               "requests and 2) auto-relinquish. Therefore, ex_ctx should be "
+               "at most half-full";
+        ddl_manager_.do_task(time_syncer_->patronus_now().term(),
+                             &ctx,
+                             // one task may have two wr at most
+                             ex_ctx.wr_remain_size() / 2);
         commit_handle_request_messages(ex_ctx, &ctx);
         post_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
 
