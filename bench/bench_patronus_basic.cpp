@@ -775,17 +775,123 @@ void benchmark(Patronus::pointer patronus,
     // for (size_t thread_nr : {1, 2, 4, 8, 16})
     // for (size_t thread_nr : {1, 4, 16})
     // for (size_t thread_nr : {1, 16})
-    for (size_t thread_nr : {16})
+    // for (size_t thread_nr : {1, 4, 8, 16, 32})
+    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t block_size : {64ul, 2_MB, 128_MB})
         for (size_t block_size : {64ul})
         {
-            // for (size_t coro_nr : {1, 32})
-            for (size_t coro_nr : {32})
+            for (size_t coro_nr : {1})
+            // for (size_t coro_nr : {1, 2, 4, 8, 16, 32})
             {
                 auto total_test_times = kTestTimePerThread * thread_nr;
+                {
+                    auto configs = BenchConfigFactory::get_rlease_nothing(
+                        "w/o(*)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs =
+                        BenchConfigFactory::get_alloc_only("alloc w/o(*)",
+                                                           thread_nr,
+                                                           coro_nr,
+                                                           block_size,
+                                                           total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_one_bind(
+                        "w(buf) w/o(pr unbind gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs =
+                        BenchConfigFactory::get_rlease_one_bind_one_unbind(
+                            "w(buf unbind) w/o(pr gc)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::
+                        get_rlease_one_bind_one_unbind_over_mr(
+                            "[MR] w(buf unbind) w/o(pr gc)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times / 100);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::
+                        get_rlease_one_bind_one_unbind_autogc(
+                            "w(buf unbind gc) w/o(pr)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_full(
+                        "w(buf pr unbind) w/o(gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_full_over_mr(
+                        "[MR] w(buf pr unbind) w/o(gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        // MR is so slow
+                        total_test_times / 100);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_full_autogc(
+                        "w(buf pr unbind gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+            }
+        }
+    }
 
+    for (size_t thread_nr : {32})
+    {
+        CHECK_LE(thread_nr, kMaxAppThread);
+        for (size_t block_size : {64ul})
+        {
+            for (size_t coro_nr : {2, 4, 8, 16, 32})
+            {
+                auto total_test_times = kTestTimePerThread * 4;
                 {
                     auto configs = BenchConfigFactory::get_rlease_nothing(
                         "w/o(*)",
@@ -966,6 +1072,9 @@ int main(int argc, char *argv[])
     auto div_f2 = gen_F_div<double, size_t, double>();
     auto ops_f = gen_F_ops<size_t, size_t, double>();
     auto mul_f = gen_F_mul<double, size_t, double>();
+    auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
+    df.consolidate<size_t, size_t, size_t>(
+        "x_thread_nr", "x_coro_nr", "x_effective_client_nr", mul_f2, false);
     df.consolidate<size_t, size_t, double>(
         "alloc_ns(total)", "alloc_nr(total)", "alloc lat", div_f, false);
     df.consolidate<size_t, size_t, double>(
