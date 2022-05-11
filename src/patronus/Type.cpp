@@ -164,7 +164,7 @@ void debug_validate_acquire_request_flag(flag_t flag)
         bool only_alloc = flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
         bool reserved = flag & (flag_t) AcquireRequestFlag::kReserved;
         bool use_mr = flag & (flag_t) AcquireRequestFlag::kUseMR;
-        bool do_nothing = flag & (flag_t) AcquireRequestFlag::kDoNothing;
+        bool no_rpc = flag & (flag_t) AcquireRequestFlag::kNoRpc;
         DCHECK(!reserved);
         if (with_alloc)
         {
@@ -187,13 +187,16 @@ void debug_validate_acquire_request_flag(flag_t flag)
                 << "Not sure: If using MR, not guarantee to work with lease. "
                    "And the performance will be terrible in my expection";
         }
-        if (do_nothing)
+        if (no_rpc)
         {
             CHECK(!with_conflict_detect)
-                << "with_conflict_detect conflict with do_nothing";
-            CHECK(!with_alloc) << "with_alloc conflict with do_nothing";
-            CHECK(!only_alloc) << "only_alloc conflict with do_nothing";
-            CHECK(!use_mr) << "use_mr conflict with do_nothing";
+                << "with_conflict_detect conflict with do_nothing. "
+                << ", ";
+            CHECK(!with_alloc)
+                << "with_alloc conflict with do_nothing. " << no_rpc;
+            CHECK(!only_alloc)
+                << "only_alloc conflict with do_nothing. " << no_rpc;
+            CHECK(!use_mr) << "use_mr conflict with do_nothing. " << no_rpc;
         }
     }
 }
@@ -243,10 +246,10 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
     {
         os << "use-MR, ";
     }
-    bool do_nothing = flag.flag & (flag_t) AcquireRequestFlag::kDoNothing;
-    if (do_nothing)
+    bool no_rpc = flag.flag & (flag_t) AcquireRequestFlag::kNoRpc;
+    if (no_rpc)
     {
-        os << "do-nothing, ";
+        os << "no-rpc, ";
     }
     os << "}";
     return os;
@@ -298,7 +301,7 @@ void debug_validate_lease_modify_flag(flag_t flag)
         bool only_dealloc = flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
         bool reserved = flag & (flag_t) LeaseModifyFlag::kReserved;
         bool wait_success = flag & (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
-        bool do_nothing = flag & (flag_t) LeaseModifyFlag::kDoNothing;
+        bool no_rpc = flag & (flag_t) LeaseModifyFlag::kNoRpc;
         if (only_dealloc)
         {
             DCHECK(!with_dealloc) << "with_dealloc conflict with only_dealloc";
@@ -313,11 +316,13 @@ void debug_validate_lease_modify_flag(flag_t flag)
                 << "wait_success conflict with no_relinquish_unbind: If you do "
                    "not want to unbind, make no sense to wait for nothing.";
         }
-        if (do_nothing)
+        if (no_rpc)
         {
-            CHECK(!with_dealloc) << "with_dealloc conflict with do_nothing";
-            CHECK(!only_dealloc) << "only_dealloc conflict with do_nothing";
-            CHECK(!wait_success) << "wait_success conflict with do_nothing";
+            DCHECK(!no_relinquish_unbind);
+            DCHECK(!force_unbind);
+            DCHECK(!with_dealloc);
+            DCHECK(!only_dealloc);
+            DCHECK(!wait_success);
         }
         DCHECK(!reserved);
     }
@@ -363,10 +368,10 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
     {
         os << "use-MR, ";
     }
-    bool do_nothing = flag.flag & (flag_t) LeaseModifyFlag::kDoNothing;
-    if (do_nothing)
+    bool no_rpc = flag.flag & (flag_t) LeaseModifyFlag::kNoRpc;
+    if (no_rpc)
     {
-        os << "do-nothing, ";
+        os << "no-rpc, ";
     }
 
     os << "}";

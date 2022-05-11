@@ -318,9 +318,9 @@ public:
         }
         else
         {
-            // LOG_IF(WARNING, ret == nullptr)
-            //     << "Failed to allocate size " << size << ": "
-            //     << pre_class_info(class_info_);
+            LOG_IF(WARNING, ret == nullptr)
+                << "Failed to allocate size " << size << ": "
+                << pre_class_info(class_info_);
         }
 
         return ret;

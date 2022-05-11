@@ -22,10 +22,8 @@ using namespace define::literals;
 using namespace patronus;
 using namespace hmdf;
 
-[[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
-constexpr uint32_t kMachineNr = 2;
-constexpr static size_t kThreadNr = 16;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = 16;
 constexpr static size_t kMaxCoroNr = 16;
 constexpr static uint64_t kMaxKey = 100_K;
 
@@ -190,59 +188,59 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 class BenchConfigFactory
 {
 public:
-    static std::vector<BenchConfig> get_single_round_config(
-        const std::string &name,
-        size_t initial_subtable_nr,
-        size_t test_nr,
-        size_t thread_nr,
-        size_t coro_nr,
-        size_t kvblock_expect_size,
-        bool expand)
-    {
-        if (expand)
-        {
-            CHECK_EQ(thread_nr, 1);
-            CHECK_EQ(coro_nr, 1);
-        }
-        auto warm_conf = BenchConfig::get_default_conf(
-            name,
-            KVGenConf{.max_key = kMaxKey,
-                      .use_zip = true,
-                      .zip_skewness = 0.99,
-                      .kvblock_expect_size = kvblock_expect_size},
-            initial_subtable_nr,
-            test_nr,
-            thread_nr,
-            coro_nr,
-            expand /* extend */);
-        auto eval_conf = warm_conf.clone();
-        eval_conf.should_report = true;
+    // static std::vector<BenchConfig> get_single_round_config(
+    //     const std::string &name,
+    //     size_t initial_subtable_nr,
+    //     size_t test_nr,
+    //     size_t thread_nr,
+    //     size_t coro_nr,
+    //     size_t kvblock_expect_size,
+    //     bool expand)
+    // {
+    //     if (expand)
+    //     {
+    //         CHECK_EQ(thread_nr, 1);
+    //         CHECK_EQ(coro_nr, 1);
+    //     }
+    //     auto warm_conf = BenchConfig::get_default_conf(
+    //         name,
+    //         KVGenConf{.max_key = kMaxKey,
+    //                   .use_zip = true,
+    //                   .zip_skewness = 0.99,
+    //                   .kvblock_expect_size = kvblock_expect_size},
+    //         initial_subtable_nr,
+    //         test_nr,
+    //         thread_nr,
+    //         coro_nr,
+    //         expand /* extend */);
+    //     auto eval_conf = warm_conf.clone();
+    //     eval_conf.should_report = true;
 
-        return pipeline({warm_conf, eval_conf});
-    }
-    static std::vector<BenchConfig> get_expand_config(
-        const std::string &name,
-        size_t fill_nr,
-        size_t kvblock_expect_size,
-        bool subtable_use_mr)
-    {
-        // fill the table with KVs
-        auto conf = BenchConfig::get_empty_conf(
-            name,
-            KVGenConf{.max_key = kMaxKey,
-                      .use_zip = true,
-                      .zip_skewness = 0.99,
-                      .kvblock_expect_size = kvblock_expect_size});
-        conf.thread_nr = 1;
-        conf.coro_nr = 1;
-        conf.insert_prob = 1;
-        conf.auto_extend = true;
-        conf.test_nr = fill_nr;
-        conf.should_report = true;
-        conf.subtable_use_mr = subtable_use_mr;
+    //     return pipeline({warm_conf, eval_conf});
+    // }
+    // static std::vector<BenchConfig> get_expand_config(
+    //     const std::string &name,
+    //     size_t fill_nr,
+    //     size_t kvblock_expect_size,
+    //     bool subtable_use_mr)
+    // {
+    //     // fill the table with KVs
+    //     auto conf = BenchConfig::get_empty_conf(
+    //         name,
+    //         KVGenConf{.max_key = kMaxKey,
+    //                   .use_zip = true,
+    //                   .zip_skewness = 0.99,
+    //                   .kvblock_expect_size = kvblock_expect_size});
+    //     conf.thread_nr = 1;
+    //     conf.coro_nr = 1;
+    //     conf.insert_prob = 1;
+    //     conf.auto_extend = true;
+    //     conf.test_nr = fill_nr;
+    //     conf.should_report = true;
+    //     conf.subtable_use_mr = subtable_use_mr;
 
-        return pipeline({conf});
-    }
+    //     return pipeline({conf});
+    // }
     // disable auto-expand
     // the server needs to initialize the subtable (and empty) on ctor
     static std::vector<BenchConfig> get_modify_heavy_config(
@@ -278,12 +276,13 @@ public:
         size_t test_nr,
         size_t thread_nr,
         size_t coro_nr,
-        size_t kvblock_expet_size)
+        size_t initial_subtable_nr,
+        size_t kvblock_expect_size)
     {
         auto kv_g_conf = KVGenConf{.max_key = kMaxKey,
                                    .use_zip = true,
                                    .zip_skewness = 0.99,
-                                   .kvblock_expect_size = kvblock_expet_size};
+                                   .kvblock_expect_size = kvblock_expect_size};
 
         // fill the table with KVs
         auto insert_conf =
@@ -291,9 +290,10 @@ public:
         insert_conf.thread_nr = 1;
         insert_conf.coro_nr = 1;
         insert_conf.insert_prob = 1;
-        insert_conf.auto_extend = true;
+        insert_conf.auto_extend = false;
         insert_conf.test_nr = fill_nr;
         insert_conf.should_report = false;
+        insert_conf.initial_subtable_nr = initial_subtable_nr;
 
         auto query_warmup_conf =
             BenchConfig::get_empty_conf(name + ".query.warmup", kv_g_conf);
@@ -304,6 +304,7 @@ public:
         query_warmup_conf.auto_extend = false;
         query_warmup_conf.test_nr = test_nr;
         query_warmup_conf.should_report = false;
+        query_warmup_conf.initial_subtable_nr = initial_subtable_nr;
 
         auto query_report_conf = query_warmup_conf.clone();
         query_report_conf.name = name + ".query";
@@ -318,6 +319,7 @@ public:
         mix_conf.auto_extend = false;
         mix_conf.test_nr = test_nr;
         mix_conf.should_report = true;
+        mix_conf.initial_subtable_nr = initial_subtable_nr;
 
         return pipeline(
             {insert_conf, query_warmup_conf, query_report_conf, mix_conf});
@@ -344,6 +346,7 @@ private:
 template <size_t kE, size_t kB, size_t kS>
 typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     Patronus::pointer p,
+    size_t dir_id,
     const RaceHashingHandleConfig &conf,
     bool auto_expand,
     GlobalAddress meta_gaddr,
@@ -351,28 +354,27 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
 {
     using HandleT = typename RaceHashing<kE, kB, kS>::Handle;
 
-    auto tid = p->get_thread_id();
-    auto dir_id = tid;
+    auto server_nid = ::config::get_server_nids().front();
 
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
-    auto handle_rdma_ctx =
-        patronus::RdmaAdaptor::new_instance(kServerNodeId, dir_id, p, ctx);
+    auto handle_rdma_ctx = patronus::RdmaAdaptor::new_instance(
+        server_nid, dir_id, p, conf.bypass_prot, ctx);
 
     auto prhh = HandleT::new_instance(
-        kServerNodeId, meta_gaddr, conf, auto_expand, handle_rdma_ctx);
+        server_nid, meta_gaddr, conf, auto_expand, handle_rdma_ctx);
     prhh->init();
     return prhh;
 }
 
 void init_allocator(Patronus::pointer p,
+                    size_t dir_id,
                     size_t thread_nr,
                     size_t kvblock_expect_size)
 {
     // for server to handle kv block allocation requests
     // give all to kv blocks
     auto tid = p->get_thread_id();
-    auto dir_id = tid;
     CHECK_LT(tid, thread_nr);
 
     auto rh_buffer = p->get_user_reserved_buffer();
@@ -461,13 +463,14 @@ void test_basic_client_worker(
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
     auto tid = p->get_thread_id();
+    auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
     // TODO: the dtor of rhh has performance penalty.
     // dtor out of this function.
     bool auto_expand = bench_conf.auto_extend;
-    auto rhh =
-        gen_rdma_rhh<kE, kB, kS>(p, rhh_conf, auto_expand, meta_gaddr, &ctx);
+    auto rhh = gen_rdma_rhh<kE, kB, kS>(
+        p, dir_id, rhh_conf, auto_expand, meta_gaddr, &ctx);
 
     size_t ins_succ_nr = 0;
     size_t ins_retry_nr = 0;
@@ -561,6 +564,10 @@ void test_basic_client_worker(
             << ", rdma_protection_nr: " << rdma_protection_nr
             << ". executed: " << executed_nr << ", take: " << ns
             << " ns. ctx: " << ctx;
+
+    // explicitely dctor here
+    // because the dctor requires coroutines.
+    rhh.reset();
 
     ex.worker_finished(coro_id);
     ctx.yield_to_master();
@@ -752,11 +759,12 @@ void benchmark_server(Patronus::pointer p,
 
     using RaceHashingT = RaceHashing<kE, kB, kS>;
     auto tid = p->get_thread_id();
+    auto dir_id = tid;  // for server, dir_id is tid
 
     typename RaceHashingT::pointer rh;
     if (tid < thread_nr)
     {
-        init_allocator(p, thread_nr, kvblock_expect_size);
+        init_allocator(p, dir_id, thread_nr, kvblock_expect_size);
     }
     else
     {
@@ -802,35 +810,6 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     for (const auto &rhh_conf : rhh_configs)
     {
-        {
-            LOG_IF(INFO, is_master)
-                << "[bench] benching single thread for " << rhh_conf;
-            key++;
-            auto basic_conf = BenchConfigFactory::get_single_round_config(
-                "single_basic",
-                1 /* initial subtable nr */,
-                1_M,
-                1 /* thread nr */,
-                1 /* coro nr */,
-                rhh_conf.kvblock_expect_size,
-                true);
-            if (is_client)
-            {
-                for (const auto &bench_conf : basic_conf)
-                {
-                    bench_conf.validate();
-                    LOG_IF(INFO, is_master)
-                        << "[sub-conf] running conf: " << bench_conf;
-                    benchmark_client<4, 16, 16>(
-                        p, bar, is_master, bench_conf, rhh_conf, key);
-                }
-            }
-            else
-            {
-                benchmark_server<4, 16, 16>(p, bar, is_master, basic_conf, key);
-            }
-        }
-
         // for (size_t thread_nr : {16})
         // for (size_t thread_nr : {8, 16})
         // for (size_t thread_nr : {1, 4, 8, 16})
@@ -843,9 +822,10 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
             auto multithread_conf = BenchConfigFactory::get_multi_round_config(
                 "multithread_basic",
                 capacity,
-                10_M,
+                4_M,
                 thread_nr,
                 kMaxCoroNr,
+                4 /* initial_subtable_nr */,
                 rhh_conf.kvblock_expect_size);
             if (is_client)
             {
@@ -873,7 +853,7 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     PatronusConfig pconfig;
-    pconfig.machine_nr = kMachineNr;
+    pconfig.machine_nr = ::config::kMachineNr;
     pconfig.block_class = {2_MB, 8_KB};
     pconfig.block_ratio = {0.5, 0.5};
     pconfig.reserved_buffer_size = 2_GB;
@@ -883,10 +863,10 @@ int main(int argc, char *argv[])
     auto patronus = Patronus::ins(pconfig);
 
     std::vector<std::thread> threads;
-    boost::barrier bar(kThreadNr);
+    // boost::barrier bar(kThreadNr);
     auto nid = patronus->get_node_id();
 
-    bool is_client = nid == kClientNodeId;
+    bool is_client = ::config::is_client(nid);
 
     if (is_client)
     {
@@ -899,25 +879,45 @@ int main(int argc, char *argv[])
 
     LOG(INFO) << "[bench] " << pre_patronus_explain(*patronus);
 
-    for (size_t i = 0; i < kThreadNr - 1; ++i)
+    if (is_client)
     {
-        threads.emplace_back([patronus, &bar, is_client]() {
-            if (is_client)
-            {
+        boost::barrier bar(kClientThreadNr);
+        for (size_t i = 0; i < kClientThreadNr - 1; ++i)
+        {
+            threads.emplace_back([patronus, &bar]() {
                 patronus->registerClientThread();
-            }
-            else
-            {
-                patronus->registerServerThread();
-            }
-            benchmark(patronus, bar, is_client);
-        });
-    }
-    benchmark(patronus, bar, is_client);
+                bar.wait();
+                benchmark(patronus, bar, true);
+            });
+        }
+        bar.wait();
+        patronus->keeper_barrier("begin", 10ms);
+        benchmark(patronus, bar, true);
 
-    for (auto &t : threads)
+        for (auto &t : threads)
+        {
+            t.join();
+        }
+    }
+    else
     {
-        t.join();
+        boost::barrier bar(kServerThreadNr);
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
+        {
+            threads.emplace_back([patronus, &bar]() {
+                patronus->registerServerThread();
+                bar.wait();
+                benchmark(patronus, bar, false);
+            });
+        }
+        bar.wait();
+        patronus->keeper_barrier("begin", 100ms);
+        benchmark(patronus, bar, false);
+
+        for (auto &t : threads)
+        {
+            t.join();
+        }
     }
 
     StrDataFrame df;

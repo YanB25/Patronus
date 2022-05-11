@@ -186,7 +186,6 @@ void bench_qp_state(Patronus::pointer p, size_t test_time)
     col_lat_p99.push_back(lat_m.percentile(0.99));
 }
 
-static size_t barrier_entered_{0};
 void benchmark(Patronus::pointer p, bool is_client)
 {
     auto dsm = p->get_dsm();

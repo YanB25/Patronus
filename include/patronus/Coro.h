@@ -42,9 +42,12 @@ struct ServerCoroContext
     CoroCall server_workers[define::kMaxCoroNr];
     CoroCall server_master;
     ServerCoroCommunication comm;
-    ThreadUnsafePool<ServerCoroTask, define::kMaxCoroNr * MAX_MACHINE>
+    ThreadUnsafePool<
+        ServerCoroTask,
+        define::kMaxCoroNr *
+            MAX_MACHINE * ::config::patronus::kClientThreadPerServerThread>
         task_pool;
-    std::unique_ptr<ThreadUnsafeBufferPool<config::umsg::kMaxRecvBuffer>>
+    std::unique_ptr<ThreadUnsafeBufferPool<::config::umsg::kMaxRecvBuffer>>
         buffer_pool;
 };
 

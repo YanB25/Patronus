@@ -144,9 +144,9 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
            type == RpcType::kAcquireWLeaseReq ||
            type == RpcType::kAcquireRLeaseReq);
 
-    bool do_nothing = flag & (flag_t) AcquireRequestFlag::kDoNothing;
+    bool no_rpc = flag & (flag_t) AcquireRequestFlag::kNoRpc;
     bool no_gc = flag & (flag_t) AcquireRequestFlag::kNoGc;
-    if (unlikely(do_nothing))
+    if (unlikely(no_rpc))
     {
         Lease ret;
         ret.node_id_ = node_id;
@@ -572,12 +572,11 @@ Lease Patronus::lease_modify_impl(Lease &lease,
 {
     CHECK(type == RpcType::kRelinquishReq) << "** invalid type " << (int) type;
 
-    bool do_nothing = flag & (flag_t) LeaseModifyFlag::kDoNothing;
-    if (unlikely(do_nothing))
+    bool no_rpc = flag & (flag_t) LeaseModifyFlag::kNoRpc;
+    if (unlikely(no_rpc))
     {
         lease.set_invalid();
-        // actually, return nothing
-        return Lease();
+        return Lease{};
     }
 
     auto target_node_id = lease.node_id_;
@@ -1758,13 +1757,14 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
         comm.finished[i] = true;
     }
 
-    constexpr static size_t kServerBufferNr = kMaxCoroNr * MAX_MACHINE;
+    constexpr static size_t kServerBufferNr =
+        kMaxCoroNr * MAX_MACHINE * kClientThreadPerServerThread;
     std::vector<char> __buffer;
     __buffer.resize(config::umsg::kMaxRecvBuffer * kServerBufferNr);
 
-    server_coro_ctx_.buffer_pool =
-        std::make_unique<ThreadUnsafeBufferPool<config::umsg::kMaxRecvBuffer>>(
-            __buffer.data(), config::umsg::kMaxRecvBuffer * kServerBufferNr);
+    server_coro_ctx_.buffer_pool = std::make_unique<
+        ThreadUnsafeBufferPool<::config::umsg::kMaxRecvBuffer>>(
+        __buffer.data(), config::umsg::kMaxRecvBuffer * kServerBufferNr);
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
 
     OnePassBucketMonitor batch_m(
@@ -1781,7 +1781,7 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
         if (likely(nr > 0))
         {
             DVLOG(4) << "[patronus] server recv messages " << nr;
-            auto *task = task_pool.get();
+            auto *task = DCHECK_NOTNULL(task_pool.get());
             task->buf = DCHECK_NOTNULL(buffer);
             task->msg_nr = nr;
             task->fetched_nr = 0;

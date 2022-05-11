@@ -95,12 +95,14 @@ public:
     RdmaAdaptor(uint16_t node_id,
                 uint32_t dir_id,
                 Patronus::pointer patronus,
+                bool bypass_protection,
                 bool is_server,
                 CoroContext *ctx)
         : node_id_(node_id),
           dir_id_(dir_id),
           patronus_(patronus),
           coro_ctx_(ctx),
+          bypass_prot_(bypass_protection),
           is_server_(is_server)
     {
         ongoing_rdma_bufs_.reserve(kMaxOngoingRdmaBuf);
@@ -124,15 +126,25 @@ public:
     static pointer new_instance(uint16_t node_id,
                                 uint32_t dir_id,
                                 Patronus::pointer patronus,
+                                bool bypass_protection,
                                 CoroContext *ctx)
     {
-        return std::make_shared<RdmaAdaptor>(
-            node_id, dir_id, patronus, false, ctx);
+        return std::make_shared<RdmaAdaptor>(node_id,
+                                             dir_id,
+                                             patronus,
+                                             bypass_protection,
+                                             false /* is_server */,
+                                             ctx);
     }
     // for server
     static pointer new_instance(Patronus::pointer patronus)
     {
-        return std::make_shared<RdmaAdaptor>(0, 0, patronus, true, nullptr);
+        return std::make_shared<RdmaAdaptor>(0,
+                                             0,
+                                             patronus,
+                                             false /* bypass_prot */,
+                                             true /* is_server */,
+                                             nullptr);
     }
 
     // yes
@@ -313,6 +325,10 @@ public:
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
         auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        if (bypass_prot_)
+        {
+            flag |= (flag_t) RWFlag::kUseUniversalRkey;
+        }
         auto ec = patronus_->prepare_read(
             batch_, lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
         if (unlikely(ec == kNoMem))
@@ -347,6 +363,10 @@ public:
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
         auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        if (bypass_prot_)
+        {
+            flag |= (flag_t) RWFlag::kUseUniversalRkey;
+        }
         auto ec = patronus_->prepare_write(
             batch_, lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
         if (unlikely(ec == kNoMem))
@@ -388,6 +408,10 @@ public:
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
         auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        if (bypass_prot_)
+        {
+            flag |= (flag_t) RWFlag::kUseUniversalRkey;
+        }
         auto rc = patronus_->prepare_cas(batch_,
                                          lease,
                                          (char *) rdma_buf,
@@ -474,6 +498,7 @@ private:
     Patronus::pointer patronus_;
     CoroContext *coro_ctx_{nullptr};
     std::vector<Buffer> ongoing_rdma_bufs_;
+    bool bypass_prot_{false};
     bool is_server_;
     bool enable_trace_{false};
     std::string trace_name_;

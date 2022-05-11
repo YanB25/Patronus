@@ -39,8 +39,8 @@ void client_worker(Patronus::pointer p,
 
     LOG(INFO) << "Client get gaddr: " << gaddr;
 
-    auto rdma_adpt =
-        patronus::RdmaAdaptor::new_instance(server_nid, dir_id, p, &ctx);
+    auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
+        server_nid, dir_id, p, false /* bypass_prot */, &ctx);
 
     // checking acquire_perm
     {

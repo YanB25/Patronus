@@ -119,12 +119,14 @@ struct BenchConfig
         BenchConfig ret = get_empty_conf(
             name, thread_nr, coro_nr, test_nr, record_nr, record_size);
 
-        ret.acquire_flag = (flag_t) AcquireRequestFlag::kDoNothing |
+        ret.acquire_flag = (flag_t) AcquireRequestFlag::kNoRpc |
                            (flag_t) AcquireRequestFlag::kNoGc;
         ret.alloc_hint = 0;
         ret.rw_flag = (flag_t) RWFlag::kUseUniversalRkey |
                       (flag_t) RWFlag::kNoLocalExpireCheck;
-        ret.relinquish_flag = (flag_t) LeaseModifyFlag::kDoNothing;
+        CHECK(false)
+            << "TODO: Now we delete the LeaseModifyFlag::kDoNothing. See "
+               "what's different";
         return ret;
     }
     static BenchConfig get_record_conf_mw_protected(const std::string &name,

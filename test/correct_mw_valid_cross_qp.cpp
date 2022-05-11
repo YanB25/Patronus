@@ -77,7 +77,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     LOG(INFO) << "[bench] tid " << tid << ", coro: " << ctx;
 
     size_t coro_key = gen_coro_key(tid, coro_id);
-    size_t coro_magic = gen_magic(tid, coro_id);
 
     for (size_t time = 0; time < kTestTime; ++time)
     {

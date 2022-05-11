@@ -95,11 +95,12 @@ public:
     ~RaceHashingHandleImpl()
     {
         maybe_trace_bootstrap("before ~kvblock_mem_handle");
-        const auto &c = conf_.dctor;
+        const auto &c = conf_.meta.dtor;
+        // NOTE: kvblock_mem_handle_ does not listen to config
         if (kvblock_mem_handle_.valid())
         {
-            rdma_adpt_->relinquish_perm(
-                kvblock_mem_handle_, c.alloc_hint, c.flag);
+            auto rel_flag = (flag_t) 0;
+            rdma_adpt_->relinquish_perm(kvblock_mem_handle_, 0, rel_flag);
         }
         maybe_trace_bootstrap("before ~dir_mem_handle");
         if (directory_mem_handle_.valid())
@@ -173,7 +174,7 @@ public:
         maybe_trace_bootstrap("before init_kvblock_mem_handle()");
         init_kvblock_mem_handle();
 
-        const auto &c = conf_.init;
+        const auto &c = conf_.meta.ctor;
         if (c.eager_bind_subtable)
         {
             maybe_trace_bootstrap("before eager_init_subtable_mem_handle()");
@@ -210,23 +211,12 @@ public:
     {
         // TODO(race): this have performance problem because of additional
         // memcpy.
-        auto &c = conf_.init;
-
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
         DCHECK_GE(rdma_buf.size, meta_size());
         RetCode rc;
-        if (c.dcache_handle.has_value())
-        {
-            auto &dir_mem_handle = c.dcache_handle.value();
-            rc = rdma_adpt_->rdma_read(
-                rdma_buf.buffer, table_meta_addr_, meta_size(), dir_mem_handle);
-        }
-        else
-        {
-            auto &dir_mem_handle = get_directory_mem_handle();
-            rc = rdma_adpt_->rdma_read(
-                rdma_buf.buffer, table_meta_addr_, meta_size(), dir_mem_handle);
-        }
+        auto &dir_mem_handle = get_directory_mem_handle();
+        rc = rdma_adpt_->rdma_read(
+            rdma_buf.buffer, table_meta_addr_, meta_size(), dir_mem_handle);
         CHECK_EQ(rc, kOk);
 
         rc = rdma_adpt_->commit();
@@ -888,9 +878,9 @@ public:
         auto alloc_size = SubTableT::size_bytes();
         if (subtable_mem_handles_[next_subtable_idx].valid())
         {
-            auto rel_flag = 0;
+            const auto &c = conf_.meta.dtor;
             rdma_adpt_->relinquish_perm(
-                subtable_mem_handles_[next_subtable_idx], 0, rel_flag);
+                subtable_mem_handles_[next_subtable_idx], c.alloc_hint, c.flag);
         }
         auto next_subtable_handle =
             remote_alloc_acquire_subtable_directory(alloc_size);
@@ -1759,23 +1749,6 @@ public:
     }
 
 private:
-    // GlobalAddress remote_alloc_kvblock(size_t size)
-    // {
-    //     return GlobalAddress(kvblock_allocator_->alloc(size));
-    // }
-    // void remote_free_kvblock(GlobalAddress addr)
-    // {
-    //     // TODO:
-    //     // uncomment the below line to enable kvblock re-use
-    //     // kvblock_allocator_->free((void *) addr.val);
-    //     LOG_FIRST_N(WARNING, 1)
-    //         << "TODO: do not actual impl remote_free_kvblock. Can not free
-    //         it, "
-    //            "because the kv block may be allocated by otehr clients. The "
-    //            "size of the blocks may even vary. Unable to keep track and "
-    //            "reuse those memory. "
-    //         << addr;
-    // }
     RemoteMemHandle remote_alloc_acquire_subtable_directory(size_t size)
     {
         auto flag = (flag_t) AcquireRequestFlag::kNoGc |
@@ -2052,18 +2025,19 @@ private:
         if (unlikely(subtable_mem_handles_[idx].valid()))
         {
             // exist old handle, free it before going on
-            auto rel_flag = (flag_t) 0;
+            const auto &c = conf_.meta.dtor;
             rdma_adpt_->relinquish_perm(
-                subtable_mem_handles_[idx], 0 /* hint */, rel_flag);
+                subtable_mem_handles_[idx], c.alloc_hint, c.flag);
         }
+
+        const auto &c = conf_.meta.ctor;
         DCHECK(!subtable_mem_handles_[idx].valid());
-        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
         subtable_mem_handles_[idx] =
             rdma_adpt_->acquire_perm(cached_meta_.entries[idx],
-                                     0 /* hint */,
+                                     c.alloc_hint,
                                      SubTableT::size_bytes(),
-                                     0ns,
-                                     ac_flag);
+                                     c.lease_time,
+                                     c.ac_flag);
     }
     RemoteMemHandle &get_global_kvblock_mem_handle()
     {
@@ -2084,38 +2058,28 @@ private:
 
     void init_kvblock_mem_handle()
     {
-        const auto &c = conf_.init;
-        if (unlikely(c.skip_bind_g_kvblock))
-        {
-            return;
-        }
         // init the global covering handle of kvblock
         auto g_kvblock_pool_gaddr = cached_meta_.kvblock_pool_gaddr;
         auto g_kvblock_pool_size = cached_meta_.kvblock_pool_size;
         CHECK(!g_kvblock_pool_gaddr.is_null());
         CHECK_GT(g_kvblock_pool_size, 0);
 
+        // NOTE:
+        // kvblock_mem_handle_ does not listen to the config
         auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
-        kvblock_mem_handle_ = rdma_adpt_->acquire_perm(g_kvblock_pool_gaddr,
-                                                       0 /* hint */,
-                                                       g_kvblock_pool_size,
-                                                       0ns,
-                                                       ac_flag);
+        kvblock_mem_handle_ = rdma_adpt_->acquire_perm(
+            g_kvblock_pool_gaddr, 0, g_kvblock_pool_size, 0ns, ac_flag);
     }
 
     void init_directory_mem_handle()
     {
-        const auto &c = conf_.init;
-        if (c.do_nothing)
-        {
-            return;
-        }
+        const auto &c = conf_.meta.ctor;
         DCHECK(!directory_mem_handle_.valid());
         directory_mem_handle_ = rdma_adpt_->acquire_perm(table_meta_addr_,
                                                          c.alloc_hint,
                                                          sizeof(MetaT),
                                                          c.lease_time,
-                                                         c.flag);
+                                                         c.ac_flag);
     }
 };
 

@@ -7,6 +7,7 @@
 
 #include "conf.h"
 #include "patronus/Type.h"
+#include "util/TimeConv.h"
 
 namespace patronus::hash
 {
@@ -79,14 +80,20 @@ struct RaceHashingHandleConfig
 
     struct
     {
-        bool do_nothing{false};
-        bool skip_bind_g_kvblock{false};
-        bool eager_bind_subtable{false};
-        uint64_t alloc_hint{hash::config::kAllocHintDefault};
-        std::chrono::nanoseconds lease_time{0ns};
-        flag_t flag{(flag_t) AcquireRequestFlag::kNoGc};
-        std::optional<RemoteMemHandle> dcache_handle{std::nullopt};
-    } init;
+        struct
+        {
+            bool eager_bind_subtable{false};
+            uint64_t alloc_hint{hash::config::kAllocHintDefault};
+            std::chrono::nanoseconds lease_time{0ns};
+            flag_t ac_flag{(flag_t) AcquireRequestFlag::kNoGc};
+        } ctor;
+        struct
+        {
+            uint64_t alloc_hint{0};
+            // TODO: should we wailt_until_success ?
+            flag_t flag{(flag_t) 0};
+        } dtor;
+    } meta;
 
     struct
     {
@@ -96,12 +103,6 @@ struct RaceHashingHandleConfig
         flag_t patronus_unlock_flag{(flag_t) 0};
         mutable ssize_t mock_crash_nr{0};
     } expand;
-    struct
-    {
-        uint64_t alloc_hint{0};
-        // NOTE: no need to kWaitUntilSuccess
-        flag_t flag{(flag_t) 0};
-    } dctor;
 
     // the hints
     uint64_t subtable_hint{hash::config::kAllocHintDirSubtable};
@@ -109,6 +110,7 @@ struct RaceHashingHandleConfig
     double test_nr_scale_factor{1.0};
     std::string name;
     size_t kvblock_expect_size{64};
+    bool bypass_prot{false};
 };
 
 inline std::ostream &operator<<(std::ostream &os,
@@ -181,36 +183,28 @@ inline std::ostream &operator<<(std::ostream &os,
         os << "}";
     }
     {
-        os << " init {";
+        os << " meta{";
         {
-            const auto &c = conf.init;
-            if (c.do_nothing)
             {
-                os << "do_nothing";
+                os << "ctor: {";
+                const auto &c = conf.meta.ctor;
+                auto ns = util::time::to_ns(c.lease_time);
+                os << "eager_bind_subtable: " << c.eager_bind_subtable
+                   << ", alloc_hint: " << c.alloc_hint << ", lease_time: " << ns
+                   << ", ac_flag: " << AcquireRequestFlagOut(c.ac_flag);
+                os << "}";
             }
-            else
             {
-                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                              c.lease_time)
-                              .count();
-                os << "skip_kvblock: " << c.skip_bind_g_kvblock
-                   << ", eager_subtable: " << c.eager_bind_subtable
-                   << ", hint: " << c.alloc_hint << ", time: " << ns
-                   << ", flag: " << AcquireRequestFlagOut(c.flag)
-                   << ", has_dcache_handle: " << c.dcache_handle.has_value();
+                os << ", dtor: {";
+                const auto &c = conf.meta.dtor;
+                os << "alloc_hint: " << c.alloc_hint
+                   << ", flag: " << LeaseModifyFlagOut(c.flag);
+                os << "}";
             }
         }
         os << "}";
     }
-    {
-        os << " dctor {";
-        {
-            const auto &c = conf.dctor;
-            os << "hint: " << c.alloc_hint
-               << ", flag: " << LeaseModifyFlagOut(c.flag);
-        }
-        os << "}";
-    }
+
     return os;
 }
 
@@ -250,20 +244,21 @@ public:
         c.insert_kvblock.free.alloc_hint = c.insert_kvblock.begin.alloc_hint;
         c.insert_kvblock.free.flag = (flag_t) LeaseModifyFlag::kReserved;
         c.free_kvblock.do_nothing = true;
+
+        c.meta.ctor.ac_flag = (flag_t) AcquireRequestFlag::kNoRpc |
+                              (flag_t) AcquireRequestFlag::kNoGc;
+        c.meta.dtor.flag |= (flag_t) LeaseModifyFlag::kNoRpc;
+        c.bypass_prot = true;
         return c;
     }
     static RaceHashingHandleConfig get_unprotected_boostrap(
-        const std::string name)
+        const std::string name, size_t expect_kvblock_size)
     {
-        auto c = get_unprotected(name, 0 /* kv block size */, 1);
-        c.init.do_nothing = true;
-        c.init.skip_bind_g_kvblock = true;
-        // no subtable, because no protection
-        c.init.eager_bind_subtable = false;
-        c.init.flag = (flag_t) AcquireRequestFlag::kReserved;
-        c.dctor.flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
-        // can not init mem_handle here
-        // because we don't know the dir_id
+        auto c = get_unprotected(name, expect_kvblock_size, 1);
+        c.meta.ctor.ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                              (flag_t) AcquireRequestFlag::kNoRpc;
+        c.meta.ctor.eager_bind_subtable = false;
+        c.meta.dtor.flag |= (flag_t) LeaseModifyFlag::kNoRpc;
         return c;
     }
     static RaceHashingHandleConfig get_mw_protected(const std::string &name,
@@ -313,17 +308,19 @@ public:
         return c;
     }
     static RaceHashingHandleConfig get_mw_protected_bootstrap(
-        const std::string &name, bool eager_bind_subtable)
+        const std::string &name,
+        size_t expect_kvblock_size,
+        bool eager_bind_subtable)
     {
-        auto c =
-            get_mw_protected(name, 64 /* kv block size */, 1 /* batch size */);
-        c.init.do_nothing = false;
-        // binding kvblock is a trick, it should not be included into boostrap
-        // time
-        c.init.skip_bind_g_kvblock = true;
-        c.init.eager_bind_subtable = eager_bind_subtable;
-        c.init.flag = (flag_t) AcquireRequestFlag::kNoGc;
-        c.dctor.flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        // NOTE:
+        // In thie bootstrap experiments, we assume that we bind a MW/MR over
+        // a medium size of KV block region
+        // so we disable the per-KV binding
+        auto c = get_unprotected(name, expect_kvblock_size, 1 /* batch size */);
+        c.meta.ctor.eager_bind_subtable = eager_bind_subtable;
+        c.meta.ctor.ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
+        c.meta.dtor.flag = (flag_t) 0;
+        c.bypass_prot = false;
         return c;
     }
     // can not support batch allocation
@@ -376,17 +373,21 @@ public:
         c.insert_kvblock.begin.flag |= (flag_t) AcquireRequestFlag::kUseMR;
         c.insert_kvblock.end.flag |= (flag_t) LeaseModifyFlag::kUseMR;
         c.insert_kvblock.free.flag |= (flag_t) LeaseModifyFlag::kUseMR;
-        c.dctor.flag |= (flag_t) LeaseModifyFlag::kUseMR;
+        c.meta.ctor.ac_flag |= (flag_t) AcquireRequestFlag::kUseMR;
+        c.meta.dtor.flag |= (flag_t) LeaseModifyFlag::kUseMR;
 
         c.test_nr_scale_factor = 1.0 / 10;
         return c;
     }
     static RaceHashingHandleConfig get_mr_protected_boostrap(
-        const std::string &name, bool eager_bind_subtable)
+        const std::string &name,
+        size_t expect_kvblock_size,
+        bool eager_bind_subtable)
     {
-        auto c = get_mw_protected_bootstrap(name, eager_bind_subtable);
-        c.init.flag |= (flag_t) AcquireRequestFlag::kUseMR;
-        c.dctor.flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        auto c = get_mw_protected_bootstrap(
+            name, expect_kvblock_size, eager_bind_subtable);
+        c.meta.ctor.ac_flag |= (flag_t) AcquireRequestFlag::kUseMR;
+        c.meta.dtor.flag |= (flag_t) LeaseModifyFlag::kUseMR;
 
         c.test_nr_scale_factor = 1.0 / 10;
         return c;
