@@ -648,6 +648,14 @@ private:
     std::unique_ptr<UnreliableConnection<kMaxAppThread>> umsg_;
 
 public:
+    uint64_t get_base_addr() const
+    {
+        return baseAddr;
+    }
+    uint64_t get_base_size() const
+    {
+        return baseAddrSize;
+    }
     bool is_register()
     {
         return thread_id_ != -1;

@@ -4,128 +4,214 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "gflags/gflags.h"
+#include "patronus/Patronus.h"
+#include "util/DataFrameF.h"
 #include "util/Rand.h"
+#include "util/TimeConv.h"
 #include "util/monitor.h"
 
-constexpr uint16_t kClientNodeId = 0;
+using namespace patronus;
 
-constexpr static size_t dirID = 0;
+using namespace hmdf;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-std::atomic<size_t> window_nr_;
-std::atomic<size_t> window_size_;
-// 0 for sequential addr
-// 1 for random addr
-// 2 for random but 4KB aligned addr
-std::atomic<int> random_addr_;
-std::atomic<size_t> batch_poll_size_;
+std::vector<std::string> col_idx;
+std::vector<size_t> col_x_test_time;
+std::vector<size_t> col_x_bind_size;
+std::vector<uint64_t> col_lat_min;
+std::vector<uint64_t> col_lat_p5;
+std::vector<uint64_t> col_lat_p9;
+std::vector<uint64_t> col_lat_p99;
 
-std::atomic<size_t> alloc_mw_ns;
-std::atomic<size_t> free_mw_ns;
-std::atomic<size_t> bind_mw_ns;
+constexpr static size_t kDirID = 0;
 
-void server(std::shared_ptr<DSM> dsm,
-            size_t mw_nr,
-            size_t window_size,
-            int random_addr,
-            size_t batch_poll_size)
+void bench_mw_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
 {
-    const auto &cache = dsm->get_server_buffer();
-    char *buffer = (char *) cache.buffer;
-    size_t max_size = cache.size;
-
+    auto dsm = p->get_dsm();
+    auto *mw = dsm->alloc_mw(kDirID);
+    auto srv_buffer = dsm->get_server_internal_dsm_buffer();
+    uint64_t min = util::time::to_ns(0ns);
+    uint64_t max = util::time::to_ns(5ms);
+    uint64_t rng = util::time::to_ns(1ns);
+    OnePassBucketMonitor<uint64_t> lat_m(min, max, rng);
+    for (size_t i = 0; i < test_time; ++i)
     {
-        Timer timer;
+        ChronoTimer timer;
+        dsm->bind_memory_region_sync(
+            mw, 0, 0, srv_buffer.buffer, bind_size, kDirID, 0, nullptr);
+        auto ns = timer.pin();
+        lat_m.collect(ns);
+    }
+    dsm->free_mw(mw);
+    LOG(INFO) << lat_m;
 
-        printf("\n-------- alloc mw ----------\n");
-        timer.begin();
-        std::vector<ibv_mw *> mws;
-        mws.resize(mw_nr);
-        for (size_t i = 0; i < mw_nr; ++i)
-        {
-            mws[i] = dsm->alloc_mw(dirID);
-        }
-        alloc_mw_ns += timer.end(mw_nr);
-        timer.print();
+    CHECK_EQ(lat_m.overflow_nr(), 0) << lat_m;
 
-        printf("\n-------- bind mw ----------\n");
-        auto bind_mw_begin = std::chrono::steady_clock::now();
+    col_idx.push_back("mw");
+    col_x_test_time.push_back(test_time);
+    col_x_bind_size.push_back(bind_size);
+    col_lat_min.push_back(lat_m.min());
+    col_lat_p5.push_back(lat_m.percentile(0.5));
+    col_lat_p9.push_back(lat_m.percentile(0.9));
+    col_lat_p99.push_back(lat_m.percentile(0.99));
+}
 
-        CHECK(window_size < max_size)
-            << "mw_nr " << mw_nr << " too large, overflow an rdma buffer.";
-        timer.begin();
-        size_t remain_nr = mw_nr;
-        size_t window_nr = max_size / window_size;
+void bench_mr_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
+{
+    // auto *buffer = CHECK_NOTNULL(hugePageAlloc(128_MB));
+    auto dsm = p->get_dsm();
 
-        ibv_wc wc_buffer[1024];
+    auto *buffer = (char *) dsm->get_base_addr();
+    CHECK_LE(bind_size, dsm->get_base_size());
 
-        while (remain_nr > 0)
-        {
-            size_t work_nr = std::min(remain_nr, batch_poll_size);
-            for (size_t i = 0; i < work_nr; ++i)
-            {
-                const char *buffer_start = 0;
-                if (random_addr == 1 || random_addr == 2)
-                {
-                    // random address
-                    size_t rand_min = 0;
-                    size_t rand_max = max_size - window_size;
+    uint64_t min = util::time::to_ns(0ns);
+    uint64_t max = util::time::to_ns(2s);
+    uint64_t rng = util::time::to_ns(1us);
+    OnePassBucketMonitor<uint64_t> lat_m(min, max, rng);
 
-                    buffer_start =
-                        buffer + fast_pseudo_rand_int(rand_min, rand_max);
-                    if (random_addr == 2)
-                    {
-                        // ... but with 4KB aligned
-                        buffer_start =
-                            (char *) (((uint64_t) buffer_start) % 4096);
-                    }
-                }
-                else
-                {
-                    CHECK(random_addr == 0);
-                    // if i too large, we roll back i to 0.
-                    buffer_start = buffer + (i % window_nr) * window_size;
-                }
-                // every post send will be signaled.
-                dsm->bind_memory_region(mws[i],
-                                        kClientNodeId,
-                                        0,
-                                        buffer_start,
-                                        window_size,
-                                        dirID,
-                                        0,
-                                        true);
-            }
-            // dsm->poll_dir_cq(dirID, work_nr);
-            size_t polled = 0;
-            while (polled < work_nr)
-            {
-                polled += dsm->try_poll_dir_cq(wc_buffer, dirID, 1024);
-            }
-            remain_nr -= work_nr;
-        }
-        bind_mw_ns += timer.end(mw_nr);
-        timer.print();
+    auto *rdma_ctx = dsm->get_rdma_context(kDirID);
+    for (size_t i = 0; i < test_time; ++i)
+    {
+        ChronoTimer timer;
+        auto *mr = CHECK_NOTNULL(
+            createMemoryRegion((uint64_t) buffer, bind_size, rdma_ctx));
+        auto ns = timer.pin();
+        lat_m.collect(ns);
 
-        auto bind_mw_end = std::chrono::steady_clock::now();
-        auto bind_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                           bind_mw_end - bind_mw_begin)
-                           .count();
-        LOG(INFO) << "[bench] bind memory window op: " << mw_nr
-                  << ", ns: " << bind_ns
-                  << ", ops: " << 1.0 * 1e9 * mw_nr / bind_ns;
+        CHECK(destroyMemoryRegion(mr));
+    }
+    CHECK_EQ(lat_m.overflow_nr(), 0) << lat_m;
+    LOG(INFO) << lat_m;
 
-        printf("\n-------- free mw ----------\n");
-        timer.begin();
-        for (size_t i = 0; i < mw_nr; ++i)
-        {
-            dsm->free_mw(mws[i]);
-        }
-        free_mw_ns += timer.end(mw_nr);
-        timer.print();
+    col_idx.push_back("mr");
+    col_x_test_time.push_back(test_time);
+    col_x_bind_size.push_back(bind_size);
+    col_lat_min.push_back(lat_m.min());
+    col_lat_p5.push_back(lat_m.percentile(0.5));
+    col_lat_p9.push_back(lat_m.percentile(0.9));
+    col_lat_p99.push_back(lat_m.percentile(0.99));
+
+    // CHECK(hugePageFree(buffer, 128_MB));
+}
+
+void bench_mw(Patronus::pointer p,
+              size_t test_time,
+              size_t bind_size,
+              bool is_client)
+{
+    if (is_client)
+    {
+        bench_mw_cli(p, test_time, bind_size);
+    }
+    else
+    {
     }
 }
+void bench_mr(Patronus::pointer p,
+              size_t test_time,
+              size_t bind_size,
+              bool is_client)
+{
+    if (is_client)
+    {
+        bench_mr_cli(p, test_time, bind_size);
+    }
+    else
+    {
+    }
+}
+void bench_qp_flag(Patronus::pointer p, size_t test_time)
+{
+    auto dsm = p->get_dsm();
+    auto *qp = dsm->get_dir_qp(0, 0, kDirID);
+
+    uint64_t min = util::time::to_ns(0ns);
+    uint64_t max = util::time::to_ns(4ms);
+    uint64_t rng = util::time::to_ns(1ns);
+    OnePassBucketMonitor<uint64_t> lat_m(min, max, rng);
+
+    int qp_access_flags = IBV_ACCESS_REMOTE_WRITE;
+    ibv_qp_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    for (size_t i = 0; i < test_time; ++i)
+    {
+        qp_access_flags = IBV_ACCESS_REMOTE_WRITE ? IBV_ACCESS_REMOTE_READ
+                                                  : IBV_ACCESS_REMOTE_WRITE;
+        attr.qp_access_flags = qp_access_flags;
+        ChronoTimer timer;
+        auto ret = ibv_modify_qp(qp, &attr, IBV_QP_ACCESS_FLAGS);
+        auto ns = timer.pin();
+        lat_m.collect(ns);
+        PLOG_IF(FATAL, ret) << "Failed to ibv_modify_qp";
+    }
+    CHECK_EQ(lat_m.overflow_nr(), 0) << lat_m;
+    LOG(INFO) << lat_m;
+
+    col_idx.push_back("QP(flag)");
+    col_x_test_time.push_back(test_time);
+    col_x_bind_size.push_back(0);
+    col_lat_min.push_back(lat_m.min());
+    col_lat_p5.push_back(lat_m.percentile(0.5));
+    col_lat_p9.push_back(lat_m.percentile(0.9));
+    col_lat_p99.push_back(lat_m.percentile(0.99));
+}
+
+void bench_qp_state(Patronus::pointer p, size_t test_time)
+{
+    auto dsm = p->get_dsm();
+
+    uint64_t min = util::time::to_ns(0ns);
+    uint64_t max = util::time::to_ns(10ms);
+    uint64_t rng = util::time::to_ns(1ns);
+    OnePassBucketMonitor<uint64_t> lat_m(min, max, rng);
+
+    for (size_t i = 0; i < test_time; ++i)
+    {
+        ChronoTimer timer;
+        CHECK(dsm->recoverDirQP(0, 0, kDirID));
+        auto ns = timer.pin();
+        lat_m.collect(ns);
+    }
+
+    LOG(INFO) << lat_m;
+    CHECK_EQ(lat_m.overflow_nr(), 0) << lat_m;
+
+    col_idx.push_back("QP(state)");
+    col_x_test_time.push_back(test_time);
+    col_x_bind_size.push_back(0);
+    col_lat_min.push_back(lat_m.min());
+    col_lat_p5.push_back(lat_m.percentile(0.5));
+    col_lat_p9.push_back(lat_m.percentile(0.9));
+    col_lat_p99.push_back(lat_m.percentile(0.99));
+}
+
+static size_t barrier_entered_{0};
+void benchmark(Patronus::pointer p, bool is_client)
+{
+    auto dsm = p->get_dsm();
+    for (size_t size :
+         {64_B, 4_KB, 32_KB, 256_KB, 2_MB, 16_MB, 64_MB, 512_MB, 2_GB})
+    {
+        size_t test_time = 1_K;
+
+        bench_mw(p, test_time, size, is_client);
+        LOG(INFO) << "[bench] bench_mr size: " << size;
+        bench_mr(p, test_time, size, is_client);
+    }
+    auto mr_max_size = dsm->get_base_size();
+    for (size_t size = 4_GB; size <= mr_max_size; size *= 2)
+    {
+        LOG(INFO) << "[bench] bench_mr size: " << size;
+        bench_mr(p, 10, size, is_client);
+    }
+
+    LOG(INFO) << "[bench] bench_qp_flag";
+    bench_qp_flag(p, 1_K);
+    LOG(INFO) << "[bench] bench_qp_state";
+    bench_qp_state(p, 1_K);
+}
+
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
@@ -133,72 +219,42 @@ int main(int argc, char *argv[])
 
     rdmaQueryDevice();
 
-    auto &m = bench::BenchManager::ins();
-    auto &bench = m.reg("memory-window");
-    bench.add_column("window_nr", &window_nr_)
-        .add_column("window_size", &window_size_)
-        .add_column("addr-access-type", &random_addr_)
-        .add_column("batch-poll-size", &batch_poll_size_)
-        .add_column_ns("alloc-mw", &alloc_mw_ns)
-        .add_column_ns("bind-mw", &bind_mw_ns)
-        .add_column_ns("free-mw", &free_mw_ns)
-        .add_dependent_throughput("bind-mw");
+    PatronusConfig config;
+    config.machine_nr = ::config::kMachineNr;
+    config.block_class = {2_MB};
+    config.block_ratio = {1};
 
-    DSMConfig config;
-    config.machineNR = ::config::kMachineNr;
+    auto patronus = Patronus::ins(config);
 
-    auto dsm = DSM::getInstance(config);
+    auto nid = patronus->get_node_id();
 
-    sleep(1);
-
-    dsm->registerThread();
-
-    // let client spining
-    auto nid = dsm->getMyNodeID();
-    if (nid == kClientNodeId)
+    if (::config::is_client(nid))
     {
-        LOG(INFO) << "client do nothing";
+        patronus->registerClientThread();
+        patronus->keeper_barrier("begin", 100ms);
+        benchmark(patronus, true);
     }
     else
     {
-        // 150 us to alloc one mw.
-        // 10000000 mws need 16 min, so we don't bench it.
-        std::vector<size_t> window_nr_arr{1000, 10000};
-        // std::vector<size_t> window_size_arr{
-        //     1, 2ull * define::MB, 512 * define::MB};
-        std::vector<bool> random_addr_arr{true, false};
-        // for (auto window_nr : window_nr_arr)
-        for (auto window_nr : {10000})
-        {
-            for (auto window_size : {2 * define::MB})
-            // for (auto window_size : {64})
-            {
-                // for (int random_addr : {0, 1, 2})
-                for (int random_addr : {2})
-                {
-                    for (size_t batch_poll_size : {8})
-                    // for (size_t batch_poll_size : {1, 10, 100})
-                    {
-                        window_nr_ = window_nr;
-                        window_size_ = window_size;
-                        random_addr_ = random_addr;
-                        batch_poll_size_ = batch_poll_size;
-
-                        server(dsm,
-                               window_nr,
-                               window_size,
-                               random_addr,
-                               batch_poll_size);
-                        bench.snapshot();
-                        bench.clear();
-                    }
-                }
-            }
-        }
-        m.report("memory-window");
-        m.to_csv("memory-window");
+        patronus->registerServerThread();
+        patronus->keeper_barrier("begin", 100ms);
+        benchmark(patronus, false);
     }
 
-    dsm->keeper_barrier("finished", 100ms);
+    StrDataFrame df;
+    df.load_index(std::move(col_idx));
+    df.load_column<size_t>("x_bind_size", std::move(col_x_bind_size));
+    df.load_column<size_t>("x_test_nr", std::move(col_x_test_time));
+    df.load_column<uint64_t>("lat_min(ns)", std::move(col_lat_min));
+    df.load_column<uint64_t>("lat_p5(ns)", std::move(col_lat_p5));
+    df.load_column<uint64_t>("lat_p9(ns)", std::move(col_lat_p9));
+    df.load_column<uint64_t>("lat_p99(ns)", std::move(col_lat_p99));
+
+    auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
+    df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                        io_format::csv2);
+    df.write<std::string, size_t, double>(filename.c_str(), io_format::csv2);
+
+    patronus->keeper_barrier("finished", 100ms);
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
