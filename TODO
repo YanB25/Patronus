@@ -286,8 +286,3 @@ will see an unexpected cases:
 - Added more checks at the handling path of response messages. Didnt catch any resp message with status == kReserved.
 - Fail to reproduce, and reproduce once may takes ~10 minutes
 - Decided to ignore this bug for now.
-
-================================
-
-- Give me the results of overhead of permission manipulation
-- Give me the proof: MW can survive even if QP reconnects
