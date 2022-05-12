@@ -25,7 +25,7 @@ using namespace hmdf;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = 32;
 constexpr static size_t kMaxCoroNr = 16;
-constexpr static uint64_t kMaxKey = 100_K;
+constexpr static uint64_t kMaxKey = 10_K;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -315,19 +315,19 @@ public:
         query_report_conf.name = name + ".query";
         query_report_conf.should_report = true;
 
-        auto mix_conf = BenchConfig::get_empty_conf(name + ".mix", kv_g_conf);
-        mix_conf.thread_nr = thread_nr;
-        mix_conf.coro_nr = coro_nr;
-        mix_conf.get_prob = 0.8;
-        mix_conf.delete_prob = 0.1;
-        mix_conf.insert_prob = 0.1;
-        mix_conf.auto_extend = false;
-        mix_conf.test_nr = test_nr;
-        mix_conf.should_report = true;
-        mix_conf.initial_subtable_nr = initial_subtable_nr;
+        return pipeline({insert_conf, query_warmup_conf, query_report_conf});
 
-        return pipeline(
-            {insert_conf, query_warmup_conf, query_report_conf, mix_conf});
+        // auto mix_conf = BenchConfig::get_empty_conf(name + ".mix",
+        // kv_g_conf); mix_conf.thread_nr = thread_nr; mix_conf.coro_nr =
+        // coro_nr; mix_conf.get_prob = 0.8; mix_conf.delete_prob = 0.1;
+        // mix_conf.insert_prob = 0.1;
+        // mix_conf.auto_extend = false;
+        // mix_conf.test_nr = test_nr;
+        // mix_conf.should_report = true;
+        // mix_conf.initial_subtable_nr = initial_subtable_nr;
+
+        // return pipeline(
+        //     {insert_conf, query_warmup_conf, query_report_conf, mix_conf});
     }
 
 private:
@@ -825,35 +825,76 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         // for (size_t thread_nr : {8, 16})
         // for (size_t thread_nr : {1, 4, 8, 16})
         // for (size_t thread_nr : {8, 16})
-        for (size_t thread_nr : {8, 16, 32})
+        for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
         {
-            LOG_IF(INFO, is_master)
-                << "[bench] benching multiple threads for " << rhh_conf;
-            constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
-            key++;
-            auto multithread_conf = BenchConfigFactory::get_multi_round_config(
-                "multithread_basic",
-                capacity,
-                4_M,
-                thread_nr,
-                kMaxCoroNr,
-                4 /* initial_subtable_nr */,
-                rhh_conf.kvblock_expect_size);
-            if (is_client)
+            for (size_t coro_nr : {1})
             {
-                for (const auto &bench_conf : multithread_conf)
+                LOG_IF(INFO, is_master)
+                    << "[bench] benching multiple threads for " << rhh_conf;
+                constexpr size_t capacity =
+                    RaceHashing<4, 16, 16>::max_capacity();
+                key++;
+                auto multithread_conf =
+                    BenchConfigFactory::get_multi_round_config(
+                        "multithread_basic",
+                        capacity,
+                        1_M,
+                        thread_nr,
+                        coro_nr,
+                        4 /* initial_subtable_nr */,
+                        rhh_conf.kvblock_expect_size);
+                if (is_client)
                 {
-                    bench_conf.validate();
-                    LOG_IF(INFO, is_master)
-                        << "[sub-conf] running conf: " << bench_conf;
-                    benchmark_client<4, 16, 16>(
-                        p, bar, is_master, bench_conf, rhh_conf, key);
+                    for (const auto &bench_conf : multithread_conf)
+                    {
+                        bench_conf.validate();
+                        LOG_IF(INFO, is_master)
+                            << "[sub-conf] running conf: " << bench_conf;
+                        benchmark_client<4, 16, 16>(
+                            p, bar, is_master, bench_conf, rhh_conf, key);
+                    }
+                }
+                else
+                {
+                    benchmark_server<4, 16, 16>(
+                        p, bar, is_master, multithread_conf, key);
                 }
             }
-            else
+        }
+        for (size_t thread_nr : {32})
+        {
+            for (size_t coro_nr : {2, 4, 8, 16})
             {
-                benchmark_server<4, 16, 16>(
-                    p, bar, is_master, multithread_conf, key);
+                LOG_IF(INFO, is_master)
+                    << "[bench] benching multiple threads for " << rhh_conf;
+                constexpr size_t capacity =
+                    RaceHashing<4, 16, 16>::max_capacity();
+                key++;
+                auto multithread_conf =
+                    BenchConfigFactory::get_multi_round_config(
+                        "multithread_basic",
+                        capacity,
+                        1_M,
+                        thread_nr,
+                        coro_nr,
+                        4 /* initial_subtable_nr */,
+                        rhh_conf.kvblock_expect_size);
+                if (is_client)
+                {
+                    for (const auto &bench_conf : multithread_conf)
+                    {
+                        bench_conf.validate();
+                        LOG_IF(INFO, is_master)
+                            << "[sub-conf] running conf: " << bench_conf;
+                        benchmark_client<4, 16, 16>(
+                            p, bar, is_master, bench_conf, rhh_conf, key);
+                    }
+                }
+                else
+                {
+                    benchmark_server<4, 16, 16>(
+                        p, bar, is_master, multithread_conf, key);
+                }
             }
         }
     }
@@ -967,6 +1008,12 @@ int main(int argc, char *argv[])
         "test_ns(effective)", "test_nr(total)", "lat(avg)", div_f, false);
     df.consolidate<size_t, size_t, double>(
         "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
+
+    auto client_nr = ::config::get_client_nids().size();
+    auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
+    df.load_column<double>("ops(cluster)", df.get_column<double>("ops(total)"));
+    df.replace<double>("ops(cluster)", replace_mul_f);
+
     df.consolidate<double, size_t, double>(
         "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
     df.consolidate<double, size_t, double>(
