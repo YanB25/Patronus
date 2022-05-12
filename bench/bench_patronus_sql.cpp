@@ -22,11 +22,9 @@ using namespace define::literals;
 using namespace patronus;
 using namespace hmdf;
 
-[[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
-constexpr uint32_t kMachineNr = 2;
-constexpr static size_t kThreadNr = 16;
-constexpr static size_t kMaxCoroNr = 8;
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
+constexpr static size_t kClientThreadNr = kMaxAppThread;
+constexpr static size_t kMaxCoroNr = 16;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -124,9 +122,7 @@ struct BenchConfig
         ret.alloc_hint = 0;
         ret.rw_flag = (flag_t) RWFlag::kUseUniversalRkey |
                       (flag_t) RWFlag::kNoLocalExpireCheck;
-        CHECK(false)
-            << "TODO: Now we delete the LeaseModifyFlag::kDoNothing. See "
-               "what's different";
+        ret.relinquish_flag = (flag_t) LeaseModifyFlag::kNoRpc;
         return ret;
     }
     static BenchConfig get_record_conf_mw_protected(const std::string &name,
@@ -179,7 +175,8 @@ void test_basic_client_worker(
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
     auto tid = p->get_thread_id();
-    auto dir_id = tid;
+    auto server_nid = ::config::get_server_nids().front();
+    auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
     size_t rdma_protection_nr = 0;
@@ -199,7 +196,7 @@ void test_basic_client_worker(
     CHECK_GE(rdma_buffer.size, io_size);
     while (ex.get_private_data().thread_remain_task > 0)
     {
-        auto lease = p->get_rlease(kServerNodeId,
+        auto lease = p->get_rlease(server_nid,
                                    dir_id,
                                    GlobalAddress(0),
                                    conf.alloc_hint,
@@ -563,17 +560,17 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     };
 
     // very easy to saturate, no need to test many threads
-    for (size_t thread_nr : {1, 4})
+    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
     {
         for (size_t io_times : {1})
         {
             for (size_t record_size : {64})
             {
-                for (size_t io_record_nr : {64})
+                for (size_t io_record_nr : {1})
                 {
-                    // for (size_t record_buffer_size : {512_MB, 1_GB})
-                    for (size_t record_buffer_size :
-                         {4_KB, 256_KB, 16_MB, 1_GB})
+                    for (size_t record_buffer_size : {4_KB, 16_MB})
+                    // for (size_t record_buffer_size :
+                    //      {4_KB, 256_KB, 16_MB, 1_GB})
                     {
                         for (const auto &[name, sql] : sqls)
                         {
@@ -581,15 +578,16 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                             size_t record_nr = record_buffer_size / record_size;
                             {
                                 key++;
-                                auto confs = ConfigFactory::get_mw(name + ".mw",
-                                                                   thread_nr,
-                                                                   kMaxCoroNr,
-                                                                   20_K,
-                                                                   record_nr,
-                                                                   record_size,
-                                                                   io_times,
-                                                                   io_record_nr,
-                                                                   sql);
+                                auto confs =
+                                    ConfigFactory::get_mw(name + ".mw",
+                                                          thread_nr,
+                                                          1 /* coro_nr */,
+                                                          20_K,
+                                                          record_nr,
+                                                          record_size,
+                                                          io_times,
+                                                          io_record_nr,
+                                                          sql);
                                 if (is_client)
                                 {
                                     for (const auto &conf : confs)
@@ -612,7 +610,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                                 auto confs = ConfigFactory::get_unprotected(
                                     name + ".unprot",
                                     thread_nr,
-                                    kMaxCoroNr,
+                                    1 /* coro_nr */,
                                     20_K,
                                     record_nr,
                                     record_size,
@@ -637,15 +635,16 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                             }
                             {
                                 key++;
-                                auto confs = ConfigFactory::get_mr(name + ".mr",
-                                                                   thread_nr,
-                                                                   kMaxCoroNr,
-                                                                   500,
-                                                                   record_nr,
-                                                                   record_size,
-                                                                   io_times,
-                                                                   io_record_nr,
-                                                                   sql);
+                                auto confs =
+                                    ConfigFactory::get_mr(name + ".mr",
+                                                          thread_nr,
+                                                          1 /* coro_nr */,
+                                                          500,
+                                                          record_nr,
+                                                          record_size,
+                                                          io_times,
+                                                          io_record_nr,
+                                                          sql);
                                 if (is_client)
                                 {
                                     for (const auto &conf : confs)
@@ -668,6 +667,118 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
             }
         }
     }
+
+    for (size_t thread_nr : {32})
+    {
+        for (size_t coro_nr : {2, 4, 8, 16})
+        {
+            for (size_t io_times : {1})
+            {
+                for (size_t record_size : {64})
+                {
+                    for (size_t io_record_nr : {1})
+                    {
+                        for (size_t record_buffer_size : {4_KB, 16_MB})
+                        // for (size_t record_buffer_size :
+                        //      {4_KB, 256_KB, 16_MB, 1_GB})
+                        {
+                            for (const auto &[name, sql] : sqls)
+                            {
+                                CHECK_EQ(record_buffer_size % record_size, 0);
+                                size_t record_nr =
+                                    record_buffer_size / record_size;
+                                {
+                                    key++;
+                                    auto confs =
+                                        ConfigFactory::get_mw(name + ".mw",
+                                                              thread_nr,
+                                                              coro_nr,
+                                                              20_K,
+                                                              record_nr,
+                                                              record_size,
+                                                              io_times,
+                                                              io_record_nr,
+                                                              sql);
+                                    if (is_client)
+                                    {
+                                        for (const auto &conf : confs)
+                                        {
+                                            LOG_IF(INFO, is_master)
+                                                << "[conf] " << conf;
+                                            benchmark_client(
+                                                p, bar, conf, is_master, key);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        benchmark_server(
+                                            p, bar, confs, is_master, key);
+                                    }
+                                }
+
+                                {
+                                    key++;
+                                    auto confs = ConfigFactory::get_unprotected(
+                                        name + ".unprot",
+                                        thread_nr,
+                                        coro_nr,
+                                        20_K,
+                                        record_nr,
+                                        record_size,
+                                        io_times,
+                                        io_record_nr,
+                                        sql);
+                                    if (is_client)
+                                    {
+                                        for (const auto &conf : confs)
+                                        {
+                                            LOG_IF(INFO, is_master)
+                                                << "[conf] " << conf;
+                                            benchmark_client(
+                                                p, bar, conf, is_master, key);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        benchmark_server(
+                                            p, bar, confs, is_master, key);
+                                    }
+                                }
+                                {
+                                    key++;
+                                    auto confs =
+                                        ConfigFactory::get_mr(name + ".mr",
+                                                              thread_nr,
+                                                              coro_nr,
+                                                              500,
+                                                              record_nr,
+                                                              record_size,
+                                                              io_times,
+                                                              io_record_nr,
+                                                              sql);
+                                    if (is_client)
+                                    {
+                                        for (const auto &conf : confs)
+                                        {
+                                            LOG_IF(INFO, is_master)
+                                                << "[conf] " << conf;
+                                            benchmark_client(
+                                                p, bar, conf, is_master, key);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        benchmark_server(
+                                            p, bar, confs, is_master, key);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 int main(int argc, char *argv[])
@@ -676,7 +787,7 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     PatronusConfig pconfig;
-    pconfig.machine_nr = kMachineNr;
+    pconfig.machine_nr = ::config::kMachineNr;
     pconfig.block_class = {2_MB, 8_KB};
     pconfig.block_ratio = {0.5, 0.5};
     pconfig.reserved_buffer_size = 2_GB;
@@ -686,10 +797,9 @@ int main(int argc, char *argv[])
     auto patronus = Patronus::ins(pconfig);
 
     std::vector<std::thread> threads;
-    boost::barrier bar(kThreadNr);
     auto nid = patronus->get_node_id();
 
-    bool is_client = nid == kClientNodeId;
+    bool is_client = ::config::is_client(nid);
 
     if (is_client)
     {
@@ -700,30 +810,45 @@ int main(int argc, char *argv[])
         patronus->registerServerThread();
     }
 
-    for (size_t i = 0; i < kThreadNr - 1; ++i)
+    if (is_client)
     {
-        threads.emplace_back([patronus, &bar, is_client]() {
-            if (is_client)
-            {
+        boost::barrier bar(kClientThreadNr);
+        for (size_t i = 0; i < kClientThreadNr - 1; ++i)
+        {
+            threads.emplace_back([patronus, &bar]() {
                 patronus->registerClientThread();
-            }
-            else
-            {
-                patronus->registerServerThread();
-            }
-            LOG(INFO) << "[bench] " << pre_patronus_explain(*patronus)
-                      << ". tid: " << patronus->get_thread_id();
+                bar.wait();
+                benchmark(patronus, bar, true);
+            });
+        }
+        bar.wait();
+        patronus->keeper_barrier("begin", 100ms);
+        benchmark(patronus, bar, true);
 
-            benchmark(patronus, bar, is_client);
-        });
+        for (auto &t : threads)
+        {
+            t.join();
+        }
     }
-    LOG(INFO) << "[bench] " << pre_patronus_explain(*patronus)
-              << ". tid: " << patronus->get_thread_id();
-    benchmark(patronus, bar, is_client);
-
-    for (auto &t : threads)
+    else
     {
-        t.join();
+        boost::barrier bar(kServerThreadNr);
+        for (size_t i = 0; i < kServerThreadNr - 1; ++i)
+        {
+            threads.emplace_back([patronus, &bar]() {
+                patronus->registerServerThread();
+                bar.wait();
+                benchmark(patronus, bar, false);
+            });
+        }
+        bar.wait();
+        patronus->keeper_barrier("begin", 100ms);
+        benchmark(patronus, bar, false);
+
+        for (auto &t : threads)
+        {
+            t.join();
+        }
     }
 
     StrDataFrame df;
@@ -762,6 +887,12 @@ int main(int argc, char *argv[])
         "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
     df.consolidate<double, size_t, double>(
         "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
+
+    auto client_nr = ::config::get_client_nids().size();
+    auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
+    df.load_column<double>("ops(cluster)", df.get_column<double>("ops(total)"));
+    df.replace<double>("ops(cluster)", replace_mul_f);
+
     df.consolidate<double, size_t, double>(
         "ops(thread)", "x_coro_nr", "ops(coro)", div_f2, false);
 
