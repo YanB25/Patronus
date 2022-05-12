@@ -1364,6 +1364,7 @@ size_t Patronus::handle_rdma_finishes(
 
 void Patronus::finished(uint64_t key)
 {
+    VLOG(1) << "[patronus] finished(" << key << ")";
     finished_[key][dsm_->get_node_id()] = true;
 
     auto tid = get_thread_id();
@@ -1459,13 +1460,14 @@ void Patronus::handle_admin_exit(AdminRequest *req,
     {
         if (!finished_[key][i])
         {
-            DVLOG(1) << "[patronus] receive exit request by " << from_node
-                     << ". but node " << i << " not finished yet. key: " << key;
+            VLOG(1) << "[patronus] receive exit request by " << from_node
+                    << ". but (at least) node " << i
+                    << " not finished yet. key: " << key;
             return;
         }
     }
 
-    DVLOG(1) << "[patronus] set should_exit to true";
+    VLOG(1) << "[patronus] set should_exit to true";
     DCHECK_LT(key, should_exit_.size());
     should_exit_[key].store(true, std::memory_order_release);
 }
@@ -1721,6 +1723,7 @@ void Patronus::handle_response_lease_modify(LeaseModifyResponse *resp)
 
 void Patronus::server_serve(uint64_t key)
 {
+    DVLOG(1) << "[patronus] server_serve(" << key << ")";
     auto &server_workers = server_coro_ctx_.server_workers;
     auto &server_master = server_coro_ctx_.server_master;
 

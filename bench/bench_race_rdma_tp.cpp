@@ -23,7 +23,7 @@ using namespace patronus;
 using namespace hmdf;
 
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kClientThreadNr = 16;
+constexpr static size_t kClientThreadNr = 32;
 constexpr static size_t kMaxCoroNr = 16;
 constexpr static uint64_t kMaxKey = 100_K;
 
@@ -90,6 +90,9 @@ struct BenchConfig
     bool subtable_use_mr{false};
     KVGenConf kv_gen_conf_;  // remember it for debuging
     IKVRandGenerator::pointer kv_g;
+
+    bool is_loading{false};
+    std::optional<uint64_t> limit_nid;
 
     void validate() const
     {
@@ -294,6 +297,8 @@ public:
         insert_conf.test_nr = fill_nr;
         insert_conf.should_report = false;
         insert_conf.initial_subtable_nr = initial_subtable_nr;
+        insert_conf.is_loading = true;
+        insert_conf.limit_nid = 1;  // nid
 
         auto query_warmup_conf =
             BenchConfig::get_empty_conf(name + ".query.warmup", kv_g_conf);
@@ -655,6 +660,7 @@ void benchmark_client(Patronus::pointer p,
     size_t actual_test_nr = bench_conf.test_nr * rhh_conf.test_nr_scale_factor;
 
     auto tid = p->get_thread_id();
+    auto nid = p->get_node_id();
     if (is_master)
     {
         // init here by master
@@ -671,7 +677,12 @@ void benchmark_client(Patronus::pointer p,
 
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
-    if (tid < thread_nr)
+    bool should_enter = tid < thread_nr;
+    if (bench_conf.limit_nid.has_value() && bench_conf.limit_nid.value() != nid)
+    {
+        should_enter = false;
+    }
+    if (should_enter)
     {
         ex.get_private_data().thread_remain_task = 0;
         for (size_t i = coro_nr; i < kMaxCoroNr; ++i)
@@ -795,7 +806,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     // set the rhh we like to test
     std::vector<RaceHashingHandleConfig> rhh_configs;
-    for (size_t kvblock_expect_size : {64_B, 4_KB})
+    for (size_t kvblock_expect_size : {4_KB})
     {
         rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
             "unprot", kvblock_expect_size, 0 /* no batching */));
@@ -813,7 +824,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         // for (size_t thread_nr : {16})
         // for (size_t thread_nr : {8, 16})
         // for (size_t thread_nr : {1, 4, 8, 16})
-        for (size_t thread_nr : {8})
+        // for (size_t thread_nr : {8, 16})
+        for (size_t thread_nr : {8, 16, 32})
         {
             LOG_IF(INFO, is_master)
                 << "[bench] benching multiple threads for " << rhh_conf;

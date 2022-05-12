@@ -24,7 +24,7 @@ using namespace define::literals;
 using namespace patronus;
 using namespace hmdf;
 
-constexpr static uint64_t kMaxKey = 10_K;
+constexpr static uint64_t kMaxKey = 3_K;
 
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = kMaxAppThread;
@@ -672,7 +672,10 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     // set the rhh we like to test
     std::vector<RaceHashingHandleConfig> rhh_configs;
-    for (size_t kvblock_size : {64_B, 512_B})
+    // for (size_t kvblock_size : {64_B, 512_B})
+    // for (size_t kvblock_size : {512_B})
+    // for (size_t kvblock_size : {1_KB, 4_KB})
+    for (size_t kvblock_size : {4_KB})
     // for (size_t kvblock_size : {512_B, 4_KB})
     // for (size_t kvblock_size : {4_KB})
     {
@@ -691,11 +694,13 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     for (auto &rhh_conf : rhh_configs)
     {
-        for (size_t thread_nr : {32})
+        for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
         {
-            for (size_t coro_nr : {16})
+            for (size_t coro_nr : {1})
+            // for (size_t coro_nr : {1})
             {
-                for (size_t io_nr : {1, 8, 16, 32})
+                // for (size_t io_nr : {8, 16, 32})
+                for (size_t io_nr : {8})
                 // for (size_t io_nr : {128})
                 // for (size_t io_nr : {0, 1, 8, 16, 32})
                 {
@@ -706,6 +711,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                         "boot",
                         4 /* subtable nr */,
                         capacity,
+                        // 1_M,
                         100_K,
                         // 10_K /* test_nr */,
                         thread_nr /* thread nr */,
@@ -736,6 +742,59 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
             }
         }
     }
+
+    // for (auto &rhh_conf : rhh_configs)
+    // {
+    //     for (size_t thread_nr : {32})
+    //     {
+    //         for (size_t coro_nr : {2, 4, 8, 16})
+    //         // for (size_t coro_nr : {1})
+    //         {
+    //             // for (size_t io_nr : {8, 16, 32})
+    //             for (size_t io_nr : {8})
+    //             // for (size_t io_nr : {128})
+    //             // for (size_t io_nr : {0, 1, 8, 16, 32})
+    //             {
+    //                 LOG_IF(INFO, is_master)
+    //                     << "[bench] benching single thread for " << rhh_conf;
+    //                 key++;
+    //                 auto basic_conf =
+    //                 BenchConfigFactory::get_bootstrap_config(
+    //                     "boot",
+    //                     4 /* subtable nr */,
+    //                     capacity,
+    //                     // 1_M,
+    //                     100_K,
+    //                     // 10_K /* test_nr */,
+    //                     thread_nr /* thread nr */,
+    //                     coro_nr /* coro nr */,
+    //                     io_nr);
+    //                 if (is_client)
+    //                 {
+    //                     for (const auto &bench_conf : basic_conf)
+    //                     {
+    //                         bench_conf.validate();
+    //                         LOG_IF(INFO, is_master)
+    //                             << "[sub-conf] running conf: " << bench_conf;
+    //                         benchmark_client<4, 16, 16>(
+    //                             p, bar, is_master, bench_conf, rhh_conf,
+    //                             key);
+    //                     }
+    //                 }
+    //                 else
+    //                 {
+    //                     benchmark_server<4, 16, 16>(
+    //                         p,
+    //                         bar,
+    //                         is_master,
+    //                         basic_conf,
+    //                         rhh_conf.kvblock_expect_size,
+    //                         key);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 int main(int argc, char *argv[])
@@ -844,6 +903,18 @@ int main(int argc, char *argv[])
         "test_ns(effective)", "test_nr(total)", "lat(avg)", div_f, false);
     df.consolidate<size_t, size_t, double>(
         "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
+
+    auto client_nr = ::config::get_client_nids().size();
+    auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
+    df.load_column<double>("ops(cluster)", df.get_column<double>("ops(total)"));
+    df.replace<double>("ops(cluster)", replace_mul_f);
+
+    df.consolidate<double, size_t, double>("ops(cluster)",
+                                           "x_io_nr_per_boot",
+                                           "effective ops(cluster)",
+                                           mul_f,
+                                           false);
+
     df.consolidate<double, size_t, double>(
         "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
     df.consolidate<double, size_t, double>(
@@ -857,6 +928,17 @@ int main(int argc, char *argv[])
     df.load_column<size_t>("lat_p9", std::move(col_latency_p9));
     df.load_column<size_t>("lat_p99", std::move(col_latency_p99));
     df.load_column<size_t>("lat_max", std::move(col_latency_max));
+
+    df.consolidate<size_t, size_t, double>(
+        "lat_min", "x_io_nr_per_boot", "lat_min(avg)", div_f, false);
+    df.consolidate<size_t, size_t, double>(
+        "lat_p5", "x_io_nr_per_boot", "lat_p5(avg)", div_f, false);
+    df.consolidate<size_t, size_t, double>(
+        "lat_p9", "x_io_nr_per_boot", "lat_p9(avg)", div_f, false);
+    df.consolidate<size_t, size_t, double>(
+        "lat_p99", "x_io_nr_per_boot", "lat_p99(avg)", div_f, false);
+    df.consolidate<size_t, size_t, double>(
+        "lat_max", "x_io_nr_per_boot", "lat_max(avg)", div_f, false);
 
     auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
     df.write<std::ostream, std::string, size_t, double>(std::cout,

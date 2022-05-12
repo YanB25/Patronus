@@ -318,8 +318,9 @@ public:
         // so we disable the per-KV binding
         auto c = get_unprotected(name, expect_kvblock_size, 1 /* batch size */);
         c.meta.ctor.eager_bind_subtable = eager_bind_subtable;
-        c.meta.ctor.ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
-        c.meta.dtor.flag = (flag_t) 0;
+        c.meta.ctor.ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                              (flag_t) AcquireRequestFlag::kNoBindPR;
+        c.meta.dtor.flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
         c.bypass_prot = false;
         return c;
     }

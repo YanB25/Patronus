@@ -2066,7 +2066,13 @@ private:
 
         // NOTE:
         // kvblock_mem_handle_ does not listen to the config
-        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
+        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                       (flag_t) AcquireRequestFlag::kNoBindPR;
+        if (conf_.bypass_prot)
+        {
+            ac_flag |= (flag_t) AcquireRequestFlag::kNoRpc;
+        }
+
         kvblock_mem_handle_ = rdma_adpt_->acquire_perm(
             g_kvblock_pool_gaddr, 0, g_kvblock_pool_size, 0ns, ac_flag);
     }
