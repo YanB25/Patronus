@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <cstdlib>
 #include <iostream>
 #include <queue>
 #include <set>
@@ -33,10 +35,11 @@ std::vector<size_t> col_x_coro_nr;
 std::vector<size_t> col_x_lease_time_ns;
 std::vector<size_t> col_alloc_nr;
 std::vector<size_t> col_alloc_ns;
-std::vector<uint64_t> col_lat_min;
-std::vector<uint64_t> col_lat_p5;
-std::vector<uint64_t> col_lat_p9;
-std::vector<uint64_t> col_lat_p99;
+
+std::vector<std::string> col_lat_idx;
+std::vector<uint64_t> col_lat_patronus;
+std::vector<uint64_t> col_lat_MR;
+std::vector<uint64_t> col_lat_unprotected;
 
 using namespace hmdf;
 
@@ -48,10 +51,6 @@ struct CoroCommunication
     CoroCall workers[kCoroCnt];
     CoroCall master;
     ssize_t thread_remain_task;
-    double lat_min;
-    double lat_p5;
-    double lat_p9;
-    double lat_p99;
     std::vector<bool> finish_all;
 };
 
@@ -323,11 +322,7 @@ void reg_result(const std::string &name,
                 size_t block_size,
                 size_t thread_nr,
                 size_t coro_nr,
-                std::chrono::nanoseconds acquire_ns,
-                double lat_min,
-                double lat_p5,
-                double lat_p9,
-                double lat_p99)
+                std::chrono::nanoseconds acquire_ns)
 {
     col_idx.push_back(name);
     col_x_alloc_size.push_back(block_size);
@@ -337,10 +332,23 @@ void reg_result(const std::string &name,
     col_x_lease_time_ns.push_back(ns);
     col_alloc_nr.push_back(test_times);
     col_alloc_ns.push_back(total_ns);
-    col_lat_min.push_back(lat_min);
-    col_lat_p5.push_back(lat_p5);
-    col_lat_p9.push_back(lat_p9);
-    col_lat_p99.push_back(lat_p99);
+}
+
+std::unordered_map<std::string, std::vector<uint64_t>> lat_data_;
+void reg_latency(const std::string &name, OnePassBucketMonitor<uint64_t> &m)
+{
+    if (unlikely(col_lat_idx.empty()))
+    {
+        col_lat_idx.push_back("lat_min");
+        col_lat_idx.push_back("lat_p5");
+        col_lat_idx.push_back("lat_p9");
+        col_lat_idx.push_back("lat_p99");
+    }
+
+    lat_data_[name].push_back(m.min());
+    lat_data_[name].push_back(m.percentile(0.5));
+    lat_data_[name].push_back(m.percentile(0.9));
+    lat_data_[name].push_back(m.percentile(0.99));
 }
 
 void bench_alloc_thread_coro_master(Patronus::pointer patronus,
@@ -441,6 +449,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     size_t coro_id,
                                     CoroYield &yield,
                                     CoroCommunication &coro_comm,
+                                    OnePassBucketMonitor<uint64_t> &lat_m,
                                     bool is_master,
                                     size_t alloc_size,
                                     flag_t acquire_flag,
@@ -456,11 +465,6 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
 
     size_t fail_nr = 0;
     size_t succ_nr = 0;
-
-    auto min = util::time::to_ns(0ns);
-    auto max = util::time::to_ns(10ms);
-    auto range = util::time::to_ns(1us);
-    OnePassBucketMonitor lat_m(min, max, range);
 
     ChronoTimer timer;
     ChronoTimer op_timer;
@@ -511,13 +515,6 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         }
     }
     auto total_ns = timer.pin();
-    if (is_master && coro_id == 0)
-    {
-        coro_comm.lat_min = lat_m.min();
-        coro_comm.lat_p5 = lat_m.percentile(0.5);
-        coro_comm.lat_p9 = lat_m.percentile(0.9);
-        coro_comm.lat_p99 = lat_m.percentile(0.99);
-    }
 
     coro_comm.finish_all[coro_id] = true;
 
@@ -536,16 +533,17 @@ struct BenchResult
     double lat_p99;
 };
 
-BenchResult bench_alloc_thread_coro(Patronus::pointer patronus,
-                                    size_t alloc_size,
-                                    size_t test_times,
-                                    bool is_master,
-                                    std::atomic<ssize_t> &work_nr,
-                                    size_t coro_nr,
-                                    flag_t acquire_flag,
-                                    flag_t relinquish_flag,
-                                    std::chrono::nanoseconds acquire_ns,
-                                    bool do_not_call_relinquish)
+void bench_alloc_thread_coro(Patronus::pointer patronus,
+                             OnePassBucketMonitor<uint64_t> &lat_m,
+                             size_t alloc_size,
+                             size_t test_times,
+                             bool is_master,
+                             std::atomic<ssize_t> &work_nr,
+                             size_t coro_nr,
+                             flag_t acquire_flag,
+                             flag_t relinquish_flag,
+                             std::chrono::nanoseconds acquire_ns,
+                             bool do_not_call_relinquish)
 {
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
@@ -559,6 +557,7 @@ BenchResult bench_alloc_thread_coro(Patronus::pointer patronus,
     {
         coro_comm.workers[i] =
             CoroCall([patronus,
+                      &lat_m,
                       coro_id = i,
                       &coro_comm,
                       alloc_size,
@@ -571,6 +570,7 @@ BenchResult bench_alloc_thread_coro(Patronus::pointer patronus,
                                                coro_id,
                                                yield,
                                                coro_comm,
+                                               lat_m,
                                                is_master,
                                                alloc_size,
                                                acquire_flag,
@@ -588,10 +588,7 @@ BenchResult bench_alloc_thread_coro(Patronus::pointer patronus,
         });
 
     coro_comm.master();
-    return BenchResult{coro_comm.lat_min,
-                       coro_comm.lat_p5,
-                       coro_comm.lat_p9,
-                       coro_comm.lat_p99};
+    return;
 }
 
 // void bench_template_coro(Patronus::pointer patronus,
@@ -648,20 +645,25 @@ void bench_template(const std::string &name,
     ChronoTimer timer;
 
     auto tid = patronus->get_thread_id();
-    BenchResult r;
+
+    auto min = util::time::to_ns(0ns);
+    auto max = util::time::to_ns(10ms);
+    auto range = util::time::to_ns(1us);
+    OnePassBucketMonitor lat_m(min, max, range);
 
     if (tid < thread_nr)
     {
-        r = bench_alloc_thread_coro(patronus,
-                                    alloc_size,
-                                    test_times,
-                                    is_master,
-                                    work_nr,
-                                    coro_nr,
-                                    acquire_flag,
-                                    relinquish_flag,
-                                    acquire_ns,
-                                    do_not_call_relinquish);
+        bench_alloc_thread_coro(patronus,
+                                lat_m,
+                                alloc_size,
+                                test_times,
+                                is_master,
+                                work_nr,
+                                coro_nr,
+                                acquire_flag,
+                                relinquish_flag,
+                                acquire_ns,
+                                do_not_call_relinquish);
     }
 
     bar.wait();
@@ -674,11 +676,8 @@ void bench_template(const std::string &name,
                    alloc_size,
                    thread_nr,
                    coro_nr,
-                   acquire_ns,
-                   r.lat_min,
-                   r.lat_p5,
-                   r.lat_p9,
-                   r.lat_p99);
+                   acquire_ns);
+        reg_latency(name, lat_m);
     }
     bar.wait();
 }
@@ -782,7 +781,8 @@ void benchmark(Patronus::pointer patronus,
         // for (size_t block_size : {64ul, 2_MB, 128_MB})
         for (size_t block_size : {64ul})
         {
-            for (size_t coro_nr : {1})
+            // for (size_t coro_nr : {1})
+            for (size_t coro_nr : {16})
             // for (size_t coro_nr : {1, 2, 4, 8, 16, 32})
             {
                 auto total_test_times = kTestTimePerThread * thread_nr;
@@ -889,7 +889,8 @@ void benchmark(Patronus::pointer patronus,
         CHECK_LE(thread_nr, kMaxAppThread);
         for (size_t block_size : {64ul})
         {
-            for (size_t coro_nr : {2, 4, 8, 16, 32})
+            // for (size_t coro_nr : {2, 4, 8, 16, 32})
+            for (size_t coro_nr : {1})
             {
                 auto total_test_times = kTestTimePerThread * 4;
                 {
@@ -904,7 +905,7 @@ void benchmark(Patronus::pointer patronus,
                 }
                 {
                     auto configs =
-                        BenchConfigFactory::get_alloc_only("alloc w/o(*)",
+                        BenchConfigFactory::get_alloc_only("alloc w / o(*) ",
                                                            thread_nr,
                                                            coro_nr,
                                                            block_size,
@@ -1059,45 +1060,72 @@ int main(int argc, char *argv[])
         }
     }
 
-    StrDataFrame df;
-    df.load_index(std::move(col_idx));
-    df.load_column<size_t>("x_alloc_size", std::move(col_x_alloc_size));
-    df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
-    df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
-    df.load_column<size_t>("x_lease_time(ns)", std::move(col_x_lease_time_ns));
-    df.load_column<size_t>("alloc_nr(total)", std::move(col_alloc_nr));
-    df.load_column<size_t>("alloc_ns(total)", std::move(col_alloc_ns));
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_idx));
+        df.load_column<size_t>("x_alloc_size", std::move(col_x_alloc_size));
+        df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
+        df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
+        df.load_column<size_t>("x_lease_time(ns)",
+                               std::move(col_x_lease_time_ns));
+        df.load_column<size_t>("alloc_nr(total)", std::move(col_alloc_nr));
+        df.load_column<size_t>("alloc_ns(total)", std::move(col_alloc_ns));
 
-    auto div_f = gen_F_div<size_t, size_t, double>();
-    auto div_f2 = gen_F_div<double, size_t, double>();
-    auto ops_f = gen_F_ops<size_t, size_t, double>();
-    auto mul_f = gen_F_mul<double, size_t, double>();
-    auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
-    df.consolidate<size_t, size_t, size_t>(
-        "x_thread_nr", "x_coro_nr", "x_effective_client_nr", mul_f2, false);
-    df.consolidate<size_t, size_t, double>(
-        "alloc_ns(total)", "alloc_nr(total)", "alloc lat", div_f, false);
-    df.consolidate<size_t, size_t, double>(
-        "alloc_nr(total)", "alloc_ns(total)", "alloc ops(total)", ops_f, false);
-    df.consolidate<double, size_t, double>(
-        "alloc ops(total)", "x_thread_nr", "alloc ops(thread)", div_f2, false);
+        auto div_f = gen_F_div<size_t, size_t, double>();
+        auto div_f2 = gen_F_div<double, size_t, double>();
+        auto ops_f = gen_F_ops<size_t, size_t, double>();
+        auto mul_f = gen_F_mul<double, size_t, double>();
+        auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
 
-    // calculate cluster numbers
-    auto client_nr = ::config::get_client_nids().size();
-    auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
-    df.load_column<double>("alloc ops(cluster)",
-                           df.get_column<double>("alloc ops(total)"));
-    df.replace<double>("alloc ops(cluster)", replace_mul_f);
+        // calculate cluster numbers
+        auto client_nr = ::config::get_client_nids().size();
+        auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
+        auto replace_mul_f_size = gen_replace_F_mul<size_t>(client_nr);
 
-    df.load_column<uint64_t>("lat min(ns)", std::move(col_lat_min));
-    df.load_column<uint64_t>("lat p5(ns)", std::move(col_lat_p5));
-    df.load_column<uint64_t>("lat p9(ns)", std::move(col_lat_p9));
-    df.load_column<uint64_t>("lat p99(ns)", std::move(col_lat_p99));
+        df.consolidate<size_t, size_t, size_t>(
+            "x_thread_nr", "x_coro_nr", "x_effective_client_nr", mul_f2, false);
+        df.replace<size_t>("x_effective_client_nr", replace_mul_f_size);
 
-    auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
-    df.write<std::ostream, std::string, size_t, double>(std::cout,
-                                                        io_format::csv2);
-    df.write<std::string, size_t, double>(filename.c_str(), io_format::csv2);
+        df.consolidate<size_t, size_t, double>(
+            "alloc_ns(total)", "alloc_nr(total)", "alloc lat", div_f, false);
+        df.consolidate<size_t, size_t, double>("alloc_nr(total)",
+                                               "alloc_ns(total)",
+                                               "alloc ops(total)",
+                                               ops_f,
+                                               false);
+        df.consolidate<double, size_t, double>("alloc ops(total)",
+                                               "x_thread_nr",
+                                               "alloc ops(thread)",
+                                               div_f2,
+                                               false);
+
+        df.load_column<double>("alloc ops(cluster)",
+                               df.get_column<double>("alloc ops(total)"));
+        df.replace<double>("alloc ops(cluster)", replace_mul_f);
+
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
+    }
+
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_lat_idx));
+        for (auto &[name, vec] : lat_data_)
+        {
+            df.load_column<uint64_t>(name.c_str(), std::move(vec));
+        }
+
+        std::map<std::string, std::string> info;
+        info.emplace("kind", "lat");
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
+    }
 
     patronus->keeper_barrier("finished", 100ms);
     LOG(INFO) << "Exiting...";

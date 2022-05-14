@@ -44,6 +44,13 @@ std::vector<double> col_put_succ_rate;
 std::vector<double> col_del_succ_rate;
 std::vector<size_t> col_rdma_protection_err;
 
+std::vector<std::string> col_lat_idx;
+std::vector<uint64_t> col_lat_min;
+std::vector<uint64_t> col_lat_p5;
+std::vector<uint64_t> col_lat_p9;
+std::vector<uint64_t> col_lat_p99;
+std::unordered_map<std::string, std::vector<uint64_t>> lat_data;
+
 struct KVGenConf
 {
     uint64_t max_key{1};
@@ -465,7 +472,8 @@ void test_basic_client_worker(
     const BenchConfig &bench_conf,
     const RaceHashingHandleConfig &rhh_conf,
     GlobalAddress meta_gaddr,
-    CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
+    CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
+    OnePassBucketMonitor<uint64_t> &lat_m)
 {
     auto tid = p->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
@@ -497,6 +505,9 @@ void test_basic_client_worker(
     key.resize(sizeof(uint64_t));
     value.resize(8);
     CHECK_NOTNULL(bench_conf.kv_g)->gen_value(&value[0], 8);
+
+    ChronoTimer op_timer;
+    bool should_report_latency = (tid == 0 && coro_id == 0);
     while (ex.get_private_data().thread_remain_task > 0)
     {
         bench_conf.kv_g->gen_key(&key[0], sizeof(uint64_t));
@@ -510,6 +521,11 @@ void test_basic_client_worker(
         //         rhh->hack_trigger_rdma_protection_error();
         //     }
         // }
+
+        if (should_report_latency)
+        {
+            op_timer.pin();
+        }
 
         if (true_with_prob(insert_prob))
         {
@@ -545,6 +561,10 @@ void test_basic_client_worker(
             rdma_protection_nr += rc == kRdmaProtectionErr;
             DCHECK(rc == kOk || rc == kNotFound || rc == kRdmaProtectionErr)
                 << "** unexpected rc: " << rc;
+        }
+        if (should_report_latency)
+        {
+            lat_m.collect(timer.pin());
         }
         executed_nr++;
         ex.get_private_data().thread_remain_task--;
@@ -675,6 +695,11 @@ void benchmark_client(Patronus::pointer p,
     }
     bar.wait();
 
+    auto min = util::time::to_ns(0ns);
+    auto max = util::time::to_ns(1ms);
+    auto rng = util::time::to_ns(1us);
+    OnePassBucketMonitor lat_m(min, max, rng);
+
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
     bool should_enter = tid < thread_nr;
@@ -692,16 +717,23 @@ void benchmark_client(Patronus::pointer p,
         }
         for (size_t i = 0; i < coro_nr; ++i)
         {
-            ex.worker(
-                i) = CoroCall([p,
-                               coro_id = i,
-                               &bench_conf,
-                               &rhh_conf,
-                               &ex,
-                               meta_gaddr = g_meta_gaddr](CoroYield &yield) {
-                test_basic_client_worker<kE, kB, kS>(
-                    p, coro_id, yield, bench_conf, rhh_conf, meta_gaddr, ex);
-            });
+            ex.worker(i) =
+                CoroCall([p,
+                          coro_id = i,
+                          &bench_conf,
+                          &rhh_conf,
+                          &ex,
+                          &lat_m,
+                          meta_gaddr = g_meta_gaddr](CoroYield &yield) {
+                    test_basic_client_worker<kE, kB, kS>(p,
+                                                         coro_id,
+                                                         yield,
+                                                         bench_conf,
+                                                         rhh_conf,
+                                                         meta_gaddr,
+                                                         ex,
+                                                         lat_m);
+                });
         }
         auto &master = ex.master();
         master = CoroCall([p, &ex, actual_test_nr = actual_test_nr, coro_nr](
@@ -712,6 +744,7 @@ void benchmark_client(Patronus::pointer p,
 
         master();
     }
+
     bar.wait();
     auto ns = timer.pin();
 
@@ -727,9 +760,10 @@ void benchmark_client(Patronus::pointer p,
         p->finished(key);
     }
 
+    auto report_name = bench_conf.conf_name() + "[" + rhh_conf.name + "]";
     if (is_master && bench_conf.should_report)
     {
-        col_idx.push_back(bench_conf.conf_name() + "[" + rhh_conf.name + "]");
+        col_idx.push_back(report_name);
         col_x_kvdist.push_back(bench_conf.kv_gen_conf_.desc());
         col_x_thread_nr.push_back(bench_conf.thread_nr);
         col_x_coro_nr.push_back(bench_conf.coro_nr);
@@ -748,6 +782,18 @@ void benchmark_client(Patronus::pointer p,
         col_del_succ_rate.push_back(del_succ_rate);
 
         col_rdma_protection_err.push_back(prv.rdma_protection_nr);
+
+        if (col_lat_idx.empty())
+        {
+            col_lat_idx.push_back("lat_min");
+            col_lat_idx.push_back("lat_p5");
+            col_lat_idx.push_back("lat_p9");
+            col_lat_idx.push_back("lat_p99");
+        }
+        lat_data[report_name].push_back(lat_m.min());
+        lat_data[report_name].push_back(lat_m.percentile(0.5));
+        lat_data[report_name].push_back(lat_m.percentile(0.9));
+        lat_data[report_name].push_back(lat_m.percentile(0.99));
     }
 }
 
@@ -863,7 +909,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         }
         for (size_t thread_nr : {32})
         {
-            for (size_t coro_nr : {2, 4, 8, 16})
+            // for (size_t coro_nr : {2, 4, 8, 16})
+            for (size_t coro_nr : {1})
             {
                 LOG_IF(INFO, is_master)
                     << "[bench] benching multiple threads for " << rhh_conf;
@@ -973,56 +1020,78 @@ int main(int argc, char *argv[])
         }
     }
 
-    StrDataFrame df;
-    df.load_index(std::move(col_idx));
-    df.load_column<std::string>("x_kv_dist", std::move(col_x_kvdist));
-    df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
-    df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
-    df.load_column<double>("x_put_rate", std::move(col_x_put_rate));
-    df.load_column<double>("x_del_rate", std::move(col_x_del_rate));
-    df.load_column<double>("x_get_rate", std::move(col_x_get_rate));
-    df.load_column<size_t>("test_nr(total)", std::move(col_test_op_nr));
-    df.load_column<size_t>("test_ns(total)", std::move(col_ns));
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_idx));
+        df.load_column<std::string>("x_kv_dist", std::move(col_x_kvdist));
+        df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
+        df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
+        df.load_column<double>("x_put_rate", std::move(col_x_put_rate));
+        df.load_column<double>("x_del_rate", std::move(col_x_del_rate));
+        df.load_column<double>("x_get_rate", std::move(col_x_get_rate));
+        df.load_column<size_t>("test_nr(total)", std::move(col_test_op_nr));
+        df.load_column<size_t>("test_ns(total)", std::move(col_ns));
 
-    df.load_column<size_t>("rdma_prot_err_nr",
-                           std::move(col_rdma_protection_err));
-    df.load_column<double>("get_succ_rate", std::move(col_get_succ_rate));
-    df.load_column<double>("put_succ_rate", std::move(col_put_succ_rate));
-    df.load_column<double>("del_succ_rate", std::move(col_del_succ_rate));
+        df.load_column<size_t>("rdma_prot_err_nr",
+                               std::move(col_rdma_protection_err));
+        df.load_column<double>("get_succ_rate", std::move(col_get_succ_rate));
+        df.load_column<double>("put_succ_rate", std::move(col_put_succ_rate));
+        df.load_column<double>("del_succ_rate", std::move(col_del_succ_rate));
 
-    auto div_f = gen_F_div<size_t, size_t, double>();
-    auto div_f2 = gen_F_div<double, size_t, double>();
-    auto ops_f = gen_F_ops<size_t, size_t, double>();
-    auto mul_f = gen_F_mul<double, size_t, double>();
-    auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
-    df.consolidate<size_t, size_t, size_t>(
-        "x_thread_nr", "x_coro_nr", "client_nr(effective)", mul_f2, false);
-    df.consolidate<size_t, size_t, size_t>("test_ns(total)",
-                                           "client_nr(effective)",
-                                           "test_ns(effective)",
-                                           mul_f2,
-                                           false);
-    df.consolidate<size_t, size_t, double>(
-        "test_ns(total)", "test_nr(total)", "lat(div)", div_f, false);
-    df.consolidate<size_t, size_t, double>(
-        "test_ns(effective)", "test_nr(total)", "lat(avg)", div_f, false);
-    df.consolidate<size_t, size_t, double>(
-        "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
+        auto div_f = gen_F_div<size_t, size_t, double>();
+        auto div_f2 = gen_F_div<double, size_t, double>();
+        auto ops_f = gen_F_ops<size_t, size_t, double>();
+        auto mul_f = gen_F_mul<double, size_t, double>();
+        auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
+        df.consolidate<size_t, size_t, size_t>(
+            "x_thread_nr", "x_coro_nr", "client_nr(effective)", mul_f2, false);
+        df.consolidate<size_t, size_t, size_t>("test_ns(total)",
+                                               "client_nr(effective)",
+                                               "test_ns(effective)",
+                                               mul_f2,
+                                               false);
+        df.consolidate<size_t, size_t, double>(
+            "test_ns(total)", "test_nr(total)", "lat(div)", div_f, false);
+        df.consolidate<size_t, size_t, double>(
+            "test_ns(effective)", "test_nr(total)", "lat(avg)", div_f, false);
+        df.consolidate<size_t, size_t, double>(
+            "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
 
-    auto client_nr = ::config::get_client_nids().size();
-    auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
-    df.load_column<double>("ops(cluster)", df.get_column<double>("ops(total)"));
-    df.replace<double>("ops(cluster)", replace_mul_f);
+        auto client_nr = ::config::get_client_nids().size();
+        auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
+        df.load_column<double>("ops(cluster)",
+                               df.get_column<double>("ops(total)"));
+        df.replace<double>("ops(cluster)", replace_mul_f);
 
-    df.consolidate<double, size_t, double>(
-        "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
-    df.consolidate<double, size_t, double>(
-        "ops(thread)", "x_coro_nr", "ops(coro)", div_f2, false);
+        df.consolidate<double, size_t, double>(
+            "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
+        df.consolidate<double, size_t, double>(
+            "ops(thread)", "x_coro_nr", "ops(coro)", div_f2, false);
 
-    auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
-    df.write<std::ostream, std::string, size_t, double>(std::cout,
-                                                        io_format::csv2);
-    df.write<std::string, size_t, double>(filename.c_str(), io_format::csv2);
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
+    }
+
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_lat_idx));
+        for (auto &[name, vec] : lat_data)
+        {
+            df.load_column<uint64_t>(name.c_str(), std::move(vec));
+        }
+
+        std::map<std::string, std::string> info;
+        info.emplace("kind", "lat");
+
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
+    }
 
     patronus->keeper_barrier("finished", 100ms);
 
