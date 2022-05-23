@@ -212,6 +212,16 @@ public:
     inline ibv_cq *get_dir_cq(size_t dirID);
     inline ibv_qp *get_th_qp(int node_id, size_t dirID);
     inline ibv_mr *get_dir_mr(size_t dirID);
+    inline ibv_mr *get_dm_mr()
+    {
+        return dirCon.front()->lockMR;
+    }
+    Buffer get_dm()
+    {
+        char *dm_addr = (char *) dirCon.front()->dmPool;
+        size_t dm_size = dirCon.front()->lockSize;
+        return {dm_addr, dm_size};
+    }
     inline RdmaContext *get_rdma_context(size_t dirID);
     inline uint32_t get_rkey(size_t node_id, size_t dir_id);
 
