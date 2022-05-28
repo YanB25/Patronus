@@ -37,8 +37,8 @@ struct RespMsg
 // constexpr static size_t kTokenNr = 1;
 // constexpr static ssize_t kMessageEachToken = kAllowedInflight / kTokenNr;
 
-constexpr static size_t kAllowedInflight = 64;
-constexpr static size_t kTokenNr = 64;
+constexpr static size_t kAllowedInflight = 32;
+constexpr static size_t kTokenNr = 32;
 constexpr static ssize_t kMessageEachToken = kAllowedInflight / kTokenNr;
 
 static_assert(kAllowedInflight <= config::umsg::kExpectInFlightMessageNr);

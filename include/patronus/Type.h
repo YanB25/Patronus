@@ -97,7 +97,8 @@ enum class AcquireRequestFlag : uint16_t
     kOnlyAllocation = 1 << 5,
     kUseMR = 1 << 6,
     kNoRpc = 1 << 7,
-    kReserved = 1 << 8,
+    kDebugServerDoNothing = 1 << 8,
+    kReserved = 1 << 9,
 };
 
 void debug_validate_acquire_request_flag(flag_t flag);

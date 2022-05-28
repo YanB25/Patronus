@@ -251,6 +251,12 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
     {
         os << "no-rpc, ";
     }
+    bool debug_srv_do_nothing =
+        flag.flag & (flag_t) AcquireRequestFlag::kDebugServerDoNothing;
+    if (debug_srv_do_nothing)
+    {
+        os << "dbg-svr-do-nothing";
+    }
     os << "}";
     return os;
 }

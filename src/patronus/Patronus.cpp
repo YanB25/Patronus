@@ -916,6 +916,8 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
     bool no_bind_any = req->flag & (flag_t) AcquireRequestFlag::kNoBindAny;
     bool with_alloc = req->flag & (flag_t) AcquireRequestFlag::kWithAllocation;
     bool only_alloc = req->flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
+    bool debug_srv_do_nothing =
+        req->flag & (flag_t) AcquireRequestFlag::kDebugServerDoNothing;
 
     bool use_mr = req->flag & (flag_t) AcquireRequestFlag::kUseMR;
 
@@ -929,6 +931,16 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
     bool bind_buf = true;
     bool bind_pr = true;
     bool alloc_lease_ctx = true;
+
+    if (debug_srv_do_nothing)
+    {
+        alloc_buf = false;
+        alloc_pr = false;
+        bind_buf = false;
+        bind_pr = false;
+        alloc_lease_ctx = false;
+    }
+
     // if not binding pr, we will even skip allocating it.
     if (no_bind_pr)
     {
@@ -1959,6 +1971,13 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
     using LeaseIdT = decltype(AcquireResponse::lease_id);
 
     bool no_gc = req->flag & (flag_t) AcquireRequestFlag::kNoGc;
+    bool debug_srv_do_nothing =
+        req->flag & (flag_t) AcquireRequestFlag::kDebugServerDoNothing;
+    if (debug_srv_do_nothing)
+    {
+        no_gc = true;
+        DCHECK(!alloc_lease_ctx);
+    }
 
     if (likely(status == AcquireRequestStatus::kSuccess))
     {
