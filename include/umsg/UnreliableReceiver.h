@@ -92,7 +92,7 @@ private:
     ibv_recv_wr recvs[kEndpointNr][kRecvBuffer];
     ibv_sge recv_sgl[kEndpointNr][kRecvBuffer];
 
-    size_t msg_recv_index_[kEndpointNr]{};
+    AlignedArray<size_t, kEndpointNr> msg_recv_indexes_{};
 };
 template <size_t kEndpointNr>
 void UnreliableRecvMessageConnection<kEndpointNr>::fills(ibv_sge &sge,
@@ -267,7 +267,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
     DCHECK_LT(th_id, kEndpointNr);
     DCHECK_LT(batch_id, kRecvBuffer);
 
-    size_t cur_idx = msg_recv_index_[th_id]++;
+    size_t cur_idx = msg_recv_indexes_[th_id]++;
     auto actual_size = wc.imm_data;
 
     if (likely(ibuf != nullptr))
@@ -334,7 +334,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc_no_cpy(
     DCHECK_LT(th_id, kEndpointNr);
     DCHECK_LT(batch_id, kRecvBuffer);
 
-    size_t cur_idx = msg_recv_index_[th_id]++;
+    size_t cur_idx = msg_recv_indexes_[th_id]++;
     auto actual_size = wc.imm_data;
 
     if (likely(ret_ptr != nullptr))
