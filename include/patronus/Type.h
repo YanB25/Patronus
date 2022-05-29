@@ -30,6 +30,8 @@ enum class RpcType : uint8_t
     kAcquireLeaseResp,
     kRelinquishReq,
     kRelinquishResp,
+    kExtendReq,
+    kExtendResp,
     kAdmin,
     kTimeSync,
 };

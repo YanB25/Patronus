@@ -70,10 +70,10 @@ struct TraceContext
 struct RpcContext
 {
     Lease *ret_lease{nullptr};
-    Lease *origin_lease{nullptr};
     BaseMessage *request{nullptr};
     std::atomic<bool> ready{false};
     size_t dir_id{0};
+    RetCode ret_code{RetCode::kOk};
 };
 
 struct RWContext
@@ -186,6 +186,10 @@ public:
                           std::chrono::nanoseconds ns,
                           flag_t flag /* LeaseModifyFlag */,
                           CoroContext *ctx = nullptr);
+    inline RetCode rpc_extend(Lease &lease,
+                              std::chrono::nanoseconds ns,
+                              flag_t flag /* LeaseModifyFlag */,
+                              CoroContext *ctx = nullptr);
     /**
      * when allocation is ON, hint is sent to the server
      */
@@ -376,8 +380,10 @@ public:
     void post_handle_request_acquire(AcquireRequest *req,
                                      HandleReqContext &req_ctx,
                                      CoroContext *ctx);
-    void post_handle_request_lease_modify(LeaseModifyRequest *req,
-                                          HandleReqContext &req_ctx,
+    void post_handle_request_lease_relinquish(LeaseModifyRequest *req,
+                                              HandleReqContext &req_ctx,
+                                              CoroContext *ctx);
+    void post_handle_request_lease_extend(LeaseModifyRequest *req,
                                           CoroContext *ctx);
 
     Buffer get_rdma_buffer_8B()
@@ -780,7 +786,8 @@ private:
 
     // for servers
     void handle_response_acquire(AcquireResponse *);
-    void handle_response_lease_modify(LeaseModifyResponse *);
+    void handle_response_lease_relinquish(LeaseModifyResponse *);
+    void handle_response_lease_extend(LeaseModifyResponse *resp);
     void handle_admin_exit(AdminRequest *req, CoroContext *ctx);
     void handle_admin_recover(AdminRequest *req, CoroContext *ctx);
     void handle_admin_barrier(AdminRequest *req, CoroContext *ctx);
@@ -789,6 +796,8 @@ private:
     void prepare_handle_request_lease_relinquish(LeaseModifyRequest *,
                                                  HandleReqContext &req_ctx,
                                                  CoroContext *ctx);
+    void prepare_handle_request_lease_extend(LeaseModifyRequest *,
+                                             CoroContext *ctx);
     void handle_request_lease_extend(LeaseModifyRequest *, CoroContext *ctx);
     void handle_request_lease_upgrade(LeaseModifyRequest *, CoroContext *ctx);
 
@@ -867,6 +876,10 @@ private:
                                size_t extend_unit_nr,
                                flag_t flag,
                                CoroContext *ctx);
+    inline RetCode rpc_extend_impl(Lease &lease,
+                                   uint64_t ns,
+                                   flag_t flag,
+                                   CoroContext *ctx);
     RetCode cas_impl(char *iobuf,
                      size_t node_id,
                      size_t dir_id,
@@ -877,12 +890,12 @@ private:
                      uint16_t wr_prefix,
                      CoroContext *ctx,
                      TraceView = util::nulltrace);
-    Lease lease_modify_impl(Lease &lease,
-                            uint64_t hint,
-                            RpcType type,
-                            time::ns_t ns,
-                            flag_t flag /* LeaseModificationFlag */,
-                            CoroContext *ctx = nullptr);
+    RetCode lease_modify_impl(Lease &lease,
+                              uint64_t hint,
+                              RpcType type,
+                              time::ns_t ns,
+                              flag_t flag /* LeaseModificationFlag */,
+                              CoroContext *ctx = nullptr);
     inline void fill_bind_mw_wr(ibv_send_wr &wr,
                                 ibv_mw *mw,
                                 ibv_mr *mr,
@@ -1089,6 +1102,20 @@ Lease Patronus::get_wlease(uint16_t node_id,
                           ctx);
 }
 
+RetCode Patronus::rpc_extend_impl(Lease &lease,
+                                  uint64_t ns,
+                                  flag_t flag,
+                                  CoroContext *ctx)
+{
+    DVLOG(4) << "[patronus][rpc-extend-impl] trying to extend. ns: " << ns
+             << ", flag:" << LeaseModifyFlagOut(flag)
+             << ", coro:" << (ctx ? *ctx : nullctx)
+             << "original lease: " << lease;
+
+    return lease_modify_impl(
+        lease, 0 /* hint */, RpcType::kExtendReq, ns, flag, ctx);
+}
+
 RetCode Patronus::extend_impl(Lease &lease,
                               size_t extend_unit_nr,
                               flag_t flag,
@@ -1124,6 +1151,32 @@ RetCode Patronus::extend_impl(Lease &lease,
              << ". Now lease: " << lease;
     return cas_ec;
 }
+
+RetCode Patronus::rpc_extend(Lease &lease,
+                             std::chrono::nanoseconds chrono_ns,
+                             flag_t flag,
+                             CoroContext *ctx)
+{
+    debug_validate_lease_modify_flag(flag);
+    auto ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
+    auto rc = rpc_extend_impl(lease, ns, flag, ctx);
+    if (rc != RetCode::kOk)
+    {
+        return rc;
+    }
+
+    // okay, modify lease locally
+    auto ns_per_unit = lease.ns_per_unit_;
+    // round up divide
+    auto extend_unit_nr = (ns + ns_per_unit - 1) / ns_per_unit;
+    lease.aba_unit_nr_to_ddl_.u32_2 += extend_unit_nr;
+    lease.update_ddl_term();
+
+    DCHECK_EQ(rc, RetCode::kOk);
+    return rc;
+}
+
 RetCode Patronus::extend(Lease &lease,
                          std::chrono::nanoseconds chrono_ns,
                          flag_t flag,
@@ -1183,8 +1236,9 @@ void Patronus::dealloc(GlobalAddress gaddr,
 
     auto flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind |
                 (flag_t) LeaseModifyFlag::kOnlyDeallocation;
-    lease_modify_impl(
+    auto ret = lease_modify_impl(
         lease, hint, RpcType::kRelinquishReq, 0 /* term */, flag, ctx);
+    DCHECK_EQ(ret, RetCode::kOk);
 }
 void Patronus::relinquish(Lease &lease,
                           uint64_t hint,
@@ -1196,8 +1250,11 @@ void Patronus::relinquish(Lease &lease,
 
     debug_validate_lease_modify_flag(flag);
     // TODO(Patronus): the term is set to 0 here.
-    lease_modify_impl(
+    auto rc = lease_modify_impl(
         lease, hint, RpcType::kRelinquishReq, 0 /* term */, flag, ctx);
+    DCHECK_EQ(rc, RetCode::kOk);
+
+    lease.set_invalid();
 }
 
 RetCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)

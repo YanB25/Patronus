@@ -222,10 +222,10 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     msg->flag = flag;
 
     rpc_context->ret_lease = &ret_lease;
-    rpc_context->origin_lease = nullptr;
     rpc_context->dir_id = dir_id;
     rpc_context->ready = false;
     rpc_context->request = (BaseMessage *) msg;
+    rpc_context->ret_code = RetCode::kOk;
 
     if constexpr (debug())
     {
@@ -276,6 +276,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
             << "** getting ret_lease is not succeeded, but the status is "
                "reserved. Lease: "
             << ret_lease;
+        DCHECK_NE(rpc_context->ret_code, RetCode::kOk);
     }
 
     if constexpr (debug())
@@ -563,20 +564,21 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
  * the server will find lease_ctx by @lease_id from lease, and use the info
  * there.
  */
-Lease Patronus::lease_modify_impl(Lease &lease,
-                                  uint64_t hint,
-                                  RpcType type,
-                                  time::ns_t ns,
-                                  flag_t flag,
-                                  CoroContext *ctx)
+RetCode Patronus::lease_modify_impl(Lease &lease,
+                                    uint64_t hint,
+                                    RpcType type,
+                                    time::ns_t ns,
+                                    flag_t flag,
+                                    CoroContext *ctx)
 {
-    CHECK(type == RpcType::kRelinquishReq) << "** invalid type " << (int) type;
+    DCHECK(type == RpcType::kRelinquishReq || type == RpcType::kExtendReq)
+        << "** invalid type " << (int) type;
 
     bool no_rpc = flag & (flag_t) LeaseModifyFlag::kNoRpc;
+
     if (unlikely(no_rpc))
     {
-        lease.set_invalid();
-        return Lease{};
+        return RetCode::kOk;
     }
 
     auto target_node_id = lease.node_id_;
@@ -586,9 +588,6 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     char *rdma_buf = get_rdma_message_buffer();
     auto *rpc_context = get_rpc_context();
     uint16_t rpc_ctx_id = get_rpc_context_id(rpc_context);
-
-    Lease ret_lease;
-    ret_lease.node_id_ = target_node_id;
 
     auto *msg = (LeaseModifyRequest *) rdma_buf;
     msg->type = type;
@@ -606,9 +605,9 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     msg->addr = lease.base_addr_;
     msg->size = lease.buffer_size_;
 
-    rpc_context->ret_lease = &ret_lease;
     rpc_context->ready = false;
     rpc_context->request = (BaseMessage *) msg;
+    rpc_context->ret_code = RetCode::kOk;
 
     if constexpr (debug())
     {
@@ -634,25 +633,15 @@ Lease Patronus::lease_modify_impl(Lease &lease,
     DCHECK(rpc_context->ready) << "** Should have been ready when switch "
                                   "back to worker coro. ctx: "
                                << (ctx ? *ctx : nullctx);
-    if (ret_lease.success())
-    {
-        // if success, should disable the original lease
-        lease.set_invalid();
-    }
-    // actually no return. so never use me
-    ret_lease.set_error(AcquireRequestStatus::kReservedNoReturn);
 
-    if constexpr (debug())
-    {
-        memset(rpc_context, 0, sizeof(RpcContext));
-    }
+    auto ret = rpc_context->ret_code;
 
     put_rpc_context(rpc_context);
     // TODO(patronus): this may have bug if the buffer is re-used when NIC is
     // DMA-ing
     put_rdma_message_buffer(rdma_buf);
 
-    return ret_lease;
+    return ret;
 }
 
 size_t Patronus::handle_response_messages(const char *msg_buf,
@@ -696,7 +685,17 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
                      << " at patronus_now: " << time_syncer_->patronus_now();
             DCHECK(is_client_)
                 << "** only server can handle request_acquire. msg: " << *msg;
-            handle_response_lease_modify(msg);
+            handle_response_lease_relinquish(msg);
+            break;
+        }
+        case RpcType::kExtendResp:
+        {
+            auto *msg = (LeaseModifyResponse *) base;
+            DVLOG(4) << "[patronus] handling lease modify response " << *msg
+                     << " at patronus_now: " << time_syncer_->patronus_now();
+            DCHECK(is_client_)
+                << "** only server can handle request_acquire. msg: " << *msg;
+            handle_response_lease_extend(msg);
             break;
         }
         case RpcType::kAdmin:
@@ -764,6 +763,7 @@ void Patronus::prepare_handle_request_messages(
             prepare_handle_request_acquire(msg, req_ctx, ctx);
             break;
         }
+        case RpcType::kExtendReq:
         case RpcType::kRelinquishReq:
         {
             auto *msg = (LeaseModifyRequest *) base;
@@ -820,6 +820,32 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     auto *request = (AcquireRequest *) rpc_context->request;
 
     DCHECK_EQ(resp->type, RpcType::kAcquireLeaseResp);
+
+    switch (resp->status)
+    {
+    case AcquireRequestStatus::kSuccess:
+        rpc_context->ret_code = RetCode::kOk;
+        break;
+    case AcquireRequestStatus::kLockedErr:
+    case AcquireRequestStatus::kMagicMwErr:
+        rpc_context->ret_code = RetCode::kRetry;
+        break;
+    case AcquireRequestStatus::kBindErr:
+    case AcquireRequestStatus::kRegMrErr:
+        rpc_context->ret_code = RetCode::kRdmaExecutionErr;
+        break;
+    case AcquireRequestStatus::kAddressOutOfRangeErr:
+        rpc_context->ret_code = RetCode::kInvalid;
+    case AcquireRequestStatus::kNoMw:
+    case AcquireRequestStatus::kNoMem:
+        rpc_context->ret_code = RetCode::kNoMem;
+        break;
+    case AcquireRequestStatus::kReserved:
+    case AcquireRequestStatus::kReservedNoReturn:
+    default:
+        LOG(FATAL) << "** Invalid resp->status: " << (int) resp->status
+                   << ". possibly reserved one.";
+    }
 
     auto &ret_lease = *rpc_context->ret_lease;
     if (likely(resp->status == AcquireRequestStatus::kSuccess))
@@ -1194,6 +1220,14 @@ void Patronus::prepare_handle_request_lease_modify(
         prepare_handle_request_lease_relinquish(req, req_ctx, ctx);
         break;
     }
+    case RpcType::kExtendReq:
+    {
+        // do nothing
+        // the task is postponed to post_handle_request_lease_extend
+        // because we directly get whether extension succeeds
+        // and response to the client
+        break;
+    }
     default:
     {
         LOG(FATAL) << "unknown/invalid request type " << (int) type
@@ -1255,6 +1289,16 @@ void Patronus::post_handle_request_messages(
             post_handle_request_acquire(msg, req_ctx, ctx);
             break;
         }
+        case RpcType::kExtendReq:
+        {
+            auto *msg = (LeaseModifyRequest *) base;
+            DVLOG(4) << "[patronus] post handling lease modify request " << *msg
+                     << ", coro: " << *ctx;
+            DCHECK(is_server_)
+                << "** only server can handle request_acquire. msg: " << *msg;
+            post_handle_request_lease_extend(msg, ctx);
+            break;
+        }
         case RpcType::kRelinquishReq:
         {
             auto *msg = (LeaseModifyRequest *) base;
@@ -1262,7 +1306,7 @@ void Patronus::post_handle_request_messages(
                      << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
-            post_handle_request_lease_modify(msg, req_ctx, ctx);
+            post_handle_request_lease_relinquish(msg, req_ctx, ctx);
             break;
         }
         case RpcType::kAdmin:
@@ -1722,13 +1766,36 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
     return cur_idx;
 }
 
-void Patronus::handle_response_lease_modify(LeaseModifyResponse *resp)
+void Patronus::handle_response_lease_relinquish(LeaseModifyResponse *resp)
 {
     auto type = resp->type;
     DCHECK_EQ(type, RpcType::kRelinquishResp);
 
     auto rpc_ctx_id = resp->cid.rpc_ctx_id;
     auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
+
+    DCHECK(resp->success) << "** relinquish has to success";
+
+    rpc_context->ret_code = RetCode::kOk;
+    rpc_context->ready.store(true, std::memory_order_release);
+}
+
+void Patronus::handle_response_lease_extend(LeaseModifyResponse *resp)
+{
+    auto type = resp->type;
+    DCHECK_EQ(type, RpcType::kExtendResp);
+
+    auto rpc_ctx_id = resp->cid.rpc_ctx_id;
+    auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
+
+    if (resp->success)
+    {
+        rpc_context->ret_code = RetCode::kOk;
+    }
+    else
+    {
+        rpc_context->ret_code = RetCode::kInvalid;
+    }
 
     rpc_context->ready.store(true, std::memory_order_release);
 }
@@ -2138,9 +2205,61 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
         << "currently stick to thisconstrain " << pre_coro_ctx(ctx);
 }
 
-void Patronus::post_handle_request_lease_modify(LeaseModifyRequest *req,
-                                                HandleReqContext &req_ctx,
+void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
                                                 CoroContext *ctx)
+{
+    DCHECK_EQ(req->type, RpcType::kExtendReq);
+
+    bool lease_valid = true;
+    auto lease_id = req->lease_id;
+    auto *lease_ctx = get_lease_context(lease_id);
+    if (unlikely(lease_ctx == nullptr))
+    {
+        lease_valid = false;
+    }
+    else
+    {
+        if (unlikely(!lease_ctx->client_cid.is_same(req->cid)))
+        {
+            lease_valid = false;
+        }
+    }
+
+    if (lease_valid)
+    {
+        bool with_pr = lease_ctx->with_pr;
+        CHECK(with_pr) << "** extend a lease without pr.";
+        auto protection_region_id = lease_ctx->protection_region_id;
+        auto *protection_region = get_protection_region(protection_region_id);
+        CHECK(protection_region)
+            << "** get invalid protection region from valid lease_ctx.";
+
+        auto ns_per_unit = protection_region->ns_per_unit;
+        auto extend_unit_nr = (req->ns + ns_per_unit - 1) / ns_per_unit;
+        auto old_val = protection_region->aba_unit_nr_to_ddl.load(
+            std::memory_order_relaxed);
+        old_val.u32_2 += extend_unit_nr;
+        protection_region->aba_unit_nr_to_ddl.store(old_val,
+                                                    std::memory_order_relaxed);
+    }
+
+    auto *resp_buf = get_rdma_message_buffer();
+    auto &resp_msg = *(LeaseModifyResponse *) resp_buf;
+    resp_msg.type = RpcType::kExtendResp;
+    resp_msg.cid = req->cid;
+    resp_msg.cid.node_id = get_node_id();
+    resp_msg.cid.thread_id = get_thread_id();
+    resp_msg.success = lease_valid;
+    dsm_->unreliable_send((const char *) resp_buf,
+                          sizeof(LeaseModifyResponse),
+                          req->cid.node_id,
+                          req->cid.thread_id);
+    put_rdma_message_buffer(resp_buf);
+}
+
+void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
+                                                    HandleReqContext &req_ctx,
+                                                    CoroContext *ctx)
 {
     std::ignore = ctx;
 

@@ -43,6 +43,16 @@ std::ostream &operator<<(std::ostream &os, const RpcType &t)
         os << "TimeSync";
         break;
     }
+    case RpcType::kExtendReq:
+    {
+        os << "Ext-req";
+        break;
+    }
+    case RpcType::kExtendResp:
+    {
+        os << "Ext-resp";
+        break;
+    }
     default:
     {
         os << "Unknown(" << (int) t << ")";
