@@ -170,7 +170,7 @@ static_assert(sizeof(AdminRequest) < config::umsg::kUserMessageSize);
 static_assert(sizeof(AdminRequest::flag) >= sizeof(AdminFlag));
 std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);
 
-enum class LeaseModifyFlag : uint8_t
+enum class LeaseModifyFlag : uint16_t
 {
     kNoRelinquishUnbind = 1 << 0,
     kForceUnbind = 1 << 1,
@@ -181,7 +181,8 @@ enum class LeaseModifyFlag : uint8_t
     kWaitUntilSuccess = 1 << 4,
     kUseMR = 1 << 5,
     kNoRpc = 1 << 6,
-    kReserved = 1 << 7,
+    kDebugExtendDoNothing = 1 << 7,
+    kReserved = 1 << 8,
 };
 void debug_validate_lease_modify_flag(flag_t flag);
 struct LeaseModifyFlagOut
@@ -200,7 +201,7 @@ struct LeaseModifyRequest
     id_t lease_id;
     time::ns_t ns;
     uint64_t hint; /* when only_dealloc is ON */
-    uint8_t flag;  /* LeaseModifyFlag */
+    uint16_t flag; /* LeaseModifyFlag */
     uint64_t addr; /* when only_dealloc is ON */
     uint32_t size; /* when only_dealloc is ON */
     Debug<uint64_t> digest;

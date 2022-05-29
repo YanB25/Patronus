@@ -2211,36 +2211,43 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
     DCHECK_EQ(req->type, RpcType::kExtendReq);
 
     bool lease_valid = true;
-    auto lease_id = req->lease_id;
-    auto *lease_ctx = get_lease_context(lease_id);
-    if (unlikely(lease_ctx == nullptr))
+    bool dbg_ext_do_nothing =
+        req->flag & (flag_t) LeaseModifyFlag::kDebugExtendDoNothing;
+
+    if (likely(!dbg_ext_do_nothing))
     {
-        lease_valid = false;
-    }
-    else
-    {
-        if (unlikely(!lease_ctx->client_cid.is_same(req->cid)))
+        auto lease_id = req->lease_id;
+        auto *lease_ctx = get_lease_context(lease_id);
+        if (unlikely(lease_ctx == nullptr))
         {
             lease_valid = false;
         }
-    }
+        else
+        {
+            if (unlikely(!lease_ctx->client_cid.is_same(req->cid)))
+            {
+                lease_valid = false;
+            }
+        }
 
-    if (lease_valid)
-    {
-        bool with_pr = lease_ctx->with_pr;
-        CHECK(with_pr) << "** extend a lease without pr.";
-        auto protection_region_id = lease_ctx->protection_region_id;
-        auto *protection_region = get_protection_region(protection_region_id);
-        CHECK(protection_region)
-            << "** get invalid protection region from valid lease_ctx.";
+        if (lease_valid)
+        {
+            bool with_pr = lease_ctx->with_pr;
+            CHECK(with_pr) << "** extend a lease without pr.";
+            auto protection_region_id = lease_ctx->protection_region_id;
+            auto *protection_region =
+                get_protection_region(protection_region_id);
+            CHECK(protection_region)
+                << "** get invalid protection region from valid lease_ctx.";
 
-        auto ns_per_unit = protection_region->ns_per_unit;
-        auto extend_unit_nr = (req->ns + ns_per_unit - 1) / ns_per_unit;
-        auto old_val = protection_region->aba_unit_nr_to_ddl.load(
-            std::memory_order_relaxed);
-        old_val.u32_2 += extend_unit_nr;
-        protection_region->aba_unit_nr_to_ddl.store(old_val,
-                                                    std::memory_order_relaxed);
+            auto ns_per_unit = protection_region->ns_per_unit;
+            auto extend_unit_nr = (req->ns + ns_per_unit - 1) / ns_per_unit;
+            auto old_val = protection_region->aba_unit_nr_to_ddl.load(
+                std::memory_order_relaxed);
+            old_val.u32_2 += extend_unit_nr;
+            protection_region->aba_unit_nr_to_ddl.store(
+                old_val, std::memory_order_relaxed);
+        }
     }
 
     auto *resp_buf = get_rdma_message_buffer();
