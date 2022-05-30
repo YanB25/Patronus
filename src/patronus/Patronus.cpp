@@ -1544,12 +1544,6 @@ void Patronus::handle_admin_barrier(AdminRequest *req,
 void Patronus::handle_admin_recover(AdminRequest *req,
                                     [[maybe_unused]] CoroContext *ctx)
 {
-    if constexpr (debug())
-    {
-        uint64_t digest = req->digest.get();
-        req->digest = 0;
-        DCHECK_EQ(digest, djb2_digest(req, sizeof(AdminRequest)));
-    }
     LOG(WARNING) << "[patronus] QP recovering. req: " << *req;
 
     ContTimer<::config::kMonitorFailureRecovery> timer;
