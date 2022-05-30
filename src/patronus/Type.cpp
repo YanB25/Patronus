@@ -63,6 +63,16 @@ std::ostream &operator<<(std::ostream &os, const RpcType &t)
         os << "Ext-resp";
         break;
     }
+    case RpcType::kMemoryReq:
+    {
+        os << "Mem-req";
+        break;
+    }
+    case RpcType::kMemoryResp:
+    {
+        os << "Mem-resp";
+        break;
+    }
     default:
     {
         os << "Unknown(" << (int) t << ")";
@@ -465,6 +475,42 @@ std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &resp)
 {
     os << "{LeaseModifyResponse type: " << resp.type << ", cid : " << resp.cid
        << ", success: " << resp.success << " }";
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, MemoryRequestFlag flag)
+{
+    os << "{MemoryRequestFlag ";
+    switch (flag)
+    {
+    case MemoryRequestFlag::kRead:
+        os << "Read";
+        break;
+    case MemoryRequestFlag::kWrite:
+        os << "Write";
+        break;
+    case MemoryRequestFlag::kCAS:
+        os << "CAS";
+        break;
+    default:
+        LOG(FATAL) << "** Unknown flag " << (int) flag;
+    }
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const MemoryRequest &req)
+{
+    os << "{MemoryRequest type: " << req.type << ", cid: " << req.cid
+       << ", flag: " << (MemoryRequestFlag) req.flag
+       << ", remote_addr: " << (void *) req.remote_addr
+       << ", size: " << (size_t) req.size << "}";
+    return os;
+}
+std::ostream &operator<<(std::ostream &os, const MemoryResponse &resp)
+{
+    os << "{MemoryResponse type: " << resp.type << ", cid: " << resp.cid
+       << ", flag: " << (MemoryRequestFlag) resp.flag
+       << ", success: " << resp.success << ", size: " << resp.size << "}";
     return os;
 }
 

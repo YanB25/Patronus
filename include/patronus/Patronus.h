@@ -74,6 +74,7 @@ struct RpcContext
     std::atomic<bool> ready{false};
     size_t dir_id{0};
     RetCode ret_code{RetCode::kOk};
+    char *buffer_addr{nullptr};  // for rpc_{read|write|cas}
 };
 
 struct RWContext
@@ -219,6 +220,8 @@ public:
                         flag_t flag /* RWFlag */,
                         CoroContext *ctx,
                         TraceView = util::nulltrace);
+    inline RetCode rpc_read(
+        Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx);
     inline RetCode write(Lease &lease,
                          const char *ibuf,
                          size_t size,
@@ -226,6 +229,11 @@ public:
                          flag_t flag /* RWFlag */,
                          CoroContext *ctx,
                          TraceView = util::nulltrace);
+    inline RetCode rpc_write(Lease &lease,
+                             const char *ibuf,
+                             size_t size,
+                             size_t offset,
+                             CoroContext *ctx);
     inline RetCode cas(Lease &lease,
                        char *iobuf,
                        size_t offset,
@@ -234,6 +242,12 @@ public:
                        flag_t flag /* RWFlag */,
                        CoroContext *ctx,
                        TraceView = util::nulltrace);
+    inline RetCode rpc_cas(Lease &lease,
+                           char *iobuf,
+                           size_t offset,
+                           uint64_t compare,
+                           uint64_t swap,
+                           CoroContext *ctx);
     // below for batch API
     RetCode prepare_write(PatronusBatchContext &batch,
                           Lease &lease,
@@ -383,6 +397,8 @@ public:
     void post_handle_request_lease_relinquish(LeaseModifyRequest *req,
                                               HandleReqContext &req_ctx,
                                               CoroContext *ctx);
+    void post_handle_request_memory_access(MemoryRequest *req,
+                                           CoroContext *ctx);
     void post_handle_request_lease_extend(LeaseModifyRequest *req,
                                           CoroContext *ctx);
     void post_handle_request_admin(AdminRequest *req, CoroContext *ctx);
@@ -806,6 +822,7 @@ private:
     void handle_response_lease_extend(LeaseModifyResponse *resp);
     inline void handle_response_admin_qp_modification(AdminResponse *resp,
                                                       CoroContext *ctx);
+    void handle_response_memory_access(MemoryResponse *resp, CoroContext *ctx);
     void handle_admin_exit(AdminRequest *req, CoroContext *ctx);
     void handle_admin_recover(AdminRequest *req, CoroContext *ctx);
     void handle_admin_barrier(AdminRequest *req, CoroContext *ctx);
@@ -889,6 +906,13 @@ private:
                             uint16_t wrid_prefix,
                             CoroContext *ctx,
                             TraceView = util::nulltrace);
+    inline RetCode rpc_rwcas_impl(char *iobuf,
+                                  size_t size,
+                                  size_t node_id,
+                                  size_t dir_id,
+                                  size_t remote_addr,
+                                  MemoryRequestFlag rwcas,
+                                  CoroContext *ctx);
     inline RetCode extend_impl(Lease &lease,
                                size_t extend_unit_nr,
                                flag_t flag,
@@ -1770,6 +1794,115 @@ void Patronus::handle_response_admin_qp_modification(AdminResponse *resp,
         rpc_context->ret_code = RetCode::kRdmaExecutionErr;
     }
     rpc_context->ready.store(true, std::memory_order_release);
+}
+
+RetCode Patronus::rpc_cas(Lease &lease,
+                          char *iobuf,
+                          size_t offset,
+                          uint64_t compare,
+                          uint64_t swap,
+                          CoroContext *ctx)
+{
+    uint64_t *data = (uint64_t *) iobuf;
+    *data = compare;
+    *(data + 1) = swap;
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    return rpc_rwcas_impl(iobuf,
+                          2 * sizeof(uint64_t),
+                          lease.node_id_,
+                          lease.dir_id_,
+                          remote_addr,
+                          MemoryRequestFlag::kCAS,
+                          ctx);
+}
+
+RetCode Patronus::rpc_read(
+    Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx)
+{
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    return rpc_rwcas_impl(obuf,
+                          size,
+                          lease.node_id_,
+                          lease.dir_id_,
+                          remote_addr,
+                          MemoryRequestFlag::kRead,
+                          ctx);
+}
+
+RetCode Patronus::rpc_write(Lease &lease,
+                            const char *ibuf,
+                            size_t size,
+                            size_t offset,
+                            CoroContext *ctx)
+{
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    return rpc_rwcas_impl((char *) ibuf,
+                          size,
+                          lease.node_id_,
+                          lease.dir_id_,
+                          remote_addr,
+                          MemoryRequestFlag::kWrite,
+                          ctx);
+}
+
+RetCode Patronus::rpc_rwcas_impl(char *iobuf,
+                                 size_t size,
+                                 size_t node_id,
+                                 size_t dir_id,
+                                 size_t remote_addr,
+                                 MemoryRequestFlag rwcas,
+                                 CoroContext *ctx)
+{
+    char *rdma_buf = get_rdma_message_buffer();
+    auto *rpc_context = get_rpc_context();
+    auto rpc_ctx_id = get_rpc_context_id(rpc_context);
+
+    auto *msg = (MemoryRequest *) rdma_buf;
+    msg->type = RpcType::kMemoryReq;
+    msg->cid.node_id = get_node_id();
+    msg->cid.thread_id = get_thread_id();
+    msg->cid.coro_id = ctx ? ctx->coro_id() : kNotACoro;
+    msg->cid.rpc_ctx_id = rpc_ctx_id;
+    msg->remote_addr = remote_addr;
+    msg->size = size;
+    msg->flag = (flag_t) rwcas;
+
+    rpc_context->ready = false;
+    rpc_context->request = (BaseMessage *) msg;
+    rpc_context->ret_code = RetCode::kOk;
+    rpc_context->buffer_addr = iobuf;
+
+    if (unlikely(!msg->validate()))
+    {
+        return RetCode::kInvalid;
+    }
+    if (rwcas == MemoryRequestFlag::kWrite)
+    {
+        memcpy(msg->buffer, iobuf, size);
+    }
+    if (rwcas == MemoryRequestFlag::kCAS)
+    {
+        DCHECK_EQ(size, 2 * sizeof(uint64_t));
+        memcpy(msg->buffer, iobuf, size);
+    }
+
+    if constexpr (debug())
+    {
+        msg->digest = 0;
+        msg->digest = djb2_digest(msg, msg->msg_size());
+    }
+
+    dsm_->unreliable_send(rdma_buf, msg->msg_size(), node_id, dir_id);
+
+    DCHECK_NOTNULL(ctx)->yield_to_master();
+
+    DCHECK(rpc_context->ready);
+
+    auto ret = rpc_context->ret_code;
+    put_rpc_context(rpc_context);
+    put_rdma_message_buffer(rdma_buf);
+
+    return ret;
 }
 
 }  // namespace patronus

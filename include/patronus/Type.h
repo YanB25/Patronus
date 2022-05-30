@@ -35,6 +35,8 @@ enum class RpcType : uint8_t
     kAdmin,
     kAdminReq,
     kAdminResp,
+    kMemoryReq,
+    kMemoryResp,
     kTimeSync,
 };
 std::ostream &operator<<(std::ostream &os, const RpcType &t);
@@ -245,18 +247,6 @@ struct BatchBaseMessage
 } __attribute__((packed));
 static_assert(sizeof(BatchBaseMessage) == 64);
 
-// struct BatchResponse
-// {
-//     uint64_t batch_size;
-//     BatchBaseMessage messages[config::patronus::kMaxResponseBatchSize];
-// } __attribute__((packed));
-// static_assert(sizeof(BatchResponse) <= config::umsg::kUserMessageSize);
-// inline std::ostream &operator<<(std::ostream &os, const BatchResponse &resp)
-// {
-//     os << "{BatchResp size: " << resp.batch_size << ", ...}";
-//     return os;
-// }
-
 enum class RWFlag : uint8_t
 {
     kNoLocalExpireCheck = 1 << 0,
@@ -275,6 +265,65 @@ struct RWFlagOut
     flag_t flag;
 };
 std::ostream &operator<<(std::ostream &os, RWFlagOut flag);
+
+enum class MemoryRequestFlag : uint8_t
+{
+    kRead,
+    kWrite,
+    kCAS
+};
+std::ostream &operator<<(std::ostream &os, MemoryRequestFlag flag);
+struct MemoryRequest
+{
+    enum RpcType type;
+    ClientID cid;
+    uint8_t flag;  // MemoryRequestFlag
+    uint64_t remote_addr;
+    Debug<uint64_t> digest;
+    uint8_t size;
+    char buffer[32];
+    size_t msg_size() const
+    {
+        return sizeof(MemoryRequest);
+    }
+    bool validate() const
+    {
+        return size <= buffer_capacity();
+    }
+    constexpr size_t buffer_capacity() const
+    {
+        return 32;
+    }
+} __attribute__((packed));
+static_assert(sizeof(MemoryRequest) <= config::umsg::kUserMessageSize);
+static_assert(sizeof(MemoryRequest::flag) >= sizeof(MemoryRequestFlag));
+static_assert(std::numeric_limits<decltype(MemoryRequest::size)>::max() >= 32);
+std::ostream &operator<<(std::ostream &os, const MemoryRequest &req);
+
+struct MemoryResponse
+{
+    enum RpcType type;
+    ClientID cid;
+    uint8_t flag;  // MemoryRequestFlag
+    bool success;
+    size_t size;
+    char buffer[32];
+    Debug<uint64_t> digest;
+    size_t msg_size() const
+    {
+        return sizeof(MemoryResponse);
+    }
+    bool validate()
+    {
+        return size <= buffer_capacity();
+    }
+    constexpr size_t buffer_capacity() const
+    {
+        return 32;
+    }
+} __attribute__((packed));
+static_assert(sizeof(MemoryResponse) <= config::umsg::kUserMessageSize);
+std::ostream &operator<<(std::ostream &os, const MemoryResponse &resp);
 
 }  // namespace patronus
 

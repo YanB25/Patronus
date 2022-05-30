@@ -736,6 +736,22 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
             }
             break;
         }
+        case RpcType::kMemoryResp:
+        {
+            auto *msg = (MemoryResponse *) base;
+
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest, djb2_digest(msg, msg->msg_size()))
+                    << "** digest mismatch for message: " << *msg
+                    << ". msg_size: " << msg->msg_size();
+            }
+
+            handle_response_memory_access(msg, nullptr);
+            break;
+        }
         case RpcType::kAdminResp:
         {
             auto *msg = (AdminResponse *) base;
@@ -745,7 +761,8 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
             {
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
-                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AdminResponse)));
+                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AdminResponse)))
+                    << "** digest mismatch for message " << *msg;
             }
 
             CHECK(admin_type == AdminFlag::kAdminReqRecovery ||
@@ -753,6 +770,7 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
                   admin_type == AdminFlag::kAdminQPtoRW);
 
             handle_response_admin_qp_modification(msg, nullptr);
+            break;
         }
         default:
         {
@@ -820,6 +838,23 @@ void Patronus::prepare_handle_request_messages(
                 DCHECK_EQ(digest, djb2_digest(msg, sizeof(LeaseModifyRequest)));
             }
             prepare_handle_request_lease_modify(msg, req_ctx, ctx);
+            break;
+        }
+        case RpcType::kMemoryReq:
+        {
+            auto *msg = (MemoryRequest *) base;
+            DVLOG(4) << "[patronus] prepare handling memory request " << *msg
+                     << ", coro: " << *ctx;
+            DCHECK(is_server_)
+                << "** only server can handle request_acquire. msg: " << *msg;
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest, djb2_digest(msg, msg->msg_size()));
+            }
+            DCHECK(msg->validate());
+            // do nothing
             break;
         }
         case RpcType::kAdmin:
@@ -1364,6 +1399,16 @@ void Patronus::post_handle_request_messages(
             post_handle_request_lease_relinquish(msg, req_ctx, ctx);
             break;
         }
+        case RpcType::kMemoryReq:
+        {
+            auto *msg = (MemoryRequest *) base;
+            DVLOG(4) << "[patronus] post handling lease modify request " << *msg
+                     << ", coro: " << *ctx;
+            DCHECK(is_server_)
+                << "** only server can handle request_acquire. msg: " << *msg;
+            post_handle_request_memory_access(msg, ctx);
+            break;
+        }
         case RpcType::kAdmin:
         case RpcType::kAdminReq:
         {
@@ -1547,13 +1592,6 @@ void Patronus::handle_admin_qp_access_flag(AdminRequest *req,
 void Patronus::handle_admin_exit(AdminRequest *req,
                                  [[maybe_unused]] CoroContext *ctx)
 {
-    if constexpr (debug())
-    {
-        uint64_t digest = req->digest.get();
-        req->digest = 0;
-        DCHECK_EQ(digest, djb2_digest(req, sizeof(AdminRequest)));
-    }
-
     auto from_node = req->cid.node_id;
     auto key = req->data;
     DCHECK_LT(key, finished_.size());
@@ -1795,6 +1833,46 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
     return cur_idx;
 }
 
+void Patronus::handle_response_memory_access(MemoryResponse *resp,
+                                             CoroContext *ctx)
+{
+    std::ignore = ctx;
+
+    auto type = resp->type;
+    DCHECK_EQ(type, RpcType::kMemoryResp);
+    auto rpc_ctx_id = resp->cid.rpc_ctx_id;
+    auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
+
+    auto mf = (MemoryRequestFlag) resp->flag;
+
+    if (resp->success)
+    {
+        rpc_context->ret_code = RetCode::kOk;
+        if (mf == MemoryRequestFlag::kRead)
+        {
+            memcpy(rpc_context->buffer_addr, resp->buffer, resp->size);
+        }
+    }
+    else
+    {
+        if (mf == MemoryRequestFlag::kCAS)
+        {
+            rpc_context->ret_code = RetCode::kRetry;
+        }
+        else
+        {
+            rpc_context->ret_code = RetCode::kRdmaExecutionErr;
+        }
+    }
+
+    if (mf == MemoryRequestFlag::kCAS)
+    {
+        DCHECK_EQ(resp->size, sizeof(uint64_t));
+        memcpy(rpc_context->buffer_addr, resp->buffer, resp->size);
+    }
+
+    rpc_context->ready.store(true, std::memory_order_release);
+}
 void Patronus::handle_response_lease_relinquish(LeaseModifyResponse *resp)
 {
     auto type = resp->type;
@@ -2327,6 +2405,92 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
                           sizeof(LeaseModifyResponse),
                           req->cid.node_id,
                           req->cid.thread_id);
+    put_rdma_message_buffer(resp_buf);
+}
+
+void Patronus::post_handle_request_memory_access(MemoryRequest *req,
+                                                 CoroContext *ctx)
+{
+    std::ignore = ctx;
+
+    auto *resp_buf = get_rdma_message_buffer();
+    auto &resp_msg = *(MemoryResponse *) resp_buf;
+    resp_msg.type = RpcType::kMemoryResp;
+    resp_msg.cid = req->cid;
+    resp_msg.cid.node_id = get_node_id();
+    resp_msg.cid.thread_id = get_thread_id();
+    resp_msg.success = true;
+    resp_msg.size = req->size;
+    resp_msg.flag = req->flag;
+
+    CHECK(resp_msg.validate())
+        << "** If request is valid, the response must be valid";
+
+    auto mf = (MemoryRequestFlag) req->flag;
+    // remote_address is indexed to this buffer
+    auto dsm = get_dsm();
+    char *addr = (char *) dsm->get_base_addr() + dsm->dsm_reserve_size() +
+                 req->remote_addr;
+    if (mf == MemoryRequestFlag::kRead)
+    {
+        // memcpy
+        DCHECK_GE(resp_msg.buffer_capacity(), req->size);
+        memcpy(resp_msg.buffer, addr, req->size);
+        DVLOG(4) << "[patronus][rpc-mem]  handling rpc memory read at "
+                 << (void *) addr << " with size " << (size_t) req->size
+                 << ". dsm_base: " << (void *) dsm->get_base_addr()
+                 << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
+                 << ", remote_addr: " << (void *) req->remote_addr << " from "
+                 << req->cid;
+    }
+    else if (mf == MemoryRequestFlag::kWrite)
+    {
+        // memcpy
+        DCHECK_GE(req->buffer_capacity(), req->size);
+        memcpy(addr, req->buffer, req->size);
+        DVLOG(4) << "[patronus][rpc-mem] handling rpc memory write at "
+                 << (void *) addr << " with size " << (size_t) req->size
+                 << ". dsm_base: " << (void *) dsm->get_base_addr()
+                 << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
+                 << ", remote_addr: " << (void *) req->remote_addr << " from "
+                 << req->cid;
+    }
+    else
+    {
+        CHECK_EQ(mf, MemoryRequestFlag::kCAS);
+        auto *patomic = (std::atomic<uint64_t> *) addr;
+        DCHECK_EQ(req->size, 2 * sizeof(uint64_t));
+        uint64_t compare = *((uint64_t *) req->buffer);
+        uint64_t remember_compare = compare;
+        uint64_t swap = *(((uint64_t *) req->buffer) + 1);
+        bool succ = patomic->compare_exchange_strong(
+            compare, swap, std::memory_order_relaxed);
+        resp_msg.success = succ;
+        resp_msg.size = sizeof(uint64_t);
+        memcpy(resp_msg.buffer, &compare, sizeof(compare));
+        DVLOG(4) << "[patronus][rpc-mem] handling rpc memory CAS at "
+                 << (void *) addr << " with size " << (size_t) req->size
+                 << ". dsm_base: " << (void *) dsm->get_base_addr()
+                 << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
+                 << ", remote_addr: " << (void *) req->remote_addr << " from "
+                 << req->cid << ". compare: " << compare << ", swap: " << swap;
+        // CHECK(succ) << "[debug] !! CAS failed. compare: " << remember_compare
+        //             << ", swap: " << swap << ", got " << compare
+        //             << ". addr: " << (void *) addr
+        //             << ", remote_addr: " << req->remote_addr
+        //             << ", cid: " << req->cid;
+    }
+
+    if constexpr (debug())
+    {
+        resp_msg.digest = 0;
+        resp_msg.digest = djb2_digest(&resp_msg, resp_msg.msg_size());
+    }
+    dsm_->unreliable_send((char *) resp_buf,
+                          resp_msg.msg_size(),
+                          req->cid.node_id,
+                          req->cid.thread_id);
+
     put_rdma_message_buffer(resp_buf);
 }
 
