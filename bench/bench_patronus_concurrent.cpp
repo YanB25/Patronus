@@ -25,8 +25,8 @@ using namespace std::chrono_literals;
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-// constexpr static size_t kTestTimePerThread = 1_M;
-constexpr static size_t kTestTimePerThread = 100;
+constexpr static size_t kTestTimePerThread = 1_M;
+// constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
 std::vector<size_t> col_x_alloc_size;
@@ -54,17 +54,24 @@ struct CoroCommunication
     std::vector<bool> finish_all;
 };
 
+inline size_t gen_coro_key(size_t node_id, size_t thread_id, size_t coro_id)
+{
+    return node_id * kMaxAppThread * kCoroCnt + thread_id * kCoroCnt + coro_id;
+}
+uint64_t bench_locator(uint64_t key, size_t size)
+{
+    return key * size;
+}
+
 struct BenchConfig
 {
     size_t thread_nr;
     size_t coro_nr;
     size_t block_size;
     size_t task_nr;
-    std::chrono::nanoseconds acquire_ns;
-    size_t extend_nr;
-    std::chrono::nanoseconds extend_ns;
-    bool extend_use_rpc;
-    flag_t extend_flag;
+    bool modify_qp_flag;
+    bool reinit_qp;
+    bool use_mr;
     std::string name;
     bool report;
 
@@ -86,14 +93,11 @@ struct BenchConfig
 
 std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 {
-    auto acq_ns = util::time::to_ns(conf.acquire_ns);
-    auto ext_ns = util::time::to_ns(conf.extend_ns);
     os << "`" << conf.name << "`: {Conf: thread_nr " << conf.thread_nr
        << ", coro_nr: " << conf.coro_nr << ", block_size: " << conf.block_size
-       << ", task_nr: " << conf.task_nr << ", acquire_ns: " << acq_ns
-       << ", extend_ns: " << ext_ns << ", extend_nr: " << conf.extend_nr
-       << ", use_rpc: " << conf.extend_use_rpc
-       << ", extend_flag: " << LeaseModifyFlagOut(conf.extend_flag)
+       << ", task_nr: " << conf.task_nr
+       << ", modify_qp_flag: " << conf.modify_qp_flag
+       << ", reinit_qp: " << conf.reinit_qp << ", use_mr: " << conf.use_mr
        << ", report: " << conf.report << "}";
     return os;
 }
@@ -101,51 +105,57 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 class BenchConfigFactory
 {
 public:
-    static std::vector<BenchConfig> get_extend(const std::string &name,
-                                               size_t thread_nr,
-                                               size_t coro_nr,
-                                               size_t block_size,
-                                               size_t task_nr,
-                                               size_t extend_nr)
+    static std::vector<BenchConfig> get_mw(const std::string &name,
+                                           size_t thread_nr,
+                                           size_t coro_nr,
+                                           size_t block_size,
+                                           size_t task_nr)
     {
         auto conf = BenchConfig::get_empty_conf(
             name, thread_nr, coro_nr, block_size, task_nr);
-        conf.acquire_ns = 1ms;
-        conf.extend_nr = extend_nr;
-        conf.extend_ns = 1ms;
-        conf.extend_use_rpc = false;
-        conf.extend_flag = (flag_t) 0;
+        conf.modify_qp_flag = false;
+        conf.reinit_qp = false;
+        conf.use_mr = false;
         return pipeline({conf, conf});
     }
-    static std::vector<BenchConfig> get_rpc_extend(const std::string &name,
-                                                   size_t thread_nr,
-                                                   size_t coro_nr,
-                                                   size_t block_size,
-                                                   size_t task_nr,
-                                                   size_t extend_nr)
+    static std::vector<BenchConfig> get_qp_flag(const std::string &name,
+                                                size_t thread_nr,
+                                                size_t coro_nr,
+                                                size_t block_size,
+                                                size_t task_nr)
     {
-        auto confs = get_extend(
-            name, thread_nr, coro_nr, block_size, task_nr, extend_nr);
-        for (auto &conf : confs)
-        {
-            conf.extend_use_rpc = true;
-        }
-        return confs;
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.modify_qp_flag = true;
+        conf.reinit_qp = false;
+        conf.use_mr = false;
+        return pipeline({conf, conf});
     }
-    static std::vector<BenchConfig> get_rpc(const std::string &name,
-                                            size_t thread_nr,
-                                            size_t coro_nr,
-                                            size_t block_size,
-                                            size_t task_nr,
-                                            size_t extend_nr)
+    static std::vector<BenchConfig> get_qp_state(const std::string &name,
+                                                 size_t thread_nr,
+                                                 size_t coro_nr,
+                                                 size_t block_size,
+                                                 size_t task_nr)
     {
-        auto confs = get_rpc_extend(
-            name, thread_nr, coro_nr, block_size, task_nr, extend_nr);
-        for (auto &conf : confs)
-        {
-            conf.extend_flag = (flag_t) LeaseModifyFlag::kDebugExtendDoNothing;
-        }
-        return confs;
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.modify_qp_flag = false;
+        conf.reinit_qp = true;
+        conf.use_mr = false;
+        return pipeline({conf, conf});
+    }
+    static std::vector<BenchConfig> get_mr(const std::string &name,
+                                           size_t thread_nr,
+                                           size_t coro_nr,
+                                           size_t block_size,
+                                           size_t task_nr)
+    {
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.modify_qp_flag = false;
+        conf.reinit_qp = false;
+        conf.use_mr = true;
+        return pipeline({conf, conf});
     }
 
 private:
@@ -166,7 +176,6 @@ void reg_result(const BenchConfig &conf, uint64_t total_ns)
     col_x_alloc_size.push_back(conf.block_size);
     col_x_thread_nr.push_back(conf.thread_nr);
     col_x_coro_nr.push_back(conf.coro_nr);
-    col_x_extend_nr.push_back(conf.extend_nr);
     col_alloc_nr.push_back(conf.task_nr);
     col_alloc_ns.push_back(total_ns);
 }
@@ -290,60 +299,102 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     bool is_master,
                                     const BenchConfig &conf)
 {
-    // TODO: latency
+    // TODO: handle latency
     std::ignore = lat_m;
-
+    auto nid = patronus->get_node_id();
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
     auto server_nid = ::config::get_server_nids().front();
 
     auto alloc_size = conf.block_size;
-    auto acquire_ns = conf.acquire_ns;
 
     CoroContext ctx(tid, &yield, &coro_comm.master, coro_id);
 
     size_t fail_nr = 0;
     size_t succ_nr = 0;
 
+    auto coro_key = gen_coro_key(nid, tid, coro_id);
+    auto locate_offset = bench_locator(coro_key, alloc_size);
+
+    auto dsm = patronus->get_dsm();
+
     ChronoTimer timer;
     ChronoTimer op_timer;
+
+    auto rdma_buf = patronus->get_rdma_buffer(alloc_size);
+    auto acquire_flag = (flag_t) AcquireRequestFlag::kNoGc;
+    auto rel_flag = (flag_t) 0;
+    auto rw_flag = (flag_t) 0;
+    if (conf.use_mr)
+    {
+        acquire_flag = (flag_t) AcquireRequestFlag::kUseMR |
+                       (flag_t) AcquireRequestFlag::kNoGc;
+        rel_flag = (flag_t) LeaseModifyFlag::kUseMR;
+    }
+    if (conf.modify_qp_flag)
+    {
+        acquire_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+        rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
+        rw_flag = (flag_t) RWFlag::kUseUniversalRkey;
+        CHECK_EQ(conf.coro_nr, 1)
+            << "** With modify_qp flag, only one coroutine is allowed. They "
+               "are sharing the same QP.";
+    }
+    if (conf.reinit_qp)
+    {
+        acquire_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+        rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
+        rw_flag = (flag_t) RWFlag::kUseUniversalRkey;
+        CHECK_EQ(conf.coro_nr, 1)
+            << "** With reinit_qp flag, only one coroutine is allowed. They "
+               "are sharing the same QP.";
+    }
+    size_t flag_on = conf.use_mr + conf.modify_qp_flag + conf.reinit_qp;
+    CHECK_LE(flag_on, 1) << "at most one flag is on";
     while (coro_comm.thread_remain_task > 0)
     {
-        bool succ = true;
         if (is_master && coro_id == 0)
         {
             op_timer.pin();
         }
-        auto acquire_flag = (flag_t) AcquireRequestFlag::kNoGc;
         auto lease = patronus->get_rlease(server_nid,
                                           dir_id,
-                                          nullgaddr,
+                                          GlobalAddress(0, locate_offset),
                                           0 /* alloc_hint */,
                                           alloc_size,
-                                          acquire_ns,
+                                          0ns,
                                           acquire_flag,
                                           &ctx);
-        DCHECK(lease.success());
-        succ = lease.success();
-
-        for (size_t i = 0; i < conf.extend_nr; ++i)
+        CHECK(lease.success());
+        if (conf.modify_qp_flag)
         {
-            if (conf.extend_use_rpc)
-            {
-                auto rc = patronus->rpc_extend(
-                    lease, conf.extend_ns, conf.extend_flag, &ctx);
-                CHECK_EQ(rc, RetCode::kOk);
-            }
-            else
-            {
-                auto rc = patronus->extend(
-                    lease, conf.extend_ns, conf.extend_flag, &ctx);
-                CHECK_EQ(rc, RetCode::kOk);
-            }
+            auto ec = patronus->signal_modify_qp_flag(
+                server_nid, dir_id, false /* to RO */, &ctx);
+            CHECK_EQ(ec, kOk);
+        }
+        if (conf.reinit_qp)
+        {
+            auto ec = patronus->signal_reinit_qp(server_nid, dir_id, &ctx);
+            CHECK_EQ(ec, kOk);
         }
 
-        auto rel_flag = (flag_t) 0;
+        auto ec = patronus->read(
+            lease, rdma_buf.buffer, alloc_size, 0 /* offset */, rw_flag, &ctx);
+        CHECK_EQ(ec, kOk);
+
         patronus->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
+
+        if (conf.modify_qp_flag)
+        {
+            auto ec = patronus->signal_modify_qp_flag(
+                server_nid, dir_id, true /* to RO */, &ctx);
+            CHECK_EQ(ec, kOk);
+        }
+        if (conf.reinit_qp)
+        {
+            auto ec = patronus->signal_reinit_qp(server_nid, dir_id, &ctx);
+            CHECK_EQ(ec, kOk);
+        }
 
         auto total_ns = timer.pin();
 
@@ -355,6 +406,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         ctx.yield_to_master();
         CHECK(false) << "yield back to me.";
     }
+    patronus->put_rdma_buffer(rdma_buf);
 }
 
 struct BenchResult
@@ -534,44 +586,41 @@ void benchmark(Patronus::pointer patronus,
     for (size_t thread_nr : {1})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
-        for (size_t extend_nr : {4})
+        for (size_t coro_nr : {16})
+        // for (size_t coro_nr : {1, 2, 4, 8, 16, 32})
         {
-            for (size_t coro_nr : {16})
-            // for (size_t coro_nr : {1, 2, 4, 8, 16, 32})
+            auto total_test_times = kTestTimePerThread * thread_nr;
             {
-                auto total_test_times = kTestTimePerThread * thread_nr;
-                {
-                    auto configs =
-                        BenchConfigFactory::get_extend("ext",
-                                                       thread_nr,
-                                                       coro_nr,
-                                                       kBlockSize,
-                                                       total_test_times,
-                                                       extend_nr);
-                    run_benchmark(
-                        patronus, configs, bar, is_client, is_master, key);
-                }
-                {
-                    auto configs =
-                        BenchConfigFactory::get_rpc_extend("rpc-ext",
-                                                           thread_nr,
-                                                           coro_nr,
-                                                           kBlockSize,
-                                                           total_test_times,
-                                                           extend_nr);
-                    run_benchmark(
-                        patronus, configs, bar, is_client, is_master, key);
-                }
-                {
-                    auto configs = BenchConfigFactory::get_rpc("rpc",
-                                                               thread_nr,
-                                                               coro_nr,
-                                                               kBlockSize,
-                                                               total_test_times,
-                                                               extend_nr);
-                    run_benchmark(
-                        patronus, configs, bar, is_client, is_master, key);
-                }
+                auto configs = BenchConfigFactory::get_mw(
+                    "mw", thread_nr, coro_nr, kBlockSize, total_test_times);
+                run_benchmark(
+                    patronus, configs, bar, is_client, is_master, key);
+            }
+            {
+                auto configs = BenchConfigFactory::get_mr(
+                    "mr", thread_nr, coro_nr, kBlockSize, total_test_times);
+                run_benchmark(
+                    patronus, configs, bar, is_client, is_master, key);
+            }
+            {
+                auto configs =
+                    BenchConfigFactory::get_qp_flag("qp(flag)",
+                                                    thread_nr,
+                                                    coro_nr,
+                                                    kBlockSize,
+                                                    total_test_times);
+                run_benchmark(
+                    patronus, configs, bar, is_client, is_master, key);
+            }
+            {
+                auto configs =
+                    BenchConfigFactory::get_qp_state("qp(state)",
+                                                     thread_nr,
+                                                     coro_nr,
+                                                     kBlockSize,
+                                                     total_test_times);
+                run_benchmark(
+                    patronus, configs, bar, is_client, is_master, key);
             }
         }
     }
@@ -579,44 +628,41 @@ void benchmark(Patronus::pointer patronus,
     for (size_t thread_nr : {32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
-        for (size_t extend_nr : {4})
+        // for (size_t coro_nr : {2, 4, 8, 16, 32})
+        for (size_t coro_nr : {32})
         {
-            // for (size_t coro_nr : {2, 4, 8, 16, 32})
-            for (size_t coro_nr : {32})
+            auto total_test_times = kTestTimePerThread * 4;
             {
-                auto total_test_times = kTestTimePerThread * 4;
-                {
-                    auto configs =
-                        BenchConfigFactory::get_extend("ext",
-                                                       thread_nr,
-                                                       coro_nr,
-                                                       kBlockSize,
-                                                       total_test_times,
-                                                       extend_nr);
-                    run_benchmark(
-                        patronus, configs, bar, is_client, is_master, key);
-                }
-                {
-                    auto configs =
-                        BenchConfigFactory::get_rpc_extend("rpc-ext",
-                                                           thread_nr,
-                                                           coro_nr,
-                                                           kBlockSize,
-                                                           total_test_times,
-                                                           extend_nr);
-                    run_benchmark(
-                        patronus, configs, bar, is_client, is_master, key);
-                }
-                {
-                    auto configs = BenchConfigFactory::get_rpc("rpc",
-                                                               thread_nr,
-                                                               coro_nr,
-                                                               kBlockSize,
-                                                               total_test_times,
-                                                               extend_nr);
-                    run_benchmark(
-                        patronus, configs, bar, is_client, is_master, key);
-                }
+                auto configs = BenchConfigFactory::get_mw(
+                    "mw", thread_nr, coro_nr, kBlockSize, total_test_times);
+                run_benchmark(
+                    patronus, configs, bar, is_client, is_master, key);
+            }
+            {
+                auto configs = BenchConfigFactory::get_mr(
+                    "mr", thread_nr, coro_nr, kBlockSize, total_test_times);
+                run_benchmark(
+                    patronus, configs, bar, is_client, is_master, key);
+            }
+            {
+                auto configs =
+                    BenchConfigFactory::get_qp_flag("qp(flag)",
+                                                    thread_nr,
+                                                    coro_nr,
+                                                    kBlockSize,
+                                                    total_test_times);
+                run_benchmark(
+                    patronus, configs, bar, is_client, is_master, key);
+            }
+            {
+                auto configs =
+                    BenchConfigFactory::get_qp_state("qp(state)",
+                                                     thread_nr,
+                                                     coro_nr,
+                                                     kBlockSize,
+                                                     total_test_times);
+                run_benchmark(
+                    patronus, configs, bar, is_client, is_master, key);
             }
         }
     }

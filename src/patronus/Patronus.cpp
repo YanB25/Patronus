@@ -685,6 +685,13 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
                      << " at patronus_now: " << time_syncer_->patronus_now();
             DCHECK(is_client_)
                 << "** only server can handle request_acquire. msg: " << *msg;
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest,
+                          djb2_digest(msg, sizeof(LeaseModifyResponse)));
+            }
             handle_response_lease_relinquish(msg);
             break;
         }
@@ -695,6 +702,13 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
                      << " at patronus_now: " << time_syncer_->patronus_now();
             DCHECK(is_client_)
                 << "** only server can handle request_acquire. msg: " << *msg;
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest,
+                          djb2_digest(msg, sizeof(LeaseModifyResponse)));
+            }
             handle_response_lease_extend(msg);
             break;
         }
@@ -703,21 +717,42 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
             auto *msg = (AdminRequest *) base;
             DVLOG(4) << "[patronus] handling admin request " << *msg
                      << " at patronus_now: " << time_syncer_->patronus_now();
+
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AdminRequest)));
+            }
+
             auto admin_type = (AdminFlag) msg->flag;
             if (admin_type == AdminFlag::kAdminReqExit)
             {
                 handle_admin_exit(msg, nullptr);
-            }
-            else if (admin_type == AdminFlag::kAdminReqRecovery)
-            {
-                LOG(FATAL) << "Client should not be receiving kAdminReqReocery"
-                              "request.";
             }
             else
             {
                 LOG(FATAL) << "Unknown admin type " << (int) admin_type;
             }
             break;
+        }
+        case RpcType::kAdminResp:
+        {
+            auto *msg = (AdminResponse *) base;
+            auto admin_type = (AdminFlag) msg->flag;
+
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AdminResponse)));
+            }
+
+            CHECK(admin_type == AdminFlag::kAdminReqRecovery ||
+                  admin_type == AdminFlag::kAdminQPtoRO ||
+                  admin_type == AdminFlag::kAdminQPtoRW);
+
+            handle_response_admin_qp_modification(msg, nullptr);
         }
         default:
         {
@@ -760,6 +795,13 @@ void Patronus::prepare_handle_request_messages(
                      << " coro " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AcquireRequest)))
+                    << "** digest mismatch for req " << *msg;
+            }
             prepare_handle_request_acquire(msg, req_ctx, ctx);
             break;
         }
@@ -771,25 +813,47 @@ void Patronus::prepare_handle_request_messages(
                      << *msg << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest, djb2_digest(msg, sizeof(LeaseModifyRequest)));
+            }
             prepare_handle_request_lease_modify(msg, req_ctx, ctx);
             break;
         }
         case RpcType::kAdmin:
+        case RpcType::kAdminReq:
         {
             auto *msg = (AdminRequest *) base;
             DVLOG(4) << "[patronus] handling admin request " << *msg << *ctx;
             auto admin_type = (AdminFlag) msg->flag;
+
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AdminRequest)));
+            }
+
             if (admin_type == AdminFlag::kAdminReqExit)
             {
                 handle_admin_exit(msg, nullptr);
             }
             else if (admin_type == AdminFlag::kAdminReqRecovery)
             {
+                CHECK_EQ(request_type, RpcType::kAdminReq);
                 handle_admin_recover(msg, nullptr);
             }
             else if (admin_type == AdminFlag::kAdminBarrier)
             {
                 handle_admin_barrier(msg, nullptr);
+            }
+            else if (admin_type == AdminFlag::kAdminQPtoRO ||
+                     admin_type == AdminFlag::kAdminQPtoRW)
+            {
+                CHECK_EQ(request_type, RpcType::kAdminReq);
+                handle_admin_qp_access_flag(msg, nullptr);
             }
             else
             {
@@ -906,15 +970,6 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
     auto dirID = req->dir_id;
     DCHECK_EQ(dirID, get_thread_id())
         << "** Currently we limit that server tid handles dir_id";
-
-    // auto internal = dsm_->get_server_buffer();
-    if constexpr (debug())
-    {
-        uint64_t digest = req->digest.get();
-        req->digest = 0;
-        DCHECK_EQ(digest, djb2_digest(req, sizeof(AcquireRequest)))
-            << "** digest mismatch for req " << *req;
-    }
 
     auto &ex_ctx = coro_ex_ctx(ctx->coro_id());
 
@@ -1310,8 +1365,15 @@ void Patronus::post_handle_request_messages(
             break;
         }
         case RpcType::kAdmin:
+        case RpcType::kAdminReq:
         {
             // do nothing
+            auto *msg = (AdminRequest *) base;
+            DVLOG(4) << "[patronus] post handling admin request " << *msg
+                     << ", coro: " << *ctx;
+            DCHECK(is_server_)
+                << "** only server can handle request_acquire. msg: " << *msg;
+            post_handle_request_admin(msg, ctx);
             break;
         }
         default:
@@ -1321,46 +1383,6 @@ void Patronus::post_handle_request_messages(
         }
         }
     }
-}
-
-void Patronus::handle_request_lease_relinquish(LeaseModifyRequest *req,
-                                               CoroContext *ctx)
-{
-    // response before going on
-    // the response is only for the correctness of underlying umsg
-    auto *resp_buf = get_rdma_message_buffer();
-    auto &resp_msg = *(LeaseModifyResponse *) resp_buf;
-    resp_msg.type = RpcType::kRelinquishResp;
-    resp_msg.cid = req->cid;
-    resp_msg.cid.node_id = get_node_id();
-    resp_msg.cid.thread_id = get_thread_id();
-    resp_msg.success = true;
-
-    dsm_->unreliable_send((char *) resp_buf,
-                          sizeof(LeaseModifyResponse),
-                          req->cid.node_id,
-                          req->cid.thread_id);
-    put_rdma_message_buffer(resp_buf);
-
-    DCHECK_EQ(req->type, RpcType::kRelinquishReq);
-
-    bool only_dealloc = req->flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
-
-    // handle dealloc here
-    if (only_dealloc)
-    {
-        auto dsm_offset = req->addr;
-        auto *addr = dsm_->dsm_offset_to_addr(dsm_offset);
-        patronus_free(addr, req->size, req->hint);
-        return;
-    }
-
-    auto lease_id = req->lease_id;
-    task_gc_lease(lease_id,
-                  req->cid,
-                  compound_uint64_t(0),
-                  req->flag | (flag_t) LeaseModifyFlag::kForceUnbind,
-                  ctx);
 }
 
 size_t Patronus::handle_rdma_finishes(
@@ -1435,6 +1457,7 @@ void Patronus::finished(uint64_t key)
     msg->cid.thread_id = tid;
     msg->cid.coro_id = kMasterCoro;
     msg->data = key;
+    msg->need_response = false;
 
     if constexpr (debug())
     {
@@ -1496,6 +1519,31 @@ void Patronus::handle_admin_recover(AdminRequest *req,
         << "[patronus] timer: " << timer;
 }
 
+void Patronus::handle_admin_qp_access_flag(AdminRequest *req,
+                                           [[maybe_unused]] CoroContext *ctx)
+{
+    LOG(WARNING) << "[patronus] QP recovering. req: " << *req;
+
+    auto from_node = req->cid.node_id;
+    auto tid = req->cid.thread_id;
+    auto dir_id = req->dir_id;
+    if (req->flag == (flag_t) AdminFlag::kAdminQPtoRO)
+    {
+        CHECK(dsm_->modify_dir_qp_access_flag(
+            from_node, tid, dir_id, IBV_ACCESS_REMOTE_READ));
+    }
+    else
+    {
+        CHECK_EQ(req->flag, (flag_t) AdminFlag::kAdminQPtoRW);
+        CHECK(dsm_->modify_dir_qp_access_flag(
+            from_node,
+            tid,
+            dir_id,
+            (flag_t) IBV_ACCESS_REMOTE_READ |
+                (flag_t) IBV_ACCESS_REMOTE_WRITE));
+    }
+}
+
 void Patronus::handle_admin_exit(AdminRequest *req,
                                  [[maybe_unused]] CoroContext *ctx)
 {
@@ -1531,32 +1579,13 @@ void Patronus::signal_server_to_recover_qp(size_t node_id,
                                            size_t dir_id,
                                            TraceView v)
 {
-    auto tid = get_thread_id();
-    DCHECK_LT(dir_id, NR_DIRECTORY);
-    DCHECK_LT(tid, kMaxAppThread);
-
-    char *rdma_buf = get_rdma_message_buffer();
-
-    auto *msg = (AdminRequest *) rdma_buf;
-    msg->type = RpcType::kAdmin;
-    msg->cid.node_id = get_node_id();
-    msg->cid.thread_id = tid;
-    msg->cid.coro_id = kNotACoro;
-    msg->cid.rpc_ctx_id = 0;
-    msg->dir_id = dir_id;
-    msg->flag = (flag_t) AdminFlag::kAdminReqRecovery;
-
-    if constexpr (debug())
-    {
-        msg->digest = 0;
-        msg->digest = djb2_digest(msg, sizeof(AdminRequest));
-    }
-
-    dsm_->unreliable_send(rdma_buf, sizeof(AdminRequest), node_id, dir_id);
-
-    // TODO(patronus): this may have problem if message not inlined and buffer
-    // is re-used and NIC is DMA-ing
-    put_rdma_message_buffer(rdma_buf);
+    auto rc = admin_request_impl(node_id,
+                                 dir_id,
+                                 0 /* data */,
+                                 (flag_t) AdminFlag::kAdminReqRecovery,
+                                 false /* need response */,
+                                 nullptr);
+    DCHECK_EQ(rc, kOk);
 
     v.pin("signal-server-recovery");
 }
@@ -2205,9 +2234,39 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
         << "currently stick to thisconstrain " << pre_coro_ctx(ctx);
 }
 
+void Patronus::post_handle_request_admin(AdminRequest *req, CoroContext *ctx)
+{
+    std::ignore = ctx;
+    if (unlikely(!req->need_response))
+    {
+        return;
+    }
+    auto *resp_buf = get_rdma_message_buffer();
+    auto &resp_msg = *(AdminResponse *) resp_buf;
+    resp_msg.type = RpcType::kAdminResp;
+    resp_msg.cid = req->cid;
+    resp_msg.cid.node_id = get_node_id();
+    resp_msg.cid.thread_id = get_thread_id();
+    resp_msg.flag = req->flag;
+    resp_msg.success = true;
+
+    if constexpr (debug())
+    {
+        resp_msg.digest = 0;
+        resp_msg.digest = djb2_digest(&resp_msg, sizeof(AdminResponse));
+    }
+
+    dsm_->unreliable_send((const char *) resp_buf,
+                          sizeof(AdminResponse),
+                          req->cid.node_id,
+                          req->cid.thread_id);
+    put_rdma_message_buffer(resp_buf);
+}
+
 void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
                                                 CoroContext *ctx)
 {
+    std::ignore = ctx;
     DCHECK_EQ(req->type, RpcType::kExtendReq);
 
     bool lease_valid = true;
@@ -2257,6 +2316,13 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
     resp_msg.cid.node_id = get_node_id();
     resp_msg.cid.thread_id = get_thread_id();
     resp_msg.success = lease_valid;
+
+    if constexpr (debug())
+    {
+        resp_msg.digest = 0;
+        resp_msg.digest = djb2_digest(&resp_msg, sizeof(LeaseModifyResponse));
+    }
+
     dsm_->unreliable_send((const char *) resp_buf,
                           sizeof(LeaseModifyResponse),
                           req->cid.node_id,
@@ -2277,6 +2343,11 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
     resp_msg.cid.node_id = get_node_id();
     resp_msg.cid.thread_id = get_thread_id();
     resp_msg.success = true;
+    if constexpr (debug())
+    {
+        resp_msg.digest = 0;
+        resp_msg.digest = djb2_digest(&resp_msg, sizeof(LeaseModifyResponse));
+    }
     dsm_->unreliable_send((char *) resp_buf,
                           sizeof(LeaseModifyResponse),
                           req->cid.node_id,

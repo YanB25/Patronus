@@ -385,6 +385,7 @@ public:
                                               CoroContext *ctx);
     void post_handle_request_lease_extend(LeaseModifyRequest *req,
                                           CoroContext *ctx);
+    void post_handle_request_admin(AdminRequest *req, CoroContext *ctx);
 
     Buffer get_rdma_buffer_8B()
     {
@@ -544,6 +545,14 @@ public:
 
     void prepare_fast_backup_recovery(size_t prepare_nr);
 
+    inline RetCode signal_modify_qp_flag(size_t node_id,
+                                         size_t dir_id,
+                                         bool to_ro,
+                                         CoroContext *);
+    inline RetCode signal_reinit_qp(size_t node_id,
+                                    size_t dir_id,
+                                    CoroContext *);
+
 private:
     PatronusConfig conf_;
     // the default_allocator_ is set on registering server thread.
@@ -602,6 +611,13 @@ private:
             mw_pool_[dirID].push(mw);
         }
     }
+
+    inline RetCode admin_request_impl(size_t node_id,
+                                      size_t dir_id,
+                                      uint64_t data,
+                                      flag_t flag,
+                                      bool need_response,
+                                      CoroContext *ctx);
 
 public:
     char *get_rdma_message_buffer()
@@ -788,11 +804,12 @@ private:
     void handle_response_acquire(AcquireResponse *);
     void handle_response_lease_relinquish(LeaseModifyResponse *);
     void handle_response_lease_extend(LeaseModifyResponse *resp);
+    inline void handle_response_admin_qp_modification(AdminResponse *resp,
+                                                      CoroContext *ctx);
     void handle_admin_exit(AdminRequest *req, CoroContext *ctx);
     void handle_admin_recover(AdminRequest *req, CoroContext *ctx);
     void handle_admin_barrier(AdminRequest *req, CoroContext *ctx);
-    void handle_request_lease_relinquish(LeaseModifyRequest *,
-                                         CoroContext *ctx);
+    void handle_admin_qp_access_flag(AdminRequest *req, CoroContext *ctx);
     void prepare_handle_request_lease_relinquish(LeaseModifyRequest *,
                                                  HandleReqContext &req_ctx,
                                                  CoroContext *ctx);
@@ -906,7 +923,6 @@ private:
 
     inline bool valid_lease_buffer_offset(size_t buffer_offset) const;
     inline bool valid_total_buffer_offset(size_t buffer_offset) const;
-
     void validate_buffers();
 
     void debug_analysis_per_qp_batch(const char *msg_buf,
@@ -1640,6 +1656,120 @@ inline void Patronus::debug_analysis_per_qp_batch(
             }
         }
     }
+}
+
+RetCode Patronus::admin_request_impl(size_t node_id,
+                                     size_t dir_id,
+                                     uint64_t data,
+                                     flag_t flag,
+                                     bool need_response,
+                                     CoroContext *ctx)
+{
+    DCHECK_LT(get_thread_id(), kMaxAppThread);
+    DCHECK_LT(dir_id, NR_DIRECTORY);
+
+    RetCode ret = RetCode::kOk;
+    char *rdma_buf = get_rdma_message_buffer();
+    RpcContext *rpc_context = nullptr;
+
+    auto *msg = (AdminRequest *) rdma_buf;
+    msg->type = RpcType::kAdminReq;
+    msg->cid.node_id = get_node_id();
+    msg->cid.thread_id = get_thread_id();
+    msg->cid.coro_id = ctx ? ctx->coro_id() : kNotACoro;
+    msg->cid.rpc_ctx_id = 0;
+    msg->dir_id = dir_id;
+    msg->flag = flag;
+    msg->data = data;
+    msg->need_response = need_response;
+
+    if (need_response)
+    {
+        rpc_context = get_rpc_context();
+        auto rpc_ctx_id = get_rpc_context_id(rpc_context);
+        msg->cid.rpc_ctx_id = rpc_ctx_id;
+
+        rpc_context->ready = false;
+        rpc_context->request = (BaseMessage *) msg;
+        rpc_context->ret_code = RetCode::kOk;
+    }
+
+    if constexpr (debug())
+    {
+        msg->digest = 0;
+        msg->digest = djb2_digest(msg, sizeof(AdminRequest));
+    }
+
+    dsm_->unreliable_send(rdma_buf, sizeof(AdminRequest), node_id, dir_id);
+
+    if (need_response)
+    {
+        DCHECK_NOTNULL(ctx)->yield_to_master();
+
+        DCHECK(rpc_context->ready) << "** Should have been ready when switch "
+                                      "back to worker thread. coro: "
+                                   << pre_coro_ctx(ctx);
+
+        ret = rpc_context->ret_code;
+        put_rpc_context(rpc_context);
+    }
+
+    // TODO(patronus): this may have problem if message not inlined and buffer
+    // is re-used and NIC is DMA-ing
+    put_rdma_message_buffer(rdma_buf);
+    return ret;
+}
+RetCode Patronus::signal_modify_qp_flag(size_t node_id,
+                                        size_t dir_id,
+                                        bool to_ro,
+                                        CoroContext *ctx)
+{
+    flag_t flag = 0;
+    if (to_ro)
+    {
+        flag = (flag_t) AdminFlag::kAdminQPtoRO;
+    }
+    else
+    {
+        flag = (flag_t) AdminFlag::kAdminQPtoRW;
+    }
+    return admin_request_impl(node_id,
+                              dir_id,
+                              0 /* data */,
+                              flag,
+                              true /* need response */,
+                              DCHECK_NOTNULL(ctx));
+}
+
+RetCode Patronus::signal_reinit_qp(size_t node_id,
+                                   size_t dir_id,
+                                   CoroContext *ctx)
+{
+    auto flag = (flag_t) AdminFlag::kAdminReqRecovery;
+    return admin_request_impl(node_id,
+                              dir_id,
+                              0 /* data */,
+                              flag,
+                              true /* need response */,
+                              DCHECK_NOTNULL(ctx));
+}
+
+void Patronus::handle_response_admin_qp_modification(AdminResponse *resp,
+                                                     CoroContext *ctx)
+{
+    std::ignore = ctx;
+    auto rpc_ctx_id = resp->cid.rpc_ctx_id;
+    auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
+
+    if (resp->success)
+    {
+        rpc_context->ret_code = kOk;
+    }
+    else
+    {
+        rpc_context->ret_code = RetCode::kRdmaExecutionErr;
+    }
+    rpc_context->ready.store(true, std::memory_order_release);
 }
 
 }  // namespace patronus

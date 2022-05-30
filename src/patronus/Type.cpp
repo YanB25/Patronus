@@ -38,6 +38,16 @@ std::ostream &operator<<(std::ostream &os, const RpcType &t)
         os << "Adm";
         break;
     }
+    case RpcType::kAdminReq:
+    {
+        os << "Adm-req";
+        break;
+    }
+    case RpcType::kAdminResp:
+    {
+        os << "Adm-resp";
+        break;
+    }
     case RpcType::kTimeSync:
     {
         os << "TimeSync";
@@ -140,6 +150,16 @@ std::ostream &operator<<(std::ostream &os, const AdminFlag &f)
     case AdminFlag::kAdminBarrier:
     {
         os << "Barrier";
+        break;
+    }
+    case AdminFlag::kAdminQPtoRO:
+    {
+        os << "QP2RO";
+        break;
+    }
+    case AdminFlag::kAdminQPtoRW:
+    {
+        os << "QP2RW";
         break;
     }
     default:
@@ -419,7 +439,17 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
 std::ostream &operator<<(std::ostream &os, const AdminRequest &req)
 {
     os << "{AdminRequest type: " << req.type << ", cid: " << req.cid
-       << "flags: " << (int) req.flag << " }";
+       << "flags: " << req.flag << ", dir_id: " << req.dir_id
+       << ", data: " << req.data << ", need_resp: " << req.need_response
+       << " }";
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const AdminResponse &resp)
+{
+    os << "{AdminResponse type: " << resp.type << ", cid: " << resp.cid
+       << ", flag: " << (AdminFlag) resp.flag << ", success: " << resp.success
+       << "}";
     return os;
 }
 

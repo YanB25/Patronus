@@ -33,6 +33,8 @@ enum class RpcType : uint8_t
     kExtendReq,
     kExtendResp,
     kAdmin,
+    kAdminReq,
+    kAdminResp,
     kTimeSync,
 };
 std::ostream &operator<<(std::ostream &os, const RpcType &t);
@@ -154,6 +156,8 @@ enum class AdminFlag : uint8_t
     kAdminReqExit = 0,
     kAdminReqRecovery = 1,
     kAdminBarrier = 2,
+    kAdminQPtoRO,
+    kAdminQPtoRW,
 };
 std::ostream &operator<<(std::ostream &os, const AdminFlag &f);
 
@@ -165,10 +169,22 @@ struct AdminRequest
     Debug<uint64_t> digest;
     uint16_t dir_id;
     uint64_t data;  // used by p->barrier()
+    bool need_response;
 } __attribute__((packed));
 static_assert(sizeof(AdminRequest) < config::umsg::kUserMessageSize);
 static_assert(sizeof(AdminRequest::flag) >= sizeof(AdminFlag));
 std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);
+
+struct AdminResponse
+{
+    enum RpcType type;
+    ClientID cid;
+    uint8_t flag;  // enum AdminFlag
+    bool success;
+    Debug<uint64_t> digest;
+} __attribute__((packed));
+static_assert(sizeof(AdminResponse) < config::umsg::kUserMessageSize);
+std::ostream &operator<<(std::ostream &os, const AdminResponse &resp);
 
 enum class LeaseModifyFlag : uint16_t
 {

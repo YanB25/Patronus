@@ -607,8 +607,18 @@ public:
     }
     inline uint32_t get_icon_lkey();
 
+    inline bool modify_th_qp_access_flag(int node_id,
+                                         size_t dir_id,
+                                         uint64_t flags);
+    inline bool modify_dir_qp_access_flag(size_t node_id,
+                                          size_t thread_id,
+                                          size_t dir_id,
+                                          uint64_t flags);
+
     // below used as lease
 private:
+    inline bool modify_qp_access_flag(ibv_qp *, uint64_t flags);
+
     inline void *dsm_base() const
     {
         DCHECK_EQ(baseAddr, remoteInfo[get_node_id()].dsmBase);
@@ -983,4 +993,34 @@ inline void DSM::free(GlobalAddress addr)
 {
     local_allocator_.free(addr);
 }
+
+bool DSM::modify_th_qp_access_flag(int node_id, size_t dir_id, uint64_t f)
+{
+    auto *qp = get_th_qp(node_id, dir_id);
+    return modify_qp_access_flag(qp, f);
+}
+bool DSM::modify_dir_qp_access_flag(size_t node_id,
+                                    size_t thread_id,
+                                    size_t dir_id,
+                                    uint64_t f)
+{
+    auto *qp = get_dir_qp(node_id, thread_id, dir_id);
+    return modify_qp_access_flag(qp, f);
+}
+
+bool DSM::modify_qp_access_flag(ibv_qp *qp, uint64_t flags)
+{
+    ibv_qp_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.qp_access_flags = flags;
+    auto ret = ibv_modify_qp(qp, &attr, IBV_QP_ACCESS_FLAGS);
+    if (ret)
+    {
+        DLOG(WARNING) << "[DSM} failed to modify qp access flag. QP: " << qp
+                      << ", flags: " << (uint64_t) flags;
+        return false;
+    }
+    return true;
+}
+
 #endif /* __DSM_H__ */
