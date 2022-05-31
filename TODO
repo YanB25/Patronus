@@ -288,7 +288,8 @@ will see an unexpected cases:
 - Decided to ignore this bug for now.
 
 ==================================
-- bench_patronus_extend: not debug and not tested
-- bench_patronus_concurrent: not debug and not tested
+- bench_patronus_extend: not debug and not tested: get the results.
+- bench_patronus_concurrent: not debug and not tested: get the results.
 [-] try to pass all tests: now admin requests - some need resp, others not. may have bug because of this.
 [-] try to pass correct_patronus_rpc_basic, and modify to rpc_{read/write}
+- RACE hashing: let it report the RW cases.
