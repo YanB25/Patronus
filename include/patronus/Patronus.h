@@ -1229,25 +1229,27 @@ RetCode Patronus::extend(Lease &lease,
     // round up divide
     auto extend_unit_nr = (ns + ns_per_unit - 1) / ns_per_unit;
 
-    auto patronus_now = time_syncer_->patronus_now();
-    auto patronus_ddl = lease.ddl_term();
-    auto epsilon = time_syncer_->epsilon();
-    time::ns_t diff_ns = patronus_ddl - patronus_now;
-    bool already_pass_ddl =
-        diff_ns < 0 + epsilon + time::TimeSyncer::kCommunicationLatencyNs;
-    if (unlikely(already_pass_ddl))
-    {
-        // already pass DDL, no need to extend.
-        DVLOG(4) << "[patronus][maybe-extend] Assume DDL passed (not extend). "
-                    "lease ddl: "
-                 << patronus_ddl << ", patronus_now: " << patronus_now
-                 << ", diff_ns: " << diff_ns << " < 0 + epsilon(" << epsilon
-                 << ") + CommunicationLatencyNs("
-                 << time::TimeSyncer::kCommunicationLatencyNs
-                 << "). coro: " << (ctx ? *ctx : nullctx)
-                 << ". Now lease: " << lease;
-        return RetCode::kLeaseLocalExpiredErr;
-    }
+    // maybe too slow to check for local expiration
+    // auto patronus_now = time_syncer_->patronus_now();
+    // auto patronus_ddl = lease.ddl_term();
+    // auto epsilon = time_syncer_->epsilon();
+    // time::ns_t diff_ns = patronus_ddl - patronus_now;
+    // bool already_pass_ddl =
+    //     diff_ns < 0 + epsilon + time::TimeSyncer::kCommunicationLatencyNs;
+    // if (unlikely(already_pass_ddl))
+    // {
+    //     // already pass DDL, no need to extend.
+    //     DVLOG(4) << "[patronus][maybe-extend] Assume DDL passed (not extend).
+    //     "
+    //                 "lease ddl: "
+    //              << patronus_ddl << ", patronus_now: " << patronus_now
+    //              << ", diff_ns: " << diff_ns << " < 0 + epsilon(" << epsilon
+    //              << ") + CommunicationLatencyNs("
+    //              << time::TimeSyncer::kCommunicationLatencyNs
+    //              << "). coro: " << (ctx ? *ctx : nullctx)
+    //              << ". Now lease: " << lease;
+    //     return RetCode::kLeaseLocalExpiredErr;
+    // }
 
     return extend_impl(lease, extend_unit_nr, flag, ctx);
 }

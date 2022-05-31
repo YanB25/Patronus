@@ -441,7 +441,7 @@ RetCode Patronus::protection_region_cas_impl(Lease &lease,
                                              uint64_t swap,
                                              CoroContext *ctx)
 {
-    CHECK(lease.success());
+    DCHECK(lease.success());
 
     uint32_t rkey = lease.header_rkey_;
     uint64_t remote_addr = lease.header_addr_ + offset;
@@ -2223,11 +2223,15 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
                 aba_unit_to_ddl, std::memory_order_acq_rel);
         }
 
+        auto patronus_now = time_syncer_->patronus_now();
+        resp_msg->aba_id = aba_unit_to_ddl.u32_1;
+        resp_msg->begin_term = patronus_now.term();
+        resp_msg->ns_per_unit = ns_per_unit;
+
         // NOTE: we allow enable gc while disable pr.
         if (likely(!no_gc))
         {
             CHECK(alloc_lease_ctx);
-            auto patronus_now = time_syncer_->patronus_now();
             auto patronus_ddl_term = patronus_now.term() + ns_per_unit;
 
             auto flag = (flag_t) 0;
@@ -2238,27 +2242,13 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
                     CoroContext *ctx) {
                     task_gc_lease(lease_id, cid, aba_unit_to_ddl, flag, ctx);
                 });
-
-            resp_msg->begin_term = patronus_now.term();
-            resp_msg->ns_per_unit = ns_per_unit;
-            resp_msg->aba_id = aba_unit_to_ddl.u32_1;
-
-            if (alloc_pr)
-            {
-                protection_region->begin_term = patronus_now.term();
-                protection_region->ns_per_unit = req->required_ns;
-                DCHECK_GT(aba_unit_to_ddl.u32_2, 0);
-                memset(&(protection_region->meta),
-                       0,
-                       sizeof(ProtectionRegionMeta));
-            }
         }
-        else
+        if (alloc_pr)
         {
-            resp_msg->begin_term = 0;
-            resp_msg->ns_per_unit =
-                std::numeric_limits<decltype(resp_msg->ns_per_unit)>::max();
-            resp_msg->aba_id = 0;
+            protection_region->begin_term = patronus_now.term();
+            protection_region->ns_per_unit = req->required_ns;
+            DCHECK_GT(aba_unit_to_ddl.u32_2, 0);
+            memset(&(protection_region->meta), 0, sizeof(ProtectionRegionMeta));
         }
     }
     else
@@ -2455,7 +2445,7 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
         auto *patomic = (std::atomic<uint64_t> *) addr;
         DCHECK_EQ(req->size, 2 * sizeof(uint64_t));
         uint64_t compare = *((uint64_t *) req->buffer);
-        uint64_t remember_compare = compare;
+        // uint64_t remember_compare = compare;
         uint64_t swap = *(((uint64_t *) req->buffer) + 1);
         bool succ = patomic->compare_exchange_strong(
             compare, swap, std::memory_order_relaxed);
@@ -2468,11 +2458,6 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
                  << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
                  << ", remote_addr: " << (void *) req->remote_addr << " from "
                  << req->cid << ". compare: " << compare << ", swap: " << swap;
-        // CHECK(succ) << "[debug] !! CAS failed. compare: " << remember_compare
-        //             << ", swap: " << swap << ", got " << compare
-        //             << ". addr: " << (void *) addr
-        //             << ", remote_addr: " << req->remote_addr
-        //             << ", cid: " << req->cid;
     }
 
     if constexpr (debug())

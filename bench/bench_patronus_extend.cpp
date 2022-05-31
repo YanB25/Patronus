@@ -25,8 +25,8 @@ using namespace std::chrono_literals;
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-// constexpr static size_t kTestTimePerThread = 1_M;
-constexpr static size_t kTestTimePerThread = 100;
+constexpr static size_t kTestTimePerThread = 100_K;
+// constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
 std::vector<size_t> col_x_alloc_size;
@@ -309,7 +309,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
     ChronoTimer op_timer;
     while (coro_comm.thread_remain_task > 0)
     {
-        bool succ = true;
+        // bool succ = true;
         if (is_master && coro_id == 0)
         {
             op_timer.pin();
@@ -323,8 +323,11 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                           acquire_ns,
                                           acquire_flag,
                                           &ctx);
-        DCHECK(lease.success());
-        succ = lease.success();
+        if (unlikely(!lease.success()))
+        {
+            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr);
+            continue;
+        }
 
         for (size_t i = 0; i < conf.extend_nr; ++i)
         {
@@ -338,23 +341,26 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             {
                 auto rc = patronus->extend(
                     lease, conf.extend_ns, conf.extend_flag, &ctx);
-                CHECK_EQ(rc, RetCode::kOk);
+                CHECK_EQ(rc, RetCode::kOk)
+                    << "** extended failed at " << i << " attempt.";
             }
         }
 
         auto rel_flag = (flag_t) 0;
         patronus->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
 
-        auto total_ns = timer.pin();
-
-        coro_comm.finish_all[coro_id] = true;
-
-        VLOG(1) << "[bench] tid " << tid << " got " << fail_nr
-                << " failed lease. succ lease: " << succ_nr << " within "
-                << total_ns << " ns. coro: " << ctx;
-        ctx.yield_to_master();
-        CHECK(false) << "yield back to me.";
+        coro_comm.thread_remain_task--;
     }
+
+    auto total_ns = timer.pin();
+
+    coro_comm.finish_all[coro_id] = true;
+
+    VLOG(1) << "[bench] tid " << tid << " got " << fail_nr
+            << " failed lease. succ lease: " << succ_nr << " within "
+            << total_ns << " ns. coro: " << ctx;
+    ctx.yield_to_master();
+    CHECK(false) << "yield back to me.";
 }
 
 struct BenchResult
@@ -520,6 +526,7 @@ void run_benchmark(Patronus::pointer patronus,
     }
 }
 
+constexpr static size_t kExtendNr = 8;
 void benchmark(Patronus::pointer patronus,
                boost::barrier &bar,
                bool is_client,
@@ -530,14 +537,15 @@ void benchmark(Patronus::pointer patronus,
     constexpr static size_t kBlockSize = 64;
 
     size_t key = 0;
-    // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-    for (size_t thread_nr : {1})
+    // for (size_t thread_nr : {1})
+    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+    // for (size_t thread_nr : {32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
-        for (size_t extend_nr : {4})
+        // for (size_t extend_nr : {2, 4, 8, 6, 10, 12, 16})
+        for (size_t extend_nr : {kExtendNr})
         {
-            for (size_t coro_nr : {16})
-            // for (size_t coro_nr : {1, 2, 4, 8, 16, 32})
+            for (size_t coro_nr : {1})
             {
                 auto total_test_times = kTestTimePerThread * thread_nr;
                 {
@@ -579,10 +587,11 @@ void benchmark(Patronus::pointer patronus,
     for (size_t thread_nr : {32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
-        for (size_t extend_nr : {4})
+        for (size_t extend_nr : {kExtendNr})
         {
             // for (size_t coro_nr : {2, 4, 8, 16, 32})
-            for (size_t coro_nr : {32})
+            for (size_t coro_nr : {2, 4, 8, 16})
+            // for (size_t coro_nr : {16})
             {
                 auto total_test_times = kTestTimePerThread * 4;
                 {

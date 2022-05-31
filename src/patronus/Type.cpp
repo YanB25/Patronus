@@ -442,7 +442,7 @@ std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp)
        << ", header_base: " << (void *) resp.header_base
        << ", begin_term: " << resp.begin_term
        << ", ns_per_unit: " << resp.ns_per_unit << ", status: " << resp.status
-       << " }";
+       << ", aba_id: " << resp.aba_id << " }";
     return os;
 }
 
