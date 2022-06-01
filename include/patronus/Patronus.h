@@ -1772,12 +1772,16 @@ RetCode Patronus::signal_reinit_qp(size_t node_id,
                                    CoroContext *ctx)
 {
     auto flag = (flag_t) AdminFlag::kAdminReqRecovery;
-    return admin_request_impl(node_id,
-                              dir_id,
-                              0 /* data */,
-                              flag,
-                              true /* need response */,
-                              DCHECK_NOTNULL(ctx));
+    auto ec = admin_request_impl(node_id,
+                                 dir_id,
+                                 0 /* data */,
+                                 flag,
+                                 true /* need response */,
+                                 DCHECK_NOTNULL(ctx));
+    CHECK_EQ(ec, RetCode::kOk);
+
+    CHECK(dsm_->recoverThreadQP(node_id, dir_id));
+    return kOk;
 }
 
 void Patronus::handle_response_admin_qp_modification(AdminResponse *resp,

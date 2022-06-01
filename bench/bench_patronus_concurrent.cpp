@@ -23,9 +23,10 @@ using namespace patronus;
 using namespace std::chrono_literals;
 
 constexpr static size_t kClientThreadNr = kMaxAppThread;
+// constexpr static size_t kClientThreadNr = 1;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-constexpr static size_t kTestTimePerThread = 1_M;
+constexpr static size_t kTestTimePerThread = 100_K;
 // constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
@@ -333,7 +334,8 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
     }
     if (conf.modify_qp_flag)
     {
-        acquire_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+        acquire_flag = (flag_t) AcquireRequestFlag::kNoRpc |
+                       (flag_t) AcquireRequestFlag::kNoGc;
         rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
         rw_flag = (flag_t) RWFlag::kUseUniversalRkey;
         CHECK_EQ(conf.coro_nr, 1)
@@ -342,7 +344,8 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
     }
     if (conf.reinit_qp)
     {
-        acquire_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+        acquire_flag = (flag_t) AcquireRequestFlag::kNoRpc |
+                       (flag_t) AcquireRequestFlag::kNoGc;
         rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
         rw_flag = (flag_t) RWFlag::kUseUniversalRkey;
         CHECK_EQ(conf.coro_nr, 1)
@@ -365,7 +368,12 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                           0ns,
                                           acquire_flag,
                                           &ctx);
-        CHECK(lease.success());
+        if (unlikely(!lease.success()))
+        {
+            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr);
+            continue;
+        }
+
         if (conf.modify_qp_flag)
         {
             auto ec = patronus->signal_modify_qp_flag(
@@ -378,9 +386,10 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             CHECK_EQ(ec, kOk);
         }
 
-        auto ec = patronus->read(
-            lease, rdma_buf.buffer, alloc_size, 0 /* offset */, rw_flag, &ctx);
-        CHECK_EQ(ec, kOk);
+        // auto ec = patronus->read(
+        //     lease, rdma_buf.buffer, alloc_size, 0 /* offset */, rw_flag,
+        //     &ctx);
+        // CHECK_EQ(ec, kOk);
 
         patronus->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
 
@@ -396,16 +405,18 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             CHECK_EQ(ec, kOk);
         }
 
-        auto total_ns = timer.pin();
-
-        coro_comm.finish_all[coro_id] = true;
-
-        VLOG(1) << "[bench] tid " << tid << " got " << fail_nr
-                << " failed lease. succ lease: " << succ_nr << " within "
-                << total_ns << " ns. coro: " << ctx;
-        ctx.yield_to_master();
-        CHECK(false) << "yield back to me.";
+        coro_comm.thread_remain_task--;
     }
+
+    auto total_ns = timer.pin();
+
+    coro_comm.finish_all[coro_id] = true;
+
+    VLOG(1) << "[bench] tid " << tid << " got " << fail_nr
+            << " failed lease. succ lease: " << succ_nr << " within "
+            << total_ns << " ns. coro: " << ctx;
+    ctx.yield_to_master();
+    CHECK(false) << "yield back to me.";
     patronus->put_rdma_buffer(rdma_buf);
 }
 
@@ -583,13 +594,14 @@ void benchmark(Patronus::pointer patronus,
 
     size_t key = 0;
     // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-    for (size_t thread_nr : {1})
+    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
-        for (size_t coro_nr : {16})
+        for (size_t coro_nr : {1})
         // for (size_t coro_nr : {1, 2, 4, 8, 16, 32})
         {
-            auto total_test_times = kTestTimePerThread * thread_nr;
+            auto total_test_times =
+                kTestTimePerThread * std::min(thread_nr, (size_t) 4);
             {
                 auto configs = BenchConfigFactory::get_mw(
                     "mw", thread_nr, coro_nr, kBlockSize, total_test_times);
@@ -597,8 +609,12 @@ void benchmark(Patronus::pointer patronus,
                     patronus, configs, bar, is_client, is_master, key);
             }
             {
-                auto configs = BenchConfigFactory::get_mr(
-                    "mr", thread_nr, coro_nr, kBlockSize, total_test_times);
+                auto configs =
+                    BenchConfigFactory::get_mr("mr",
+                                               thread_nr,
+                                               coro_nr,
+                                               kBlockSize,
+                                               total_test_times * 0.1);
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
@@ -608,7 +624,7 @@ void benchmark(Patronus::pointer patronus,
                                                     thread_nr,
                                                     coro_nr,
                                                     kBlockSize,
-                                                    total_test_times);
+                                                    total_test_times * 0.1);
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
@@ -618,7 +634,7 @@ void benchmark(Patronus::pointer patronus,
                                                      thread_nr,
                                                      coro_nr,
                                                      kBlockSize,
-                                                     total_test_times);
+                                                     total_test_times * 0.01);
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
@@ -628,8 +644,8 @@ void benchmark(Patronus::pointer patronus,
     for (size_t thread_nr : {32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
-        // for (size_t coro_nr : {2, 4, 8, 16, 32})
-        for (size_t coro_nr : {32})
+        for (size_t coro_nr : {2, 4, 8, 16, 32})
+        // for (size_t coro_nr : {32})
         {
             auto total_test_times = kTestTimePerThread * 4;
             {
@@ -644,26 +660,8 @@ void benchmark(Patronus::pointer patronus,
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
-            {
-                auto configs =
-                    BenchConfigFactory::get_qp_flag("qp(flag)",
-                                                    thread_nr,
-                                                    coro_nr,
-                                                    kBlockSize,
-                                                    total_test_times);
-                run_benchmark(
-                    patronus, configs, bar, is_client, is_master, key);
-            }
-            {
-                auto configs =
-                    BenchConfigFactory::get_qp_state("qp(state)",
-                                                     thread_nr,
-                                                     coro_nr,
-                                                     kBlockSize,
-                                                     total_test_times);
-                run_benchmark(
-                    patronus, configs, bar, is_client, is_master, key);
-            }
+            // QP state, flag does not support multiple clients sharing the same
+            // QP
         }
     }
 
