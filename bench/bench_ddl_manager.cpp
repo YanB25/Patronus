@@ -25,7 +25,6 @@ std::vector<uint64_t> col_ns;
 // std::vector<uint64_t> col_lat_p9;
 // std::vector<uint64_t> col_lat_p99;
 
-constexpr static size_t kDirID = 0;
 constexpr static size_t kTestNr = 10_M;
 
 template <size_t kSize>
@@ -58,7 +57,6 @@ void do_benchmark(Patronus::pointer p,
 
     auto &time_syncer = p->time_syncer();
 
-    auto min = 0;
     auto max = std::numeric_limits<patronus::time::term_t>::max();
 
     // load
@@ -121,8 +119,6 @@ int main(int argc, char *argv[])
     config.reserved_buffer_size = 1_MB;
 
     auto patronus = Patronus::ins(config);
-
-    auto nid = patronus->get_node_id();
 
     benchmark(patronus);
 

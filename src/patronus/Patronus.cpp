@@ -1034,6 +1034,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
     bool only_alloc = req->flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
     bool debug_srv_do_nothing =
         req->flag & (flag_t) AcquireRequestFlag::kDebugServerDoNothing;
+    bool dbg_flg_1 = req->flag & (flag_t) AcquireRequestFlag::kDebugFlag_1;
 
     bool use_mr = req->flag & (flag_t) AcquireRequestFlag::kUseMR;
 
@@ -1055,6 +1056,10 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
         bind_buf = false;
         bind_pr = false;
         alloc_lease_ctx = false;
+    }
+    if (dbg_flg_1)
+    {
+        // do what you want
     }
 
     // if not binding pr, we will even skip allocating it.
@@ -2235,7 +2240,6 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
             auto patronus_ddl_term = patronus_now.term() + ns_per_unit;
 
             auto flag = (flag_t) 0;
-
             ddl_manager_.push(
                 patronus_ddl_term,
                 [this, lease_id, cid = req->cid, aba_unit_to_ddl, flag](
@@ -2934,7 +2938,6 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             {
                 // only buffer
                 bind_nr = 1;
-                // auto &buffer_wr = coro_ex_ctx(ctx->coro_id()).fetch_wr();
                 auto buffer_wr_id = ex_ctx.fetch_wr();
                 auto &buffer_wr = ex_ctx.wr(buffer_wr_id);
                 fill_bind_mw_wr(buffer_wr,
@@ -3069,10 +3072,13 @@ void Patronus::server_coro_worker(coro_t coro_id,
             << "** By design, we give ex_ctx the double capacity to handle 1) "
                "requests and 2) auto-relinquish. Therefore, ex_ctx should be "
                "at most half-full";
-        ddl_manager_.do_task(time_syncer_->patronus_now().term(),
-                             &ctx,
-                             // one task may have two wr at most
-                             ex_ctx.wr_remain_size() / 2);
+        if (!ddl_manager_.empty() && ex_ctx.wr_remain_size() > 0)
+        {
+            ddl_manager_.do_task(time_syncer_->patronus_now().term(),
+                                 &ctx,
+                                 // one task may have two wr at most
+                                 ex_ctx.wr_remain_size() / 2);
+        }
         commit_handle_request_messages(ex_ctx, &ctx);
         post_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
 

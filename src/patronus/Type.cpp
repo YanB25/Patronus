@@ -295,7 +295,12 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestFlagOut flag)
         flag.flag & (flag_t) AcquireRequestFlag::kDebugServerDoNothing;
     if (debug_srv_do_nothing)
     {
-        os << "dbg-svr-do-nothing";
+        os << "dbg-svr-do-nothing, ";
+    }
+    bool debug_1 = flag.flag & (flag_t) AcquireRequestFlag::kDebugFlag_1;
+    if (debug_1)
+    {
+        os << "dbg-flg-1, ";
     }
     os << "}";
     return os;

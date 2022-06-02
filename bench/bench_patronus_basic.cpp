@@ -206,7 +206,8 @@ public:
         size_t task_nr)
     {
         flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoBindPR;
-        flag_t relinquish_flag = (flag_t) 0;
+        flag_t relinquish_flag =
+            (flag_t) LeaseModifyFlag::kNoRpc;  // definitely no rpc
         auto acquire_ns = 1ns;
         auto conf = BenchConfig::get_empty_conf(
             name, thread_nr, coro_nr, block_size, task_nr);
@@ -215,6 +216,21 @@ public:
         conf.acquire_ns = acquire_ns;
         conf.do_not_call_relinquish = true;
         return pipeline({conf, conf});
+    }
+    static std::vector<BenchConfig> get_rlease_one_bind_one_unbind_autogc_dbg(
+        const std::string &name,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t block_size,
+        size_t task_nr)
+    {
+        auto ret = get_rlease_one_bind_one_unbind_autogc(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        for (auto &conf : ret)
+        {
+            conf.acquire_flag |= (flag_t) AcquireRequestFlag::kDebugFlag_1;
+        }
+        return ret;
     }
     static std::vector<BenchConfig> get_rlease_no_unbind(
         const std::string &name,
@@ -989,6 +1005,17 @@ void benchmark(Patronus::pointer patronus,
                     run_benchmark(
                         patronus, configs, bar, is_client, is_master, key);
                 }
+                // {
+                //     auto configs = BenchConfigFactory::
+                //         get_rlease_one_bind_one_unbind_autogc_dbg(
+                //             "DBG w(buf unbind gc) w/o(pr)",
+                //             thread_nr,
+                //             coro_nr,
+                //             block_size,
+                //             total_test_times);
+                //     run_benchmark(
+                //         patronus, configs, bar, is_client, is_master, key);
+                // }
                 // {
                 //     auto configs = BenchConfigFactory::get_rlease_full(
                 //         "w(buf pr unbind) w/o(gc)",
