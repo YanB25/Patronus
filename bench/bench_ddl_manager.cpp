@@ -1,102 +1,110 @@
-#include <glog/logging.h>
+#include <algorithm>
+#include <random>
 
-#include <chrono>
-
-#include "Common.h"
+#include "DSM.h"
+#include "Timer.h"
 #include "gflags/gflags.h"
-#include "patronus/DDLManager.h"
+#include "patronus/Patronus.h"
+#include "util/DataFrameF.h"
 #include "util/Rand.h"
+#include "util/TimeConv.h"
+#include "util/monitor.h"
 
-using namespace define::literals;
+using namespace patronus;
+
+using namespace hmdf;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-void test_handle_speed(size_t test_size, size_t interval_us)
+std::vector<std::string> col_idx;
+std::vector<size_t> col_x_test_time;
+std::vector<size_t> col_x_active_size;
+std::vector<uint64_t> col_ns;
+// std::vector<uint64_t> col_lat_min;
+// std::vector<uint64_t> col_lat_p5;
+// std::vector<uint64_t> col_lat_p9;
+// std::vector<uint64_t> col_lat_p99;
+
+constexpr static size_t kDirID = 0;
+constexpr static size_t kTestNr = 10_M;
+
+template <size_t kSize>
+struct DumpData
 {
-    using namespace std::chrono_literals;
-    patronus::DDLManager m;
-    auto now = std::chrono::steady_clock::now();
-
-    for (size_t i = 0; i < test_size; ++i)
+    mutable volatile char buffer[kSize];
+    void f() const
     {
-        m.push(now + 1s + std::chrono::microseconds(i * interval_us),
-               [](CoroContext *) {});
+        buffer[0] = 1;
+        buffer[kSize - 1] = 1;
+    }
+};
+
+void do_benchmark(Patronus::pointer p,
+                  size_t active_size,
+                  std::chrono::nanoseconds later_time,
+                  size_t test_nr)
+{
+    LOG(INFO) << "[bench] active_size: " << active_size
+              << ", later_time: " << util::time::to_ns(later_time)
+              << ", test_nr: " << test_nr;
+    DDLManager ddl_manager;
+    DumpData<40> data;
+    // load
+    auto task = [data](CoroContext *) {
+        // do nothing
+        data.f();
+    };
+    // LOG(INFO) << "[debug] task size is " << sizeof(task);
+
+    auto &time_syncer = p->time_syncer();
+
+    auto min = 0;
+    auto max = std::numeric_limits<patronus::time::term_t>::max();
+
+    // load
+    for (size_t i = 0; i < active_size; ++i)
+    {
+        auto key =
+            time_syncer.patronus_later(util::time::to_ns(later_time)).term();
+        ddl_manager.push(key, task);
     }
 
-    size_t done = 0;
-
-    while (true)
+    // auto lat_min = util::time::to_ns(0ns);
+    // auto lat_max = util::time::to_ns(10us);
+    // auto lat_rng = util::time::to_ns(10ns);
+    // OnePassBucketMonitor pop_lat_m(lat_min, lat_max, lat_rng);
+    // OnePassBucketMonitor push_lat_m(lat_min, lat_max, lat_rng);
+    // bench
+    ChronoTimer timer;
+    for (size_t i = 0; i < test_nr; ++i)
     {
-        auto now = std::chrono::steady_clock::now();
-        if (m.do_task(now, nullptr))
-        {
-            // okay, the first task arrived.
-            done++;
-            break;
-        }
-    }
+        // do one and push one
+        auto key =
+            time_syncer.patronus_later(util::time::to_ns(later_time)).term();
+        // ddl_manager.push(key, task);
+        ddl_manager.push(key, task);
 
-    size_t none_nr = 0;
-    size_t have_nr = 0;
-    size_t max_task_per_poll = 0;
-    while (done < test_size)
-    {
-        auto now = std::chrono::steady_clock::now();
-        size_t size = m.do_task(now, nullptr);
-        if (size > 0)
-        {
-            done += size;
-            have_nr++;
-            max_task_per_poll = std::max(max_task_per_poll, size);
-        }
-        else
-        {
-            none_nr++;
-        }
+        CHECK_EQ(ddl_manager.do_task(max, nullptr, 1), 1)
+            << "got no task at " << i << "-test. detail: " << ddl_manager
+            << ". max is : " << max;
     }
-    LOG(INFO) << "[bench] ongoing requests: " << test_size
-              << ", interval_us: " << interval_us << ", none_nr: " << none_nr
-              << ", have_nr: " << have_nr
-              << ", max_task_per_poll: " << max_task_per_poll
-              << ", (have_nr / test_nr) " << 1.0 * (have_nr) / (test_size);
+    auto ns = timer.pin();
+
+    col_idx.push_back("ddl");
+    col_x_test_time.push_back(test_nr);
+    col_x_active_size.push_back(active_size);
+    col_ns.push_back(ns);
 }
 
-void burn(size_t max_size)
+void benchmark(Patronus::pointer patronus)
 {
-    patronus::DDLManager m;
-    size_t op = 0;
-    Timer t;
-    t.begin();
-    for (size_t i = 0; i < max_size / 2; ++i)
+    for (size_t active_size : {0_B, 1_K, 10_K, 100_K, 1_M, 10_M, 100_M})
     {
-        m.push(fast_pseudo_rand_int(), [](CoroContext *) {});
-    }
-    for (size_t i = 0; i < 10_M; ++i)
-    {
-        bool insert = fast_pseudo_bool_with_nth(2);
-        if (unlikely(m.empty()))
+        for (auto later_time : {1ns, 10ns, 100ns})
         {
-            insert = true;
-        }
-        if (unlikely(m.size() >= max_size))
-        {
-            insert = false;
-        }
-        if (insert)
-        {
-            m.push(fast_pseudo_rand_int(), [](CoroContext *) {});
-            op++;
-        }
-        else
-        {
-            DCHECK_LE(m.do_task(fast_pseudo_rand_int(), nullptr, 1), 1);
+            do_benchmark(patronus, active_size, later_time, kTestNr);
         }
     }
-    auto ns = t.end();
-    double ops = 1.0 * op * 1e9 / ns;
-    double ns_per_op = ns / op;
-    LOG(INFO) << "[burn] op: " << op << ", ns: " << ns << ",ops: " << ops
-              << " ns per op: " << ns_per_op;
 }
 
 int main(int argc, char *argv[])
@@ -104,17 +112,41 @@ int main(int argc, char *argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    bindCore(0);
+    PatronusConfig config;
+    config.machine_nr = ::config::kMachineNr;
+    config.block_class = {4_KB};
+    config.block_ratio = {1};
+    config.alloc_buffer_size = 1_MB;
+    config.lease_buffer_size = 1_MB;
+    config.reserved_buffer_size = 1_MB;
 
-    burn(1_M);
+    auto patronus = Patronus::ins(config);
 
-    for (size_t ongoing : {1_K, 1_M, 2_M, 8_M})
-    {
-        for (size_t us : {1, 2, 4, 8})
-        {
-            test_handle_speed(ongoing, us);
-        }
-    }
+    auto nid = patronus->get_node_id();
+
+    benchmark(patronus);
+
+    StrDataFrame df;
+    df.load_index(std::move(col_idx));
+    df.load_column<size_t>("x_test_nr", std::move(col_x_test_time));
+    df.load_column<size_t>("x_active_nr", std::move(col_x_active_size));
+    df.load_column<size_t>("test_ns", std::move(col_ns));
+
+    auto ops_f = gen_F_ops<size_t, size_t, double>();
+    auto div_f = gen_F_div<size_t, size_t, double>();
+    df.consolidate<size_t, size_t, double>(
+        "x_test_nr", "test_ns", "ops(total)", ops_f, false);
+    df.consolidate<size_t, size_t, double>(
+        "test_ns", "x_test_nr", "lat_ns(avg)", div_f, false);
+    // df.load_column<uint64_t>("lat_min(ns)", std::move(col_lat_min));
+    // df.load_column<uint64_t>("lat_p5(ns)", std::move(col_lat_p5));
+    // df.load_column<uint64_t>("lat_p9(ns)", std::move(col_lat_p9));
+    // df.load_column<uint64_t>("lat_p99(ns)", std::move(col_lat_p99));
+
+    auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
+    df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                        io_format::csv2);
+    df.write<std::string, size_t, double>(filename.c_str(), io_format::csv2);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

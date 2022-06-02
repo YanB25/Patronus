@@ -119,6 +119,8 @@ public:
         return pqueue_.empty();
     }
 
+    friend std::ostream &operator<<(std::ostream &os, const DDLManager &m);
+
 private:
     time::term_t to_ddl(
         const std::chrono::time_point<std::chrono::steady_clock> &tp)
@@ -130,6 +132,21 @@ private:
 
     std::priority_queue<value_type> pqueue_;
 };
+
+inline std::ostream &operator<<(std::ostream &os, const DDLManager &m)
+{
+    os << "{DDLManager: task_nr: " << m.size();
+    if (m.pqueue_.empty())
+    {
+        os << ", Empty";
+    }
+    else
+    {
+        os << ", front DDL: " << m.pqueue_.top().ddl();
+    }
+    os << "}";
+    return os;
+}
 }  // namespace patronus
 
 #endif
