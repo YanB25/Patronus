@@ -1192,7 +1192,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                     status = AcquireRequestStatus::kNoMw;
                     goto out;
                 }
-                auto buffer_wr_idx = ex_ctx.fetch_wr();
+                auto buffer_wr_idx = ex_ctx.fetch_bind_wr();
                 req_ctx.meta.buffer_wr_idx = buffer_wr_idx;
                 auto &buffer_wr = ex_ctx.wr(buffer_wr_idx);
                 fill_bind_mw_wr(buffer_wr,
@@ -1221,8 +1221,8 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                     status = AcquireRequestStatus::kNoMw;
                     goto out;
                 }
-                auto buffer_wr_idx = ex_ctx.fetch_wr();
-                auto header_wr_idx = ex_ctx.fetch_wr();
+                auto buffer_wr_idx = ex_ctx.fetch_bind_wr();
+                auto header_wr_idx = ex_ctx.fetch_bind_wr();
                 auto &buffer_wr = ex_ctx.wr(buffer_wr_idx);
                 auto &header_wr = ex_ctx.wr(header_wr_idx);
                 req_ctx.meta.buffer_wr_idx = buffer_wr_idx;
@@ -2669,7 +2669,7 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
             {
                 // only buffer
                 bind_nr = 1;
-                auto buffer_wr_idx = ex_ctx.fetch_wr();
+                auto buffer_wr_idx = ex_ctx.fetch_unbind_wr();
                 auto &buffer_wr = ex_ctx.wr(buffer_wr_idx);
                 req_ctx.meta.buffer_wr_idx = buffer_wr_idx;
                 req_ctx.meta.header_wr_idx = std::nullopt;
@@ -2686,8 +2686,8 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
             {
                 // pr and buffer
                 bind_nr = 2;
-                auto buffer_wr_idx = ex_ctx.fetch_wr();
-                auto header_wr_idx = ex_ctx.fetch_wr();
+                auto buffer_wr_idx = ex_ctx.fetch_unbind_wr();
+                auto header_wr_idx = ex_ctx.fetch_unbind_wr();
                 auto &buffer_wr = ex_ctx.wr(buffer_wr_idx);
                 auto &header_wr = ex_ctx.wr(header_wr_idx);
                 req_ctx.meta.buffer_wr_idx = buffer_wr_idx;
@@ -2938,7 +2938,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             {
                 // only buffer
                 bind_nr = 1;
-                auto buffer_wr_id = ex_ctx.fetch_wr();
+                auto buffer_wr_id = ex_ctx.fetch_unbind_wr();
                 auto &buffer_wr = ex_ctx.wr(buffer_wr_id);
                 fill_bind_mw_wr(buffer_wr,
                                 DCHECK_NOTNULL(lease_ctx->buffer_mw),
@@ -2953,8 +2953,8 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             {
                 // pr and buffer
                 bind_nr = 2;
-                auto buffer_wr_id = ex_ctx.fetch_wr();
-                auto header_wr_id = ex_ctx.fetch_wr();
+                auto buffer_wr_id = ex_ctx.fetch_unbind_wr();
+                auto header_wr_id = ex_ctx.fetch_unbind_wr();
                 auto &buffer_wr = ex_ctx.wr(buffer_wr_id);
                 auto &header_wr = ex_ctx.wr(header_wr_id);
                 fill_bind_mw_wr(header_wr,

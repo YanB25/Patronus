@@ -117,13 +117,6 @@ public:
     {
         return kBatchLimit;
     }
-    size_t fetch_wr()
-    {
-        auto ret = wr_idx_;
-        wr_idx_++;
-        DCHECK_LE(wr_idx_, kBatchLimit) << "** overflow fetch_mw. " << *this;
-        return ret;
-    }
     ibv_send_wr &wr(size_t wr_id)
     {
         DCHECK_LT(wr_id, wr_idx_) << "** overflow fetch_mw. " << *this;
@@ -177,6 +170,7 @@ public:
         DCHECK_LT(rw_ctx_id, std::numeric_limits<uint32_t>::max());
 
         WRID signal_wrid{WRID_PREFIX_RESERVED_1, get_WRID_ID_RESERVED()};
+
         for (size_t i = 0; i < wr_idx_; ++i)
         {
             bool last = (i + 1 == wr_idx_);
@@ -222,6 +216,11 @@ public:
                  << ", rr_tid: " << rr_thread_idx_
                  << ", rr_nid: " << rr_machine_idx_
                  << ". signaled wrid: " << signal_wrid;
+        // LOG_EVERY_N(INFO, 1000)
+        //     << "bind_nr: " << bind_nr_ << ", unbind_nr: " << unbind_nr_
+        //     << ", wr: " << wr_idx_;
+        bind_nr_ = 0;
+        unbind_nr_ = 0;
         return true;
     }
     ibv_qp *get_qp_rr();
@@ -233,7 +232,25 @@ public:
     friend std::ostream &operator<<(std::ostream &os,
                                     const ServerCoroBatchExecutionContext &ctx);
 
+    size_t fetch_bind_wr()
+    {
+        bind_nr_++;
+        return fetch_wr();
+    }
+    size_t fetch_unbind_wr()
+    {
+        unbind_nr_++;
+        return fetch_wr();
+    }
+
 private:
+    size_t fetch_wr()
+    {
+        auto ret = wr_idx_;
+        wr_idx_++;
+        DCHECK_LE(wr_idx_, kBatchLimit) << "** overflow fetch_mw. " << *this;
+        return ret;
+    }
     size_t wr_idx_{0};
     ibv_send_wr wrs_[kBatchLimit]{};
     uint64_t id_per_qp[kBatchLimit]{};
@@ -242,6 +259,9 @@ private:
 
     DSM::pointer dsm_;
     ibv_send_wr *bad_wr_;
+
+    size_t bind_nr_{0};
+    size_t unbind_nr_{0};
 
     static thread_local size_t rr_thread_idx_;
     static thread_local size_t rr_machine_idx_;

@@ -6,6 +6,8 @@
 #include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "util/DataFrameF.h"
+#include "util/PerformanceReporter.h"
+#include "util/Pre.h"
 #include "util/Rand.h"
 #include "util/TimeConv.h"
 #include "util/monitor.h"
@@ -28,6 +30,8 @@ constexpr static size_t kDirID = 0;
 
 void bench_mw_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
 {
+    // Sequence<uint32_t> rkey_seq;
+
     auto dsm = p->get_dsm();
     auto *mw = dsm->alloc_mw(kDirID);
     auto srv_buffer = dsm->get_server_internal_dsm_buffer();
@@ -42,6 +46,7 @@ void bench_mw_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
             mw, 0, 0, srv_buffer.buffer, bind_size, kDirID, 0, nullptr);
         auto ns = timer.pin();
         lat_m.collect(ns);
+        // rkey_seq.push_back(mw->rkey);
     }
     dsm->free_mw(mw);
     LOG(INFO) << lat_m;
@@ -55,6 +60,8 @@ void bench_mw_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
     col_lat_p5.push_back(lat_m.percentile(0.5));
     col_lat_p9.push_back(lat_m.percentile(0.9));
     col_lat_p99.push_back(lat_m.percentile(0.99));
+
+    // LOG(INFO) << "rkeys are: " << util::pre_vec(rkey_seq.to_vector(), 1024);
 }
 
 void bench_mr_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
