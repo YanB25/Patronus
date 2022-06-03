@@ -339,7 +339,6 @@ constexpr static size_t kLeaseCacheItemLimitNr = 3;
 // change unsignaled to signaled ones every @kUnsignaledUnbindRateLimit
 constexpr static size_t kUnsignaledUnbindRateLimit = 4;
 
-constexpr static size_t kEnableUnbindMwReuseOpt = false;
 }  // namespace config
 
 #define likely(x) __builtin_expect((x), 1)

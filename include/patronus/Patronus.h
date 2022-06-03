@@ -572,6 +572,9 @@ public:
                                     CoroContext *);
     friend class ServerCoroBatchExecutionContext;
 
+    void set_configure_reuse_mw_opt(bool val);
+    bool get_configure_reuse_mw_opt();
+
 private:
     PatronusConfig conf_;
     // the default_allocator_ is set on registering server thread.
@@ -624,7 +627,6 @@ private:
                                       bool need_response,
                                       CoroContext *ctx);
 
-public:
     ibv_mw *get_mw(size_t dirID)
     {
         DCHECK(!mw_pool_[dirID].empty());
@@ -640,6 +642,7 @@ public:
         }
     }
 
+public:
     char *get_rdma_message_buffer()
     {
         return (char *) rdma_message_buffer_pool_->get();
@@ -1009,6 +1012,8 @@ private:
 
     std::queue<PatronusThreadResourceDesc> prepared_fast_backup_descs_;
     std::mutex fast_backup_descs_mu_;
+
+    bool reuse_mw_opt_enabled_{true};
 };
 
 bool Patronus::already_passed_ddl(time::PatronusTime patronus_ddl) const

@@ -33,6 +33,7 @@ std::vector<size_t> col_x_alloc_size;
 std::vector<size_t> col_x_thread_nr;
 std::vector<size_t> col_x_coro_nr;
 std::vector<size_t> col_x_lease_time_ns;
+std::vector<size_t> col_x_with_reuse_mw_opt;
 std::vector<size_t> col_alloc_nr;
 std::vector<size_t> col_alloc_ns;
 
@@ -66,6 +67,7 @@ struct BenchConfig
     std::chrono::nanoseconds acquire_ns;
     std::string name;
     bool report;
+    bool reuse_mw_opt{true};
 
     static BenchConfig get_empty_conf(const std::string &name,
                                       size_t thread_nr,
@@ -159,8 +161,10 @@ public:
         conf.acquire_flag = acquire_flag;
         conf.relinquish_flag = relinquish_flag;
         conf.acquire_ns = acquire_ns;
+        conf.reuse_mw_opt = false;
         return pipeline({conf, conf});
     }
+    // 1 + 1
     static std::vector<BenchConfig> get_rlease_one_bind_one_unbind(
         const std::string &name,
         size_t thread_nr,
@@ -177,7 +181,24 @@ public:
         conf.acquire_flag = acquire_flag;
         conf.relinquish_flag = relinquish_flag;
         conf.acquire_ns = acquire_ns;
+        conf.reuse_mw_opt = false;
         return pipeline({conf, conf});
+    }
+    // 1 + 0 (at expetation)
+    static std::vector<BenchConfig> get_rlease_one_bind_one_unbind_reuse_mw_opt(
+        const std::string &name,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t block_size,
+        size_t task_nr)
+    {
+        auto ret = get_rlease_one_bind_one_unbind(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        for (auto &conf : ret)
+        {
+            conf.reuse_mw_opt = true;
+        }
+        return ret;
     }
     static std::vector<BenchConfig> get_rlease_one_bind_one_unbind_over_mr(
         const std::string &name,
@@ -215,6 +236,7 @@ public:
         conf.relinquish_flag = relinquish_flag;
         conf.acquire_ns = acquire_ns;
         conf.do_not_call_relinquish = true;
+        conf.reuse_mw_opt = false;
         return pipeline({conf, conf});
     }
     static std::vector<BenchConfig> get_rlease_one_bind_one_unbind_autogc_dbg(
@@ -232,23 +254,8 @@ public:
         }
         return ret;
     }
-    static std::vector<BenchConfig> get_rlease_no_unbind(
-        const std::string &name,
-        size_t thread_nr,
-        size_t coro_nr,
-        size_t block_size,
-        size_t task_nr)
-    {
-        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc;
-        flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
-        auto acquire_ns = 0ns;
-        auto conf = BenchConfig::get_empty_conf(
-            name, thread_nr, coro_nr, block_size, task_nr);
-        conf.acquire_flag = acquire_flag;
-        conf.relinquish_flag = relinquish_flag;
-        conf.acquire_ns = acquire_ns;
-        return pipeline({conf, conf});
-    }
+
+    // 2 + 2
     static std::vector<BenchConfig> get_rlease_full(const std::string &name,
                                                     size_t thread_nr,
                                                     size_t coro_nr,
@@ -263,8 +270,30 @@ public:
         conf.acquire_flag = acquire_flag;
         conf.relinquish_flag = relinquish_flag;
         conf.acquire_ns = acquire_ns;
+        conf.reuse_mw_opt = false;
         return pipeline({conf, conf});
     }
+    // 2 + 1
+    // static std::vector<BenchConfig> get_rlease_full_wo_unbind_pr(
+    //     const std::string &name,
+    //     size_t thread_nr,
+    //     size_t coro_nr,
+    //     size_t block_size,
+    //     size_t task_nr)
+    // {
+    //     CHECK(false) << "TODO: support
+    //     LeaseModifyFlag::kNoRelinquishUnbindPr"; flag_t acquire_flag =
+    //     (flag_t) AcquireRequestFlag::kNoGc; flag_t relinquish_flag =
+    //         (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
+    //     auto acquire_ns = 0ns;
+    //     auto conf = BenchConfig::get_empty_conf(
+    //         name, thread_nr, coro_nr, block_size, task_nr);
+    //     conf.acquire_flag = acquire_flag;
+    //     conf.relinquish_flag = relinquish_flag;
+    //     conf.acquire_ns = acquire_ns;
+    //     conf.reuse_mw_opt = false;
+    //     return pipeline({conf, conf});
+    // }
     static std::vector<BenchConfig> get_rlease_full_over_mr(
         const std::string &name,
         size_t thread_nr,
@@ -299,44 +328,7 @@ public:
         conf.relinquish_flag = relinquish_flag;
         conf.acquire_ns = acquire_ns;
         conf.do_not_call_relinquish = true;
-        return pipeline({conf, conf});
-    }
-    static std::vector<BenchConfig> get_rlease_alloc(const std::string &name,
-                                                     size_t thread_nr,
-                                                     size_t coro_nr,
-                                                     size_t block_size,
-                                                     size_t task_nr)
-    {
-        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kWithAllocation |
-                              (flag_t) AcquireRequestFlag::kNoBindPR |
-                              (flag_t) AcquireRequestFlag::kNoGc;
-        flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kWithDeallocation;
-        auto acquire_ns = 0ns;
-        auto conf = BenchConfig::get_empty_conf(
-            name, thread_nr, coro_nr, block_size, task_nr);
-        conf.acquire_flag = acquire_flag;
-        conf.relinquish_flag = relinquish_flag;
-        conf.acquire_ns = acquire_ns;
-        return pipeline({conf, conf});
-    }
-    static std::vector<BenchConfig> get_rlease_alloc_no_unbind(
-        const std::string &name,
-        size_t thread_nr,
-        size_t coro_nr,
-        size_t block_size,
-        size_t task_nr)
-    {
-        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kWithAllocation |
-                              (flag_t) AcquireRequestFlag::kNoBindPR |
-                              (flag_t) AcquireRequestFlag::kNoGc;
-        flag_t relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind |
-                                 (flag_t) LeaseModifyFlag::kWithDeallocation;
-        auto acquire_ns = 0ns;
-        auto conf = BenchConfig::get_empty_conf(
-            name, thread_nr, coro_nr, block_size, task_nr);
-        conf.acquire_flag = acquire_flag;
-        conf.relinquish_flag = relinquish_flag;
-        conf.acquire_ns = acquire_ns;
+        conf.reuse_mw_opt = false;
         return pipeline({conf, conf});
     }
 
@@ -352,21 +344,16 @@ private:
     }
 };
 
-void reg_result(const std::string &name,
-                size_t test_times,
-                size_t total_ns,
-                size_t block_size,
-                size_t thread_nr,
-                size_t coro_nr,
-                std::chrono::nanoseconds acquire_ns)
+void reg_result(size_t total_ns, const BenchConfig &conf)
 {
-    col_idx.push_back(name);
-    col_x_alloc_size.push_back(block_size);
-    col_x_thread_nr.push_back(thread_nr);
-    col_x_coro_nr.push_back(coro_nr);
-    auto ns = util::time::to_ns(acquire_ns);
+    col_idx.push_back(conf.name);
+    col_x_alloc_size.push_back(conf.block_size);
+    col_x_thread_nr.push_back(conf.thread_nr);
+    col_x_coro_nr.push_back(conf.coro_nr);
+    auto ns = util::time::to_ns(conf.acquire_ns);
     col_x_lease_time_ns.push_back(ns);
-    col_alloc_nr.push_back(test_times);
+    col_x_with_reuse_mw_opt.push_back(conf.reuse_mw_opt);
+    col_alloc_nr.push_back(conf.task_nr);
     col_alloc_ns.push_back(total_ns);
 }
 
@@ -487,12 +474,14 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     CoroCommunication &coro_comm,
                                     OnePassBucketMonitor<uint64_t> &lat_m,
                                     bool is_master,
-                                    size_t alloc_size,
-                                    flag_t acquire_flag,
-                                    flag_t relinquish_flag,
-                                    std::chrono::nanoseconds acquire_ns,
-                                    bool do_not_call_relinquish)
+                                    const BenchConfig &conf)
 {
+    auto alloc_size = conf.block_size;
+    auto acquire_ns = conf.acquire_ns;
+    auto acquire_flag = conf.acquire_flag;
+    auto relinquish_flag = conf.relinquish_flag;
+    auto do_not_call_relinquish = conf.do_not_call_relinquish;
+
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
     auto server_nid = ::config::get_server_nids().front();
@@ -571,16 +560,13 @@ struct BenchResult
 
 void bench_alloc_thread_coro(Patronus::pointer patronus,
                              OnePassBucketMonitor<uint64_t> &lat_m,
-                             size_t alloc_size,
-                             size_t test_times,
                              bool is_master,
                              std::atomic<ssize_t> &work_nr,
-                             size_t coro_nr,
-                             flag_t acquire_flag,
-                             flag_t relinquish_flag,
-                             std::chrono::nanoseconds acquire_ns,
-                             bool do_not_call_relinquish)
+                             const BenchConfig &conf)
 {
+    auto coro_nr = conf.coro_nr;
+    auto test_times = conf.task_nr;
+
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
 
@@ -591,29 +577,15 @@ void bench_alloc_thread_coro(Patronus::pointer patronus,
 
     for (size_t i = 0; i < coro_nr; ++i)
     {
-        coro_comm.workers[i] =
-            CoroCall([patronus,
-                      &lat_m,
-                      coro_id = i,
-                      &coro_comm,
-                      alloc_size,
-                      acquire_flag,
-                      relinquish_flag,
-                      acquire_ns,
-                      is_master,
-                      do_not_call_relinquish](CoroYield &yield) {
-                bench_alloc_thread_coro_worker(patronus,
-                                               coro_id,
-                                               yield,
-                                               coro_comm,
-                                               lat_m,
-                                               is_master,
-                                               alloc_size,
-                                               acquire_flag,
-                                               relinquish_flag,
-                                               acquire_ns,
-                                               do_not_call_relinquish);
-            });
+        coro_comm.workers[i] = CoroCall([patronus,
+                                         &lat_m,
+                                         coro_id = i,
+                                         &coro_comm,
+                                         is_master,
+                                         &conf](CoroYield &yield) {
+            bench_alloc_thread_coro_worker(
+                patronus, coro_id, yield, coro_comm, lat_m, is_master, conf);
+        });
     }
 
     coro_comm.master =
@@ -627,48 +599,21 @@ void bench_alloc_thread_coro(Patronus::pointer patronus,
     return;
 }
 
-// void bench_template_coro(Patronus::pointer patronus,
-//                          size_t test_times,
-//                          size_t alloc_size,
-//                          size_t coro_nr,
-//                          std::atomic<ssize_t> &work_nr,
-//                          flag_t acquire_flag,
-//                          flag_t relinquish_flag,
-//                          std::chrono::nanoseconds acquire_ns)
-// {
-//     auto tid = patronus->get_thread_id();
-//     auto dir_id = tid % kServerThreadNr;
-//     CHECK_LT(dir_id, NR_DIRECTORY)
-//         << "Failed to run this case. Two threads should not share the same "
-//            "directory, otherwise the one thread will poll CQE from other "
-//            "threads.";
-//     bench_alloc_thread_coro(patronus,
-//                             alloc_size,
-//                             test_times,
-//                             is_master,
-//                             work_nr,
-//                             coro_nr,
-//                             acquire_flag,
-//                             relinquish_flag,
-//                             acquire_ns);
-// }
-
 void bench_template(const std::string &name,
                     Patronus::pointer patronus,
                     boost::barrier &bar,
                     std::atomic<ssize_t> &work_nr,
-                    size_t test_times,
-                    size_t alloc_size,
-                    size_t thread_nr,
-                    size_t coro_nr,
                     bool is_master,
-                    bool report,
-                    flag_t acquire_flag,
-                    flag_t relinquish_flag,
-                    std::chrono::nanoseconds acquire_ns,
-                    bool do_not_call_relinquish)
+                    const BenchConfig &conf)
 
 {
+    auto test_times = conf.task_nr;
+    auto thread_nr = conf.thread_nr;
+    auto coro_nr = conf.coro_nr;
+    auto report = conf.report;
+    auto alloc_size = conf.block_size;
+    auto acquire_ns = conf.acquire_ns;
+
     if (is_master)
     {
         work_nr = test_times;
@@ -689,30 +634,14 @@ void bench_template(const std::string &name,
 
     if (tid < thread_nr)
     {
-        bench_alloc_thread_coro(patronus,
-                                lat_m,
-                                alloc_size,
-                                test_times,
-                                is_master,
-                                work_nr,
-                                coro_nr,
-                                acquire_flag,
-                                relinquish_flag,
-                                acquire_ns,
-                                do_not_call_relinquish);
+        bench_alloc_thread_coro(patronus, lat_m, is_master, work_nr, conf);
     }
 
     bar.wait();
     auto total_ns = timer.pin();
     if (is_master && report)
     {
-        reg_result(name,
-                   test_times,
-                   total_ns,
-                   alloc_size,
-                   thread_nr,
-                   coro_nr,
-                   acquire_ns);
+        reg_result(total_ns, conf);
         reg_latency(name, lat_m);
     }
     bar.wait();
@@ -753,20 +682,7 @@ void run_benchmark_client(Patronus::pointer patronus,
     }
     bar.wait();
 
-    bench_template(conf.name,
-                   patronus,
-                   bar,
-                   shared_task_nr,
-                   conf.task_nr,
-                   conf.block_size,
-                   conf.thread_nr,
-                   conf.coro_nr,
-                   is_master,
-                   conf.report,
-                   conf.acquire_flag,
-                   conf.relinquish_flag,
-                   conf.acquire_ns,
-                   conf.do_not_call_relinquish);
+    bench_template(conf.name, patronus, bar, shared_task_nr, is_master, conf);
     bar.wait();
     if (is_master)
     {
@@ -784,6 +700,11 @@ void run_benchmark(Patronus::pointer patronus,
     for (const auto &conf : configs)
     {
         key++;
+
+        LOG_IF(INFO, is_master)
+            << "[bench] setting reuse_mw_opt to " << conf.reuse_mw_opt;
+        patronus->set_configure_reuse_mw_opt(conf.reuse_mw_opt);
+
         if (is_client)
         {
             run_benchmark_client(patronus, conf, bar, is_master, key);
@@ -983,6 +904,17 @@ void benchmark(Patronus::pointer patronus,
                     run_benchmark(
                         patronus, configs, bar, is_client, is_master, key);
                 }
+                {
+                    auto configs = BenchConfigFactory::
+                        get_rlease_one_bind_one_unbind_reuse_mw_opt(
+                            "+ reuse w(buf unbind) w/o(pr gc)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
                 // {
                 //     auto configs = BenchConfigFactory::
                 //         get_rlease_one_bind_one_unbind_over_mr(
@@ -1130,6 +1062,8 @@ int main(int argc, char *argv[])
         df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
         df.load_column<size_t>("x_lease_time(ns)",
                                std::move(col_x_lease_time_ns));
+        df.load_column<size_t>("x_with_reuse_mw_opt",
+                               std::move(col_x_with_reuse_mw_opt));
         df.load_column<size_t>("alloc_nr(total)", std::move(col_alloc_nr));
         df.load_column<size_t>("alloc_ns(total)", std::move(col_alloc_ns));
 

@@ -3415,5 +3415,24 @@ bool Patronus::fast_switch_backup_qp(TraceView v)
     prepared_fast_backup_descs_.pop();
     return apply_client_resource(std::move(desc), false /* bind core */, v);
 }
+void Patronus::set_configure_reuse_mw_opt(bool val)
+{
+    for (auto &ex_ctx : coro_batch_ex_ctx_)
+    {
+        ex_ctx.set_configure_reuse_mw_opt(val);
+    }
+}
+bool Patronus::get_configure_reuse_mw_opt()
+{
+    bool conf = coro_batch_ex_ctx_.front().get_configure_reuse_mw_opt();
+    if constexpr (debug())
+    {
+        for (const auto &ex_ctx : coro_batch_ex_ctx_)
+        {
+            CHECK_EQ(conf, ex_ctx.get_configure_reuse_mw_opt());
+        }
+    }
+    return conf;
+}
 
 }  // namespace patronus

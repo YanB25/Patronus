@@ -167,6 +167,14 @@ public:
     {
         return req_idx_;
     }
+    void set_configure_reuse_mw_opt(bool val)
+    {
+        reuse_mw_opt_enabled_ = val;
+    }
+    bool get_configure_reuse_mw_opt() const
+    {
+        return reuse_mw_opt_enabled_;
+    }
 
     /**
      * @brief prepare unbinding the memory window
@@ -277,6 +285,7 @@ private:
                                                        [kMaxAppThread];
 
     ibv_mw *shadow_mw_{nullptr};
+    bool reuse_mw_opt_enabled_{true};
 };
 
 inline std::ostream &operator<<(std::ostream &os,

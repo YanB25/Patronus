@@ -33,7 +33,6 @@ ServerCoroBatchExecutionContext::get_qp_rr()
 bool ServerCoroBatchExecutionContext::commit(uint16_t prefix,
                                              uint64_t rw_ctx_id)
 {
-    // LOG(INFO) << "[debug] !! commit() called for rw_ctx_id: " << rw_ctx_id;
     if (unlikely(prepared_tasks_.empty()))
     {
         return false;
@@ -41,7 +40,7 @@ bool ServerCoroBatchExecutionContext::commit(uint16_t prefix,
     DCHECK_LT(rw_ctx_id, std::numeric_limits<uint32_t>::max());
 
     bool ret = true;
-    if constexpr (::config::kEnableUnbindMwReuseOpt)
+    if (reuse_mw_opt_enabled_)
     {
         ret = commit_with_mw_reuse_optimization(prefix, rw_ctx_id);
     }
@@ -50,8 +49,6 @@ bool ServerCoroBatchExecutionContext::commit(uint16_t prefix,
         ret = commit_wo_mw_reuse_optimization(prefix, rw_ctx_id);
     }
 
-    // return all the unsued_mw back to patronus
-    // LOG(INFO) << "commit() returning " << free_mws_.size() << " mw. ";
     while (!free_mws_.empty())
     {
         auto *mw = free_mws_.front();
