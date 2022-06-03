@@ -12,10 +12,11 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 using namespace patronus;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
+// constexpr static size_t kClientThreadNr = 1;
 
 static_assert(kClientThreadNr <= kMaxAppThread);
 static_assert(kServerThreadNr <= NR_DIRECTORY);
-constexpr static size_t kCoroCnt = 1;
+constexpr static size_t kCoroCnt = 16;
 // constexpr static size_t kCoroCnt = 1;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;

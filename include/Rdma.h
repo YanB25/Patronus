@@ -22,7 +22,6 @@
 
 #include "Common.h"
 
-
 #define MAX_POST_LIST 32
 #define DCT_ACCESS_KEY 3185
 #define UD_PKEY 0x11111111
@@ -538,6 +537,26 @@ static inline void fillSgeWr(ibv_sge &sg,
         wr.sg_list = &sg;
         wr.num_sge = 1;
     }
+}
+inline void fill_bind_mw_wr(ibv_send_wr &wr,
+                            ibv_mw *mw,
+                            ibv_mr *mr,
+                            uint64_t addr,
+                            size_t length,
+                            int access_flag)
+{
+    wr.sg_list = nullptr;
+    wr.num_sge = 0;
+    wr.opcode = IBV_WR_BIND_MW;
+    wr.imm_data = 0;
+    wr.wr_id = 0;
+    wr.send_flags = 0;
+    wr.bind_mw.mw = mw;
+    wr.bind_mw.rkey = mw->rkey;
+    wr.bind_mw.bind_info.mr = mr;
+    wr.bind_mw.bind_info.addr = addr;
+    wr.bind_mw.bind_info.length = length;
+    wr.bind_mw.bind_info.mw_access_flags = access_flag;
 }
 
 constexpr int IBV_ACCESS_CUSTOM_REMOTE_RW =

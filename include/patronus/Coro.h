@@ -15,6 +15,7 @@
 
 namespace patronus
 {
+class Patronus;
 struct ServerCoroTask
 {
     const char *buf{nullptr};  // msg buffer
@@ -94,60 +95,134 @@ struct HandleReqContext
         uint64_t addr_to_bind;
         size_t buffer_size;
         uint64_t hint;
-        ibv_mw *buffer_mw;
-        ibv_mw *header_mw;
         uint32_t dir_id;
     } relinquish;
-    struct
-    {
-        std::optional<size_t> buffer_wr_idx;
-        std::optional<size_t> header_wr_idx;
-    } meta;
 };
 
+struct TaskDesc
+{
+    bool is_unbind;
+    ibv_mw *mw;
+    ibv_mr *mr;
+    uint64_t bind_addr;
+    size_t size;
+    int access_flag;
+    AcquireRequestStatus *o_status;
+    ibv_mw **o_mw;
+    TaskDesc(bool is_unbind,
+             ibv_mw *mw,
+             ibv_mr *mr,
+             uint64_t bind_addr,
+             size_t size,
+             int access_flag,
+             AcquireRequestStatus *o_status,
+             ibv_mw **o_mw)
+        : is_unbind(is_unbind),
+          mw(mw),
+          mr(mr),
+          bind_addr(bind_addr),
+          size(size),
+          access_flag(access_flag),
+          o_status(o_status),
+          o_mw(o_mw)
+    {
+    }
+};
+inline std::ostream &operator<<(std::ostream &os, const TaskDesc &t)
+{
+    os << "{TaskDesc is_unbind: " << t.is_unbind << ", mw: " << t.mw
+       << ", mr: " << t.mr << ", bind_addr: " << (void *) t.bind_addr
+       << ", size: " << t.size << ", access_flag: " << t.access_flag
+       << ", o_status: " << (void *) t.o_status << ", o_mw: " << (void *) t.o_mw
+       << "}";
+    return os;
+}
 class ServerCoroBatchExecutionContext
 {
 public:
     // buffer_mw & header_mw: the max ibv_post_send nr is twice the number of
     // message
     // The auto-relinquish experiments may also contain ones. So double again.
+    ServerCoroBatchExecutionContext()
+    {
+        prepared_tasks_.reserve(max_wr_size());
+    }
+    ~ServerCoroBatchExecutionContext();
     constexpr static size_t kBatchLimit =
         4 * config::patronus::kHandleRequestBatchLimit;
     static size_t batch_limit()
     {
         return kBatchLimit;
     }
-    ibv_send_wr &wr(size_t wr_id)
-    {
-        DCHECK_LT(wr_id, wr_idx_) << "** overflow fetch_mw. " << *this;
-        return wrs_[wr_id];
-    }
-    void clear()
-    {
-        memset(wrs_, 0, sizeof(ibv_send_wr) * wr_idx_);
-        memset(req_ctx_, 0, sizeof(HandleReqContext) * req_idx_);
-        wr_idx_ = 0;
-        req_idx_ = 0;
-    }
-    void init(DSM::pointer dsm)
-    {
-        dsm_ = dsm;
-    }
-    static size_t max_wr_size()
+    void clear();
+
+    void init(Patronus *patronus, size_t dir_id);
+
+    constexpr static size_t max_wr_size()
     {
         return kBatchLimit;
     }
-    size_t wr_size() const
-    {
-        return wr_idx_;
-    }
-    size_t wr_remain_size() const
-    {
-        return kBatchLimit - wr_idx_;
-    }
+
     size_t req_size() const
     {
         return req_idx_;
+    }
+
+    /**
+     * @brief prepare unbinding the memory window
+     *
+     * @param mr IN
+     * @param bind_addr IN
+     * @param size IN
+     * @param access_flag IN
+     */
+    void prepare_unbind_mw(ibv_mw *mw,
+                           ibv_mr *mr,
+                           uint64_t bind_addr,
+                           size_t size,
+                           int access_flag)
+    {
+        prepared_tasks_.emplace_back(true /* is unbind */,
+                                     mw,
+                                     mr,
+                                     bind_addr,
+                                     size,
+                                     access_flag,
+                                     nullptr /* o_status */,
+                                     nullptr /* o_mw */);
+        DCHECK_EQ(size, 1) << "since it is unbind, should be size of 1";
+        DCHECK_LE(prepared_tasks_.size(), max_wr_size());
+    }
+    void put_mw(ibv_mw *mw);
+
+    /**
+     * @brief prepare binding the memory window
+     *
+     * @param mr
+     * @param bind_addr
+     * @param size
+     * @param access_flag
+     * @param o_status OUT: the status of execution
+     * @param o_mw OUT: the memory window bound
+     */
+    void prepare_bind_mw(ibv_mr *mr,
+                         uint64_t bind_addr,
+                         size_t size,
+                         int access_flag,
+                         AcquireRequestStatus *o_status,
+                         ibv_mw **o_mw)
+    {
+        *DCHECK_NOTNULL(o_status) = AcquireRequestStatus::kSuccess;
+        *DCHECK_NOTNULL(o_mw) = nullptr;
+        prepared_tasks_.emplace_back(false /* is_unbind */,
+                                     nullptr /* mw */,
+                                     mr,
+                                     bind_addr,
+                                     size,
+                                     access_flag,
+                                     o_status,
+                                     o_mw);
+        DCHECK_LE(prepared_tasks_.size(), max_wr_size());
     }
     size_t fetch_req_idx()
     {
@@ -161,107 +236,38 @@ public:
         DCHECK_LT(req_id, req_idx_);
         return req_ctx_[req_id];
     }
-    bool commit(uint16_t prefix, uint64_t rw_ctx_id)
+    bool commit(uint16_t prefix, uint64_t rw_ctx_id);
+
+    size_t prepared_size() const
     {
-        if (unlikely(wr_idx_ == 0))
-        {
-            return false;
-        }
-        DCHECK_LT(rw_ctx_id, std::numeric_limits<uint32_t>::max());
-
-        WRID signal_wrid{WRID_PREFIX_RESERVED_1, get_WRID_ID_RESERVED()};
-
-        for (size_t i = 0; i < wr_idx_; ++i)
-        {
-            bool last = (i + 1 == wr_idx_);
-            bool should_signal = last;
-            auto &wr = wrs_[i];
-            wr.wr_id = WRID(prefix, !!should_signal, rw_ctx_id).val;
-            if (last)
-            {
-                wr.next = nullptr;
-                wr.send_flags |= IBV_SEND_SIGNALED;
-                signal_wrid = wr.wr_id;
-            }
-            else
-            {
-                wr.next = &wrs_[i + 1];
-                DCHECK(!(wr.send_flags & IBV_SEND_SIGNALED));
-            }
-        }
-
-        auto *qp = get_qp_rr();
-        auto ret = ibv_post_send(qp, wrs_, &bad_wr_);
-        if (unlikely(ret != 0))
-        {
-            CHECK(false) << "[patronus] failed to ibv_post_send for bind_mw. "
-                            "failed wr : "
-                         << WRID(bad_wr_->wr_id)
-                         << ". prefix: " << pre_wrid_prefix(prefix)
-                         << ", rw_ctx_id: " << rw_ctx_id
-                         << ", signal_wrid: " << signal_wrid
-                         << ", posted: " << wr_idx_ << ", req_nr: " << req_idx_
-                         << ", posting to QP[" << rr_machine_idx_ << "]["
-                         << rr_thread_idx_ << "]";
-
-            for (size_t i = 0; i < req_idx_; ++i)
-            {
-                req_ctx_[i].status = AcquireRequestStatus::kBindErr;
-            }
-        }
-        DVLOG(4) << "[patronus] batch commit with prefix "
-                 << pre_wrid_prefix(prefix)
-                 << ", rw_ctx_id: " << (uint64_t) rw_ctx_id
-                 << ", post size: " << wr_idx_ << ", request size " << req_idx_
-                 << ", rr_tid: " << rr_thread_idx_
-                 << ", rr_nid: " << rr_machine_idx_
-                 << ". signaled wrid: " << signal_wrid;
-        // LOG_EVERY_N(INFO, 1000)
-        //     << "bind_nr: " << bind_nr_ << ", unbind_nr: " << unbind_nr_
-        //     << ", wr: " << wr_idx_;
-        bind_nr_ = 0;
-        unbind_nr_ = 0;
-        return true;
+        return prepared_tasks_.size();
     }
-    ibv_qp *get_qp_rr();
-    size_t wr_post_idx(size_t wr_idx) const
+    size_t remain_size() const
     {
-        DCHECK_LT(wr_idx, wr_idx_);
-        return id_per_qp[wr_idx];
+        return max_wr_size() - prepared_size();
     }
+
     friend std::ostream &operator<<(std::ostream &os,
                                     const ServerCoroBatchExecutionContext &ctx);
 
-    size_t fetch_bind_wr()
-    {
-        bind_nr_++;
-        return fetch_wr();
-    }
-    size_t fetch_unbind_wr()
-    {
-        unbind_nr_++;
-        return fetch_wr();
-    }
-
 private:
-    size_t fetch_wr()
-    {
-        auto ret = wr_idx_;
-        wr_idx_++;
-        DCHECK_LE(wr_idx_, kBatchLimit) << "** overflow fetch_mw. " << *this;
-        return ret;
-    }
-    size_t wr_idx_{0};
-    ibv_send_wr wrs_[kBatchLimit]{};
-    uint64_t id_per_qp[kBatchLimit]{};
+    bool commit_wo_mw_reuse_optimization(uint16_t prefix, uint64_t rw_ctx_id);
+    bool commit_with_mw_reuse_optimization(uint16_t prefix, uint64_t rw_ctx_id);
+
+    Patronus *patronus_{nullptr};
+    DSM::pointer dsm_;
+    size_t dir_id_{0};
+
+    std::tuple<ibv_qp *, size_t, size_t> get_qp_rr();
+
+    std::vector<TaskDesc> prepared_tasks_{};
+
     size_t req_idx_{0};
     HandleReqContext req_ctx_[kBatchLimit]{};
 
-    DSM::pointer dsm_;
     ibv_send_wr *bad_wr_;
 
-    size_t bind_nr_{0};
-    size_t unbind_nr_{0};
+    std::queue<ibv_mw *> free_mws_;
 
     static thread_local size_t rr_thread_idx_;
     static thread_local size_t rr_machine_idx_;
@@ -269,12 +275,14 @@ private:
     // this one is shared among threads
     static thread_local uint64_t tl_per_qp_mw_post_idx_[MAX_MACHINE]
                                                        [kMaxAppThread];
+
+    ibv_mw *shadow_mw_{nullptr};
 };
 
 inline std::ostream &operator<<(std::ostream &os,
                                 const ServerCoroBatchExecutionContext &ctx)
 {
-    os << "{ex_ctx: wr_size: " << ctx.wr_size()
+    os << "{ex_ctx: prepared_size: " << ctx.prepared_size()
        << ", req_size: " << ctx.req_size() << ", rr_tid: " << ctx.rr_thread_idx_
        << ", rr_nid: " << ctx.rr_machine_idx_ << "}";
     return os;

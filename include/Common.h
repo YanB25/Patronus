@@ -338,6 +338,8 @@ constexpr static size_t kLeaseCacheItemLimitNr = 3;
 // the unsignaled unbinds may flood the QP
 // change unsignaled to signaled ones every @kUnsignaledUnbindRateLimit
 constexpr static size_t kUnsignaledUnbindRateLimit = 4;
+
+constexpr static size_t kEnableUnbindMwReuseOpt = false;
 }  // namespace config
 
 #define likely(x) __builtin_expect((x), 1)
@@ -362,6 +364,17 @@ inline std::string binary_to_csv_filename(
     }
     ret += "csv";
     return ret;
+}
+
+inline bool is_mw_magic_err(uint64_t id)
+{
+    constexpr static uint32_t magic = 0b1010101010;
+    constexpr static uint16_t mask = 0b1111111111;
+    if (unlikely((id & mask) == magic))
+    {
+        return true;
+    }
+    return false;
 }
 
 #endif /* __COMMON_H__ */

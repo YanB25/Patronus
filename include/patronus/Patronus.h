@@ -30,7 +30,9 @@ namespace patronus
 {
 using TraceView = util::TraceView;
 using namespace define::literals;
+
 class Patronus;
+class ServerCoroBatchExecutionContext;
 struct PatronusConfig
 {
     size_t machine_nr{0};
@@ -568,6 +570,7 @@ public:
     inline RetCode signal_reinit_qp(size_t node_id,
                                     size_t dir_id,
                                     CoroContext *);
+    friend class ServerCoroBatchExecutionContext;
 
 private:
     PatronusConfig conf_;
@@ -614,8 +617,17 @@ private:
         return key;
     }
 
+    inline RetCode admin_request_impl(size_t node_id,
+                                      size_t dir_id,
+                                      uint64_t data,
+                                      flag_t flag,
+                                      bool need_response,
+                                      CoroContext *ctx);
+
+public:
     ibv_mw *get_mw(size_t dirID)
     {
+        DCHECK(!mw_pool_[dirID].empty());
         auto *ret = mw_pool_[dirID].front();
         mw_pool_[dirID].pop();
         return DCHECK_NOTNULL(ret);
@@ -628,14 +640,6 @@ private:
         }
     }
 
-    inline RetCode admin_request_impl(size_t node_id,
-                                      size_t dir_id,
-                                      uint64_t data,
-                                      flag_t flag,
-                                      bool need_response,
-                                      CoroContext *ctx);
-
-public:
     char *get_rdma_message_buffer()
     {
         return (char *) rdma_message_buffer_pool_->get();

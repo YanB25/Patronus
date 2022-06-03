@@ -788,7 +788,7 @@ void Patronus::prepare_handle_request_messages(
     ServerCoroBatchExecutionContext &ex_ctx,
     CoroContext *ctx)
 {
-    DCHECK_EQ(ex_ctx.wr_size(), 0)
+    DCHECK_EQ(ex_ctx.prepared_size(), 0)
         << "** ex_ctx " << (void *) &ex_ctx << " for coro " << pre_coro_ctx(ctx)
         << " wr not empty";
     DCHECK_EQ(ex_ctx.req_size(), 0)
@@ -1008,9 +1008,6 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
 
     auto &ex_ctx = coro_ex_ctx(ctx->coro_id());
 
-    req_ctx.meta.buffer_wr_idx = std::nullopt;
-    req_ctx.meta.header_wr_idx = std::nullopt;
-
     AcquireRequestStatus status = AcquireRequestStatus::kSuccess;
 
     uint64_t object_buffer_offset = 0;
@@ -1023,8 +1020,6 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
     uint64_t slot_id = 0;
     ProtectionRegion *protection_region = nullptr;
     uint64_t protection_region_id = 0;
-    ibv_mw *buffer_mw = nullptr;
-    ibv_mw *header_mw = nullptr;
     ibv_mr *buffer_mr = nullptr;
     ibv_mr *header_mr = nullptr;
 
@@ -1182,57 +1177,32 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                                   : IBV_ACCESS_CUSTOM_REMOTE_RW;
 
             size_t bind_req_nr = 0;
+
             if (bind_buf && !bind_pr)
             {
-                // only binding buffer. not to bind ProtectionRegion
                 bind_req_nr = 1;
-                buffer_mw = get_mw(dirID);
-                if (unlikely(buffer_mw == nullptr))
-                {
-                    status = AcquireRequestStatus::kNoMw;
-                    goto out;
-                }
-                auto buffer_wr_idx = ex_ctx.fetch_bind_wr();
-                req_ctx.meta.buffer_wr_idx = buffer_wr_idx;
-                auto &buffer_wr = ex_ctx.wr(buffer_wr_idx);
-                fill_bind_mw_wr(buffer_wr,
-                                buffer_mw,
-                                mr,
-                                (uint64_t) DCHECK_NOTNULL(object_addr),
-                                req->size,
-                                access_flag);
+                ex_ctx.prepare_bind_mw(mr,
+                                       (uint64_t) DCHECK_NOTNULL(object_addr),
+                                       req->size,
+                                       access_flag,
+                                       &req_ctx.status,
+                                       &req_ctx.acquire.buffer_mw);
+
                 DVLOG(4) << "[patronus] Bind mw for buffer. addr "
                          << (void *) object_addr
                          << "(dsm_offset: " << object_dsm_offset
                          << "), size: " << req->size << " with access flag "
                          << (int) access_flag << ". Acquire flag: "
                          << AcquireRequestFlagOut(req->flag);
-                DCHECK(!(buffer_wr.send_flags & IBV_SEND_SIGNALED));
             }
             else if (bind_buf && bind_pr)
             {
-                // bind buffer & ProtectionRegion
-                // for buffer
-                bind_req_nr = 2;
-                buffer_mw = get_mw(dirID);
-                header_mw = get_mw(dirID);
-                if (unlikely(buffer_mw == nullptr || header_mw == nullptr))
-                {
-                    status = AcquireRequestStatus::kNoMw;
-                    goto out;
-                }
-                auto buffer_wr_idx = ex_ctx.fetch_bind_wr();
-                auto header_wr_idx = ex_ctx.fetch_bind_wr();
-                auto &buffer_wr = ex_ctx.wr(buffer_wr_idx);
-                auto &header_wr = ex_ctx.wr(header_wr_idx);
-                req_ctx.meta.buffer_wr_idx = buffer_wr_idx;
-                req_ctx.meta.header_wr_idx = header_wr_idx;
-                fill_bind_mw_wr(buffer_wr,
-                                buffer_mw,
-                                mr,
-                                (uint64_t) DCHECK_NOTNULL(object_addr),
-                                req->size,
-                                access_flag);
+                ex_ctx.prepare_bind_mw(mr,
+                                       (uint64_t) DCHECK_NOTNULL(object_addr),
+                                       req->size,
+                                       access_flag,
+                                       &req_ctx.status,
+                                       &req_ctx.acquire.buffer_mw);
                 DVLOG(4) << "[patronus] Bind mw for buffer. addr "
                          << (void *) object_addr
                          << "(dsm_offset: " << object_dsm_offset
@@ -1240,29 +1210,24 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                          << (int) access_flag << ". Acquire flag: "
                          << AcquireRequestFlagOut(req->flag);
                 // for header
-                fill_bind_mw_wr(header_wr,
-                                header_mw,
-                                mr,
-                                (uint64_t) header_addr,
-                                sizeof(ProtectionRegion),
-                                // header always grant R/W
-                                IBV_ACCESS_CUSTOM_REMOTE_RW);
+                ex_ctx.prepare_bind_mw(mr,
+                                       (uint64_t) header_addr,
+                                       sizeof(ProtectionRegion),
+                                       IBV_ACCESS_CUSTOM_REMOTE_RW,
+                                       &req_ctx.status,
+                                       &req_ctx.acquire.header_mw);
                 DVLOG(4) << "[patronus] Bind mw for header. addr: "
                          << (void *) header_addr
                          << " (dsm_offset: " << header_dsm_offset << ")"
                          << ", size: " << sizeof(ProtectionRegion)
                          << " with R/W access. Acquire flag: "
                          << AcquireRequestFlagOut(req->flag);
-                DCHECK(!(buffer_wr.send_flags & IBV_SEND_INLINE));
-                DCHECK(!(header_wr.send_flags & IBV_SEND_INLINE));
             }
             else
             {
                 CHECK(!bind_pr && !bind_buf)
                     << "invalid configuration. bind_pr: " << bind_pr
                     << ", bind_buf: " << bind_buf;
-                req_ctx.meta.buffer_wr_idx = std::nullopt;
-                req_ctx.meta.header_wr_idx = std::nullopt;
             }
         }
     }
@@ -1278,8 +1243,6 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
 
 out:
     req_ctx.status = status;
-    req_ctx.acquire.buffer_mw = buffer_mw;
-    req_ctx.acquire.header_mw = header_mw;
     req_ctx.acquire.buffer_mr = buffer_mr;
     req_ctx.acquire.header_mr = header_mr;
     req_ctx.acquire.object_addr = (uint64_t) object_addr;
@@ -1655,6 +1618,7 @@ void Patronus::registerServerThread()
     }
 
     auto tid = get_thread_id();
+    auto dir_id = tid;
     CHECK_LT(tid, NR_DIRECTORY)
         << "** make no sense to have more threads than NR_DIRECTORY. One "
            "thread can manipulate multiple DIR, but should not share the same "
@@ -1686,7 +1650,7 @@ void Patronus::registerServerThread()
     coro_batch_ex_ctx_.resize(kMaxCoroNr);
     for (size_t i = 0; i < kMaxCoroNr; ++i)
     {
-        coro_batch_ex_ctx_[i].init(dsm_);
+        coro_batch_ex_ctx_[i].init(this, dir_id);
     }
 
     CHECK(!is_server_) << "** already registered";
@@ -2075,6 +2039,7 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
                                            CoroContext *ctx)
 {
     auto &ex_ctx = coro_ex_ctx(ctx->coro_id());
+
     ibv_mw *buffer_mw = req_ctx.acquire.buffer_mw;
     ibv_mw *header_mw = req_ctx.acquire.header_mw;
     ibv_mr *buffer_mr = req_ctx.acquire.buffer_mr;
@@ -2099,33 +2064,7 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
 
     auto status = req_ctx.status;
     DCHECK_NE(status, AcquireRequestStatus::kReserved);
-    if (status == AcquireRequestStatus::kSuccess)
-    {
-        if constexpr (::config::kEnableSkipMagicMw)
-        {
-            constexpr static uint32_t magic = 0b1010101010;
-            constexpr static uint16_t mask = 0b1111111111;
 
-            auto buffer_wr_idx = req_ctx.meta.buffer_wr_idx;
-            auto header_wr_idx = req_ctx.meta.header_wr_idx;
-            if (buffer_wr_idx.has_value())
-            {
-                auto id = ex_ctx.wr_post_idx(buffer_wr_idx.value());
-                if (unlikely((id & mask) == magic))
-                {
-                    status = AcquireRequestStatus::kMagicMwErr;
-                }
-            }
-            if (header_wr_idx.has_value())
-            {
-                auto id = ex_ctx.wr_post_idx(header_wr_idx.value());
-                if (unlikely((id & mask) == magic))
-                {
-                    status = AcquireRequestStatus::kMagicMwErr;
-                }
-            }
-        }
-    }
     auto dir_id = req->dir_id;
 
     auto *resp_buf = get_rdma_message_buffer();
@@ -2135,7 +2074,7 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
     resp_msg->cid.node_id = get_node_id();
     resp_msg->cid.thread_id = get_thread_id();
     resp_msg->status = status;
-    resp_msg->post_qp_id = req_ctx.meta.buffer_wr_idx.value_or(0);
+    resp_msg->post_qp_id = 0 /* not used. delete this field later */;
 
     CHECK_NE(resp_msg->status, AcquireRequestStatus::kReserved)
         << "** Server should not response a reserved status. "
@@ -2259,9 +2198,10 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
     {
         // gc here for all allocated resources
         resp_msg->lease_id = std::numeric_limits<LeaseIdT>::max();
-        put_mw(dir_id, buffer_mw);
+
+        ex_ctx.put_mw(buffer_mw);
+        ex_ctx.put_mw(header_mw);
         buffer_mw = nullptr;
-        put_mw(dir_id, header_mw);
         header_mw = nullptr;
         if (unlikely(buffer_mr != nullptr))
         {
@@ -2516,9 +2456,6 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
     uint64_t addr_to_bind = req_ctx.relinquish.addr_to_bind;
     size_t buffer_size = req_ctx.relinquish.buffer_size;
     uint64_t hint = req_ctx.relinquish.hint;
-    auto dir_id = req_ctx.relinquish.dir_id;
-    auto *buffer_mw = req_ctx.relinquish.buffer_mw;
-    auto *header_mw = req_ctx.relinquish.header_mw;
 
     if (with_conflict_detect)
     {
@@ -2530,15 +2467,6 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
     if (with_dealloc)
     {
         patronus_free((void *) addr_to_bind, buffer_size, hint);
-    }
-
-    if (buffer_mw)
-    {
-        put_mw(dir_id, buffer_mw);
-    }
-    if (header_mw)
-    {
-        put_mw(dir_id, header_mw);
     }
 
     // TODO(patronus): not considering any checks here
@@ -2664,58 +2592,37 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
             // and no matter allocated_mw_nr +2/-2/0, it generates corrupted
             // mws. But if set size to 1 and allocated_mw_nr + 2, it works
             // well.
-            size_t bind_nr = 0;
             if (with_buf && !with_pr)
             {
                 // only buffer
-                bind_nr = 1;
-                auto buffer_wr_idx = ex_ctx.fetch_unbind_wr();
-                auto &buffer_wr = ex_ctx.wr(buffer_wr_idx);
-                req_ctx.meta.buffer_wr_idx = buffer_wr_idx;
-                req_ctx.meta.header_wr_idx = std::nullopt;
-                fill_bind_mw_wr(buffer_wr,
-                                DCHECK_NOTNULL(lease_ctx->buffer_mw),
-                                mr,
-                                (uint64_t) bind_nulladdr,
-                                1,
-                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
-
-                DCHECK(!(buffer_wr.send_flags & IBV_SEND_SIGNALED));
+                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
+                                         mr,
+                                         (uint64_t) bind_nulladdr,
+                                         1,
+                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
+                lease_ctx->buffer_mw = nullptr;
             }
             else if (with_buf && with_pr)
             {
                 // pr and buffer
-                bind_nr = 2;
-                auto buffer_wr_idx = ex_ctx.fetch_unbind_wr();
-                auto header_wr_idx = ex_ctx.fetch_unbind_wr();
-                auto &buffer_wr = ex_ctx.wr(buffer_wr_idx);
-                auto &header_wr = ex_ctx.wr(header_wr_idx);
-                req_ctx.meta.buffer_wr_idx = buffer_wr_idx;
-                req_ctx.meta.header_wr_idx = header_wr_idx;
-
-                fill_bind_mw_wr(buffer_wr,
-                                DCHECK_NOTNULL(lease_ctx->header_mw),
-                                mr,
-                                (uint64_t) bind_nulladdr,
-                                1,
-                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
-                fill_bind_mw_wr(header_wr,
-                                DCHECK_NOTNULL(lease_ctx->buffer_mw),
-                                mr,
-                                (uint64_t) bind_nulladdr,
-                                1,
-                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
-                DCHECK(!(buffer_wr.send_flags & IBV_SEND_SIGNALED));
-                DCHECK(!(header_wr.send_flags & IBV_SEND_SIGNALED));
+                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
+                                         mr,
+                                         (uint64_t) bind_nulladdr,
+                                         1,
+                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
+                lease_ctx->header_mw = nullptr;
+                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
+                                         mr,
+                                         (uint64_t) bind_nulladdr,
+                                         1,
+                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
+                lease_ctx->buffer_mw = nullptr;
             }
             else
             {
                 CHECK(!with_buf && !with_pr)
                     << "invalid configuration. with_buf: " << with_buf
                     << ", with_pr: " << with_pr;
-
-                req_ctx.meta.buffer_wr_idx = std::nullopt;
-                req_ctx.meta.header_wr_idx = std::nullopt;
             }
         }
     }
@@ -2732,8 +2639,6 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
     req_ctx.relinquish.addr_to_bind = lease_ctx->addr_to_bind;
     req_ctx.relinquish.buffer_size = lease_ctx->buffer_size;
     req_ctx.relinquish.hint = lease_ctx->hint;
-    req_ctx.relinquish.buffer_mw = lease_ctx->buffer_mw;
-    req_ctx.relinquish.header_mw = lease_ctx->header_mw;
     req_ctx.relinquish.dir_id = lease_ctx->dir_id;
 }
 
@@ -2933,45 +2838,28 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             // and no matter allocated_mw_nr +2/-2/0, it generates corrupted
             // mws. But if set size to 1 and allocated_mw_nr + 2, it works
             // well.
-            size_t bind_nr = 0;
             if (with_buf && !with_pr)
             {
                 // only buffer
-                bind_nr = 1;
-                auto buffer_wr_id = ex_ctx.fetch_unbind_wr();
-                auto &buffer_wr = ex_ctx.wr(buffer_wr_id);
-                fill_bind_mw_wr(buffer_wr,
-                                DCHECK_NOTNULL(lease_ctx->buffer_mw),
-                                mr,
-                                (uint64_t) bind_nulladdr,
-                                1,
-                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
-
-                DCHECK(!(buffer_wr.send_flags & IBV_SEND_INLINE));
+                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
+                                         mr,
+                                         (uint64_t) bind_nulladdr,
+                                         1,
+                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
             }
             else if (with_buf && with_pr)
             {
                 // pr and buffer
-                bind_nr = 2;
-                auto buffer_wr_id = ex_ctx.fetch_unbind_wr();
-                auto header_wr_id = ex_ctx.fetch_unbind_wr();
-                auto &buffer_wr = ex_ctx.wr(buffer_wr_id);
-                auto &header_wr = ex_ctx.wr(header_wr_id);
-                fill_bind_mw_wr(header_wr,
-                                DCHECK_NOTNULL(lease_ctx->header_mw),
-                                mr,
-                                (uint64_t) bind_nulladdr,
-                                1,
-                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
-                fill_bind_mw_wr(buffer_wr,
-                                DCHECK_NOTNULL(lease_ctx->buffer_mw),
-                                mr,
-                                (uint64_t) bind_nulladdr,
-                                1,
-                                IBV_ACCESS_CUSTOM_REMOTE_NORW);
-
-                DCHECK(!(header_wr.send_flags & IBV_SEND_SIGNALED));
-                DCHECK(!(buffer_wr.send_flags & IBV_SEND_SIGNALED));
+                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
+                                         mr,
+                                         (uint64_t) bind_nulladdr,
+                                         1,
+                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
+                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
+                                         mr,
+                                         (uint64_t) bind_nulladdr,
+                                         1,
+                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
             }
             else
             {
@@ -2997,13 +2885,15 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         patronus_free(addr, size, hint);
     }
 
+    // NOTE: don't call put_mw(...) here
+    // because ex_ctx manages the ownership of mw.
     if (lease_ctx->header_mw)
     {
-        put_mw(lease_ctx->dir_id, lease_ctx->header_mw);
+        lease_ctx->header_mw = nullptr;
     }
     if (lease_ctx->buffer_mw)
     {
-        put_mw(lease_ctx->dir_id, lease_ctx->buffer_mw);
+        lease_ctx->buffer_mw = nullptr;
     }
 
     if (with_pr)
@@ -3068,16 +2958,16 @@ void Patronus::server_coro_worker(coro_t coro_id,
         prepare_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
         // NOTE: worker coroutine poll tasks here
         // NOTE: we combine wrs, so put do_task here.
-        DCHECK_GE(2 * ex_ctx.wr_remain_size(), ex_ctx.max_wr_size())
+        DCHECK_GE(2 * ex_ctx.remain_size(), ex_ctx.max_wr_size())
             << "** By design, we give ex_ctx the double capacity to handle 1) "
                "requests and 2) auto-relinquish. Therefore, ex_ctx should be "
                "at most half-full";
-        if (!ddl_manager_.empty() && ex_ctx.wr_remain_size() > 0)
+        if (!ddl_manager_.empty() && ex_ctx.remain_size() > 0)
         {
             ddl_manager_.do_task(time_syncer_->patronus_now().term(),
                                  &ctx,
                                  // one task may have two wr at most
-                                 ex_ctx.wr_remain_size() / 2);
+                                 ex_ctx.remain_size() / 2);
         }
         commit_handle_request_messages(ex_ctx, &ctx);
         post_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
@@ -3098,7 +2988,6 @@ void Patronus::server_coro_worker(coro_t coro_id,
                  << " finished current task. yield to master.";
         comm.finished[coro_id] = true;
 
-        // LOG_EVERY_N(INFO, 1000) << "per_qp_batch_m: " << per_qp_batch_m;
         ctx.yield_to_master();
     }
 
