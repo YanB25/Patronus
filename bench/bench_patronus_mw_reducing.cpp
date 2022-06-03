@@ -203,6 +203,27 @@ public:
         }
         return ret;
     }
+    // 1 + 0 (at expetation) + gc
+    static std::vector<BenchConfig>
+    get_rlease_one_bind_one_unbind_reuse_mw_opt_gc(
+        const std::string &name,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t block_size,
+        size_t task_nr,
+        std::chrono::nanoseconds acquire_ns)
+    {
+        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoBindPR;
+        flag_t relinquish_flag = (flag_t) 0;
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.acquire_flag = acquire_flag;
+        conf.relinquish_flag = relinquish_flag;
+        conf.acquire_ns = acquire_ns;
+        conf.do_not_call_relinquish = true;
+        conf.reuse_mw_opt = true;
+        return pipeline({conf, conf});
+    }
     static std::vector<BenchConfig> get_rlease_one_bind_one_unbind_over_mr(
         const std::string &name,
         size_t thread_nr,
@@ -277,26 +298,25 @@ public:
         return pipeline({conf, conf});
     }
     // 2 + 1
-    // static std::vector<BenchConfig> get_rlease_full_wo_unbind_pr(
-    //     const std::string &name,
-    //     size_t thread_nr,
-    //     size_t coro_nr,
-    //     size_t block_size,
-    //     size_t task_nr)
-    // {
-    //     CHECK(false) << "TODO: support
-    //     LeaseModifyFlag::kNoRelinquishUnbindPr"; flag_t acquire_flag =
-    //     (flag_t) AcquireRequestFlag::kNoGc; flag_t relinquish_flag =
-    //         (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
-    //     auto acquire_ns = 0ns;
-    //     auto conf = BenchConfig::get_empty_conf(
-    //         name, thread_nr, coro_nr, block_size, task_nr);
-    //     conf.acquire_flag = acquire_flag;
-    //     conf.relinquish_flag = relinquish_flag;
-    //     conf.acquire_ns = acquire_ns;
-    //     conf.reuse_mw_opt = false;
-    //     return pipeline({conf, conf});
-    // }
+    static std::vector<BenchConfig> get_rlease_full_wo_unbind_pr(
+        const std::string &name,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t block_size,
+        size_t task_nr)
+    {
+        flag_t acquire_flag = (flag_t) AcquireRequestFlag::kNoGc;
+        flag_t relinquish_flag =
+            (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
+        auto acquire_ns = 0ns;
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr);
+        conf.acquire_flag = acquire_flag;
+        conf.relinquish_flag = relinquish_flag;
+        conf.acquire_ns = acquire_ns;
+        conf.reuse_mw_opt = false;
+        return pipeline({conf, conf});
+    }
     static std::vector<BenchConfig> get_rlease_full_over_mr(
         const std::string &name,
         size_t thread_nr,
@@ -615,7 +635,6 @@ void bench_template(const std::string &name,
     auto coro_nr = conf.coro_nr;
     auto report = conf.report;
     auto alloc_size = conf.block_size;
-    auto acquire_ns = conf.acquire_ns;
 
     if (is_master)
     {
@@ -857,7 +876,7 @@ void benchmark(Patronus::pointer patronus,
                 auto total_test_times = kTestTimePerThread * 4;
                 {
                     auto configs = BenchConfigFactory::get_rlease_nothing(
-                        "w/o(*)",
+                        "RPC",
                         thread_nr,
                         coro_nr,
                         block_size,
@@ -865,41 +884,31 @@ void benchmark(Patronus::pointer patronus,
                     run_benchmark(
                         patronus, configs, bar, is_client, is_master, key);
                 }
-                // {
-                //     auto configs =
-                //         BenchConfigFactory::get_rlease_nothing_no_rel(
-                //             "w/o(*) no-rel",
-                //             thread_nr,
-                //             coro_nr,
-                //             block_size,
-                //             total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs =
-                //         BenchConfigFactory::get_alloc_only("alloc w / o(*) ",
-                //                                            thread_nr,
-                //                                            coro_nr,
-                //                                            block_size,
-                //                                            total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs = BenchConfigFactory::get_rlease_one_bind(
-                //         "w(buf) w/o(pr unbind gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
+                {
+                    auto configs =
+                        BenchConfigFactory::get_rlease_full("full (2+2)",
+                                                            thread_nr,
+                                                            coro_nr,
+                                                            block_size,
+                                                            total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs =
+                        BenchConfigFactory::get_rlease_full_wo_unbind_pr(
+                            "+ rolling header (2+1)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
                 {
                     auto configs =
                         BenchConfigFactory::get_rlease_one_bind_one_unbind(
-                            "w(buf unbind) w/o(pr gc)",
+                            "+ inline header (1+1)",
                             thread_nr,
                             coro_nr,
                             block_size,
@@ -910,7 +919,7 @@ void benchmark(Patronus::pointer patronus,
                 {
                     auto configs = BenchConfigFactory::
                         get_rlease_one_bind_one_unbind_reuse_mw_opt(
-                            "+ reuse w(buf unbind) w/o(pr gc)",
+                            "+ reuse MW (1+0)",
                             thread_nr,
                             coro_nr,
                             block_size,
@@ -918,72 +927,30 @@ void benchmark(Patronus::pointer patronus,
                     run_benchmark(
                         patronus, configs, bar, is_client, is_master, key);
                 }
-                // {
-                //     auto configs = BenchConfigFactory::
-                //         get_rlease_one_bind_one_unbind_over_mr(
-                //             "[MR] w(buf unbind) w/o(pr gc)",
-                //             thread_nr,
-                //             coro_nr,
-                //             block_size,
-                //             total_test_times / 100);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs = BenchConfigFactory::
-                //         get_rlease_one_bind_one_unbind_autogc(
-                //             "w(buf unbind gc) w/o(pr)",
-                //             thread_nr,
-                //             coro_nr,
-                //             block_size,
-                //             total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs = BenchConfigFactory::
-                //         get_rlease_one_bind_one_unbind_autogc_dbg(
-                //             "DBG w(buf unbind gc) w/o(pr)",
-                //             thread_nr,
-                //             coro_nr,
-                //             block_size,
-                //             total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs = BenchConfigFactory::get_rlease_full(
-                //         "w(buf pr unbind) w/o(gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs =
-                //     BenchConfigFactory::get_rlease_full_over_mr(
-                //         "[MR] w(buf pr unbind) w/o(gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         // MR is so slow
-                //         total_test_times / 100);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
-                // {
-                //     auto configs =
-                //     BenchConfigFactory::get_rlease_full_autogc(
-                //         "w(buf pr unbind gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
+                {
+                    auto configs = BenchConfigFactory::
+                        get_rlease_one_bind_one_unbind_reuse_mw_opt_gc(
+                            "+ auto-GC (1+0)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times,
+                            1ns);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::
+                        get_rlease_one_bind_one_unbind_reuse_mw_opt_gc(
+                            "+ auto-GC (1+0)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times,
+                            100us);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
             }
         }
     }

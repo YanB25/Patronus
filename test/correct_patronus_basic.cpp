@@ -137,7 +137,6 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
-        // auto rel_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
         auto rel_flag = 0;
         p->relinquish(lease, 0, rel_flag, &ctx);
 

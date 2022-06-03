@@ -191,17 +191,18 @@ std::ostream &operator<<(std::ostream &os, const AdminResponse &resp);
 
 enum class LeaseModifyFlag : uint16_t
 {
-    kNoRelinquishUnbind = 1 << 0,
-    kForceUnbind = 1 << 1,
-    kWithDeallocation = 1 << 2,
-    kOnlyDeallocation = 1 << 3,
+    kNoRelinquishUnbindAny = 1 << 0,
+    kNoRelinquishUnbindPr = 1 << 1,
+    kForceUnbind = 1 << 2,
+    kWithDeallocation = 1 << 3,
+    kOnlyDeallocation = 1 << 4,
     // wait until unbind success before returning
     // will harm performance
-    kWaitUntilSuccess = 1 << 4,
-    kUseMR = 1 << 5,
-    kNoRpc = 1 << 6,
-    kDebugExtendDoNothing = 1 << 7,
-    kReserved = 1 << 8,
+    kWaitUntilSuccess = 1 << 5,
+    kUseMR = 1 << 6,
+    kNoRpc = 1 << 7,
+    kDebugExtendDoNothing = 1 << 8,
+    kReserved = 1 << 9,
 };
 void debug_validate_lease_modify_flag(flag_t flag);
 struct LeaseModifyFlagOut

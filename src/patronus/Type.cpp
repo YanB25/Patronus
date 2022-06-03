@@ -344,8 +344,10 @@ void debug_validate_lease_modify_flag(flag_t flag)
 {
     if constexpr (debug())
     {
-        [[maybe_unused]] bool no_relinquish_unbind =
-            flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        [[maybe_unused]] bool no_unbind_any =
+            flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny;
+        [[maybe_unused]] bool no_unbind_pr =
+            flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
         [[maybe_unused]] bool force_unbind =
             flag & (flag_t) LeaseModifyFlag::kForceUnbind;
         bool with_dealloc = flag & (flag_t) LeaseModifyFlag::kWithDeallocation;
@@ -363,18 +365,21 @@ void debug_validate_lease_modify_flag(flag_t flag)
         }
         if (wait_success)
         {
-            DCHECK(!no_relinquish_unbind)
+            DCHECK(!no_unbind_any)
                 << "wait_success conflict with no_relinquish_unbind: If you do "
                    "not want to unbind, make no sense to wait for nothing.";
         }
         if (no_rpc)
         {
-            DCHECK(!no_relinquish_unbind);
+            DCHECK(!no_unbind_any);
+            DCHECK(!no_unbind_pr);
             DCHECK(!force_unbind);
             DCHECK(!with_dealloc);
             DCHECK(!only_dealloc);
             DCHECK(!wait_success);
         }
+        DCHECK(!(no_unbind_any && no_unbind_pr))
+            << "Only one of no_unbind_any and no_unbind_pr should be set";
         DCHECK(!reserved);
     }
 }
@@ -387,11 +392,17 @@ std::ostream &operator<<(std::ostream &os, LeaseModifyFlagOut flag)
     {
         os << "RESERVED, ";
     }
-    bool no_relinquish_unbind =
-        flag.flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
-    if (no_relinquish_unbind)
+    bool no_unbind_any =
+        flag.flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny;
+    if (no_unbind_any)
     {
-        os << "no-rel-unbind, ";
+        os << "no-unbind-any, ";
+    }
+    bool no_unbind_pr =
+        flag.flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
+    if (no_unbind_pr)
+    {
+        os << "no-unbind-pr, ";
     }
     bool force_unbind = flag.flag & (flag_t) LeaseModifyFlag::kForceUnbind;
     if (force_unbind)

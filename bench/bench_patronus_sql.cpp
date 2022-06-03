@@ -148,7 +148,7 @@ struct BenchConfig
         ret.rw_flag = (flag_t) RWFlag::kNoLocalExpireCheck;
         // TODO: disable unbind on relinquish
         // does it make sense?
-        ret.relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
+        ret.relinquish_flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny;
         return ret;
     }
     static BenchConfig get_record_conf_mr_protected(const std::string &name,

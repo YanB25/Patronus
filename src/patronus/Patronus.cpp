@@ -2494,10 +2494,11 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
              << ", expect cid " << cid << ", coro: " << pre_coro_ctx(ctx)
              << ", at patronus time: " << time_syncer_->patronus_now();
 
-    bool wait_success = flag & (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
     bool with_dealloc = flag & (flag_t) LeaseModifyFlag::kWithDeallocation;
     bool only_dealloc = flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
-    bool no_unbind = flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    bool no_unbind_any =
+        flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny;
+    bool no_unbind_pr = flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
     DCHECK(!only_dealloc) << "This case should have been handled. "
                              "task_gc_lease never handle this";
     bool use_mr = flag & (flag_t) LeaseModifyFlag::kUseMR;
@@ -2526,18 +2527,19 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
 
     bool with_pr = lease_ctx->with_pr;
     bool with_buf = lease_ctx->with_buf;
+    bool unbind_pr = with_pr;
+    bool unbind_buf = with_buf;
 
-    static thread_local size_t unsignaled_idx__{0};
-    size_t expect_unbind_nr = 0;
-    if (!no_unbind)
+    if (no_unbind_pr)
     {
-        expect_unbind_nr = (!!with_pr) + (!!with_buf);
+        DCHECK(!no_unbind_any);
+        unbind_pr = false;
     }
-    unsignaled_idx__ += expect_unbind_nr;
-    if (unlikely(unsignaled_idx__ >= config::kUnsignaledUnbindRateLimit))
+    if (no_unbind_any)
     {
-        unsignaled_idx__ = 0;
-        wait_success = true;
+        DCHECK(!no_unbind_pr);
+        unbind_buf = false;
+        unbind_pr = false;
     }
 
     uint64_t protection_region_id = 0;
@@ -2557,22 +2559,23 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
 
     // after that, getting this lease_ctx is not possible
     // so, store what we need at req_ctx.relinquish.
-
     if (only_dealloc)
     {
-        no_unbind = true;
+        unbind_pr = false;
+        unbind_buf = false;
     }
-    if (likely(!no_unbind))
+
+    if (likely(unbind_pr || unbind_buf))
     {
         if (use_mr)
         {
             auto *buffer_mr = DCHECK_NOTNULL(lease_ctx)->buffer_mr;
             auto *header_mr = DCHECK_NOTNULL(lease_ctx)->header_mr;
-            if (buffer_mr != nullptr)
+            if (buffer_mr != nullptr && unbind_buf)
             {
                 CHECK(destroyMemoryRegion(buffer_mr));
             }
-            if (header_mr != nullptr)
+            if (header_mr != nullptr && unbind_pr)
             {
                 CHECK(destroyMemoryRegion(header_mr));
             }
@@ -2592,38 +2595,38 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
             // and no matter allocated_mw_nr +2/-2/0, it generates corrupted
             // mws. But if set size to 1 and allocated_mw_nr + 2, it works
             // well.
-            if (with_buf && !with_pr)
+            if (unbind_buf)
             {
-                // only buffer
                 ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
                                          mr,
                                          (uint64_t) bind_nulladdr,
                                          1,
                                          IBV_ACCESS_CUSTOM_REMOTE_NORW);
-                lease_ctx->buffer_mw = nullptr;
             }
-            else if (with_buf && with_pr)
+            else
             {
-                // pr and buffer
+                if (unlikely(with_buf))
+                {
+                    ex_ctx.put_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw));
+                }
+            }
+            lease_ctx->buffer_mw = nullptr;
+            if (unbind_pr)
+            {
                 ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
                                          mr,
                                          (uint64_t) bind_nulladdr,
                                          1,
                                          IBV_ACCESS_CUSTOM_REMOTE_NORW);
-                lease_ctx->header_mw = nullptr;
-                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
-                                         mr,
-                                         (uint64_t) bind_nulladdr,
-                                         1,
-                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
-                lease_ctx->buffer_mw = nullptr;
             }
             else
             {
-                CHECK(!with_buf && !with_pr)
-                    << "invalid configuration. with_buf: " << with_buf
-                    << ", with_pr: " << with_pr;
+                if (unlikely(with_pr))
+                {
+                    ex_ctx.put_mw(DCHECK_NOTNULL(lease_ctx->header_mw));
+                }
             }
+            lease_ctx->header_mw = nullptr;
         }
     }
 
@@ -2656,10 +2659,11 @@ void Patronus::task_gc_lease(uint64_t lease_id,
 
     auto &ex_ctx = coro_ex_ctx(ctx->coro_id());
 
-    bool wait_success = flag & (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
     bool with_dealloc = flag & (flag_t) LeaseModifyFlag::kWithDeallocation;
     bool only_dealloc = flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
-    bool no_unbind = flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbind;
+    bool no_unbind_any =
+        flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny;
+    bool no_unbind_pr = flag & (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
     DCHECK(!only_dealloc) << "This case should have been handled. "
                              "task_gc_lease never handle this";
     bool use_mr = flag & (flag_t) LeaseModifyFlag::kUseMR;
@@ -2683,18 +2687,17 @@ void Patronus::task_gc_lease(uint64_t lease_id,
 
     bool with_pr = lease_ctx->with_pr;
     bool with_buf = lease_ctx->with_buf;
+    bool unbind_pr = with_pr;
+    bool unbind_buf = with_buf;
 
-    static thread_local size_t unsignaled_idx__{0};
-    size_t expect_unbind_nr = 0;
-    if (!no_unbind)
+    if (no_unbind_any)
     {
-        expect_unbind_nr = (!!with_pr) + (!!with_buf);
+        unbind_pr = false;
+        unbind_buf = false;
     }
-    unsignaled_idx__ += expect_unbind_nr;
-    if (unlikely(unsignaled_idx__ >= config::kUnsignaledUnbindRateLimit))
+    if (no_unbind_pr)
     {
-        unsignaled_idx__ = 0;
-        wait_success = true;
+        unbind_pr = false;
     }
 
     uint64_t protection_region_id = 0;
@@ -2809,19 +2812,20 @@ void Patronus::task_gc_lease(uint64_t lease_id,
 
     if (only_dealloc)
     {
-        no_unbind = true;
+        unbind_buf = false;
+        unbind_pr = false;
     }
-    if (likely(!no_unbind))
+    if (likely(unbind_buf || unbind_pr))
     {
         if (use_mr)
         {
             auto *buffer_mr = DCHECK_NOTNULL(lease_ctx)->buffer_mr;
             auto *header_mr = DCHECK_NOTNULL(lease_ctx)->header_mr;
-            if (buffer_mr != nullptr)
+            if (buffer_mr != nullptr && unbind_buf)
             {
                 CHECK(destroyMemoryRegion(buffer_mr));
             }
-            if (header_mr != nullptr)
+            if (header_mr != nullptr && unbind_pr)
             {
                 CHECK(destroyMemoryRegion(header_mr));
             }
@@ -2838,23 +2842,8 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             // and no matter allocated_mw_nr +2/-2/0, it generates corrupted
             // mws. But if set size to 1 and allocated_mw_nr + 2, it works
             // well.
-            if (with_buf && !with_pr)
+            if (unbind_buf)
             {
-                // only buffer
-                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
-                                         mr,
-                                         (uint64_t) bind_nulladdr,
-                                         1,
-                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
-            }
-            else if (with_buf && with_pr)
-            {
-                // pr and buffer
-                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
-                                         mr,
-                                         (uint64_t) bind_nulladdr,
-                                         1,
-                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
                 ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
                                          mr,
                                          (uint64_t) bind_nulladdr,
@@ -2863,9 +2852,25 @@ void Patronus::task_gc_lease(uint64_t lease_id,
             }
             else
             {
-                CHECK(!with_buf && !with_pr)
-                    << "invalid configuration. with_buf: " << with_buf
-                    << ", with_pr: " << with_pr;
+                if (unlikely(with_buf))
+                {
+                    ex_ctx.put_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw));
+                }
+            }
+            if (unbind_pr)
+            {
+                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
+                                         mr,
+                                         (uint64_t) bind_nulladdr,
+                                         1,
+                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
+            }
+            else
+            {
+                if (unlikely(with_pr))
+                {
+                    ex_ctx.put_mw(DCHECK_NOTNULL(lease_ctx->header_mw));
+                }
             }
         }
     }

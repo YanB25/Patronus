@@ -1285,7 +1285,7 @@ void Patronus::dealloc(GlobalAddress gaddr,
     lease.buffer_size_ = size;
     lease.id_ = std::numeric_limits<LeaseIDT>::max();
 
-    auto flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbind |
+    auto flag = (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny |
                 (flag_t) LeaseModifyFlag::kOnlyDeallocation;
     auto ret = lease_modify_impl(
         lease, hint, RpcType::kRelinquishReq, 0 /* term */, flag, ctx);
