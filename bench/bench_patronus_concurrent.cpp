@@ -666,8 +666,8 @@ void benchmark(Patronus::pointer patronus,
     constexpr static size_t kIONr = 16;
 
     size_t key = 0;
-    // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-    for (size_t thread_nr : {32})
+    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+    // for (size_t thread_nr : {32})
     {
         auto total_test_times =
             kTestTimePerThread * std::min(thread_nr, (size_t) 4);
@@ -682,22 +682,22 @@ void benchmark(Patronus::pointer patronus,
         }
     }
 
-    // for (size_t coro_nr : {2, 4, 8, 16, 32})
-    // {
-    //     auto total_test_times = kTestTimePerThread * 4;
-    //     {
-    //         auto configs = BenchConfigFactory::get_mw("mw",
-    //                                                   32 /* thread_nr */,
-    //                                                   coro_nr,
-    //                                                   kBlockSize,
-    //                                                   total_test_times,
-    //                                                   kIONr);
-    //         run_benchmark(patronus, configs, bar, is_client, is_master, key);
-    //     }
-    // }
+    for (size_t coro_nr : {2, 4, 8, 16, 32})
+    {
+        auto total_test_times = kTestTimePerThread * 4;
+        {
+            auto configs = BenchConfigFactory::get_mw("mw",
+                                                      32 /* thread_nr */,
+                                                      coro_nr,
+                                                      kBlockSize,
+                                                      total_test_times,
+                                                      kIONr);
+            run_benchmark(patronus, configs, bar, is_client, is_master, key);
+        }
+    }
 
-    // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-    for (size_t thread_nr : {32})
+    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+    // for (size_t thread_nr : {32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         for (size_t coro_nr : {1})
@@ -751,19 +751,28 @@ void benchmark(Patronus::pointer patronus,
         }
     }
 
-    // for (size_t coro_nr : {2, 4, 8, 16, 32})
-    // {
-    //     auto total_test_times = kTestTimePerThread * 4;
-    //     {
-    //         auto configs = BenchConfigFactory::get_mr("mr",
-    //                                                   32 /* thread_nr */,
-    //                                                   coro_nr,
-    //                                                   kBlockSize,
-    //                                                   total_test_times * 0.1,
-    //                                                   kIONr);
-    //         run_benchmark(patronus, configs, bar, is_client, is_master, key);
-    //     }
-    // }
+    for (size_t coro_nr : {2, 4, 8, 16, 32})
+    {
+        auto total_test_times = kTestTimePerThread * 4;
+        {
+            auto configs = BenchConfigFactory::get_mr("mr",
+                                                      32 /* thread_nr */,
+                                                      coro_nr,
+                                                      kBlockSize,
+                                                      total_test_times * 0.1,
+                                                      kIONr);
+            run_benchmark(patronus, configs, bar, is_client, is_master, key);
+        }
+        {
+            auto configs = BenchConfigFactory::get_msg_base("two-sided",
+                                                            32 /* thread_nr */,
+                                                            coro_nr,
+                                                            kBlockSize,
+                                                            total_test_times,
+                                                            kIONr);
+            run_benchmark(patronus, configs, bar, is_client, is_master, key);
+        }
+    }
 
     bar.wait();
 }
