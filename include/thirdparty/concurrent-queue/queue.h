@@ -49,6 +49,13 @@ public:
     {
         return *(Meta *) meta_;
     }
+    ~Queue()
+    {
+        allocator_->free(witness_buf_);
+        allocator_->free(finished_buf_);
+        allocator_->free(entries_buf_);
+        allocator_->free(meta_);
+    }
 
 private:
     GlobalAddress to_exposed_remote_mem(void *mem) const

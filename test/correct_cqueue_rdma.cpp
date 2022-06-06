@@ -53,6 +53,15 @@ uint64_t calculate_client_id(uint64_t nid, uint64_t tid, uint64_t coro_id)
     return nid * kMaxAppThread * kMaxCoroNr + tid * kMaxCoroNr + coro_id;
 }
 
+struct QueueItem
+{
+    uint64_t nid;
+    uint64_t tid;
+    uint64_t cid;
+    uint64_t op_id;
+    char padding[64 - 4 * sizeof(uint64_t)];
+};
+
 struct BenchConfig
 {
     std::string name;
@@ -227,7 +236,6 @@ typename Queue<T>::pointer gen_queue(Patronus::pointer p,
     return queue;
 }
 
-template <typename T>
 void test_basic_client_worker(
     Patronus::pointer p,
     size_t coro_id,
@@ -239,12 +247,13 @@ void test_basic_client_worker(
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
     OnePassBucketMonitor<uint64_t> &lat_m)
 {
+    auto nid = p->get_node_id();
     auto tid = p->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
-    auto handle =
-        gen_handle<T>(p, dir_id, client_id, handle_conf, meta_gaddr, &ctx);
+    auto handle = gen_handle<QueueItem>(
+        p, dir_id, client_id, handle_conf, meta_gaddr, &ctx);
 
     size_t put_succ_nr = 0;
     size_t put_nomem_nr = 0;
@@ -258,7 +267,8 @@ void test_basic_client_worker(
     ChronoTimer op_timer;
     bool should_report_latency = (tid == 0 && coro_id == 0);
 
-    auto value = T{};
+    std::map<std::tuple<uint64_t, uint64_t, uint64_t>, uint64_t> book;
+
     while (ex.get_private_data().thread_remain_task > 0)
     {
         if (should_report_latency)
@@ -267,10 +277,18 @@ void test_basic_client_worker(
         }
         if (bench_conf.is_consumer(client_id))
         {
-            auto rc = handle->pop(value);
+            QueueItem item;
+            auto rc = handle->pop(item);
             if (rc == kOk)
             {
                 get_succ_nr++;
+                auto nid = item.nid;
+                auto tid = item.tid;
+                auto cid = item.cid;
+                auto op_id = item.op_id;
+                auto got_op_id = book[{nid, tid, cid}]++;
+                CHECK_EQ(got_op_id, op_id);
+                executed_nr++;
             }
             else
             {
@@ -280,10 +298,12 @@ void test_basic_client_worker(
         }
         else
         {
-            auto rc = handle->push(value);
+            QueueItem item{nid, tid, coro_id, executed_nr};
+            auto rc = handle->push(item);
             if (rc == kOk)
             {
                 put_succ_nr++;
+                executed_nr++;
             }
             else
             {
@@ -299,7 +319,6 @@ void test_basic_client_worker(
         {
             lat_m.collect(timer.pin());
         }
-        executed_nr++;
         ex.get_private_data().thread_remain_task--;
     }
     auto ns = timer.pin();
@@ -537,11 +556,6 @@ void benchmark_server(Patronus::pointer p,
     p->server_serve(key);
     bar.wait();
 }
-template <size_t kSize>
-struct Dummy
-{
-    char buf[kSize];
-};
 
 void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 {
@@ -555,7 +569,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     for (const auto &handle_conf : handle_configs)
     {
-        for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+        for (size_t thread_nr : {8})
         {
             for (size_t coro_nr : {1})
             {
@@ -569,13 +583,13 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                     conf.validate();
                     LOG_IF(INFO, is_master)
                         << "[sub-conf] running conf: " << conf;
-                    benchmark_client<Dummy<64>>(
+                    benchmark_client<QueueData>(
                         p, bar, is_master, conf, handle_conf, key);
                 }
                 else
                 {
                     // TODO: let queue config be real.
-                    benchmark_server<Dummy<64>>(
+                    benchmark_server<QueueData>(
                         p,
                         bar,
                         is_master,
