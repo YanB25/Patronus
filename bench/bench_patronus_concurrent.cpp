@@ -33,7 +33,7 @@ std::vector<std::string> col_idx;
 std::vector<size_t> col_x_alloc_size;
 std::vector<size_t> col_x_thread_nr;
 std::vector<size_t> col_x_coro_nr;
-std::vector<size_t> col_x_extend_nr;
+std::vector<size_t> col_x_rw_nr;
 std::vector<size_t> col_alloc_nr;
 std::vector<size_t> col_alloc_ns;
 
@@ -70,17 +70,25 @@ struct BenchConfig
     size_t coro_nr;
     size_t block_size;
     size_t task_nr;
+    size_t rw_nr;
     bool modify_qp_flag;
     bool reinit_qp;
     bool use_mr;
+    bool use_msg;
     std::string name;
     bool report;
+
+    bool should_report_lat() const
+    {
+        return report && thread_nr == 32 && coro_nr == 1;
+    }
 
     static BenchConfig get_empty_conf(const std::string &name,
                                       size_t thread_nr,
                                       size_t coro_nr,
                                       size_t block_size,
-                                      size_t task_nr)
+                                      size_t task_nr,
+                                      size_t rw_nr)
     {
         BenchConfig ret;
         ret.name = name;
@@ -88,6 +96,7 @@ struct BenchConfig
         ret.coro_nr = coro_nr;
         ret.block_size = block_size;
         ret.task_nr = task_nr;
+        ret.rw_nr = rw_nr;
         return ret;
     }
 };
@@ -99,7 +108,8 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
        << ", task_nr: " << conf.task_nr
        << ", modify_qp_flag: " << conf.modify_qp_flag
        << ", reinit_qp: " << conf.reinit_qp << ", use_mr: " << conf.use_mr
-       << ", report: " << conf.report << "}";
+       << ", use_msg: " << conf.use_msg << ", report: " << conf.report << "}";
+
     return os;
 }
 
@@ -110,12 +120,14 @@ public:
                                            size_t thread_nr,
                                            size_t coro_nr,
                                            size_t block_size,
-                                           size_t task_nr)
+                                           size_t task_nr,
+                                           size_t rw_nr)
     {
         auto conf = BenchConfig::get_empty_conf(
-            name, thread_nr, coro_nr, block_size, task_nr);
+            name, thread_nr, coro_nr, block_size, task_nr, rw_nr);
         conf.modify_qp_flag = false;
         conf.reinit_qp = false;
+        conf.use_msg = false;
         conf.use_mr = false;
         return pipeline({conf, conf});
     }
@@ -123,12 +135,14 @@ public:
                                                 size_t thread_nr,
                                                 size_t coro_nr,
                                                 size_t block_size,
-                                                size_t task_nr)
+                                                size_t task_nr,
+                                                size_t rw_nr)
     {
         auto conf = BenchConfig::get_empty_conf(
-            name, thread_nr, coro_nr, block_size, task_nr);
+            name, thread_nr, coro_nr, block_size, task_nr, rw_nr);
         conf.modify_qp_flag = true;
         conf.reinit_qp = false;
+        conf.use_msg = false;
         conf.use_mr = false;
         return pipeline({conf, conf});
     }
@@ -136,12 +150,14 @@ public:
                                                  size_t thread_nr,
                                                  size_t coro_nr,
                                                  size_t block_size,
-                                                 size_t task_nr)
+                                                 size_t task_nr,
+                                                 size_t rw_nr)
     {
         auto conf = BenchConfig::get_empty_conf(
-            name, thread_nr, coro_nr, block_size, task_nr);
+            name, thread_nr, coro_nr, block_size, task_nr, rw_nr);
         conf.modify_qp_flag = false;
         conf.reinit_qp = true;
+        conf.use_msg = false;
         conf.use_mr = false;
         return pipeline({conf, conf});
     }
@@ -149,13 +165,30 @@ public:
                                            size_t thread_nr,
                                            size_t coro_nr,
                                            size_t block_size,
-                                           size_t task_nr)
+                                           size_t task_nr,
+                                           size_t rw_nr)
     {
         auto conf = BenchConfig::get_empty_conf(
-            name, thread_nr, coro_nr, block_size, task_nr);
+            name, thread_nr, coro_nr, block_size, task_nr, rw_nr);
         conf.modify_qp_flag = false;
         conf.reinit_qp = false;
+        conf.use_msg = false;
         conf.use_mr = true;
+        return pipeline({conf, conf});
+    }
+    static std::vector<BenchConfig> get_msg_base(const std::string &name,
+                                                 size_t thread_nr,
+                                                 size_t coro_nr,
+                                                 size_t block_size,
+                                                 size_t task_nr,
+                                                 size_t rw_nr)
+    {
+        auto conf = BenchConfig::get_empty_conf(
+            name, thread_nr, coro_nr, block_size, task_nr, rw_nr);
+        conf.modify_qp_flag = false;
+        conf.reinit_qp = false;
+        conf.use_mr = false;
+        conf.use_msg = true;
         return pipeline({conf, conf});
     }
 
@@ -177,12 +210,15 @@ void reg_result(const BenchConfig &conf, uint64_t total_ns)
     col_x_alloc_size.push_back(conf.block_size);
     col_x_thread_nr.push_back(conf.thread_nr);
     col_x_coro_nr.push_back(conf.coro_nr);
+    col_x_rw_nr.push_back(conf.rw_nr);
     col_alloc_nr.push_back(conf.task_nr);
     col_alloc_ns.push_back(total_ns);
 }
 
 std::unordered_map<std::string, std::vector<uint64_t>> lat_data_;
-void reg_latency(const std::string &name, OnePassBucketMonitor<uint64_t> &m)
+void reg_latency(const std::string &name,
+                 OnePassBucketMonitor<uint64_t> &m,
+                 const BenchConfig &conf)
 {
     if (unlikely(col_lat_idx.empty()))
     {
@@ -190,12 +226,27 @@ void reg_latency(const std::string &name, OnePassBucketMonitor<uint64_t> &m)
         col_lat_idx.push_back("lat_p5");
         col_lat_idx.push_back("lat_p9");
         col_lat_idx.push_back("lat_p99");
+
+        col_lat_idx.push_back("lat_min (avg)");
+        col_lat_idx.push_back("lat_p5 (avg)");
+        col_lat_idx.push_back("lat_p9 (avg)");
+        col_lat_idx.push_back("lat_p99 (avg)");
     }
 
-    lat_data_[name].push_back(m.min());
-    lat_data_[name].push_back(m.percentile(0.5));
-    lat_data_[name].push_back(m.percentile(0.9));
-    lat_data_[name].push_back(m.percentile(0.99));
+    auto min = m.min();
+    auto p5 = m.percentile(0.5);
+    auto p9 = m.percentile(0.9);
+    auto p99 = m.percentile(0.99);
+
+    lat_data_[name].push_back(min);
+    lat_data_[name].push_back(p5);
+    lat_data_[name].push_back(p9);
+    lat_data_[name].push_back(p99);
+
+    lat_data_[name].push_back(min / conf.rw_nr);
+    lat_data_[name].push_back(p5 / conf.rw_nr);
+    lat_data_[name].push_back(p9 / conf.rw_nr);
+    lat_data_[name].push_back(p99 / conf.rw_nr);
 }
 
 void bench_alloc_thread_coro_master(Patronus::pointer patronus,
@@ -300,8 +351,6 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     bool is_master,
                                     const BenchConfig &conf)
 {
-    // TODO: handle latency
-    std::ignore = lat_m;
     auto nid = patronus->get_node_id();
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
@@ -352,7 +401,14 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             << "** With reinit_qp flag, only one coroutine is allowed. They "
                "are sharing the same QP.";
     }
-    size_t flag_on = conf.use_mr + conf.modify_qp_flag + conf.reinit_qp;
+    if (conf.use_msg)
+    {
+        acquire_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+        rel_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+        rw_flag = (flag_t) RWFlag::kUseUniversalRkey;
+    }
+    size_t flag_on =
+        conf.use_mr + conf.modify_qp_flag + conf.reinit_qp + conf.use_msg;
     CHECK_LE(flag_on, 1) << "at most one flag is on";
     while (coro_comm.thread_remain_task > 0)
     {
@@ -386,10 +442,27 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             CHECK_EQ(ec, kOk);
         }
 
-        // auto ec = patronus->read(
-        //     lease, rdma_buf.buffer, alloc_size, 0 /* offset */, rw_flag,
-        //     &ctx);
-        // CHECK_EQ(ec, kOk);
+        for (size_t i = 0; i < conf.rw_nr; ++i)
+        {
+            if (conf.use_msg)
+            {
+                auto ec = patronus->rpc_read(
+                    lease, rdma_buf.buffer, alloc_size, 0 /* offset */, &ctx);
+                CHECK_EQ(ec, kOk) << "rpc_read failed at " << i << "/"
+                                  << conf.rw_nr << " try";
+            }
+            else
+            {
+                auto ec = patronus->read(lease,
+                                         rdma_buf.buffer,
+                                         alloc_size,
+                                         0 /* offset */,
+                                         rw_flag,
+                                         &ctx);
+                CHECK_EQ(ec, kOk)
+                    << "read failed at " << i << "/" << conf.rw_nr << " try.";
+            }
+        }
 
         patronus->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
 
@@ -403,6 +476,10 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         {
             auto ec = patronus->signal_reinit_qp(server_nid, dir_id, &ctx);
             CHECK_EQ(ec, kOk);
+        }
+        if (is_master && coro_id == 0)
+        {
+            lat_m.collect(op_timer.pin());
         }
 
         coro_comm.thread_remain_task--;
@@ -501,16 +578,11 @@ void bench_template(Patronus::pointer patronus,
     auto total_ns = timer.pin();
     if (is_master && report)
     {
-        // reg_result(conf.name,
-        //            conf.task_nr,
-        //            total_ns,
-        //            conf.block_size,
-        //            conf.thread_nr,
-        //            conf.coro_nr,
-        //            conf.acquire_ns,
-        //            conf.extend_nr);
         reg_result(conf, total_ns);
-        reg_latency(conf.name, lat_m);
+        if (conf.should_report_lat())
+        {
+            reg_latency(conf.name, lat_m, conf);
+        }
     }
     bar.wait();
 }
@@ -590,21 +662,56 @@ void benchmark(Patronus::pointer patronus,
 {
     bar.wait();
 
-    constexpr static size_t kBlockSize = 64;
+    constexpr static size_t kBlockSize = 32;
+    constexpr static size_t kIONr = 8;
 
     size_t key = 0;
     // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+    for (size_t thread_nr : {32})
+    {
+        auto total_test_times =
+            kTestTimePerThread * std::min(thread_nr, (size_t) 4);
+        {
+            auto configs = BenchConfigFactory::get_mw("mw",
+                                                      thread_nr,
+                                                      1 /* coro_nr */,
+                                                      kBlockSize,
+                                                      total_test_times,
+                                                      kIONr);
+            run_benchmark(patronus, configs, bar, is_client, is_master, key);
+        }
+    }
+
+    // for (size_t coro_nr : {2, 4, 8, 16, 32})
+    // {
+    //     auto total_test_times = kTestTimePerThread * 4;
+    //     {
+    //         auto configs = BenchConfigFactory::get_mw("mw",
+    //                                                   32 /* thread_nr */,
+    //                                                   coro_nr,
+    //                                                   kBlockSize,
+    //                                                   total_test_times,
+    //                                                   kIONr);
+    //         run_benchmark(patronus, configs, bar, is_client, is_master, key);
+    //     }
+    // }
+
+    // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+    for (size_t thread_nr : {32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         for (size_t coro_nr : {1})
-        // for (size_t coro_nr : {1, 2, 4, 8, 16, 32})
         {
             auto total_test_times =
                 kTestTimePerThread * std::min(thread_nr, (size_t) 4);
             {
-                auto configs = BenchConfigFactory::get_mw(
-                    "mw", thread_nr, coro_nr, kBlockSize, total_test_times);
+                auto configs =
+                    BenchConfigFactory::get_msg_base("two-sided",
+                                                     thread_nr,
+                                                     coro_nr,
+                                                     kBlockSize,
+                                                     total_test_times,
+                                                     kIONr);
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
@@ -614,7 +721,8 @@ void benchmark(Patronus::pointer patronus,
                                                thread_nr,
                                                coro_nr,
                                                kBlockSize,
-                                               total_test_times * 0.1);
+                                               total_test_times * 0.1,
+                                               kIONr);
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
@@ -624,7 +732,8 @@ void benchmark(Patronus::pointer patronus,
                                                     thread_nr,
                                                     coro_nr,
                                                     kBlockSize,
-                                                    total_test_times * 0.1);
+                                                    total_test_times * 0.05,
+                                                    kIONr);
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
@@ -634,36 +743,27 @@ void benchmark(Patronus::pointer patronus,
                                                      thread_nr,
                                                      coro_nr,
                                                      kBlockSize,
-                                                     total_test_times * 0.01);
+                                                     total_test_times * 0.005,
+                                                     kIONr);
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
         }
     }
 
-    for (size_t thread_nr : {32})
-    {
-        CHECK_LE(thread_nr, kMaxAppThread);
-        for (size_t coro_nr : {2, 4, 8, 16, 32})
-        // for (size_t coro_nr : {32})
-        {
-            auto total_test_times = kTestTimePerThread * 4;
-            {
-                auto configs = BenchConfigFactory::get_mw(
-                    "mw", thread_nr, coro_nr, kBlockSize, total_test_times);
-                run_benchmark(
-                    patronus, configs, bar, is_client, is_master, key);
-            }
-            {
-                auto configs = BenchConfigFactory::get_mr(
-                    "mr", thread_nr, coro_nr, kBlockSize, total_test_times);
-                run_benchmark(
-                    patronus, configs, bar, is_client, is_master, key);
-            }
-            // QP state, flag does not support multiple clients sharing the same
-            // QP
-        }
-    }
+    // for (size_t coro_nr : {2, 4, 8, 16, 32})
+    // {
+    //     auto total_test_times = kTestTimePerThread * 4;
+    //     {
+    //         auto configs = BenchConfigFactory::get_mr("mr",
+    //                                                   32 /* thread_nr */,
+    //                                                   coro_nr,
+    //                                                   kBlockSize,
+    //                                                   total_test_times * 0.1,
+    //                                                   kIONr);
+    //         run_benchmark(patronus, configs, bar, is_client, is_master, key);
+    //     }
+    // }
 
     bar.wait();
 }
@@ -737,12 +837,12 @@ int main(int argc, char *argv[])
     {
         StrDataFrame df;
         df.load_index(std::move(col_idx));
-        df.load_column<size_t>("x_alloc_size", std::move(col_x_alloc_size));
+        df.load_column<size_t>("x_op_size", std::move(col_x_alloc_size));
+        df.load_column<size_t>("x_rw_nr_per_task", std::move(col_x_rw_nr));
         df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
         df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
-        df.load_column<size_t>("x_extend_nr", std::move(col_x_extend_nr));
-        df.load_column<size_t>("alloc_nr(total)", std::move(col_alloc_nr));
-        df.load_column<size_t>("alloc_ns(total)", std::move(col_alloc_ns));
+        df.load_column<size_t>("task_nr(total)", std::move(col_alloc_nr));
+        df.load_column<size_t>("task_ns(total)", std::move(col_alloc_ns));
 
         auto div_f = gen_F_div<size_t, size_t, double>();
         auto div_f2 = gen_F_div<double, size_t, double>();
@@ -760,21 +860,27 @@ int main(int argc, char *argv[])
         df.replace<size_t>("x_effective_client_nr", replace_mul_f_size);
 
         df.consolidate<size_t, size_t, double>(
-            "alloc_ns(total)", "alloc_nr(total)", "alloc lat", div_f, false);
-        df.consolidate<size_t, size_t, double>("alloc_nr(total)",
-                                               "alloc_ns(total)",
-                                               "alloc ops(total)",
+            "task_ns(total)", "task_nr(total)", "task lat", div_f, false);
+        df.consolidate<size_t, size_t, double>("task_nr(total)",
+                                               "task_ns(total)",
+                                               "task ops(total)",
                                                ops_f,
                                                false);
-        df.consolidate<double, size_t, double>("alloc ops(total)",
+        df.consolidate<double, size_t, double>("task ops(total)",
                                                "x_thread_nr",
-                                               "alloc ops(thread)",
+                                               "task ops(thread)",
                                                div_f2,
                                                false);
 
-        df.load_column<double>("alloc ops(cluster)",
-                               df.get_column<double>("alloc ops(total)"));
-        df.replace<double>("alloc ops(cluster)", replace_mul_f);
+        df.load_column<double>("task ops(cluster)",
+                               df.get_column<double>("task ops(total)"));
+        df.replace<double>("task ops(cluster)", replace_mul_f);
+
+        df.consolidate<double, size_t, double>("task ops(cluster)",
+                                               "x_rw_nr_per_task",
+                                               "task ops(effective)",
+                                               mul_f,
+                                               false);
 
         auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
         df.write<std::ostream, std::string, size_t, double>(std::cout,
@@ -783,23 +889,22 @@ int main(int argc, char *argv[])
                                               io_format::csv2);
     }
 
-    // {
-    //     StrDataFrame df;
-    //     df.load_index(std::move(col_lat_idx));
-    //     for (auto &[name, vec] : lat_data_)
-    //     {
-    //         df.load_column<uint64_t>(name.c_str(), std::move(vec));
-    //     }
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_lat_idx));
+        for (auto &[name, vec] : lat_data_)
+        {
+            df.load_column<uint64_t>(name.c_str(), std::move(vec));
+        }
 
-    //     std::map<std::string, std::string> info;
-    //     info.emplace("kind", "lat");
-    //     auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta,
-    //     info); df.write<std::ostream, std::string, size_t,
-    //     double>(std::cout,
-    //                                                         io_format::csv2);
-    //     df.write<std::string, size_t, double>(filename.c_str(),
-    //                                           io_format::csv2);
-    // }
+        std::map<std::string, std::string> info;
+        info.emplace("kind", "lat");
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
+    }
 
     patronus->keeper_barrier("finished", 100ms);
     LOG(INFO) << "Exiting...";

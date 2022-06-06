@@ -1889,6 +1889,8 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
 
     if (unlikely(!msg->validate()))
     {
+        CHECK(false) << "** msg invalid. msg: " << msg
+                     << ". possible size too large.";
         return RetCode::kInvalid;
     }
     if (rwcas == MemoryRequestFlag::kWrite)
