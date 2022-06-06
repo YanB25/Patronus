@@ -663,7 +663,7 @@ void benchmark(Patronus::pointer patronus,
     bar.wait();
 
     constexpr static size_t kBlockSize = 32;
-    constexpr static size_t kIONr = 8;
+    constexpr static size_t kIONr = 16;
 
     size_t key = 0;
     // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
