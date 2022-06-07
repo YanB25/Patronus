@@ -388,6 +388,39 @@ public:
 
         return ec;
     }
+    RetCode rdma_faa(GlobalAddress vaddr,
+                     int64_t value,
+                     void *rdma_buf,
+                     RemoteMemHandle &handle) override
+    {
+        CHECK(handle.valid());
+        if constexpr (::config::kEnableRdmaTrace)
+        {
+            if (trace_enabled())
+            {
+                rdma_trace_record_.cas_nr++;
+                rdma_trace_record_.indv_one_sided++;
+            }
+        }
+        auto gaddr = vaddr_to_gaddr(vaddr);
+        auto &lease = *(Lease *) handle.private_data();
+        CHECK_GE(gaddr.offset, handle.gaddr().offset);
+        auto offset = gaddr.offset - handle.gaddr().offset;
+        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        if (bypass_prot_)
+        {
+            flag |= (flag_t) RWFlag::kUseUniversalRkey;
+        }
+        auto rc = patronus_->prepare_faa(
+            batch_, lease, (char *) rdma_buf, offset, value, flag, coro_ctx_);
+        if (unlikely(rc == kNoMem))
+        {
+            CHECK_EQ(patronus_->commit(batch_, coro_ctx_), kOk);
+            DCHECK(batch_.empty());
+            return rdma_faa(vaddr, value, rdma_buf, handle);
+        }
+        return rc;
+    }
     RetCode rdma_cas(GlobalAddress vaddr,
                      uint64_t expect,
                      uint64_t desired,

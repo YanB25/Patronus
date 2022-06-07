@@ -119,6 +119,39 @@ public:
         idx_++;
         return kOk;
     }
+    RetCode prepare_faa(ibv_qp *qp,
+                        uint32_t node_id,
+                        uint32_t dir_id,
+                        uint64_t dest,
+                        uint64_t source,
+                        int64_t value,
+                        uint32_t lkey,
+                        uint32_t rkey,
+                        CoroContext *ctx)
+    {
+        std::ignore = ctx;
+        if (unlikely(idx_ >= kMaxOp))
+        {
+            return kNoMem;
+        }
+
+        fill_meta(qp, node_id, dir_id);
+
+        auto &sge = sges_[idx_];
+        auto &wr = send_wrs_[idx_];
+        fillSgeWr(sge, wr, source, 8, lkey);
+        wr.opcode = IBV_WR_ATOMIC_FETCH_AND_ADD;
+        wr.send_flags = 0;
+        wr.wr.atomic.remote_addr = dest;
+        wr.wr.atomic.rkey = rkey;
+        wr.wr.atomic.compare_add = value;
+
+        DCHECK_EQ((uint64_t) dest % 8, 0)
+            << "** CAS addr should be 8-byte aligned. got " << (void *) dest;
+
+        idx_++;
+        return kOk;
+    }
     RetCode prepare_cas(ibv_qp *qp,
                         uint32_t node_id,
                         uint32_t dir_id,

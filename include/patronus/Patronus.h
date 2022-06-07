@@ -273,6 +273,13 @@ public:
                         uint64_t swap,
                         flag_t flag,
                         CoroContext *ctx = nullptr);
+    RetCode prepare_faa(PatronusBatchContext &batch,
+                        Lease &lease,
+                        char *iobuf,
+                        size_t offset,
+                        int64_t value,
+                        flag_t flag,
+                        CoroContext *ctx = nullptr);
     RetCode commit(PatronusBatchContext &batch, CoroContext *ctx = nullptr);
     auto patronus_now() const
     {

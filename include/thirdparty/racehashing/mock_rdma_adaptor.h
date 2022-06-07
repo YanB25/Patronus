@@ -24,9 +24,9 @@ struct MockRdmaOp
 {
     void *remote;
     void *buffer;
-    int op;  // 0 for read, 1 for write, 2 for cas
+    int op;  // 0 for read, 1 for write, 2 for cas, 3 for faa
     size_t size;
-    uint64_t expect;
+    uint64_t expect;  // or add for faa
     uint64_t desired;
 };
 inline std::ostream &operator<<(std::ostream &os, const MockRdmaOp &op)
@@ -245,6 +245,24 @@ public:
 
         return kOk;
     }
+    RetCode rdma_faa(GlobalAddress gaddr,
+                     int64_t value,
+                     void *rdma_buf,
+                     RemoteMemHandle &handle) override
+    {
+        auto *addr = from_exposed_gaddr(gaddr);
+        MockRdmaOp op;
+        op.op = 3;
+        op.remote = addr;
+        op.buffer = (char *) rdma_buf;
+        op.expect = value;
+        op.size = 8;
+        ops_.emplace_back(std::move(op));
+
+        debug_validate_handle(handle, gaddr, 8);
+
+        return kOk;
+    }
     RetCode rdma_cas(GlobalAddress gaddr,
                      uint64_t expect,
                      uint64_t desired,
@@ -325,6 +343,15 @@ public:
                 atm.compare_exchange_strong(expect, op.desired);
                 DCHECK_EQ(op.size, 8);
                 memcpy(op.buffer, (char *) &expect, op.size);
+            }
+            else if (op.op == 3)
+            {
+                int64_t value = op.expect;
+                std::atomic<uint64_t> &atm =
+                    *(std::atomic<uint64_t> *) op.remote;
+                auto old = atm.fetch_add(value);
+                DCHECK_EQ(op.size, 8);
+                memcpy(op.buffer, (char *) &old, op.size);
             }
             else
             {

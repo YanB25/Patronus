@@ -140,6 +140,10 @@ public:
                              uint64_t desired,
                              void *rdma_buf,
                              RemoteMemHandle &) = 0;
+    virtual RetCode rdma_faa(GlobalAddress gaddr,
+                             int64_t value,
+                             void *rdma_buf,
+                             RemoteMemHandle &) = 0;
     virtual RetCode commit() = 0;
     virtual RetCode put_all_rdma_buffer() = 0;
     /**

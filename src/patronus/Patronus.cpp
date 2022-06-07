@@ -3193,6 +3193,47 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
         qp, node_id, dir_id, source, dest, size, lkey, rkey, ctx);
 }
 
+RetCode Patronus::prepare_faa(PatronusBatchContext &batch,
+                              Lease &lease,
+                              char *iobuf,
+                              size_t offset,
+                              int64_t value,
+                              flag_t flag,
+                              CoroContext *ctx)
+{
+    auto ec = handle_batch_op_flag(flag);
+    if (unlikely(ec != RetCode::kOk))
+    {
+        return ec;
+    }
+    CHECK(lease.success());
+    CHECK(lease.is_writable());
+
+    auto node_id = lease.node_id_;
+    auto dir_id = lease.dir_id_;
+    uint32_t rkey = 0;
+    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        rkey = dsm_->get_rkey(node_id, dir_id);
+    }
+    else
+    {
+        rkey = lease.cur_rkey_;
+    }
+    uint64_t remote_addr = lease.base_addr_ + offset;
+
+    GlobalAddress gaddr;
+    gaddr.nodeID = node_id;
+    gaddr.offset = remote_addr;
+    uint64_t source = (uint64_t) iobuf;
+    uint64_t dest = dsm_->gaddr_to_addr(gaddr);
+    uint32_t lkey = dsm_->get_icon_lkey();
+    auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
+    return batch.prepare_faa(
+        qp, node_id, dir_id, dest, source, value, lkey, rkey, ctx);
+}
+
 RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
                               Lease &lease,
                               char *iobuf,
