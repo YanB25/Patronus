@@ -385,15 +385,15 @@ void test_basic_client_worker(
                     rc = prhh->get(key, got_value);
                 }
 
-                if (rc == RetCode::kOk)
+                if (rc == RC::kOk)
                 {
                     succ_nr++;
                 }
-                else if (rc == RetCode::kNotFound)
+                else if (rc == RC::kNotFound)
                 {
                     miss_nr++;
                 }
-                else if (rc == RetCode::kRetry)
+                else if (rc == RC::kRetry)
                 {
                     retry_nr++;
                 }

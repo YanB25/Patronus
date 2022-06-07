@@ -304,7 +304,7 @@ public:
 
         return ret;
     }
-    RetCode put_all_rdma_buffer() override
+    void put_all_rdma_buffer() override
     {
         for (auto buf : ongoing_rdma_bufs_)
         {
@@ -312,7 +312,6 @@ public:
         }
         ongoing_rdma_bufs_.clear();
         DCHECK_GE(ongoing_rdma_bufs_.capacity(), kMaxOngoingRdmaBuf);
-        return kOk;
     }
     RetCode rdma_read(void *rdma_buf,
                       GlobalAddress vaddr,

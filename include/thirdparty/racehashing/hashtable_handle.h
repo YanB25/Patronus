@@ -689,7 +689,7 @@ public:
                 DCHECK(!ret_slot.ptr().is_null());
                 dst_st_handle.del_slot(ret_slot, *rdma_adpt_);
             }
-            CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+            rdma_adpt_->put_all_rdma_buffer();
         }
 
         return kOk;
@@ -734,7 +734,7 @@ public:
             conf_.expand.mock_crash_nr--;
             if (dctx)
             {
-                dctx->set_private((void *) RetCode::kMockCrashed);
+                dctx->set_private((void *) RC::kMockCrashed);
             }
             return kRetry;
         }
@@ -789,7 +789,7 @@ public:
             maybe_drop_trace();
             return kNoMem;
         }
-        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 2) Expand the directory first
@@ -870,7 +870,7 @@ public:
                          << ". depth: " << depth
                          << ", (1<<depth): " << (1 << depth);
         }
-        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 3) allocate subtable here
@@ -891,7 +891,7 @@ public:
             << "[race][expand] (3) expanding subtable[" << subtable_idx
             << "] to next subtable[" << next_subtable_idx << "]. Allocated "
             << alloc_size << " at " << new_remote_subtable;
-        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 4) init subtable: setup the bucket header
@@ -911,7 +911,7 @@ public:
         CHECK_EQ(rc, kOk);
         cached_meta_.lds[next_subtable_idx] = ld;
 
-        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 5) insert the subtable into the directory AND lock the subtable.
@@ -956,7 +956,7 @@ public:
         cached_meta_.lds[subtable_idx] = ld;
         cached_meta_.lds[next_subtable_idx] = ld;
 
-        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 6) move data.
@@ -976,7 +976,7 @@ public:
                  kOk);
         cached_meta_.lds[subtable_idx] = ld;
 
-        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
         // Before 6.1) Iterate all the entries in @entries_, check for any
         // recursive updates to the entries.
@@ -1000,7 +1000,7 @@ public:
                      dir_mem_handle,
                      dctx),
                  kOk);
-        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 6.3) insert all items from the old bucket to the new
@@ -1022,7 +1022,7 @@ public:
             return rc;
         }
         CHECK_EQ(rc, kOk);
-        CHECK_EQ(rdma_adpt_->put_all_rdma_buffer(), kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
 
         // 7) unlock
@@ -1659,13 +1659,12 @@ public:
                              HashContext *dctx)
     {
         auto &st_mem_handle = get_subtable_mem_handle(subtable_idx);
-        auto f = [&rdma_adpt = *rdma_adpt_.get(),
-                  &st_mem_handle,
-                  new_slot,
-                  this](const Key &key,
-                        SlotHandle slot_handle,
-                        KVBlockHandle kvblock_handle,
-                        HashContext *dctx) {
+        auto f =
+            [&rdma_adpt = *rdma_adpt_.get(), &st_mem_handle, new_slot, this](
+                const Key &key,
+                SlotHandle slot_handle,
+                KVBlockHandle kvblock_handle,
+                HashContext *dctx) -> RetCode {
             std::ignore = key;
 
             uint64_t expect_val = slot_handle.val();
@@ -2136,8 +2135,7 @@ public:
     void init(HashContext *dctx = nullptr)
     {
         rhh_.init(dctx);
-        auto rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
     }
 
     void hack_trigger_rdma_protection_error()
@@ -2158,8 +2156,7 @@ public:
             << "[race] Deleted key `" << key << "`. "
             << pre_rdma_adaptor(rdma_adpt_);
 
-        auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(gc_rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
 
         maybe_end_trace(rc);
         return rc;
@@ -2173,8 +2170,7 @@ public:
             << "[race] Put key `" << key << "`. "
             << pre_rdma_adaptor(rdma_adpt_);
 
-        auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(gc_rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
 
         maybe_end_trace(rc);
         return rc;
@@ -2187,8 +2183,7 @@ public:
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Get key `" << key << "`. "
             << pre_rdma_adaptor(rdma_adpt_);
-        auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(gc_rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
 
         maybe_end_trace(rc);
         return rc;
@@ -2202,8 +2197,7 @@ public:
             << "[race] expand subtable[" << subtable_idx << "] "
             << pre_rdma_adaptor(rdma_adpt_);
 
-        auto gc_rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(gc_rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
 
         maybe_end_trace(rc);
         return rc;

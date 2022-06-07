@@ -4,7 +4,9 @@
 
 #include <iostream>
 
-enum RetCode
+#include "glog/logging.h"
+
+enum RC
 {
     kOk,
     kNotFound,
@@ -16,8 +18,9 @@ enum RetCode
     kRdmaExecutionErr,
     kLeaseLocalExpiredErr,
     kMockCrashed,
+    kReserved,
 };
-inline std::ostream &operator<<(std::ostream &os, RetCode rc)
+inline std::ostream &operator<<(std::ostream &os, RC rc)
 {
     switch (rc)
     {
@@ -51,9 +54,46 @@ inline std::ostream &operator<<(std::ostream &os, RetCode rc)
     case kMockCrashed:
         os << "kMockCrashed";
         break;
+    case kReserved:
+        os << "kReserved";
+        break;
     default:
         LOG(FATAL) << "Unknown return code " << (int) rc;
     }
+    return os;
+}
+
+class RetCode
+{
+public:
+    RetCode() : rc_(RC::kReserved)
+    {
+    }
+    RetCode(RC rc) : rc_(rc)
+    {
+    }
+    bool operator==(RC rc) const
+    {
+        return rc_ == rc;
+    }
+    bool operator!=(RC rc) const
+    {
+        return rc_ != rc;
+    }
+    void expect(RC expect_rc)
+    {
+        CHECK_EQ(rc_, expect_rc);
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const RetCode &rc);
+
+private:
+    RC rc_;
+};
+
+inline std::ostream &operator<<(std::ostream &os, const RetCode &rc)
+{
+    os << rc.rc_;
     return os;
 }
 

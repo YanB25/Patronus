@@ -99,7 +99,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /*offset*/,
                               (flag_t) RWFlag::kWithAutoExtend,
                               &ctx);
-            if (ec == RetCode::kOk)
+            if (ec == RC::kOk)
             {
                 read_loop_succ_cnt++;
             }

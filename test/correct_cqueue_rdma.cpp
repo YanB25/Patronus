@@ -291,7 +291,7 @@ void test_basic_client_worker(
             }
             else
             {
-                CHECK_EQ(rc, RetCode::kNotFound);
+                CHECK_EQ(rc, RC::kNotFound);
                 get_nomem_nr++;
             }
         }
@@ -306,7 +306,7 @@ void test_basic_client_worker(
             }
             else
             {
-                CHECK_EQ(rc, RetCode::kNoMem);
+                CHECK_EQ(rc, RC::kNoMem);
                 put_nomem_nr++;
             }
         }

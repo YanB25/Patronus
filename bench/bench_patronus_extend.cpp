@@ -335,13 +335,13 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             {
                 auto rc = patronus->rpc_extend(
                     lease, conf.extend_ns, conf.extend_flag, &ctx);
-                CHECK_EQ(rc, RetCode::kOk);
+                CHECK_EQ(rc, RC::kOk);
             }
             else
             {
                 auto rc = patronus->extend(
                     lease, conf.extend_ns, conf.extend_flag, &ctx);
-                CHECK_EQ(rc, RetCode::kOk)
+                CHECK_EQ(rc, RC::kOk)
                     << "** extended failed at " << i << " attempt.";
             }
         }

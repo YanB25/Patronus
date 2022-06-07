@@ -75,7 +75,7 @@ struct RpcContext
     BaseMessage *request{nullptr};
     std::atomic<bool> ready{false};
     size_t dir_id{0};
-    RetCode ret_code{RetCode::kOk};
+    RetCode ret_code{RC::kOk};
     char *buffer_addr{nullptr};  // for rpc_{read|write|cas}
 };
 
@@ -1196,7 +1196,7 @@ RetCode Patronus::extend_impl(Lease &lease,
     auto cas_ec = protection_region_cas_impl(
         lease, rdma_buffer.buffer, offset, compare, swap, ctx);
 
-    if (likely(cas_ec == RetCode::kOk))
+    if (likely(cas_ec == RC::kOk))
     {
         lease.aba_unit_nr_to_ddl_.u32_2 += extend_unit_nr;
         lease.update_ddl_term();
@@ -1217,7 +1217,7 @@ RetCode Patronus::rpc_extend(Lease &lease,
     auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(chrono_ns).count();
     auto rc = rpc_extend_impl(lease, ns, flag, ctx);
-    if (rc != RetCode::kOk)
+    if (rc != RC::kOk)
     {
         return rc;
     }
@@ -1229,7 +1229,7 @@ RetCode Patronus::rpc_extend(Lease &lease,
     lease.aba_unit_nr_to_ddl_.u32_2 += extend_unit_nr;
     lease.update_ddl_term();
 
-    DCHECK_EQ(rc, RetCode::kOk);
+    DCHECK_EQ(rc, RC::kOk);
     return rc;
 }
 
@@ -1264,7 +1264,7 @@ RetCode Patronus::extend(Lease &lease,
     //              << time::TimeSyncer::kCommunicationLatencyNs
     //              << "). coro: " << (ctx ? *ctx : nullctx)
     //              << ". Now lease: " << lease;
-    //     return RetCode::kLeaseLocalExpiredErr;
+    //     return RC::kLeaseLocalExpiredErr;
     // }
 
     return extend_impl(lease, extend_unit_nr, flag, ctx);
@@ -1296,7 +1296,7 @@ void Patronus::dealloc(GlobalAddress gaddr,
                 (flag_t) LeaseModifyFlag::kOnlyDeallocation;
     auto ret = lease_modify_impl(
         lease, hint, RpcType::kRelinquishReq, 0 /* term */, flag, ctx);
-    DCHECK_EQ(ret, RetCode::kOk);
+    DCHECK_EQ(ret, RC::kOk);
 }
 void Patronus::relinquish(Lease &lease,
                           uint64_t hint,
@@ -1310,7 +1310,7 @@ void Patronus::relinquish(Lease &lease,
     // TODO(Patronus): the term is set to 0 here.
     auto rc = lease_modify_impl(
         lease, hint, RpcType::kRelinquishReq, 0 /* term */, flag, ctx);
-    DCHECK_EQ(rc, RetCode::kOk);
+    DCHECK_EQ(rc, RC::kOk);
 
     lease.set_invalid();
 }
@@ -1320,8 +1320,8 @@ RetCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)
     auto lease_patronus_ddl = lease.ddl_term();
     auto patronus_now = DCHECK_NOTNULL(time_syncer_)->patronus_now();
     auto ret = time_syncer_->definitely_lt(patronus_now, lease_patronus_ddl)
-                   ? RetCode::kOk
-                   : RetCode::kLeaseLocalExpiredErr;
+                   ? RC::kOk
+                   : RC::kLeaseLocalExpiredErr;
     DVLOG(5) << "[patronus][validate_lease] patronus_now: " << patronus_now
              << ", ddl: " << lease_patronus_ddl << ", ret: " << ret;
     return ret;
@@ -1329,7 +1329,7 @@ RetCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)
 
 RetCode Patronus::handle_rwcas_flag(Lease &lease, flag_t flag, CoroContext *ctx)
 {
-    RetCode ec = RetCode::kOk;
+    RetCode ec = RC::kOk;
 
     bool no_check;
     if (lease.no_gc_)
@@ -1344,7 +1344,7 @@ RetCode Patronus::handle_rwcas_flag(Lease &lease, flag_t flag, CoroContext *ctx)
 
     if (likely(!no_check))
     {
-        if ((ec = validate_lease(lease)) != RetCode::kOk)
+        if ((ec = validate_lease(lease)) != RC::kOk)
         {
             return ec;
         }
@@ -1356,7 +1356,7 @@ RetCode Patronus::handle_rwcas_flag(Lease &lease, flag_t flag, CoroContext *ctx)
     }
     bool reserved = flag & (flag_t) RWFlag::kReserved;
     DCHECK(!reserved);
-    return RetCode::kOk;
+    return RC::kOk;
 }
 
 RetCode Patronus::read(Lease &lease,
@@ -1367,8 +1367,8 @@ RetCode Patronus::read(Lease &lease,
                        CoroContext *ctx,
                        TraceView v)
 {
-    RetCode ec = RetCode::kOk;
-    if ((ec = handle_rwcas_flag(lease, flag, ctx)) != RetCode::kOk)
+    RetCode ec = RC::kOk;
+    if ((ec = handle_rwcas_flag(lease, flag, ctx)) != RC::kOk)
     {
         return ec;
     }
@@ -1379,7 +1379,7 @@ RetCode Patronus::read(Lease &lease,
         if (lease.cache_query(offset, size, obuf))
         {
             // cache hit
-            return RetCode::kOk;
+            return RC::kOk;
         }
     }
 
@@ -1421,7 +1421,7 @@ RetCode Patronus::write(Lease &lease,
                         TraceView v)
 {
     auto ec = handle_rwcas_flag(lease, flag, ctx);
-    if (unlikely(ec != RetCode::kOk))
+    if (unlikely(ec != RC::kOk))
     {
         return ec;
     }
@@ -1451,7 +1451,7 @@ RetCode Patronus::write(Lease &lease,
                          v);
 
     bool with_cache = flag & (flag_t) RWFlag::kWithCache;
-    if (ec == RetCode::kOk && with_cache)
+    if (ec == RC::kOk && with_cache)
     {
         lease.cache_insert(offset, size, ibuf);
     }
@@ -1469,7 +1469,7 @@ RetCode Patronus::cas(Lease &lease,
                       TraceView v)
 {
     auto ec = handle_rwcas_flag(lease, flag, ctx);
-    if (unlikely(ec != RetCode::kOk))
+    if (unlikely(ec != RC::kOk))
     {
         return ec;
     }
@@ -1499,7 +1499,7 @@ RetCode Patronus::cas(Lease &lease,
                   v);
 
     bool with_cache = flag & (flag_t) RWFlag::kWithCache;
-    if (ec == RetCode::kOk && with_cache)
+    if (ec == RC::kOk && with_cache)
     {
         DCHECK_GE(sizeof(swap), 8);
         lease.cache_insert(offset, 8 /* size */, (const char *) swap);
@@ -1710,7 +1710,7 @@ RetCode Patronus::admin_request_impl(size_t node_id,
     DCHECK_LT(get_thread_id(), kMaxAppThread);
     DCHECK_LT(dir_id, NR_DIRECTORY);
 
-    RetCode ret = RetCode::kOk;
+    RetCode ret = RC::kOk;
     char *rdma_buf = get_rdma_message_buffer();
     RpcContext *rpc_context = nullptr;
 
@@ -1733,7 +1733,7 @@ RetCode Patronus::admin_request_impl(size_t node_id,
 
         rpc_context->ready = false;
         rpc_context->request = (BaseMessage *) msg;
-        rpc_context->ret_code = RetCode::kOk;
+        rpc_context->ret_code = RC::kOk;
     }
 
     if constexpr (debug())
@@ -1794,7 +1794,7 @@ RetCode Patronus::signal_reinit_qp(size_t node_id,
                                  flag,
                                  true /* need response */,
                                  DCHECK_NOTNULL(ctx));
-    CHECK_EQ(ec, RetCode::kOk);
+    CHECK_EQ(ec, RC::kOk);
 
     CHECK(dsm_->recoverThreadQP(node_id, dir_id));
     return kOk;
@@ -1813,7 +1813,7 @@ void Patronus::handle_response_admin_qp_modification(AdminResponse *resp,
     }
     else
     {
-        rpc_context->ret_code = RetCode::kRdmaExecutionErr;
+        rpc_context->ret_code = RC::kRdmaExecutionErr;
     }
     rpc_context->ready.store(true, std::memory_order_release);
 }
@@ -1891,14 +1891,14 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
 
     rpc_context->ready = false;
     rpc_context->request = (BaseMessage *) msg;
-    rpc_context->ret_code = RetCode::kOk;
+    rpc_context->ret_code = RC::kOk;
     rpc_context->buffer_addr = iobuf;
 
     if (unlikely(!msg->validate()))
     {
         CHECK(false) << "** msg invalid. msg: " << msg
                      << ". possible size too large.";
-        return RetCode::kInvalid;
+        return RC::kInvalid;
     }
     if (rwcas == MemoryRequestFlag::kWrite)
     {

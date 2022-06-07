@@ -113,7 +113,7 @@ void client_worker(Patronus::pointer p,
                           r_flag /* flag */,
                           &ctx);
         auto lease_ddl = lease.ddl_term();
-        CHECK_EQ(ec, RetCode::kOk)
+        CHECK_EQ(ec, RC::kOk)
             << "[bench] client coro " << ctx
             << " read FAILED. This should not happen, because we "
                "filter out the invalid mws. failed at "

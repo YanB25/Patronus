@@ -209,12 +209,12 @@ public:
             PLOG(ERROR) << "[patronus][batch] commit: failed to "
                            "ibv_post_send. bad_wr: wr_id: "
                         << WRID(bad_wr_->wr_id) << ", ret: " << ret;
-            return RetCode::kRdmaExecutionErr;
+            return RC::kRdmaExecutionErr;
         }
         CHECK_NOTNULL(ctx)->yield_to_master();
 
         clear();
-        return RetCode::kOk;
+        return RC::kOk;
     }
     dir_t dir_id() const
     {

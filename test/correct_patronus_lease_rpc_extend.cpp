@@ -104,8 +104,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         auto rc =
             p->rpc_extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
-        CHECK_EQ(rc, RetCode::kOk)
-            << "** Failed to rpc_extend lease. rc: " << rc;
+        CHECK_EQ(rc, RC::kOk) << "** Failed to rpc_extend lease. rc: " << rc;
 
         auto before_read_loop = std::chrono::steady_clock::now();
         size_t read_loop_succ_cnt = 0;
@@ -117,7 +116,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /*offset*/,
                               0 /* flag */,
                               &ctx);
-            if (ec == RetCode::kOk)
+            if (ec == RC::kOk)
             {
                 read_loop_succ_cnt++;
             }
@@ -138,7 +137,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         // this extension after expiration should fail
         rc = p->rpc_extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
-        CHECK_EQ(rc, RetCode::kInvalid);
+        CHECK_EQ(rc, RC::kInvalid);
 
         // make sure this will take no harm.
         p->relinquish(lease, 0, 0, &ctx);

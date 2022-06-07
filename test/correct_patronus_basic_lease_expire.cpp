@@ -114,7 +114,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /* offset */,
                               0 /* flag */,
                               &ctx);
-            if (ec != RetCode::kOk)
+            if (ec != RC::kOk)
             {
                 auto patronus_now = syncer.patronus_now();
                 time::ns_t ns_diff = lease.ddl_term() - patronus_now;
@@ -124,7 +124,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                 }
                 else
                 {
-                    CHECK_EQ(ec, RetCode::kOk)
+                    CHECK_EQ(ec, RC::kOk)
                         << "[bench] " << i << "-th, read " << t
                         << "-th failed. lease until DDL: " << ns_diff
                         << ", patronus_now: " << patronus_now;
@@ -157,7 +157,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           (flag_t) RWFlag::kNoLocalExpireCheck,
                           &ctx);
 
-        if (ec == RetCode::kOk)
+        if (ec == RC::kOk)
         {
             fail_to_unbind_m.collect(1);
         }

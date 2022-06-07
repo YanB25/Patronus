@@ -85,15 +85,13 @@ public:
     {
         auto &meta_handle = get_meta_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
-        auto rc = rdma_adpt_->rdma_read(
-            rdma_buf.buffer, meta_gaddr_, meta_size(), meta_handle);
-        CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->commit();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_
+            ->rdma_read(rdma_buf.buffer, meta_gaddr_, meta_size(), meta_handle)
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
         memcpy(&cached_meta_, rdma_buf.buffer, meta_size());
 
-        rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         cached_inited_ = true;
     }
     Meta cached_meta() const
@@ -140,16 +138,15 @@ private:
     {
         auto &push_lock_handle = get_push_lock_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
-        auto rc = rdma_adpt_->rdma_cas(
-            push_lock_gaddr(), 0, 1, rdma_buf.buffer, push_lock_handle);
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_
+            ->rdma_cas(
+                push_lock_gaddr(), 0, 1, rdma_buf.buffer, push_lock_handle)
+            .expect(RC::kOk);
         uint64_t got = *(uint64_t *) rdma_buf.buffer;
         DCHECK(got == 0 || got == 1)
             << "got invalid lock value: " << got << ". Not 0 or 1.";
-        rc = rdma_adpt_->commit();
-        CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        rdma_adpt_->put_all_rdma_buffer();
 
         if (got == 0)
         {
@@ -166,15 +163,25 @@ private:
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
         *((uint64_t *) rdma_buf.buffer) = 0;
 
-        auto rc = rdma_adpt_->rdma_write(push_lock_gaddr(),
-                                         rdma_buf.buffer,
-                                         sizeof(uint64_t),
-                                         push_lock_handle);
-        CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->commit();
-        CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        if constexpr (debug())
+        {
+            auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
+            rdma_adpt_
+                ->rdma_read(rdma_buf.buffer,
+                            push_lock_gaddr(),
+                            sizeof(uint64_t),
+                            push_lock_handle)
+                .expect(RC::kOk);
+        }
+
+        rdma_adpt_
+            ->rdma_write(push_lock_gaddr(),
+                         rdma_buf.buffer,
+                         sizeof(uint64_t),
+                         push_lock_handle)
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        rdma_adpt_->put_all_rdma_buffer();
     }
     RetCode lock_pop()
     {
@@ -188,8 +195,7 @@ private:
             << "got invalid lock value: " << got << ". Not 0 or 1.";
         rc = rdma_adpt_->commit();
         CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
 
         if (got == 0)
         {
@@ -206,31 +212,28 @@ private:
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
         *((uint64_t *) rdma_buf.buffer) = 0;
 
+        // remove me. just checking
         if constexpr (debug())
         {
-            auto rc = rdma_adpt_->rdma_read(rdma_buf.buffer,
-                                            pop_lock_gaddr(),
-                                            sizeof(uint64_t),
-                                            pop_lock_handle);
-            // CHECK_EQ(rc, kOk);
-            // auto rc = rdma_adpt_->rdma_read(pop_lock_gaddr(),
-            //                                 rdma_buf.buffer,
-            //                                 sizeof(uint64_t),
-            //                                 pop_lock_handle);
-            // CHECK_EQ(rc, kOk);
-            // rc = rdma_adpt_->commit();
-            // TODO: start here
+            rdma_adpt_
+                ->rdma_read(rdma_buf.buffer,
+                            pop_lock_gaddr(),
+                            sizeof(uint64_t),
+                            pop_lock_handle)
+                .expect(RC::kOk);
+            rdma_adpt_->commit().expect(RC::kOk);
+            uint64_t got = *(uint64_t *) rdma_buf.buffer;
+            CHECK_EQ(got, 1) << "** the lock should be taken";
         }
 
-        auto rc = rdma_adpt_->rdma_write(pop_lock_gaddr(),
-                                         rdma_buf.buffer,
-                                         sizeof(uint64_t),
-                                         pop_lock_handle);
-        CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->commit();
-        CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_
+            ->rdma_write(pop_lock_gaddr(),
+                         rdma_buf.buffer,
+                         sizeof(uint64_t),
+                         pop_lock_handle)
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        rdma_adpt_->put_all_rdma_buffer();
     }
 
     GlobalAddress push_lock_gaddr() const

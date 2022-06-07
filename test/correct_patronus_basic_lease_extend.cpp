@@ -103,7 +103,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         ns_till_ddl_m.collect(diff_ns);
 
         auto ec = p->extend(lease, kExpectLeaseAliveTime, 0 /* flag */, &ctx);
-        if (unlikely(ec != RetCode::kOk))
+        if (unlikely(ec != RC::kOk))
         {
             extend_failed_m.collect(1);
             p->relinquish(lease, 0, 0, &ctx);
@@ -126,7 +126,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /*offset*/,
                               0 /* flag */,
                               &ctx);
-            if (ec == RetCode::kOk)
+            if (ec == RC::kOk)
             {
                 read_loop_succ_cnt++;
             }

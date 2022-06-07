@@ -122,7 +122,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               0 /* offset */,
                               //   0 /* flag */,
                               &ctx);
-        if (unlikely(ec != RetCode::kOk))
+        if (unlikely(ec != RC::kOk))
         {
             CHECK(false) << "[bench] client READ failed. lease " << lease
                          << ", ctx: " << ctx << " at " << time

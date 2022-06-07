@@ -93,8 +93,7 @@ public:
             CHECK_EQ(got, client_id_);
         }
 
-        auto rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         return kOk;
     }
 
@@ -109,8 +108,7 @@ public:
         CHECK_EQ(rc, kOk);
         memcpy(&cached_meta_, rdma_buf.buffer, meta_size());
 
-        rc = rdma_adpt_->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->put_all_rdma_buffer();
         cached_inited_ = true;
     }
     Meta cached_meta() const

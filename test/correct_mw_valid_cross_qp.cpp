@@ -113,7 +113,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           0 /* offset */,
                           0 /* flag */,
                           &ctx);
-        if (unlikely(ec != RetCode::kOk))
+        if (unlikely(ec != RC::kOk))
         {
             CHECK(false) << "[bench] client READ failed. lease " << lease
                          << ", ctx: " << ctx << " at " << time
@@ -128,11 +128,11 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                      102400 /* offset */,
                      0 /* flag */,
                      &ctx);
-        CHECK_EQ(ec, RetCode::kRdmaProtectionErr);
+        CHECK_EQ(ec, RC::kRdmaProtectionErr);
 
         LOG(INFO) << "[bench] Doing the second READ after protection error.";
         ec = p->read(lease, rdma_buf.buffer, sizeof(Object), 0, 0, &ctx);
-        CHECK_EQ(ec, RetCode::kOk)
+        CHECK_EQ(ec, RC::kOk)
             << "** expect lease to remain valid across recovery";
 
         auto rel_flag = 0;

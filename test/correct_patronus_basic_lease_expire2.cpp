@@ -122,7 +122,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         memset(rdma_buf.buffer, 0, sizeof(Object));
 
         auto extend_ec = p->extend(lease, kExtendLeasePeriod, 0, &ctx);
-        if (unlikely(extend_ec != RetCode::kOk))
+        if (unlikely(extend_ec != RC::kOk))
         {
             LOG(WARNING) << "[bench] extend failed for key: " << key
                          << ", ec: " << extend_ec << ", lease: " << lease;
@@ -138,7 +138,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         // to make sure that the extend really work!
         std::this_thread::sleep_for(kInitialLeasePeriod);
         auto ec = p->read(lease, rdma_buf.buffer, sizeof(Object), 0, 0, &ctx);
-        if (unlikely(ec != RetCode::kOk))
+        if (unlikely(ec != RC::kOk))
         {
             DVLOG(3) << "[bench] extend_fail_to_work for key = " << key
                      << ", ec: " << ec << ", lease: " << lease;
@@ -160,7 +160,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                      0,
                      (flag_t) RWFlag::kNoLocalExpireCheck,
                      &ctx);
-        if (unlikely(ec == RetCode::kOk))
+        if (unlikely(ec == RC::kOk))
         {
             DVLOG(3) << "[bench] server failed to unbind for key = " << key
                      << ", ec: " << ec << ", lease: " << lease;

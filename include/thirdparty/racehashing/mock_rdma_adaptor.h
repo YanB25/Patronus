@@ -363,7 +363,7 @@ public:
         return kOk;
     }
 
-    RetCode put_all_rdma_buffer() override
+    void put_all_rdma_buffer() override
     {
         for (void *addr : allocated_buffers_)
         {
@@ -372,7 +372,6 @@ public:
                 << "[rdma][trace] gc: freeing " << (void *) addr;
         }
         allocated_buffers_.clear();
-        return kOk;
     }
     GlobalAddress to_exposed_gaddr(void *addr) override
     {

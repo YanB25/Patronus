@@ -119,7 +119,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                           0 /* offset */,
                           (flag_t) RWFlag::kUseUniversalRkey,
                           &ctx);
-        CHECK_EQ(ec, RetCode::kOk)
+        CHECK_EQ(ec, RC::kOk)
             << "[bench] client coro " << ctx
             << " read FAILED. This should not happen, because we "
                "filter out the invalid mws. Failed at "

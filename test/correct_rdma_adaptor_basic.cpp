@@ -104,8 +104,7 @@ void client_worker(Patronus::pointer p,
         auto rel_flag = 0;
         rdma_adpt->relinquish_perm(handle, 0, rel_flag);
 
-        auto rc = rdma_adpt->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt->put_all_rdma_buffer();
     }
 
     // checking acquire_perm with allocation semantics
@@ -175,8 +174,7 @@ void client_worker(Patronus::pointer p,
         auto rel_flag = (flag_t) 0;
         rdma_adpt->relinquish_perm(handle, 0 /* hint */, rel_flag);
 
-        auto rc = rdma_adpt->put_all_rdma_buffer();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt->put_all_rdma_buffer();
     }
 
     // checking remote_alloc & remote_dealloc (separate allocation & binding)

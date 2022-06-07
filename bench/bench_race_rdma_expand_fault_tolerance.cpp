@@ -405,8 +405,8 @@ void test_basic_client_worker(
             tc.inserted_nr += rc == kOk;
 
             auto *pv = dctx.get_private();
-            auto pv_rc = (RetCode)(uint64_t) pv;
-            if (unlikely(pv_rc == RetCode::kMockCrashed))
+            auto pv_rc = (RC)(uint64_t) pv;
+            if (unlikely(pv_rc == RC::kMockCrashed))
             {
                 LOG(INFO) << "[bench] MOCK crashed. inserted: " << ins_succ_nr;
                 extra["fault_at"] = std::to_string(ins_succ_nr);

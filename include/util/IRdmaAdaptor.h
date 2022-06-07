@@ -111,41 +111,43 @@ public:
     virtual ~IRdmaAdaptor() = default;
 
     // only alloc
-    virtual GlobalAddress remote_alloc(size_t size, hint_t) = 0;
+    [[nodiscard]] virtual GlobalAddress remote_alloc(size_t size, hint_t) = 0;
     // all operations other than only alloc
-    virtual RemoteMemHandle acquire_perm(GlobalAddress gaddr,
-                                         hint_t alloc_hint,
-                                         size_t size,
-                                         std::chrono::nanoseconds ns,
-                                         flag_t flag) = 0;
-    virtual RetCode extend(RemoteMemHandle &, std::chrono::nanoseconds) = 0;
+    [[nodiscard]] virtual RemoteMemHandle acquire_perm(
+        GlobalAddress gaddr,
+        hint_t alloc_hint,
+        size_t size,
+        std::chrono::nanoseconds ns,
+        flag_t flag) = 0;
+    [[nodiscard]] virtual RetCode extend(RemoteMemHandle &,
+                                         std::chrono::nanoseconds) = 0;
     // free only
     virtual void remote_free(GlobalAddress, size_t size, hint_t) = 0;
     // all rel operations other than free-only
     virtual void relinquish_perm(RemoteMemHandle &, hint_t, flag_t flag) = 0;
 
-    virtual Buffer get_rdma_buffer(size_t size) = 0;
+    [[nodiscard]] virtual Buffer get_rdma_buffer(size_t size) = 0;
     // use the put_all_rdma_buffer API.
     // virtual void put_rdma_buffer(void *rdma_buf) = 0;
-    virtual RetCode rdma_read(void *rdma_buf,
-                              GlobalAddress gaddr,
-                              size_t size,
-                              RemoteMemHandle &) = 0;
-    virtual RetCode rdma_write(GlobalAddress gaddr,
-                               void *rdma_buf,
-                               size_t size,
-                               RemoteMemHandle &) = 0;
-    virtual RetCode rdma_cas(GlobalAddress gaddr,
-                             uint64_t expect,
-                             uint64_t desired,
-                             void *rdma_buf,
-                             RemoteMemHandle &) = 0;
-    virtual RetCode rdma_faa(GlobalAddress gaddr,
-                             int64_t value,
-                             void *rdma_buf,
-                             RemoteMemHandle &) = 0;
-    virtual RetCode commit() = 0;
-    virtual RetCode put_all_rdma_buffer() = 0;
+    [[nodiscard]] virtual RetCode rdma_read(void *rdma_buf,
+                                            GlobalAddress gaddr,
+                                            size_t size,
+                                            RemoteMemHandle &) = 0;
+    [[nodiscard]] virtual RetCode rdma_write(GlobalAddress gaddr,
+                                             void *rdma_buf,
+                                             size_t size,
+                                             RemoteMemHandle &) = 0;
+    [[nodiscard]] virtual RetCode rdma_cas(GlobalAddress gaddr,
+                                           uint64_t expect,
+                                           uint64_t desired,
+                                           void *rdma_buf,
+                                           RemoteMemHandle &) = 0;
+    [[nodiscard]] virtual RetCode rdma_faa(GlobalAddress gaddr,
+                                           int64_t value,
+                                           void *rdma_buf,
+                                           RemoteMemHandle &) = 0;
+    [[nodiscard]] virtual RetCode commit() = 0;
+    virtual void put_all_rdma_buffer() = 0;
     /**
      * @brief register a secondary allocator at the client side
      * Don't confuse with patronus_->reg_allocator, which registers allocators

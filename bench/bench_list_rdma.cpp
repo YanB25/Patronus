@@ -249,7 +249,6 @@ void test_basic_client_worker(
 {
     std::ignore = bench_conf;
 
-    auto nid = p->get_node_id();
     auto tid = p->get_thread_id();
     auto client_id = local_client_id(tid, coro_id);
     auto dir_id = tid % kServerThreadNr;

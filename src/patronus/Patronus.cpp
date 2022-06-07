@@ -225,7 +225,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     rpc_context->dir_id = dir_id;
     rpc_context->ready = false;
     rpc_context->request = (BaseMessage *) msg;
-    rpc_context->ret_code = RetCode::kOk;
+    rpc_context->ret_code = RC::kOk;
 
     if constexpr (debug())
     {
@@ -276,7 +276,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
             << "** getting ret_lease is not succeeded, but the status is "
                "reserved. Lease: "
             << ret_lease;
-        DCHECK_NE(rpc_context->ret_code, RetCode::kOk);
+        DCHECK_NE(rpc_context->ret_code, RC::kOk);
     }
 
     if constexpr (debug())
@@ -528,7 +528,7 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
         DVLOG(4) << "[patronus] CAS failed by protection. wr_id: " << wrid
                  << ", wc_status: " << ibv_wc_status_str(wc_status)
                  << "coro: " << (ctx ? *ctx : nullctx);
-        return RetCode::kRdmaProtectionErr;
+        return RC::kRdmaProtectionErr;
     }
     // see if cas can success
     auto read_remote = *(uint64_t *) iobuf;
@@ -539,7 +539,7 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
                  << ", read: " << compound_uint64_t(read_remote)
                  << ", compare: " << compound_uint64_t(compare)
                  << ", new: " << compound_uint64_t(swap);
-        return RetCode::kOk;
+        return RC::kOk;
     }
     DVLOG(4) << "[patronus] CAS failed by mismatch @compare. wr_id: " << wrid
              << ", coro: " << (ctx ? *ctx : nullctx)
@@ -547,7 +547,7 @@ RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
              << ", compare: " << compound_uint64_t(compare)
              << ", swap: " << compound_uint64_t(swap);
 
-    return RetCode::kRdmaExecutionErr;
+    return RC::kRdmaExecutionErr;
 }
 /**
  * @brief the actual implementation to modify a lease (especially relinquish
@@ -578,7 +578,7 @@ RetCode Patronus::lease_modify_impl(Lease &lease,
 
     if (unlikely(no_rpc))
     {
-        return RetCode::kOk;
+        return RC::kOk;
     }
 
     auto target_node_id = lease.node_id_;
@@ -607,7 +607,7 @@ RetCode Patronus::lease_modify_impl(Lease &lease,
 
     rpc_context->ready = false;
     rpc_context->request = (BaseMessage *) msg;
-    rpc_context->ret_code = RetCode::kOk;
+    rpc_context->ret_code = RC::kOk;
 
     if constexpr (debug())
     {
@@ -923,21 +923,21 @@ void Patronus::handle_response_acquire(AcquireResponse *resp)
     switch (resp->status)
     {
     case AcquireRequestStatus::kSuccess:
-        rpc_context->ret_code = RetCode::kOk;
+        rpc_context->ret_code = RC::kOk;
         break;
     case AcquireRequestStatus::kLockedErr:
     case AcquireRequestStatus::kMagicMwErr:
-        rpc_context->ret_code = RetCode::kRetry;
+        rpc_context->ret_code = RC::kRetry;
         break;
     case AcquireRequestStatus::kBindErr:
     case AcquireRequestStatus::kRegMrErr:
-        rpc_context->ret_code = RetCode::kRdmaExecutionErr;
+        rpc_context->ret_code = RC::kRdmaExecutionErr;
         break;
     case AcquireRequestStatus::kAddressOutOfRangeErr:
-        rpc_context->ret_code = RetCode::kInvalid;
+        rpc_context->ret_code = RC::kInvalid;
     case AcquireRequestStatus::kNoMw:
     case AcquireRequestStatus::kNoMem:
-        rpc_context->ret_code = RetCode::kNoMem;
+        rpc_context->ret_code = RC::kNoMem;
         break;
     case AcquireRequestStatus::kReserved:
     case AcquireRequestStatus::kReservedNoReturn:
@@ -1810,7 +1810,7 @@ void Patronus::handle_response_memory_access(MemoryResponse *resp,
 
     if (resp->success)
     {
-        rpc_context->ret_code = RetCode::kOk;
+        rpc_context->ret_code = RC::kOk;
         if (mf == MemoryRequestFlag::kRead)
         {
             memcpy(rpc_context->buffer_addr, resp->buffer, resp->size);
@@ -1820,11 +1820,11 @@ void Patronus::handle_response_memory_access(MemoryResponse *resp,
     {
         if (mf == MemoryRequestFlag::kCAS)
         {
-            rpc_context->ret_code = RetCode::kRetry;
+            rpc_context->ret_code = RC::kRetry;
         }
         else
         {
-            rpc_context->ret_code = RetCode::kRdmaExecutionErr;
+            rpc_context->ret_code = RC::kRdmaExecutionErr;
         }
     }
 
@@ -1846,7 +1846,7 @@ void Patronus::handle_response_lease_relinquish(LeaseModifyResponse *resp)
 
     DCHECK(resp->success) << "** relinquish has to success";
 
-    rpc_context->ret_code = RetCode::kOk;
+    rpc_context->ret_code = RC::kOk;
     rpc_context->ready.store(true, std::memory_order_release);
 }
 
@@ -1860,11 +1860,11 @@ void Patronus::handle_response_lease_extend(LeaseModifyResponse *resp)
 
     if (resp->success)
     {
-        rpc_context->ret_code = RetCode::kOk;
+        rpc_context->ret_code = RC::kOk;
     }
     else
     {
-        rpc_context->ret_code = RetCode::kInvalid;
+        rpc_context->ret_code = RC::kInvalid;
     }
 
     rpc_context->ready.store(true, std::memory_order_release);
@@ -3041,7 +3041,7 @@ RetCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
                  << time::TimeSyncer::kCommunicationLatencyNs
                  << "). coro: " << (ctx ? *ctx : nullctx)
                  << ". Now lease: " << lease;
-        return RetCode::kLeaseLocalExpiredErr;
+        return RC::kLeaseLocalExpiredErr;
     }
     // assume one-sided write will not take longer than this
     constexpr static auto kMinMarginDuration = 100us;
@@ -3063,7 +3063,7 @@ RetCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
              << ", diff_ns: " << diff_ns << ", > margin_duration_ns("
              << margin_duration_ns << "). coro: " << (ctx ? *ctx : nullctx)
              << ". Now lease: " << lease;
-    return RetCode::kOk;
+    return RC::kOk;
 }
 
 void Patronus::thread_explain() const
@@ -3120,7 +3120,7 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
                                 CoroContext *ctx)
 {
     auto ec = handle_batch_op_flag(flag);
-    if (unlikely(ec != RetCode::kOk))
+    if (unlikely(ec != RC::kOk))
     {
         return ec;
     }
@@ -3161,7 +3161,7 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
                                CoroContext *ctx)
 {
     auto ec = handle_batch_op_flag(flag);
-    if (unlikely(ec != RetCode::kOk))
+    if (unlikely(ec != RC::kOk))
     {
         return ec;
     }
@@ -3202,7 +3202,7 @@ RetCode Patronus::prepare_faa(PatronusBatchContext &batch,
                               CoroContext *ctx)
 {
     auto ec = handle_batch_op_flag(flag);
-    if (unlikely(ec != RetCode::kOk))
+    if (unlikely(ec != RC::kOk))
     {
         return ec;
     }
@@ -3244,7 +3244,7 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
                               CoroContext *ctx)
 {
     auto ec = handle_batch_op_flag(flag);
-    if (unlikely(ec != RetCode::kOk))
+    if (unlikely(ec != RC::kOk))
     {
         return ec;
     }
