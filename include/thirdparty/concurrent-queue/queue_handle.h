@@ -55,25 +55,12 @@ public:
 
     RetCode push(const T &t)
     {
-        // auto [entry_gaddr, entry_idx] = fetch_slot_gaddr();
-        auto slot_desc = fetch_slot();
-        if (!slot_desc.has_valud())
-        {
-            return kNoMem;
-        }
-        auto [entry_gaddr, entry_idx] = slot_desc.value();
-
-        // TODO: remove this copy?
-        auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(T));
-        memcpy(rdma_buf.buffer, &t, sizeof(T));
-
-
-        CHECK(false) << "TODO: ";
+        CHECK(false) << "TODO: " << sizeof(t);
         return kOk;
     }
     RetCode pop(T &t)
     {
-        CHECK(false) << "TODO: ";
+        CHECK(false) << "TODO: " << sizeof(t);
         return kOk;
     }
 

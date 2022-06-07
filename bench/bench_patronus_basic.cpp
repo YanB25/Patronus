@@ -615,7 +615,6 @@ void bench_template(const std::string &name,
     auto coro_nr = conf.coro_nr;
     auto report = conf.report;
     auto alloc_size = conf.block_size;
-    auto acquire_ns = conf.acquire_ns;
 
     if (is_master)
     {

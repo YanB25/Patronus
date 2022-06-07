@@ -10,15 +10,15 @@
 #include "patronus/RdmaAdaptor.h"
 #include "patronus/memory/direct_allocator.h"
 #include "patronus/memory/mr_allocator.h"
-#include "thirdparty/concurrent-queue/conf.h"
-#include "thirdparty/concurrent-queue/queue.h"
-#include "thirdparty/concurrent-queue/queue_handle.h"
+#include "thirdparty/linked-list/conf.h"
+#include "thirdparty/linked-list/list.h"
+#include "thirdparty/linked-list/list_handle.h"
 #include "util/BenchRand.h"
 #include "util/DataFrameF.h"
 #include "util/Rand.h"
 #include "util/TimeConv.h"
 
-using namespace patronus::cqueue;
+using namespace patronus::list;
 using namespace define::literals;
 using namespace patronus;
 using namespace hmdf;
@@ -48,18 +48,15 @@ std::vector<uint64_t> col_lat_p9;
 std::vector<uint64_t> col_lat_p99;
 std::unordered_map<std::string, std::vector<uint64_t>> lat_data;
 
-uint64_t calculate_client_id(uint64_t nid, uint64_t tid, uint64_t coro_id)
+template <size_t kSize>
+struct Dummy
 {
-    return nid * kMaxAppThread * kMaxCoroNr + tid * kMaxCoroNr + coro_id;
-}
+    char buffer[kSize];
+};
 
-struct QueueItem
+struct ListItem
 {
-    uint64_t nid;
-    uint64_t tid;
-    uint64_t cid;
-    uint64_t op_id;
-    char padding[64 - 4 * sizeof(uint64_t)];
+    char buffer[64];
 };
 
 struct BenchConfig
@@ -93,14 +90,6 @@ struct BenchConfig
     std::string conf_name() const
     {
         return name;
-    }
-    bool is_consumer(uint64_t client_id) const
-    {
-        return client_id < consumer_nr;
-    }
-    bool is_producer(uint64_t client_id) const
-    {
-        return !is_consumer(client_id);
     }
 
     BenchConfig clone() const
@@ -147,12 +136,12 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
     return os;
 }
 
-typename QueueHandle<QueueItem>::pointer gen_handle(Patronus::pointer p,
-                                                    size_t dir_id,
-                                                    uint64_t client_id,
-                                                    const HandleConfig &conf,
-                                                    GlobalAddress meta_gaddr,
-                                                    CoroContext *ctx)
+template <typename T>
+typename ListHandle<T>::pointer gen_handle(Patronus::pointer p,
+                                           size_t dir_id,
+                                           const HandleConfig &conf,
+                                           GlobalAddress meta_gaddr,
+                                           CoroContext *ctx)
 {
     auto server_nid = ::config::get_server_nids().front();
 
@@ -161,8 +150,8 @@ typename QueueHandle<QueueItem>::pointer gen_handle(Patronus::pointer p,
     auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
         server_nid, dir_id, p, conf.bypass_prot, ctx);
 
-    auto handle = QueueHandle<QueueItem>::new_instance(
-        server_nid, client_id, meta_gaddr, rdma_adpt, conf);
+    auto handle =
+        ListHandle<T>::new_instance(server_nid, meta_gaddr, rdma_adpt, conf);
 
     // debug
     handle->read_meta();
@@ -218,27 +207,26 @@ void reg_latency(const std::string &name,
         << "** duplicated test detected.";
 }
 
-typename Queue<QueueItem>::pointer gen_queue(Patronus::pointer p,
-                                             const QueueConfig &config)
+template <typename T>
+typename List<T>::pointer gen_list(Patronus::pointer p,
+                                   const ListConfig &config)
 {
     auto allocator = p->get_allocator(0 /* default hint */);
 
     auto server_rdma_adpt = patronus::RdmaAdaptor::new_instance(p);
-    auto queue =
-        Queue<QueueItem>::new_instance(server_rdma_adpt, allocator, config);
+    auto list = List<T>::new_instance(server_rdma_adpt, allocator, config);
 
-    auto meta_gaddr = queue->meta_gaddr();
+    auto meta_gaddr = list->meta_gaddr();
     p->put("race:meta_gaddr", meta_gaddr, 0ns);
     LOG(INFO) << "Puting to race:meta_gaddr with " << meta_gaddr;
 
-    LOG(INFO) << "[debug] !! meta is " << queue->meta();
-    return queue;
+    LOG(INFO) << "[debug] !! meta is " << list->meta();
+    return list;
 }
 
 void test_basic_client_worker(
     Patronus::pointer p,
     size_t coro_id,
-    uint64_t client_id,
     CoroYield &yield,
     const BenchConfig &bench_conf,
     const HandleConfig &handle_conf,
@@ -246,13 +234,14 @@ void test_basic_client_worker(
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
     OnePassBucketMonitor<uint64_t> &lat_m)
 {
-    auto nid = p->get_node_id();
+    std::ignore = bench_conf;
+
     auto tid = p->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
     auto handle =
-        gen_handle(p, dir_id, client_id, handle_conf, meta_gaddr, &ctx);
+        gen_handle<Dummy<16>>(p, dir_id, handle_conf, meta_gaddr, &ctx);
 
     size_t put_succ_nr = 0;
     size_t put_nomem_nr = 0;
@@ -273,42 +262,6 @@ void test_basic_client_worker(
         if (should_report_latency)
         {
             op_timer.pin();
-        }
-        if (bench_conf.is_consumer(client_id))
-        {
-            QueueItem item;
-            auto rc = handle->pop(item);
-            if (rc == kOk)
-            {
-                get_succ_nr++;
-                auto nid = item.nid;
-                auto tid = item.tid;
-                auto cid = item.cid;
-                auto op_id = item.op_id;
-                auto got_op_id = book[{nid, tid, cid}]++;
-                CHECK_EQ(got_op_id, op_id);
-                executed_nr++;
-            }
-            else
-            {
-                CHECK_EQ(rc, RetCode::kNotFound);
-                get_nomem_nr++;
-            }
-        }
-        else
-        {
-            QueueItem item{nid, tid, coro_id, executed_nr};
-            auto rc = handle->push(item);
-            if (rc == kOk)
-            {
-                put_succ_nr++;
-                executed_nr++;
-            }
-            else
-            {
-                CHECK_EQ(rc, RetCode::kNoMem);
-                put_nomem_nr++;
-            }
         }
 
         // TODO: delete me
@@ -473,10 +426,8 @@ void benchmark_client(Patronus::pointer p,
                     auto nid = p->get_node_id();
                     auto tid = p->get_thread_id();
                     auto cid = coro_id;
-                    auto client_id = calculate_client_id(nid, tid, cid);
                     test_basic_client_worker(p,
                                              coro_id,
-                                             client_id,
                                              yield,
                                              bench_conf,
                                              handle_conf,
@@ -527,7 +478,7 @@ void benchmark_server(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
                       const std::vector<BenchConfig> &confs,
-                      const QueueConfig &queue_config,
+                      const ListConfig &list_config,
                       uint64_t key)
 {
     auto thread_nr = confs[0].thread_nr;
@@ -536,12 +487,12 @@ void benchmark_server(Patronus::pointer p,
         thread_nr = std::max(thread_nr, conf.thread_nr);
     }
 
-    typename Queue<QueueItem>::pointer queue;
+    typename List<ListItem>::pointer list;
 
     if (is_master)
     {
         p->finished(key);
-        queue = gen_queue(p, queue_config);
+        list = gen_list<ListItem>(p, list_config);
     }
     // wait for everybody to finish preparing
     bar.wait();
@@ -584,12 +535,12 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 }
                 else
                 {
-                    // TODO: let queue config be real.
+                    // TODO: let list config be real.
                     benchmark_server(p,
                                      bar,
                                      is_master,
                                      {conf},
-                                     QueueConfig{.max_entry_nr = 102400},
+                                     ListConfig{.max_entry_nr = 102400},
                                      key);
                 }
             }
