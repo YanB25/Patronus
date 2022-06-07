@@ -48,21 +48,37 @@ public:
     {
         return std::make_shared<ListHandle<T>>(node_id, meta, rdma_adpt, conf);
     }
-    RetCode debug()
+    RetCode func_debug()
     {
         read_meta();
         return kOk;
     }
 
-    RetCode push_back(const T &t)
+    RetCode lf_push_back(const T &t);
+    RetCode lf_pop_front(const T &t);
+    RetCode lk_push_back(const T &t)
     {
         std::ignore = t;
-        return kInvalid;
+        auto rc = lock_push();
+        if (rc != kOk)
+        {
+            DCHECK_EQ(rc, kRetry);
+            return rc;
+        }
+        unlock_push();
+        return kOk;
     }
-    RetCode pop_front(T &t)
+    RetCode lk_pop_front(const T &t)
     {
         std::ignore = t;
-        return kInvalid;
+        auto rc = lock_pop();
+        if (rc != kOk)
+        {
+            DCHECK_EQ(rc, kRetry);
+            return rc;
+        }
+        unlock_pop();
+        return kOk;
     }
 
     void read_meta()
@@ -116,6 +132,136 @@ private:
             meta_gaddr_, 0 /* alloc_hint */, meta_size(), 0ns, ac_flag);
         CHECK(meta_handle_.valid());
     }
+    GlobalAddress meta_gaddr() const
+    {
+        return meta_gaddr_;
+    }
+    RetCode lock_push()
+    {
+        auto &push_lock_handle = get_push_lock_handle();
+        auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
+        auto rc = rdma_adpt_->rdma_cas(
+            push_lock_gaddr(), 0, 1, rdma_buf.buffer, push_lock_handle);
+        CHECK_EQ(rc, kOk);
+        uint64_t got = *(uint64_t *) rdma_buf.buffer;
+        DCHECK(got == 0 || got == 1)
+            << "got invalid lock value: " << got << ". Not 0 or 1.";
+        rc = rdma_adpt_->commit();
+        CHECK_EQ(rc, kOk);
+        rc = rdma_adpt_->put_all_rdma_buffer();
+        CHECK_EQ(rc, kOk);
+
+        if (got == 0)
+        {
+            return kOk;
+        }
+        else
+        {
+            return kRetry;
+        }
+    }
+    void unlock_push()
+    {
+        auto &push_lock_handle = get_push_lock_handle();
+        auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
+        *((uint64_t *) rdma_buf.buffer) = 0;
+
+        auto rc = rdma_adpt_->rdma_write(push_lock_gaddr(),
+                                         rdma_buf.buffer,
+                                         sizeof(uint64_t),
+                                         push_lock_handle);
+        CHECK_EQ(rc, kOk);
+        rc = rdma_adpt_->commit();
+        CHECK_EQ(rc, kOk);
+        rc = rdma_adpt_->put_all_rdma_buffer();
+        CHECK_EQ(rc, kOk);
+    }
+    RetCode lock_pop()
+    {
+        auto &pop_lock_handle = get_pop_lock_handle();
+        auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
+        auto rc = rdma_adpt_->rdma_cas(
+            pop_lock_gaddr(), 0, 1, rdma_buf.buffer, pop_lock_handle);
+        CHECK_EQ(rc, kOk);
+        uint64_t got = *(uint64_t *) rdma_buf.buffer;
+        DCHECK(got == 0 || got == 1)
+            << "got invalid lock value: " << got << ". Not 0 or 1.";
+        rc = rdma_adpt_->commit();
+        CHECK_EQ(rc, kOk);
+        rc = rdma_adpt_->put_all_rdma_buffer();
+        CHECK_EQ(rc, kOk);
+
+        if (got == 0)
+        {
+            return kOk;
+        }
+        else
+        {
+            return kRetry;
+        }
+    }
+    void unlock_pop()
+    {
+        auto &pop_lock_handle = get_pop_lock_handle();
+        auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
+        *((uint64_t *) rdma_buf.buffer) = 0;
+
+        if constexpr (debug())
+        {
+            auto rc = rdma_adpt_->rdma_read(rdma_buf.buffer,
+                                            pop_lock_gaddr(),
+                                            sizeof(uint64_t),
+                                            pop_lock_handle);
+            // CHECK_EQ(rc, kOk);
+            // auto rc = rdma_adpt_->rdma_read(pop_lock_gaddr(),
+            //                                 rdma_buf.buffer,
+            //                                 sizeof(uint64_t),
+            //                                 pop_lock_handle);
+            // CHECK_EQ(rc, kOk);
+            // rc = rdma_adpt_->commit();
+            // TODO: start here
+        }
+
+        auto rc = rdma_adpt_->rdma_write(pop_lock_gaddr(),
+                                         rdma_buf.buffer,
+                                         sizeof(uint64_t),
+                                         pop_lock_handle);
+        CHECK_EQ(rc, kOk);
+        rc = rdma_adpt_->commit();
+        CHECK_EQ(rc, kOk);
+        rc = rdma_adpt_->put_all_rdma_buffer();
+        CHECK_EQ(rc, kOk);
+    }
+
+    GlobalAddress push_lock_gaddr() const
+    {
+        return meta_gaddr() + offsetof(Meta, push_lock);
+    }
+    GlobalAddress pop_lock_gaddr() const
+    {
+        return meta_gaddr() + offsetof(Meta, pop_lock);
+    }
+    RemoteMemHandle &get_push_lock_handle()
+    {
+        return get_handle_impl(0, push_lock_gaddr(), sizeof(uint64_t));
+    }
+    RemoteMemHandle &get_pop_lock_handle()
+    {
+        return get_handle_impl(0, pop_lock_gaddr(), sizeof(uint64_t));
+    }
+    RemoteMemHandle &get_handle_impl(uint64_t id,
+                                     GlobalAddress gaddr,
+                                     size_t size)
+    {
+        auto &ret = handles_[id];
+        if (unlikely(!ret.valid()))
+        {
+            auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
+                           (flag_t) AcquireRequestFlag::kNoBindPR;
+            ret = rdma_adpt_->acquire_perm(gaddr, 0, size, 0ns, ac_flag);
+        }
+        return ret;
+    }
 
     uint16_t node_id_;
     GlobalAddress meta_gaddr_;
@@ -124,6 +270,8 @@ private:
 
     bool cached_inited_{false};
     Meta cached_meta_;
+
+    std::unordered_map<uint64_t, RemoteMemHandle> handles_;
 
     RemoteMemHandle meta_handle_;
 };

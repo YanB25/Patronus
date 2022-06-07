@@ -86,6 +86,7 @@ private:
         meta_->phead = meta_->ptail = node_gaddr;
         meta_->push_lock = meta_->pop_lock = 0;
     }
+
     size_t node_size() const
     {
         return sizeof(ListNode<T>);

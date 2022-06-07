@@ -265,7 +265,7 @@ void test_basic_client_worker(
         }
 
         // TODO: delete me
-        handle->debug();
+        handle->func_debug();
 
         if (should_report_latency)
         {
@@ -423,9 +423,6 @@ void benchmark_client(Patronus::pointer p,
                           &ex,
                           &lat_m,
                           meta_gaddr = g_meta_gaddr](CoroYield &yield) {
-                    auto nid = p->get_node_id();
-                    auto tid = p->get_thread_id();
-                    auto cid = coro_id;
                     test_basic_client_worker(p,
                                              coro_id,
                                              yield,
