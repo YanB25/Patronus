@@ -15,6 +15,7 @@
 #include "thirdparty/linked-list/list_handle.h"
 #include "util/BenchRand.h"
 #include "util/DataFrameF.h"
+#include "util/Pre.h"
 #include "util/Rand.h"
 #include "util/TimeConv.h"
 
@@ -24,8 +25,8 @@ using namespace patronus;
 using namespace hmdf;
 
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kClientThreadNr = 32;
-constexpr static size_t kMaxCoroNr = 16;
+constexpr static size_t kClientThreadNr = 1;
+constexpr static size_t kMaxCoroNr = 1;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -48,16 +49,21 @@ std::vector<uint64_t> col_lat_p9;
 std::vector<uint64_t> col_lat_p99;
 std::unordered_map<std::string, std::vector<uint64_t>> lat_data;
 
-template <size_t kSize>
-struct Dummy
-{
-    char buffer[kSize];
-};
-
 struct ListItem
 {
-    char buffer[64];
+    uint64_t nid;
+    uint64_t tid;
+    uint64_t coro_id;
+    uint64_t magic_number;
 };
+
+inline std::ostream &operator<<(std::ostream &os, const ListItem &item)
+{
+    os << "{ListItem nid: " << item.nid << ", tid: " << item.tid
+       << ", coro_id: " << item.coro_id
+       << ", magic_number: " << (void *) item.magic_number << "}";
+    return os;
+}
 
 struct BenchConfig
 {
@@ -224,6 +230,18 @@ typename List<T>::pointer gen_list(Patronus::pointer p,
     return list;
 }
 
+void validate_helper(const std::vector<uint64_t> magic,
+                     const std::vector<ListItem> gots)
+{
+    CHECK_EQ(gots.size(), magic.size() + 1);
+    for (size_t i = 1; i < gots.size(); ++i)
+    {
+        const auto &got = gots[i];
+        const auto &m = magic[i - 1];
+        CHECK_EQ(got.magic_number, m);
+    }
+}
+
 void test_basic_client_worker(
     Patronus::pointer p,
     size_t coro_id,
@@ -236,12 +254,19 @@ void test_basic_client_worker(
 {
     std::ignore = bench_conf;
 
+    auto nid = p->get_node_id();
     auto tid = p->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
     auto handle =
-        gen_handle<Dummy<16>>(p, dir_id, handle_conf, meta_gaddr, &ctx);
+        gen_handle<ListItem>(p, dir_id, handle_conf, meta_gaddr, &ctx);
+    ListItem list_item;
+    list_item.nid = nid;
+    list_item.tid = tid;
+    list_item.coro_id = coro_id;
+
+    std::vector<uint64_t> magic_nums;
 
     size_t put_succ_nr = 0;
     size_t put_nomem_nr = 0;
@@ -264,8 +289,23 @@ void test_basic_client_worker(
             op_timer.pin();
         }
 
-        // TODO: delete me
-        handle->func_debug();
+        auto magic_number = fast_pseudo_rand_int();
+        magic_nums.push_back(magic_number);
+        list_item.magic_number = magic_number;
+
+        while (true)
+        {
+            auto rc = handle->lk_push_back(list_item);
+            if (rc == kOk)
+            {
+                break;
+            }
+            CHECK_EQ(rc, kRetry);
+        }
+
+        // check validity
+        auto lists = handle->debug_iterator();
+        validate_helper(magic_nums, lists);
 
         if (should_report_latency)
         {
@@ -274,6 +314,7 @@ void test_basic_client_worker(
         ex.get_private_data().thread_remain_task--;
     }
     auto ns = timer.pin();
+    LOG(INFO) << "[debug] client finished. ns: " << ns << ", ctx: " << ctx;
 
     auto &comm = ex.get_private_data();
     comm.put_succ_nr += put_succ_nr;
@@ -373,6 +414,7 @@ void benchmark_client(Patronus::pointer p,
                       const HandleConfig &handle_conf,
                       uint64_t key)
 {
+    auto selected_client = ::config::get_client_nids().front();
     auto coro_nr = bench_conf.coro_nr;
     auto thread_nr = bench_conf.thread_nr;
     bool first_enter = true;
@@ -381,7 +423,7 @@ void benchmark_client(Patronus::pointer p,
     size_t actual_test_nr = bench_conf.test_nr;
 
     auto tid = p->get_thread_id();
-    // auto nid = p->get_node_id();
+    auto nid = p->get_node_id();
     if (is_master)
     {
         // init here by master
@@ -403,7 +445,7 @@ void benchmark_client(Patronus::pointer p,
 
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
-    bool should_enter = tid < thread_nr;
+    bool should_enter = tid < thread_nr && nid == selected_client;
 
     if (should_enter)
     {
@@ -510,7 +552,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     std::vector<HandleConfig> handle_configs;
     LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{.max_entry_nr = 102400});
+    handle_configs.push_back(HandleConfig{});
 
     for (const auto &handle_conf : handle_configs)
     {
@@ -522,7 +564,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                     << "[bench] benching multiple threads for " << handle_conf;
                 key++;
                 auto conf = BenchConfig::get_conf(
-                    "default", 1_M, thread_nr, coro_nr, 1);
+                    "default", 1000, thread_nr, coro_nr, 0 /* consumer */);
                 if (is_client)
                 {
                     conf.validate();
@@ -533,12 +575,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 else
                 {
                     // TODO: let list config be real.
-                    benchmark_server(p,
-                                     bar,
-                                     is_master,
-                                     {conf},
-                                     ListConfig{.max_entry_nr = 102400},
-                                     key);
+                    benchmark_server(
+                        p, bar, is_master, {conf}, ListConfig{}, key);
                 }
             }
         }
@@ -616,78 +654,6 @@ int main(int argc, char *argv[])
         {
             t.join();
         }
-    }
-
-    {
-        StrDataFrame df;
-        df.load_index(std::move(col_idx));
-        df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
-        df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
-        df.load_column<size_t>("x_producer_nr", std::move(col_x_producer_nr));
-        df.load_column<size_t>("x_consumer_nr", std::move(col_x_consumer_nr));
-        df.load_column<size_t>("test_nr(total)", std::move(col_test_nr));
-        df.load_column<size_t>("test_ns(total)", std::move(col_ns));
-
-        df.load_column<size_t>("rdma_prot_err_nr",
-                               std::move(col_rdma_protection_err));
-        df.load_column<double>("produce_succ_rate",
-                               std::move(col_producer_succ_rate));
-        df.load_column<double>("consume_succ_rate",
-                               std::move(col_consumer_succ_rate));
-
-        auto div_f = gen_F_div<size_t, size_t, double>();
-        auto div_f2 = gen_F_div<double, size_t, double>();
-        auto ops_f = gen_F_ops<size_t, size_t, double>();
-        auto mul_f = gen_F_mul<double, size_t, double>();
-        auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
-        df.consolidate<size_t, size_t, size_t>(
-            "x_thread_nr", "x_coro_nr", "client_nr(effective)", mul_f2, false);
-        df.consolidate<size_t, size_t, size_t>("test_ns(total)",
-                                               "client_nr(effective)",
-                                               "test_ns(effective)",
-                                               mul_f2,
-                                               false);
-        df.consolidate<size_t, size_t, double>(
-            "test_ns(total)", "test_nr(total)", "lat(div)", div_f, false);
-        df.consolidate<size_t, size_t, double>(
-            "test_ns(effective)", "test_nr(total)", "lat(avg)", div_f, false);
-        df.consolidate<size_t, size_t, double>(
-            "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
-
-        auto client_nr = ::config::get_client_nids().size();
-        auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
-        df.load_column<double>("ops(cluster)",
-                               df.get_column<double>("ops(total)"));
-        df.replace<double>("ops(cluster)", replace_mul_f);
-
-        df.consolidate<double, size_t, double>(
-            "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
-        df.consolidate<double, size_t, double>(
-            "ops(thread)", "x_coro_nr", "ops(coro)", div_f2, false);
-
-        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
-        df.write<std::ostream, std::string, size_t, double>(std::cout,
-                                                            io_format::csv2);
-        df.write<std::string, size_t, double>(filename.c_str(),
-                                              io_format::csv2);
-    }
-
-    {
-        StrDataFrame df;
-        df.load_index(std::move(col_lat_idx));
-        for (auto &[name, vec] : lat_data)
-        {
-            df.load_column<uint64_t>(name.c_str(), std::move(vec));
-        }
-
-        std::map<std::string, std::string> info;
-        info.emplace("kind", "lat");
-
-        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
-        df.write<std::ostream, std::string, size_t, double>(std::cout,
-                                                            io_format::csv2);
-        df.write<std::string, size_t, double>(filename.c_str(),
-                                              io_format::csv2);
     }
 
     patronus->keeper_barrier("finished", 100ms);

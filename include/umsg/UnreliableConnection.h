@@ -28,7 +28,7 @@ public:
     UnreliableConnection(uint64_t mm,
                          size_t mmSize,
                          const std::vector<RemoteConnection> &remote_infos);
-    ~UnreliableConnection() = default;
+    ~UnreliableConnection();
     void send(size_t i_ep_id,
               const char *buf,
               size_t size,
@@ -144,6 +144,28 @@ UnreliableConnection<kEndpointNr>::UnreliableConnection(
         config::umsg::sender::kMaxSendWr);
     recv_ = std::make_unique<UnreliableRecvMessageConnection<kMaxAppThread>>(
         QPs_, recv_cqs_, ctx_);
+}
+
+template <size_t kEndpointNr>
+UnreliableConnection<kEndpointNr>::~UnreliableConnection()
+{
+    // manually call ctor here
+    recv_.reset();
+    send_.reset();
+
+    for (size_t i = 0; i < kEndpointNr; ++i)
+    {
+        CHECK(destroyQueuePair(QPs_[i])) << "** Failed to destroy QP";
+    }
+    for (size_t i = 0; i < kEndpointNr; ++i)
+    {
+        CHECK(destroyCompleteQueue(send_cqs_[i])) << "** Failed to destroy CQ";
+    }
+    for (size_t i = 0; i < kEndpointNr; ++i)
+    {
+        CHECK(destroyCompleteQueue(recv_cqs_[i])) << "** Failed to destroy CQ";
+    }
+    CHECK(destroyContext(&ctx_)) << "** Failed to destroy context.";
 }
 
 #endif

@@ -293,7 +293,7 @@ void test_basic_client_worker(
         }
         else
         {
-            auto rc = handle->lk_pop_front(d);
+            auto rc = handle->lk_pop_front(&d);
             if (rc == kOk)
             {
                 get_succ_nr++;
@@ -547,7 +547,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     std::vector<HandleConfig> handle_configs;
     LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{.max_entry_nr = 102400});
+    handle_configs.push_back(HandleConfig{});
 
     for (const auto &handle_conf : handle_configs)
     {
@@ -570,12 +570,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 else
                 {
                     // TODO: let list config be real.
-                    benchmark_server(p,
-                                     bar,
-                                     is_master,
-                                     {conf},
-                                     ListConfig{.max_entry_nr = 102400},
-                                     key);
+                    benchmark_server(
+                        p, bar, is_master, {conf}, ListConfig{}, key);
                 }
             }
         }

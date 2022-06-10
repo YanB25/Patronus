@@ -10,14 +10,12 @@ namespace patronus::list
 {
 struct ListConfig
 {
-    size_t client_nr;
-    size_t max_entry_nr;
 };
 
 inline std::ostream &operator<<(std::ostream &os, const ListConfig &config)
 {
-    os << "{ListConfig client_nr: " << config.client_nr
-       << ", max_entry_nr: " << config.max_entry_nr << "}";
+    std::ignore = config;
+    os << "{ListConfig }";
     return os;
 }
 
