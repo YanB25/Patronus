@@ -78,11 +78,8 @@ private:
     {
         auto meta_size = Meta::size();
         memset(meta_, 0, meta_size);
-        auto *first_node = (ListNode<T> *) allocator_->alloc(node_size());
-        first_node->next = nullgaddr;
-        auto node_gaddr = to_exposed_remote_mem(first_node);
-        meta_->phead = meta_->ptail = node_gaddr;
-        meta_->push_lock = meta_->pop_lock = 0;
+        meta_->phead = nullgaddr;
+        meta_->ptail = nullgaddr;
     }
 
     size_t node_size() const

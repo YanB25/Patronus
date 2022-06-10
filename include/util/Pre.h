@@ -218,6 +218,64 @@ inline std::ostream &operator<<(std::ostream &os, const pre_set<T> &s)
     return os;
 }
 
+template <typename T>
+struct pre_iter
+{
+    pre_iter(const T &iter, size_t limit = std::numeric_limits<size_t>::max())
+        : iter(iter), limit_(limit)
+    {
+    }
+    size_t limit() const
+    {
+        return limit_;
+    }
+    const T &iter;
+    size_t limit_;
+};
+
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os, pre_iter<T> iterable)
+{
+    const auto &iter = iterable.iter;
+    bool ellipsis = iter.size() > iterable.limit();
+    auto limit = std::min(iterable.limit(), iter.size());
+    auto end_size = limit / 2;
+    auto before_size = limit - end_size;
+    size_t ommitted = iter.size() - limit;
+
+    os << "[";
+    auto front_iter = iter.cbegin();
+    for (size_t i = 0; i < before_size; ++i)
+    {
+        os << *front_iter << ", ";
+        front_iter++;
+    }
+    if (ellipsis)
+    {
+        os << "...";
+        if (end_size > 0)
+        {
+            os << ", ";
+        }
+    }
+    auto back_iter = iter.cend();
+    for (size_t i = 0; i < end_size; ++i)
+    {
+        bool last = i + 1 == end_size;
+        if (!last)
+        {
+            os << *back_iter << ", ";
+        }
+        else
+        {
+            os << *back_iter;
+        }
+        back_iter++;
+    }
+    os << "] (sz: " << iter.size() << ", ommitted " << ommitted << ")";
+    return os;
+}
+
 }  // namespace util
 
 #endif

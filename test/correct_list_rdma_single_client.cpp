@@ -30,25 +30,6 @@ constexpr static size_t kMaxCoroNr = 1;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-std::vector<std::string> col_idx;
-std::vector<size_t> col_x_thread_nr;
-std::vector<size_t> col_x_coro_nr;
-std::vector<size_t> col_x_producer_nr;
-std::vector<size_t> col_x_consumer_nr;
-std::vector<size_t> col_test_nr;
-std::vector<size_t> col_ns;
-
-std::vector<double> col_producer_succ_rate;
-std::vector<double> col_consumer_succ_rate;
-std::vector<size_t> col_rdma_protection_err;
-
-std::vector<std::string> col_lat_idx;
-std::vector<uint64_t> col_lat_min;
-std::vector<uint64_t> col_lat_p5;
-std::vector<uint64_t> col_lat_p9;
-std::vector<uint64_t> col_lat_p99;
-std::unordered_map<std::string, std::vector<uint64_t>> lat_data;
-
 struct ListItem
 {
     uint64_t nid;
@@ -68,8 +49,6 @@ inline std::ostream &operator<<(std::ostream &os, const ListItem &item)
 struct BenchConfig
 {
     std::string name;
-    double producer_nr{0};
-    double consumer_nr{0};
     size_t thread_nr{1};
     size_t coro_nr{1};
     size_t test_nr{0};
@@ -82,8 +61,6 @@ struct BenchConfig
 
     void validate() const
     {
-        double sum = producer_nr + consumer_nr;
-        CHECK_DOUBLE_EQ(sum, local_client_nr());
     }
     size_t cluster_client_nr() const
     {
@@ -102,8 +79,6 @@ struct BenchConfig
     {
         BenchConfig ret;
         ret.name = name;
-        ret.producer_nr = producer_nr;
-        ret.consumer_nr = consumer_nr;
         ret.thread_nr = thread_nr;
         ret.coro_nr = coro_nr;
         ret.test_nr = test_nr;
@@ -113,8 +88,7 @@ struct BenchConfig
     static BenchConfig get_conf(const std::string &name,
                                 size_t test_nr,
                                 size_t thread_nr,
-                                size_t coro_nr,
-                                size_t consumer_nr)
+                                size_t coro_nr)
     {
         BenchConfig conf;
         conf.name = name;
@@ -122,8 +96,6 @@ struct BenchConfig
         conf.thread_nr = thread_nr;
         conf.coro_nr = coro_nr;
         conf.test_nr = test_nr;
-        conf.consumer_nr = consumer_nr;
-        conf.producer_nr = conf.local_client_nr() - consumer_nr;
         conf.should_report = true;
 
         conf.validate();
@@ -132,9 +104,8 @@ struct BenchConfig
 };
 std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 {
-    os << "{conf: name: " << conf.name << ", producer: " << conf.producer_nr
-       << ", consumer: " << conf.consumer_nr
-       << ", thread_nr: " << conf.thread_nr << ", coro_nr: " << conf.coro_nr
+    os << "{conf: name: " << conf.name << ", thread_nr: " << conf.thread_nr
+       << ", coro_nr: " << conf.coro_nr
        << "(local_client_nr: " << conf.local_client_nr()
        << ", cluster: " << conf.cluster_client_nr()
        << "), test_nr: " << conf.test_nr
@@ -175,44 +146,6 @@ struct AdditionalCoroCtx
     size_t rdma_protection_nr{0};
 };
 
-void reg_result(const std::string &name,
-                const BenchConfig &bench_conf,
-                const AdditionalCoroCtx &prv,
-                uint64_t ns)
-{
-    col_idx.push_back(name);
-    col_x_thread_nr.push_back(bench_conf.thread_nr);
-    col_x_coro_nr.push_back(bench_conf.coro_nr);
-    col_x_producer_nr.push_back(bench_conf.producer_nr);
-    col_x_consumer_nr.push_back(bench_conf.consumer_nr);
-    col_ns.push_back(ns);
-    col_test_nr.push_back(bench_conf.test_nr);
-
-    col_consumer_succ_rate.push_back(1.0 * prv.get_succ_nr / prv.get_nr);
-    col_producer_succ_rate.push_back(1.0 * prv.put_succ_nr / prv.put_nr);
-
-    col_rdma_protection_err.push_back(prv.rdma_protection_nr);
-}
-
-void reg_latency(const std::string &name,
-                 const OnePassBucketMonitor<uint64_t> &lat_m)
-{
-    if (col_lat_idx.empty())
-    {
-        col_lat_idx.push_back("lat_min");
-        col_lat_idx.push_back("lat_p5");
-        col_lat_idx.push_back("lat_p9");
-        col_lat_idx.push_back("lat_p99");
-    }
-    lat_data[name].push_back(lat_m.min());
-    lat_data[name].push_back(lat_m.percentile(0.5));
-    lat_data[name].push_back(lat_m.percentile(0.9));
-    lat_data[name].push_back(lat_m.percentile(0.99));
-
-    CHECK_EQ(lat_data[name].size(), col_lat_idx.size())
-        << "** duplicated test detected.";
-}
-
 template <typename T>
 typename List<T>::pointer gen_list(Patronus::pointer p,
                                    const ListConfig &config)
@@ -230,15 +163,33 @@ typename List<T>::pointer gen_list(Patronus::pointer p,
     return list;
 }
 
-void validate_helper(const std::vector<uint64_t> magic,
-                     const std::vector<ListItem> gots)
+void validate_helper(const std::list<ListItem> &reference,
+                     const std::list<ListItem> &test)
 {
-    CHECK_EQ(gots.size(), magic.size() + 1);
-    for (size_t i = 1; i < gots.size(); ++i)
+    CHECK_EQ(reference.size(), test.size())
+        << "[debug] size mismatch. " << util::pre_iter(reference, 10)
+        << " v.s. " << util::pre_iter(test, 10);
+
+    auto ref_it = reference.cbegin();
+    auto test_it = test.cbegin();
+    size_t ith = 0;
+    while (ref_it != reference.cend())
     {
-        const auto &got = gots[i];
-        const auto &m = magic[i - 1];
-        CHECK_EQ(got.magic_number, m);
+        if (test_it == test.cend())
+        {
+            LOG(FATAL) << "Size mismatch. test reach tail at " << ith << "-th";
+        }
+        auto reference_magic = ref_it->magic_number;
+        auto test_magic = test_it->magic_number;
+        CHECK_EQ(reference_magic, test_magic);
+        ref_it++;
+        test_it++;
+        ith++;
+    }
+    if (test_it != test.cend())
+    {
+        LOG(FATAL) << "Size mismatch. reference reaches tail at " << ith
+                   << "-th, but test is not.";
     }
 }
 
@@ -249,8 +200,7 @@ void test_basic_client_worker(
     const BenchConfig &bench_conf,
     const HandleConfig &handle_conf,
     GlobalAddress meta_gaddr,
-    CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
-    OnePassBucketMonitor<uint64_t> &lat_m)
+    CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
     std::ignore = bench_conf;
 
@@ -261,12 +211,6 @@ void test_basic_client_worker(
 
     auto handle =
         gen_handle<ListItem>(p, dir_id, handle_conf, meta_gaddr, &ctx);
-    ListItem list_item;
-    list_item.nid = nid;
-    list_item.tid = tid;
-    list_item.coro_id = coro_id;
-
-    std::vector<uint64_t> magic_nums;
 
     size_t put_succ_nr = 0;
     size_t put_nomem_nr = 0;
@@ -275,46 +219,50 @@ void test_basic_client_worker(
     size_t rdma_protection_nr = 0;
     size_t executed_nr = 0;
 
-    ChronoTimer timer;
+    std::list<ListItem> book_list;
 
-    ChronoTimer op_timer;
-    bool should_report_latency = (tid == 0 && coro_id == 0);
-
-    std::map<std::tuple<uint64_t, uint64_t, uint64_t>, uint64_t> book;
+    CHECK_EQ(handle->lk_pop_front(nullptr), kNotFound)
+        << "** list empty, should be unable to pop";
 
     while (ex.get_private_data().thread_remain_task > 0)
     {
-        if (should_report_latency)
+        if (true_with_prob(0.2))
         {
-            op_timer.pin();
-        }
-
-        auto magic_number = fast_pseudo_rand_int();
-        magic_nums.push_back(magic_number);
-        list_item.magic_number = magic_number;
-
-        while (true)
-        {
-            auto rc = handle->lk_push_back(list_item);
-            if (rc == kOk)
+            // pop
+            ListItem item;
+            LOG(INFO) << "[debug] POP ";
+            auto rc = handle->lk_pop_front(&item);
+            if (book_list.empty())
             {
-                break;
+                CHECK_EQ(rc, kNotFound)
+                    << "** list empty, should be unable to pop";
             }
-            CHECK_EQ(rc, kRetry);
+            else
+            {
+                CHECK_EQ(rc, kOk);
+                auto front_item = book_list.front();
+                book_list.pop_front();
+                CHECK_EQ(front_item.magic_number, item.magic_number);
+            }
         }
-
-        // check validity
-        auto lists = handle->debug_iterator();
-        validate_helper(magic_nums, lists);
-
-        if (should_report_latency)
+        else
         {
-            lat_m.collect(timer.pin());
+            // push
+            ListItem item;
+            item.nid = nid;
+            item.tid = tid;
+            item.coro_id = coro_id;
+            item.magic_number = fast_pseudo_rand_int();
+            book_list.push_back(item);
+            LOG(INFO) << "[debug] PUSH " << item;
+            auto rc = handle->lk_push_back(item);
+            CHECK_EQ(rc, kOk);
         }
+        auto lists = handle->debug_iterator();
+        validate_helper(book_list, lists);
+
         ex.get_private_data().thread_remain_task--;
     }
-    auto ns = timer.pin();
-    LOG(INFO) << "[debug] client finished. ns: " << ns << ", ctx: " << ctx;
 
     auto &comm = ex.get_private_data();
     comm.put_succ_nr += put_succ_nr;
@@ -327,8 +275,7 @@ void test_basic_client_worker(
               << ", nomem: " << put_nomem_nr << ", get: succ: " << get_succ_nr
               << ", not found: " << get_nomem_nr
               << ", rdma_protection_nr: " << rdma_protection_nr
-              << ". executed: " << executed_nr << ", take: " << ns
-              << " ns. ctx: " << ctx;
+              << ". executed: " << executed_nr << ". ctx: " << ctx;
 
     handle.reset();
 
@@ -438,10 +385,10 @@ void benchmark_client(Patronus::pointer p,
     }
     bar.wait();
 
-    auto min = util::time::to_ns(0ns);
-    auto max = util::time::to_ns(1ms);
-    auto rng = util::time::to_ns(1us);
-    OnePassBucketMonitor lat_m(min, max, rng);
+    // auto min = util::time::to_ns(0ns);
+    // auto max = util::time::to_ns(1ms);
+    // auto rng = util::time::to_ns(1us);
+    // OnePassBucketMonitor lat_m(min, max, rng);
 
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
@@ -457,23 +404,16 @@ void benchmark_client(Patronus::pointer p,
         }
         for (size_t i = 0; i < coro_nr; ++i)
         {
-            ex.worker(i) =
-                CoroCall([p,
-                          coro_id = i,
-                          &bench_conf,
-                          &handle_conf,
-                          &ex,
-                          &lat_m,
-                          meta_gaddr = g_meta_gaddr](CoroYield &yield) {
-                    test_basic_client_worker(p,
-                                             coro_id,
-                                             yield,
-                                             bench_conf,
-                                             handle_conf,
-                                             meta_gaddr,
-                                             ex,
-                                             lat_m);
-                });
+            ex.worker(
+                i) = CoroCall([p,
+                               coro_id = i,
+                               &bench_conf,
+                               &handle_conf,
+                               &ex,
+                               meta_gaddr = g_meta_gaddr](CoroYield &yield) {
+                test_basic_client_worker(
+                    p, coro_id, yield, bench_conf, handle_conf, meta_gaddr, ex);
+            });
         }
         auto &master = ex.master();
         master = CoroCall([p, &ex, actual_test_nr = actual_test_nr, coro_nr](
@@ -498,18 +438,6 @@ void benchmark_client(Patronus::pointer p,
     {
         LOG(INFO) << "p->finished(" << key << ")";
         p->finished(key);
-    }
-
-    auto report_name =
-        bench_conf.conf_name() + "[" + handle_conf.conf_name() + "]";
-    if (is_master && bench_conf.should_report)
-    {
-        reg_result(report_name, bench_conf, ex.get_private_data(), ns);
-
-        if (bench_conf.should_report_lat())
-        {
-            reg_latency(report_name, lat_m);
-        }
     }
 }
 
@@ -556,29 +484,21 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     for (const auto &handle_conf : handle_configs)
     {
-        for (size_t thread_nr : {8})
+        LOG_IF(INFO, is_master)
+            << "[bench] benching multiple threads for " << handle_conf;
+        key++;
+        auto conf = BenchConfig::get_conf(
+            "default", 1000, 1 /* thread_nr */, 1 /* coro_nr */);
+        if (is_client)
         {
-            for (size_t coro_nr : {1})
-            {
-                LOG_IF(INFO, is_master)
-                    << "[bench] benching multiple threads for " << handle_conf;
-                key++;
-                auto conf = BenchConfig::get_conf(
-                    "default", 1000, thread_nr, coro_nr, 0 /* consumer */);
-                if (is_client)
-                {
-                    conf.validate();
-                    LOG_IF(INFO, is_master)
-                        << "[sub-conf] running conf: " << conf;
-                    benchmark_client(p, bar, is_master, conf, handle_conf, key);
-                }
-                else
-                {
-                    // TODO: let list config be real.
-                    benchmark_server(
-                        p, bar, is_master, {conf}, ListConfig{}, key);
-                }
-            }
+            conf.validate();
+            LOG_IF(INFO, is_master) << "[sub-conf] running conf: " << conf;
+            benchmark_client(p, bar, is_master, conf, handle_conf, key);
+        }
+        else
+        {
+            // TODO: let list config be real.
+            benchmark_server(p, bar, is_master, {conf}, ListConfig{}, key);
         }
     }
 }

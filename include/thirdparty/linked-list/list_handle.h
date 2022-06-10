@@ -89,15 +89,14 @@ public:
         // 1.3) relinquish the handle
         auto rel_new_entry_flag =
             (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
-        rdma_adpt_->relinquish_perm(
-            new_entry_handle, 0 /* hint */, rel_new_entry_flag);
         rdma_adpt_->put_all_rdma_buffer();
 
         // 2) read meta for the latest ptail
         read_meta();
         auto &meta = cached_meta();
 
-        // 3) writing tail-next to the new value
+        // 3) update all the pointers
+        // 3.1) update the tail_entry->next
         auto tail_node_gaddr = meta.ptail;
         auto entry_handle = get_entry_mem_handle(tail_node_gaddr);
         auto next_ptr_buf =
@@ -111,12 +110,12 @@ public:
                          sizeof(ListNode<T>::next),
                          entry_handle)
             .expect(RC::kOk);
-        rdma_adpt_->commit().expect(RC::kOk);
-        rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
-        rdma_adpt_->put_all_rdma_buffer();
-
-        // 3) update the tail to point correctly
+        // 3.2) update the meta->ptail, and meta->phead if necessary
         meta.ptail = new_entry_gaddr;
+        if (unlikely(meta.phead == nullgaddr))
+        {
+            meta.phead = new_entry_gaddr;
+        }
         auto &meta_handle = get_meta_handle();
         auto meta_rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
         memcpy(meta_rdma_buf.buffer, &meta, meta_size());
@@ -127,7 +126,13 @@ public:
         rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
 
+        // 3) update the tail to point correctly
         unlock_push();
+
+        // 4) offload all the relinquish out of critical path.
+        rdma_adpt_->relinquish_perm(
+            new_entry_handle, 0 /* hint */, rel_new_entry_flag);
+        rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
         return kOk;
     }
 
@@ -161,51 +166,76 @@ public:
         // 0) update meta
         read_meta();
         auto &meta = cached_meta();
-        if (unlikely(meta.phead == meta.ptail))
+        if (unlikely(meta.phead == nullgaddr || meta.ptail == nullgaddr))
         {
             // is full
+            CHECK_EQ(meta.ptail, nullgaddr);
+            CHECK_EQ(meta.phead, nullgaddr);
             unlock_pop();
             return RC::kNotFound;
         }
 
-        // 1) read head->next
+        // 1) read entry = *meta_.phead
+        // or GlobalAddress head_next = meta_.phead->next
         auto head_gaddr = meta.phead;
         auto entry_handle = get_entry_mem_handle(head_gaddr);
-        auto head_next_gaddr = head_gaddr + offsetof(ListNode<T>, next);
-        auto head_next_ptr_buf =
-            rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>::next));
-        rdma_adpt_
-            ->rdma_read(head_next_ptr_buf.buffer,
-                        head_next_gaddr,
-                        sizeof(ListNode<T>::next),
-                        entry_handle)
-            .expect(RC::kOk);
-        rdma_adpt_->commit().expect(RC::kOk);
-        rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
+        GlobalAddress head_next = nullgaddr;
+        if (likely(t != nullptr))
+        {
+            // also read object
+            auto node_size = sizeof(ListNode<T>);
+            auto entry_buf = rdma_adpt_->get_rdma_buffer(node_size);
+            rdma_adpt_
+                ->rdma_read(
+                    entry_buf.buffer, head_gaddr, node_size, entry_handle)
+                .expect(RC::kOk);
+            rdma_adpt_->commit().expect(RC::kOk);
+            const auto &node = *(ListNode<T> *) entry_buf.buffer;
+            *t = node.object;
+            head_next = node.next;
+        }
+        else
+        {
+            auto head_next_gaddr = head_gaddr + offsetof(ListNode<T>, next);
+            auto head_next_ptr_buf =
+                rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>::next));
+            rdma_adpt_
+                ->rdma_read(head_next_ptr_buf.buffer,
+                            head_next_gaddr,
+                            sizeof(ListNode<T>::next),
+                            entry_handle)
+                .expect(RC::kOk);
+            rdma_adpt_->commit().expect(RC::kOk);
+            head_next = *(GlobalAddress *) head_next_ptr_buf.buffer;
+        }
         rdma_adpt_->put_all_rdma_buffer();
 
         // 2) update meta phead
         auto old_phead = meta.phead;
-        meta.phead = *(GlobalAddress *) head_next_ptr_buf.buffer;
+        meta.phead = head_next;
         write_meta();
 
         // 3) unlock
         unlock_pop();
 
-        // 4) TODO: read back value to t, if t is not nullptr.
-        CHECK(false) << "TODO:" << t;
-
-        // 5) free
+        // 5) relinquish & free
+        rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
         remote_free_list_node(old_phead);
+        rdma_adpt_->put_all_rdma_buffer();
 
         return kOk;
     }
-    std::vector<T> debug_iterator()
+    std::list<T> debug_iterator()
     {
-        std::vector<T> ret;
+        std::list<T> ret;
 
         read_meta();
         const auto &meta = cached_meta();
+        if (unlikely(meta.phead == nullgaddr))
+        {
+            return ret;
+        }
+
         auto list_node_buf = rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>));
         auto cur_list_node_gaddr = meta.phead;
         while (true)
@@ -262,6 +292,7 @@ public:
     {
         auto &meta_handle = get_meta_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
+        memcpy(rdma_buf.buffer, &cached_meta_, meta_size());
         rdma_adpt_
             ->rdma_write(meta_gaddr_, rdma_buf.buffer, meta_size(), meta_handle)
             .expect(RC::kOk);
@@ -329,11 +360,12 @@ private:
             ->rdma_cas(
                 push_lock_gaddr(), 0, 1, rdma_buf.buffer, push_lock_handle)
             .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        rdma_adpt_->put_all_rdma_buffer();
+
         uint64_t got = *(uint64_t *) rdma_buf.buffer;
         DCHECK(got == 0 || got == 1)
             << "got invalid lock value: " << got << ". Not 0 or 1.";
-        rdma_adpt_->commit().expect(RC::kOk);
-        rdma_adpt_->put_all_rdma_buffer();
 
         if (got == 0)
         {
@@ -366,12 +398,13 @@ private:
         auto rc = rdma_adpt_->rdma_cas(
             pop_lock_gaddr(), 0, 1, rdma_buf.buffer, pop_lock_handle);
         CHECK_EQ(rc, kOk);
-        uint64_t got = *(uint64_t *) rdma_buf.buffer;
-        DCHECK(got == 0 || got == 1)
-            << "got invalid lock value: " << got << ". Not 0 or 1.";
         rc = rdma_adpt_->commit();
         CHECK_EQ(rc, kOk);
         rdma_adpt_->put_all_rdma_buffer();
+
+        uint64_t got = *(uint64_t *) rdma_buf.buffer;
+        DCHECK(got == 0 || got == 1)
+            << "got invalid lock value: " << got << ". Not 0 or 1.";
 
         if (got == 0)
         {
@@ -412,7 +445,7 @@ private:
     }
     RemoteMemHandle &get_pop_lock_handle()
     {
-        return get_handle_impl(0, pop_lock_gaddr(), sizeof(uint64_t));
+        return get_handle_impl(1, pop_lock_gaddr(), sizeof(uint64_t));
     }
     RemoteMemHandle &get_handle_impl(uint64_t id,
                                      GlobalAddress gaddr,
@@ -424,6 +457,20 @@ private:
             auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
                            (flag_t) AcquireRequestFlag::kNoBindPR;
             ret = rdma_adpt_->acquire_perm(gaddr, 0, size, 0ns, ac_flag);
+        }
+        if constexpr (debug())
+        {
+            if (debug_handle_cache_validate_.count(id) == 0)
+            {
+                debug_handle_cache_validate_[id] =
+                    MemDesc{.gaddr = gaddr, .size = size};
+            }
+            else
+            {
+                const auto &old = debug_handle_cache_validate_[id];
+                CHECK_EQ(old.gaddr, gaddr);
+                CHECK_EQ(old.size, size);
+            }
         }
         return ret;
     }
@@ -441,6 +488,13 @@ private:
     std::unordered_map<uint64_t, RemoteMemHandle> handles_;
 
     RemoteMemHandle meta_handle_;
+
+    struct MemDesc
+    {
+        GlobalAddress gaddr;
+        size_t size;
+    };
+    std::unordered_map<uint64_t, MemDesc> debug_handle_cache_validate_;
 };
 }  // namespace patronus::list
 
