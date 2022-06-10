@@ -386,11 +386,6 @@ void benchmark_client(Patronus::pointer p,
     }
     bar.wait();
 
-    // auto min = util::time::to_ns(0ns);
-    // auto max = util::time::to_ns(1ms);
-    // auto rng = util::time::to_ns(1us);
-    // OnePassBucketMonitor lat_m(min, max, rng);
-
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
     bool should_enter = tid < thread_nr && nid == selected_client;

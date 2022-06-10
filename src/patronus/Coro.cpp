@@ -176,7 +176,6 @@ bool ServerCoroBatchExecutionContext::commit_wo_mw_reuse_optimization(
             const auto &task = prepared_tasks_[task_idx];
             if (task.o_status)
             {
-                LOG(INFO) << "[debug] !! setting o_status to kMagicMwErr";
                 (*task.o_status) = AcquireRequestStatus::kMagicMwErr;
             }
             // DLOG(INFO) << "[debug] !! Task " << task
