@@ -64,7 +64,7 @@ public:
             return rc;
         }
 
-        // 1.1) alloc: use acquire_perm with allocation semantics
+        // 1) alloc: use acquire_perm with allocation semantics
         auto ac_new_entry_flag = (flag_t) AcquireRequestFlag::kWithAllocation |
                                  (flag_t) AcquireRequestFlag::kNoGc |
                                  (flag_t) AcquireRequestFlag::kNoBindPR;
@@ -74,7 +74,7 @@ public:
                                                          0ns,
                                                          ac_new_entry_flag);
         auto new_entry_gaddr = new_entry_handle.gaddr();
-        // 1.2) write to the allocated record
+        // 2.1) write to the allocated record
         auto object_rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>));
         auto &list_item = *(ListNode<T> *) object_rdma_buf.buffer;
         list_item.object = t;
@@ -85,14 +85,11 @@ public:
                          sizeof(ListNode<T>),
                          new_entry_handle)
             .expect(RC::kOk);
-        rdma_adpt_->commit().expect(RC::kOk);
-        // 1.3) relinquish the handle
-        auto rel_new_entry_flag =
-            (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
-        rdma_adpt_->put_all_rdma_buffer();
 
-        // 2) read meta for the latest ptail
-        read_meta();
+        // 2.2) read meta for the latest ptail
+        auto read_meta_rdma_buf = prepare_read_meta();
+        rdma_adpt_->commit().expect(RC::kOk);
+        post_commit_read_meta(read_meta_rdma_buf);
         auto &meta = cached_meta();
 
         // 3) update all the pointers
@@ -123,16 +120,20 @@ public:
             ->rdma_write(
                 meta_gaddr(), meta_rdma_buf.buffer, meta_size(), meta_handle)
             .expect(RC::kOk);
+
+        // 3.3) unlock
+        prepare_unlock_push();
+        // 3.4) commit
         rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
 
-        // 3) update the tail to point correctly
-        unlock_push();
-
         // 4) offload all the relinquish out of critical path.
+        auto rel_new_entry_flag =
+            (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
         rdma_adpt_->relinquish_perm(
             new_entry_handle, 0 /* hint */, rel_new_entry_flag);
         rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
+        rdma_adpt_->put_all_rdma_buffer();
         return kOk;
     }
 
@@ -210,30 +211,32 @@ public:
         }
         rdma_adpt_->put_all_rdma_buffer();
 
-        // 2) update meta phead
+        // 2.1) update meta phead
         auto old_phead = meta.phead;
         meta.phead = head_next;
-        write_meta();
+        prepare_write_meta();
 
-        // 3) unlock
-        unlock_pop();
+        // 2.2) unlock
+        prepare_unlock_pop();
+        // 2.3) commit
+        rdma_adpt_->commit().expect(RC::kOk);
+        rdma_adpt_->put_all_rdma_buffer();
 
-        // 5) relinquish & free
+        // 3) relinquish & free
         rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
         remote_free_list_node(old_phead);
         rdma_adpt_->put_all_rdma_buffer();
 
         return kOk;
     }
-    std::list<T> debug_iterator()
+    using Visitor = std::function<bool(const T &)>;
+    void lf_visit(const Visitor &visit)
     {
-        std::list<T> ret;
-
         read_meta();
         const auto &meta = cached_meta();
         if (unlikely(meta.phead == nullgaddr))
         {
-            return ret;
+            return;
         }
 
         auto list_node_buf = rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>));
@@ -258,8 +261,12 @@ public:
 
             const auto &list_node = *(ListNode<T> *) list_node_buf.buffer;
             const auto &object = list_node.object;
-            ret.push_back(object);
 
+            bool should_continue = visit(object);
+            if (!should_continue)
+            {
+                break;
+            }
             cur_list_node_gaddr = list_node.next;
             if (unlikely(cur_list_node_gaddr == nullgaddr))
             {
@@ -267,6 +274,17 @@ public:
             }
         }
         rdma_adpt_->put_all_rdma_buffer();
+        return;
+    }
+    std::list<T> debug_iterator()
+    {
+        std::list<T> ret;
+
+        lf_visit([&ret](const T &t) {
+            ret.push_back(t);
+            return true;
+        });
+
         return ret;
     }
 
@@ -288,7 +306,20 @@ public:
         rdma_adpt_->put_all_rdma_buffer();
         cached_inited_ = true;
     }
-    void write_meta()
+    Buffer prepare_read_meta()
+    {
+        auto &meta_handle = get_meta_handle();
+        auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
+        rdma_adpt_
+            ->rdma_read(rdma_buf.buffer, meta_gaddr_, meta_size(), meta_handle)
+            .expect(RC::kOk);
+        return rdma_buf;
+    }
+    void post_commit_read_meta(Buffer rdma_buf)
+    {
+        memcpy(&cached_meta_, rdma_buf.buffer, meta_size());
+    }
+    void prepare_write_meta()
     {
         auto &meta_handle = get_meta_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
@@ -296,6 +327,10 @@ public:
         rdma_adpt_
             ->rdma_write(meta_gaddr_, rdma_buf.buffer, meta_size(), meta_handle)
             .expect(RC::kOk);
+    }
+    void write_meta()
+    {
+        prepare_write_meta();
         rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
     }
@@ -378,6 +413,12 @@ private:
     }
     void unlock_push()
     {
+        prepare_unlock_push();
+        rdma_adpt_->commit().expect(RC::kOk);
+        rdma_adpt_->put_all_rdma_buffer();
+    }
+    void prepare_unlock_push()
+    {
         auto &push_lock_handle = get_push_lock_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
         *((uint64_t *) rdma_buf.buffer) = 0;
@@ -388,8 +429,6 @@ private:
                          sizeof(uint64_t),
                          push_lock_handle)
             .expect(RC::kOk);
-        rdma_adpt_->commit().expect(RC::kOk);
-        rdma_adpt_->put_all_rdma_buffer();
     }
     RetCode lock_pop()
     {
@@ -415,7 +454,7 @@ private:
             return kRetry;
         }
     }
-    void unlock_pop()
+    void prepare_unlock_pop()
     {
         auto &pop_lock_handle = get_pop_lock_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
@@ -427,6 +466,10 @@ private:
                          sizeof(uint64_t),
                          pop_lock_handle)
             .expect(RC::kOk);
+    }
+    void unlock_pop()
+    {
+        prepare_unlock_pop();
         rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
     }
