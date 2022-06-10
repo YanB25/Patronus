@@ -25,9 +25,10 @@ using namespace patronus;
 using namespace hmdf;
 
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kClientThreadNr = 1;
+constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kMaxCoroNr = 1;
-constexpr static size_t kTestNr = 1_K;
+
+constexpr static size_t kTestNr = 10_K;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -51,17 +52,28 @@ struct BenchConfig
 {
     std::string name;
     size_t thread_nr{1};
+    size_t producer_nr{0};
+    size_t consumer_nr{0};
     size_t coro_nr{1};
     size_t test_nr{0};
     bool should_report{false};
 
-    bool should_report_lat() const
+    bool is_producer(size_t tid) const
     {
-        return should_report && thread_nr == 32 && coro_nr == 1;
+        return should_enter(tid) && tid < producer_nr;
+    }
+    bool is_consumer(size_t tid) const
+    {
+        return should_enter(tid) && (!is_producer(tid));
+    }
+    bool should_enter(size_t tid) const
+    {
+        return tid < thread_nr;
     }
 
     void validate() const
     {
+        CHECK_EQ(thread_nr, producer_nr + consumer_nr);
     }
     size_t cluster_client_nr() const
     {
@@ -88,13 +100,16 @@ struct BenchConfig
     }
     static BenchConfig get_conf(const std::string &name,
                                 size_t test_nr,
-                                size_t thread_nr,
+                                size_t producer_nr,
+                                size_t consumer_nr,
                                 size_t coro_nr)
     {
         BenchConfig conf;
         conf.name = name;
         conf.test_nr = test_nr;
-        conf.thread_nr = thread_nr;
+        conf.producer_nr = producer_nr;
+        conf.consumer_nr = consumer_nr;
+        conf.thread_nr = producer_nr + consumer_nr;
         conf.coro_nr = coro_nr;
         conf.test_nr = test_nr;
         conf.should_report = true;
@@ -164,33 +179,40 @@ typename List<T>::pointer gen_list(Patronus::pointer p,
     return list;
 }
 
-void validate_helper(const std::list<ListItem> &reference,
-                     const std::list<ListItem> &test)
+uint64_t gen_magic(size_t nid, size_t tid, size_t coro_id)
 {
-    CHECK_EQ(reference.size(), test.size())
-        << "[debug] size mismatch. " << util::pre_iter(reference, 10)
-        << " v.s. " << util::pre_iter(test, 10);
+    auto cluster_size =
+        ::config::get_client_nids().size() + ::config::get_server_nids().size();
+    size_t max_round = cluster_size * kMaxAppThread * kMaxCoroNr;
+    size_t id = nid * kMaxAppThread * kMaxCoroNr + tid * kMaxCoroNr + coro_id;
+    CHECK_LT(id, max_round);
+    auto multiple = fast_pseudo_rand_int(100000);
+    return max_round * multiple + id;
+}
+void validate_magic(size_t nid, size_t tid, size_t coro_id, uint64_t magic)
+{
+    auto cluster_size =
+        ::config::get_client_nids().size() + ::config::get_server_nids().size();
+    size_t max_round = cluster_size * kMaxAppThread * kMaxCoroNr;
+    auto id = magic % max_round;
+    auto expect_coro_id = id % kMaxCoroNr;
+    CHECK_EQ(expect_coro_id, coro_id)
+        << "** coro_id mismatch. id: " << id << ", max_round: " << max_round
+        << ", id % max_round: " << (id % max_round)
+        << ", % kMaxCoroNr: " << expect_coro_id;
+    id -= coro_id;
+    auto expect_tid = (id % kMaxAppThread) / kMaxCoroNr;
+    CHECK_EQ(expect_tid, tid);
+    id -= tid * kMaxCoroNr;
+    auto expect_nid = id / kMaxAppThread / kMaxCoroNr;
+    CHECK_EQ(expect_nid, nid);
+}
 
-    auto ref_it = reference.cbegin();
-    auto test_it = test.cbegin();
-    size_t ith = 0;
-    while (ref_it != reference.cend())
+void validate_helper(const std::list<ListItem> &list)
+{
+    for (const auto &item : list)
     {
-        if (test_it == test.cend())
-        {
-            LOG(FATAL) << "Size mismatch. test reach tail at " << ith << "-th";
-        }
-        auto reference_magic = ref_it->magic_number;
-        auto test_magic = test_it->magic_number;
-        CHECK_EQ(reference_magic, test_magic);
-        ref_it++;
-        test_it++;
-        ith++;
-    }
-    if (test_it != test.cend())
-    {
-        LOG(FATAL) << "Size mismatch. reference reaches tail at " << ith
-                   << "-th, but test is not.";
+        validate_magic(item.nid, item.tid, item.coro_id, item.magic_number);
     }
 }
 
@@ -215,35 +237,37 @@ void test_basic_client_worker(
 
     size_t put_succ_nr = 0;
     size_t put_nomem_nr = 0;
+    size_t put_retry_nr = 0;
     size_t get_succ_nr = 0;
     size_t get_nomem_nr = 0;
     size_t rdma_protection_nr = 0;
     size_t executed_nr = 0;
 
-    std::list<ListItem> book_list;
-
-    CHECK_EQ(handle->lk_pop_front(nullptr), kNotFound)
-        << "** list empty, should be unable to pop";
+    bool is_producer = bench_conf.is_producer(tid);
+    bool is_consumer = bench_conf.is_consumer(tid);
+    CHECK_EQ(is_producer + is_consumer, 1);
 
     while (ex.get_private_data().thread_remain_task > 0)
     {
-        if (true_with_prob(0.2))
+        auto magic = gen_magic(nid, tid, coro_id);
+        validate_magic(nid, tid, coro_id, magic);
+        if (is_consumer)
         {
             // pop
             ListItem item;
-            // LOG(INFO) << "[debug] POP ";
             auto rc = handle->lk_pop_front(&item);
-            if (book_list.empty())
+            if (rc == kOk)
             {
-                CHECK_EQ(rc, kNotFound)
-                    << "** list empty, should be unable to pop";
+                validate_magic(
+                    item.nid, item.tid, item.coro_id, item.magic_number);
+                ex.get_private_data().thread_remain_task--;
+                get_succ_nr++;
             }
             else
             {
-                CHECK_EQ(rc, kOk);
-                auto front_item = book_list.front();
-                book_list.pop_front();
-                CHECK_EQ(front_item.magic_number, item.magic_number);
+                get_nomem_nr++;
+                LOG_IF(INFO, get_nomem_nr % 1000 == 0)
+                    << "nomem: " << get_nomem_nr;
             }
         }
         else
@@ -253,17 +277,24 @@ void test_basic_client_worker(
             item.nid = nid;
             item.tid = tid;
             item.coro_id = coro_id;
-            item.magic_number = fast_pseudo_rand_int();
-            book_list.push_back(item);
-            // LOG(INFO) << "[debug] PUSH " << item;
+            item.magic_number = gen_magic(nid, tid, coro_id);
+            validate_magic(item.nid, item.tid, item.coro_id, item.magic_number);
             auto rc = handle->lk_push_back(item);
-            CHECK_EQ(rc, kOk);
+            if (rc == kOk)
+            {
+                put_succ_nr++;
+            }
+            else
+            {
+                CHECK_EQ(rc, RC::kRetry);
+                put_retry_nr++;
+            }
+            ex.get_private_data().thread_remain_task--;
         }
-        auto lists = handle->debug_iterator();
-        validate_helper(book_list, lists);
-
-        ex.get_private_data().thread_remain_task--;
     }
+    auto lists = handle->debug_iterator();
+    LOG(INFO) << "validating size " << lists.size() << " from ctx: " << ctx;
+    validate_helper(lists);
 
     auto &comm = ex.get_private_data();
     comm.put_succ_nr += put_succ_nr;
@@ -273,7 +304,8 @@ void test_basic_client_worker(
     comm.rdma_protection_nr += rdma_protection_nr;
 
     LOG(INFO) << "[bench] put: succ: " << put_succ_nr
-              << ", nomem: " << put_nomem_nr << ", get: succ: " << get_succ_nr
+              << ", nomem: " << put_nomem_nr << ", retry: " << put_retry_nr
+              << ", get: succ: " << get_succ_nr
               << ", not found: " << get_nomem_nr
               << ", rdma_protection_nr: " << rdma_protection_nr
               << ". executed: " << executed_nr << ". ctx: " << ctx;
@@ -386,14 +418,9 @@ void benchmark_client(Patronus::pointer p,
     }
     bar.wait();
 
-    // auto min = util::time::to_ns(0ns);
-    // auto max = util::time::to_ns(1ms);
-    // auto rng = util::time::to_ns(1us);
-    // OnePassBucketMonitor lat_m(min, max, rng);
-
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
-    bool should_enter = tid < thread_nr && nid == selected_client;
+    bool should_enter = bench_conf.should_enter(tid) && nid == selected_client;
 
     if (should_enter)
     {
@@ -487,19 +514,30 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     {
         LOG_IF(INFO, is_master)
             << "[bench] benching multiple threads for " << handle_conf;
-        key++;
-        auto conf = BenchConfig::get_conf(
-            "default", kTestNr, 1 /* thread_nr */, 1 /* coro_nr */);
-        if (is_client)
+        for (size_t producer_nr : {1, 2, 8, 16})
         {
-            conf.validate();
-            LOG_IF(INFO, is_master) << "[sub-conf] running conf: " << conf;
-            benchmark_client(p, bar, is_master, conf, handle_conf, key);
-        }
-        else
-        {
-            // TODO: let list config be real.
-            benchmark_server(p, bar, is_master, {conf}, ListConfig{}, key);
+            for (size_t consumer_nr : {0})
+            {
+                key++;
+                auto conf = BenchConfig::get_conf("default",
+                                                  kTestNr,
+                                                  producer_nr,
+                                                  consumer_nr,
+                                                  1 /* coro_nr */);
+                if (is_client)
+                {
+                    conf.validate();
+                    LOG_IF(INFO, is_master)
+                        << "[sub-conf] running conf: " << conf;
+                    benchmark_client(p, bar, is_master, conf, handle_conf, key);
+                }
+                else
+                {
+                    // TODO: let list config be real.
+                    benchmark_server(
+                        p, bar, is_master, {conf}, ListConfig{}, key);
+                }
+            }
         }
     }
 }
