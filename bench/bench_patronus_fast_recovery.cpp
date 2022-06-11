@@ -180,9 +180,10 @@ void test_basic_client_worker(
 
         bool should_fault = (executed_nr >= conf.fault_after_nr) &&
                             (executed_nr % conf.fault_every == 0);
+        util::TraceManager tm(1);
         if (unlikely(i_trigger_fault && should_fault))
         {
-            auto trace = util::TracerContext::new_instance("crash");
+            auto trace = tm.trace("crash");
 
             ChronoTimer timer;
             // p->trig
@@ -196,7 +197,7 @@ void test_basic_client_worker(
                                4_KB /* offset */,
                                0 /* flag */,
                                &ctx,
-                               trace->view());
+                               trace);
             CHECK_EQ(ec, kRdmaProtectionErr);
             auto fault_ns = timer.pin();
 
@@ -207,24 +208,25 @@ void test_basic_client_worker(
 
             CHECK_EQ(ec, kOk);
 
-            auto trace2 = util::TracerContext::new_instance("rw");
+            auto trace2 = tm.trace("rw");
             ec = p->write(lease,
                           rdma_buf.buffer,
                           8,
                           0 /* offset */,
                           rw_flag,
                           &ctx,
-                          trace2->view());
+                          trace2);
 
             CHECK_EQ(ec, kOk);
 
             DLOG(INFO) << "[bench] crash op takes " << fault_ns
-                       << " ns. total: " << fault_ns
-                       << " ns. Trace: " << *trace;
+                       << " ns. total: " << fault_ns << " ns. Trace: " << trace;
 
             uint64_t total_fault_ns = 0;
-            auto map = trace->retrieve_map();
-            auto map2 = trace2->retrieve_map();
+            CHECK(trace.enabled());
+            CHECK(trace2.enabled());
+            auto map = trace.retrieve_map();
+            auto map2 = trace2.retrieve_map();
             col_idx.push_back(std::to_string(col_idx.size()));
             auto fault_issue_ns = map["issue"];
             total_fault_ns += fault_issue_ns;

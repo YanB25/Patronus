@@ -272,6 +272,10 @@ class RetrieveTimer
 {
 public:
     RetrieveTimer() = default;
+    void clear()
+    {
+        records_.clear();
+    }
     void init(const std::string &name)
     {
         records_.clear();

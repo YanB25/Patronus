@@ -3,6 +3,7 @@
 #define PATRONUS_LINKED_LIST_HANDLE_H_
 
 #include "util/RetCode.h"
+#include "util/Tracer.h"
 
 namespace patronus::list
 {
@@ -55,9 +56,11 @@ public:
 
     RetCode lf_push_back(const T &t);
     RetCode lf_pop_front(const T &t);
-    RetCode lk_push_back(const T &t)
+    RetCode lk_push_back(const T &t, util::TraceView trace = util::nulltrace)
     {
         auto rc = lock_push();
+        trace.pin("lock_push");
+
         if (rc != kOk)
         {
             DCHECK_EQ(rc, kRetry);
@@ -74,6 +77,7 @@ public:
                                                          0ns,
                                                          ac_new_entry_flag);
         auto new_entry_gaddr = new_entry_handle.gaddr();
+        trace.pin("acquire new_entry");
         // 2.1) write to the allocated record
         auto object_rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>));
         auto &list_item = *(ListNode<T> *) object_rdma_buf.buffer;
@@ -91,11 +95,13 @@ public:
         rdma_adpt_->commit().expect(RC::kOk);
         post_commit_read_meta(read_meta_rdma_buf);
         auto &meta = cached_meta();
+        trace.pin("write record, read meta");
 
         // 3) update all the pointers
         // 3.1) update the tail_entry->next
         auto tail_node_gaddr = meta.ptail;
         auto entry_handle = get_entry_mem_handle(tail_node_gaddr);
+        trace.pin("acquire entry");
         auto next_ptr_buf =
             rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>::next));
         *(GlobalAddress *) next_ptr_buf.buffer = new_entry_gaddr;
@@ -126,14 +132,17 @@ public:
         // 3.4) commit
         rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
+        trace.pin("write entry->next + write meta and unlock");
 
         // 4) offload all the relinquish out of critical path.
         auto rel_new_entry_flag =
             (flag_t) LeaseModifyFlag::kNoRelinquishUnbindPr;
         rdma_adpt_->relinquish_perm(
             new_entry_handle, 0 /* hint */, rel_new_entry_flag);
+        trace.pin("relinquish new_entry");
         rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
         rdma_adpt_->put_all_rdma_buffer();
+        trace.pin("relinquish entry");
         return kOk;
     }
 
@@ -156,7 +165,7 @@ public:
     {
         return cached_node_;
     }
-    RetCode lk_pop_front(T *t)
+    RetCode lk_pop_front(T *t, util::TraceView trace = util::nulltrace)
     {
         auto rc = lock_pop();
         if (rc != kOk)
@@ -164,9 +173,11 @@ public:
             DCHECK_EQ(rc, kRetry);
             return rc;
         }
+        trace.pin("lock pop");
         // 0) update meta
         read_meta();
         auto &meta = cached_meta();
+        trace.pin("read meta");
         if (unlikely(meta.phead == nullgaddr || meta.ptail == nullgaddr))
         {
             // is full
@@ -210,6 +221,7 @@ public:
             head_next = *(GlobalAddress *) head_next_ptr_buf.buffer;
         }
         rdma_adpt_->put_all_rdma_buffer();
+        trace.pin("read entry");
 
         // 2.1) update meta phead
         auto old_phead = meta.phead;
@@ -221,11 +233,13 @@ public:
         // 2.3) commit
         rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
+        trace.pin("write meta + unlock");
 
         // 3) relinquish & free
         rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
         remote_free_list_node(old_phead);
         rdma_adpt_->put_all_rdma_buffer();
+        trace.pin("rel entry");
 
         return kOk;
     }
@@ -350,10 +364,15 @@ public:
 
     ~ListHandle()
     {
+        auto rel_flag = (flag_t) 0;
         if (meta_handle_.valid())
         {
-            auto rel_flag = (flag_t) 0;
             rdma_adpt_->relinquish_perm(meta_handle_, 0 /* hint */, rel_flag);
+        }
+        for (auto &[_, handle] : handles_)
+        {
+            std::ignore = _;
+            rdma_adpt_->relinquish_perm(handle, 0 /* hint */, rel_flag);
         }
     }
 

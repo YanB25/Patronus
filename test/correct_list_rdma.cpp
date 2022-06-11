@@ -396,7 +396,6 @@ void benchmark_client(Patronus::pointer p,
 {
     auto selected_client = ::config::get_client_nids().front();
     auto coro_nr = bench_conf.coro_nr;
-    auto thread_nr = bench_conf.thread_nr;
     bool first_enter = true;
     bool server_should_leave = true;
     CHECK_LE(coro_nr, kMaxCoroNr);

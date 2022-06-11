@@ -115,26 +115,6 @@ void client(std::shared_ptr<DSM> dsm)
         LOG(WARNING) << "[system] skip second round test.";
     }
 }
-// Notice: TLS object is created only once for each combination of type and
-// thread. Only use this when you prefer multiple callers share the same
-// instance.
-template <class T, class... Args>
-inline T &TLS(Args &&... args)
-{
-    thread_local T _tls_item(std::forward<Args>(args)...);
-    return _tls_item;
-}
-inline std::mt19937 &rand_generator()
-{
-    return TLS<std::mt19937>();
-}
-
-// [min, max]
-uint64_t rand_int(uint64_t min, uint64_t max)
-{
-    std::uniform_int_distribution<uint64_t> dist(min, max);
-    return dist(rand_generator());
-}
 
 void server(std::shared_ptr<DSM> dsm)
 {

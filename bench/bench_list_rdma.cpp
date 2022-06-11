@@ -15,6 +15,7 @@
 #include "thirdparty/linked-list/list_handle.h"
 #include "util/BenchRand.h"
 #include "util/DataFrameF.h"
+#include "util/Pre.h"
 #include "util/Rand.h"
 #include "util/TimeConv.h"
 
@@ -24,8 +25,8 @@ using namespace patronus;
 using namespace hmdf;
 
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kClientThreadNr = 32;
-constexpr static size_t kMaxCoroNr = 16;
+constexpr static size_t kClientThreadNr = kMaxAppThread;
+constexpr static size_t kMaxCoroNr = 1;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -48,28 +49,28 @@ std::vector<uint64_t> col_lat_p9;
 std::vector<uint64_t> col_lat_p99;
 std::unordered_map<std::string, std::vector<uint64_t>> lat_data;
 
-uint64_t local_client_id(uint64_t tid, uint64_t cid)
-{
-    return tid * kMaxCoroNr + cid;
-}
-
-template <size_t kSize>
-struct Dummy
-{
-    char buffer[kSize];
-};
-
 struct ListItem
 {
-    char buffer[64];
+    uint64_t nid;
+    uint64_t tid;
+    uint64_t coro_id;
+    uint64_t magic_number;
 };
+
+inline std::ostream &operator<<(std::ostream &os, const ListItem &item)
+{
+    os << "{ListItem nid: " << item.nid << ", tid: " << item.tid
+       << ", coro_id: " << item.coro_id
+       << ", magic_number: " << (void *) item.magic_number << "}";
+    return os;
+}
 
 struct BenchConfig
 {
     std::string name;
-    double producer_nr{0};
-    double consumer_nr{0};
     size_t thread_nr{1};
+    size_t producer_nr{0};
+    size_t consumer_nr{0};
     size_t coro_nr{1};
     size_t test_nr{0};
     bool should_report{false};
@@ -79,10 +80,14 @@ struct BenchConfig
         return should_report && thread_nr == 32 && coro_nr == 1;
     }
 
+    bool should_enter(size_t tid) const
+    {
+        return tid < thread_nr;
+    }
+
     void validate() const
     {
-        double sum = producer_nr + consumer_nr;
-        CHECK_DOUBLE_EQ(sum, local_client_nr());
+        CHECK_EQ(thread_nr, producer_nr + consumer_nr);
     }
     size_t cluster_client_nr() const
     {
@@ -96,21 +101,19 @@ struct BenchConfig
     {
         return name;
     }
-    bool is_consumer(uint64_t client_id) const
+    bool is_consumer(size_t tid) const
     {
-        return client_id < consumer_nr;
+        return should_enter(tid) && (!is_producer(tid));
     }
-    bool is_producer(uint64_t client_id) const
+    bool is_producer(size_t tid) const
     {
-        return !is_consumer(client_id);
+        return should_enter(tid) && tid < producer_nr;
     }
 
     BenchConfig clone() const
     {
         BenchConfig ret;
         ret.name = name;
-        ret.producer_nr = producer_nr;
-        ret.consumer_nr = consumer_nr;
         ret.thread_nr = thread_nr;
         ret.coro_nr = coro_nr;
         ret.test_nr = test_nr;
@@ -119,18 +122,18 @@ struct BenchConfig
     }
     static BenchConfig get_conf(const std::string &name,
                                 size_t test_nr,
-                                size_t thread_nr,
-                                size_t coro_nr,
-                                size_t consumer_nr)
+                                size_t producer_nr,
+                                size_t consumer_nr,
+                                size_t coro_nr)
     {
         BenchConfig conf;
         conf.name = name;
         conf.test_nr = test_nr;
-        conf.thread_nr = thread_nr;
+        conf.producer_nr = producer_nr;
+        conf.consumer_nr = consumer_nr;
+        conf.thread_nr = producer_nr + consumer_nr;
         conf.coro_nr = coro_nr;
         conf.test_nr = test_nr;
-        conf.consumer_nr = consumer_nr;
-        conf.producer_nr = conf.local_client_nr() - consumer_nr;
         conf.should_report = true;
 
         conf.validate();
@@ -139,9 +142,8 @@ struct BenchConfig
 };
 std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 {
-    os << "{conf: name: " << conf.name << ", producer: " << conf.producer_nr
-       << ", consumer: " << conf.consumer_nr
-       << ", thread_nr: " << conf.thread_nr << ", coro_nr: " << conf.coro_nr
+    os << "{conf: name: " << conf.name << ", thread_nr: " << conf.thread_nr
+       << ", coro_nr: " << conf.coro_nr
        << "(local_client_nr: " << conf.local_client_nr()
        << ", cluster: " << conf.cluster_client_nr()
        << "), test_nr: " << conf.test_nr
@@ -168,7 +170,6 @@ typename ListHandle<T>::pointer gen_handle(Patronus::pointer p,
 
     // debug
     handle->read_meta();
-    LOG(INFO) << "[debug] !! meta is " << handle->cached_meta();
     return handle;
 }
 
@@ -219,7 +220,6 @@ void reg_latency(const std::string &name,
     CHECK_EQ(lat_data[name].size(), col_lat_idx.size())
         << "** duplicated test detected.";
 }
-
 template <typename T>
 typename List<T>::pointer gen_list(Patronus::pointer p,
                                    const ListConfig &config)
@@ -233,7 +233,6 @@ typename List<T>::pointer gen_list(Patronus::pointer p,
     p->put("race:meta_gaddr", meta_gaddr, 0ns);
     LOG(INFO) << "Puting to race:meta_gaddr with " << meta_gaddr;
 
-    LOG(INFO) << "[debug] !! meta is " << list->meta();
     return list;
 }
 
@@ -249,82 +248,98 @@ void test_basic_client_worker(
 {
     std::ignore = bench_conf;
 
+    auto nid = p->get_node_id();
     auto tid = p->get_thread_id();
-    auto client_id = local_client_id(tid, coro_id);
     auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
     auto handle =
-        gen_handle<Dummy<16>>(p, dir_id, handle_conf, meta_gaddr, &ctx);
+        gen_handle<ListItem>(p, dir_id, handle_conf, meta_gaddr, &ctx);
 
     size_t put_succ_nr = 0;
     size_t put_nomem_nr = 0;
+    size_t put_retry_nr = 0;
     size_t get_succ_nr = 0;
     size_t get_nomem_nr = 0;
     size_t rdma_protection_nr = 0;
     size_t executed_nr = 0;
 
-    ChronoTimer timer;
+    bool is_producer = bench_conf.is_producer(tid);
+    bool is_consumer = bench_conf.is_consumer(tid);
+    CHECK_EQ(is_producer + is_consumer, 1);
 
     ChronoTimer op_timer;
-    bool should_report_latency = (tid == 0 && coro_id == 0);
-
-    std::map<std::tuple<uint64_t, uint64_t, uint64_t>, uint64_t> book;
-
+    util::TraceManager tm(0.1);
     while (ex.get_private_data().thread_remain_task > 0)
     {
-        if (should_report_latency)
+        if (is_consumer)
         {
-            op_timer.pin();
-        }
-        Dummy<16> d;
-
-        if (bench_conf.is_consumer(client_id))
-        {
-            auto rc = handle->lk_push_back(d);
-            if (rc == kOk)
-            {
-                put_succ_nr++;
-            }
-            else
-            {
-                put_nomem_nr++;
-            }
-        }
-        else
-        {
-            auto rc = handle->lk_pop_front(&d);
+            // pop
+            auto trace = tm.trace("pop");
+            ListItem item;
+            auto rc = handle->lk_pop_front(&item, trace);
             if (rc == kOk)
             {
                 get_succ_nr++;
+                if (bench_conf.should_report_lat())
+                {
+                    lat_m.collect(op_timer.pin());
+                }
+                ex.get_private_data().thread_remain_task--;
+                if (trace.enabled())
+                {
+                    LOG(INFO) << trace;
+                }
             }
             else
             {
                 get_nomem_nr++;
             }
         }
-
-        if (should_report_latency)
+        else
         {
-            lat_m.collect(timer.pin());
+            // push
+            auto trace = tm.trace("push");
+            ListItem item;
+            item.nid = nid;
+            item.tid = tid;
+            item.coro_id = coro_id;
+            item.magic_number = 0;
+            auto rc = handle->lk_push_back(item, trace);
+            if (rc == kOk)
+            {
+                put_succ_nr++;
+                if (bench_conf.should_report_lat())
+                {
+                    lat_m.collect(op_timer.pin());
+                }
+                ex.get_private_data().thread_remain_task--;
+                if (trace.enabled())
+                {
+                    LOG(INFO) << trace;
+                }
+            }
+            else
+            {
+                CHECK_EQ(rc, RC::kRetry);
+                put_retry_nr++;
+            }
         }
-        ex.get_private_data().thread_remain_task--;
     }
-    auto ns = timer.pin();
 
     auto &comm = ex.get_private_data();
     comm.put_succ_nr += put_succ_nr;
-    comm.put_nr += put_succ_nr + get_succ_nr;
+    comm.put_nr += put_succ_nr + put_nomem_nr + put_retry_nr;
     comm.get_succ_nr += get_succ_nr;
     comm.get_nr += get_succ_nr + get_nomem_nr;
     comm.rdma_protection_nr += rdma_protection_nr;
 
     LOG(INFO) << "[bench] put: succ: " << put_succ_nr
-              << ", nomem: " << put_nomem_nr << ", get: succ: " << get_succ_nr
+              << ", nomem: " << put_nomem_nr << ", retry: " << put_retry_nr
+              << ", get: succ: " << get_succ_nr
               << ", not found: " << get_nomem_nr
               << ", rdma_protection_nr: " << rdma_protection_nr
-              << ". executed: " << executed_nr << ", take: " << ns
-              << " ns. ctx: " << ctx;
+              << ". executed: " << executed_nr << ". ctx: " << ctx;
 
     handle.reset();
 
@@ -411,7 +426,7 @@ void benchmark_client(Patronus::pointer p,
                       uint64_t key)
 {
     auto coro_nr = bench_conf.coro_nr;
-    auto thread_nr = bench_conf.thread_nr;
+    // auto thread_nr = bench_conf.thread_nr;
     bool first_enter = true;
     bool server_should_leave = true;
     CHECK_LE(coro_nr, kMaxCoroNr);
@@ -440,7 +455,7 @@ void benchmark_client(Patronus::pointer p,
 
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
-    bool should_enter = tid < thread_nr;
+    bool should_enter = bench_conf.should_enter(tid);
 
     if (should_enter)
     {
@@ -551,15 +566,20 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     for (const auto &handle_conf : handle_configs)
     {
-        for (size_t thread_nr : {8})
+        // for (size_t producer_nr : {1, 2, 8, 16, 32})
+        // for (size_t producer_nr : {1, 8, 32})
+        for (size_t producer_nr : {1})
         {
-            for (size_t coro_nr : {1})
+            for (size_t consumer_nr : {0})
             {
+                constexpr static size_t kCoroNr = 1;
                 LOG_IF(INFO, is_master)
                     << "[bench] benching multiple threads for " << handle_conf;
                 key++;
+                // auto conf = BenchConfig::get_conf(
+                //     "default", 10_K, producer_nr, consumer_nr, kCoroNr);
                 auto conf = BenchConfig::get_conf(
-                    "default", 1_M, thread_nr, coro_nr, 1);
+                    "default", 1_K, producer_nr, consumer_nr, kCoroNr);
                 if (is_client)
                 {
                     conf.validate();
