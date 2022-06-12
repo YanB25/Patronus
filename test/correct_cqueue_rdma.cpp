@@ -26,7 +26,7 @@ using namespace hmdf;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = 32;
 constexpr static size_t kMaxCoroNr = 16;
-constexpr static size_t kEntryNrPerBlock = 8;
+constexpr static size_t kEntryNrPerBlock = 64;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -59,9 +59,17 @@ struct QueueItem
     uint64_t nid;
     uint64_t tid;
     uint64_t cid;
-    uint64_t op_id;
-    char padding[64 - 4 * sizeof(uint64_t)]{};
+    uint64_t magic_number;
+    bool valid{true};
 };
+std::ostream &operator<<(std::ostream &os, const QueueItem &item)
+{
+    os << "{QueueItem nid: " << item.nid << ", tid: " << item.tid
+       << ", cid: " << item.cid
+       << ", magic_number: " << (void *) item.magic_number
+       << ", valid: " << item.valid << "}";
+    return os;
+}
 
 struct BenchConfig
 {
@@ -118,18 +126,18 @@ struct BenchConfig
     }
     static BenchConfig get_conf(const std::string &name,
                                 size_t test_nr,
-                                size_t thread_nr,
-                                size_t coro_nr,
-                                size_t consumer_nr)
+                                size_t producer_nr,
+                                size_t consumer_nr,
+                                size_t coro_nr)
     {
         BenchConfig conf;
         conf.name = name;
         conf.test_nr = test_nr;
-        conf.thread_nr = thread_nr;
+        conf.producer_nr = producer_nr;
+        conf.consumer_nr = consumer_nr;
+        conf.thread_nr = producer_nr + consumer_nr;
         conf.coro_nr = coro_nr;
         conf.test_nr = test_nr;
-        conf.consumer_nr = consumer_nr;
-        conf.producer_nr = conf.local_client_nr() - consumer_nr;
         conf.should_report = true;
 
         conf.validate();
@@ -198,6 +206,49 @@ void reg_result(const std::string &name,
 
     col_rdma_protection_err.push_back(prv.rdma_protection_nr);
 }
+uint64_t gen_magic(size_t nid, size_t tid, size_t coro_id)
+{
+    auto cluster_size =
+        ::config::get_client_nids().size() + ::config::get_server_nids().size();
+    size_t max_round = cluster_size * kMaxAppThread * kMaxCoroNr;
+    size_t id = nid * kMaxAppThread * kMaxCoroNr + tid * kMaxCoroNr + coro_id;
+    CHECK_LT(id, max_round);
+    auto multiple = fast_pseudo_rand_int(100000);
+    return max_round * multiple + id;
+}
+void validate_magic(size_t nid, size_t tid, size_t coro_id, uint64_t magic)
+{
+    auto cluster_size =
+        ::config::get_client_nids().size() + ::config::get_server_nids().size();
+    size_t max_round = cluster_size * kMaxAppThread * kMaxCoroNr;
+    auto id = magic % max_round;
+    auto expect_coro_id = id % kMaxCoroNr;
+    CHECK_EQ(expect_coro_id, coro_id)
+        << "** coro_id mismatch. id: " << id << ", max_round: " << max_round
+        << ", id % max_round: " << (id % max_round)
+        << ", % kMaxCoroNr: " << expect_coro_id;
+    id -= coro_id;
+    auto expect_tid = (id % kMaxAppThread) / kMaxCoroNr;
+    CHECK_EQ(expect_tid, tid);
+    id -= tid * kMaxCoroNr;
+    auto expect_nid = id / kMaxAppThread / kMaxCoroNr;
+    CHECK_EQ(expect_nid, nid);
+}
+
+void validate_helper(const std::list<QueueItem> &list)
+{
+    for (const auto &item : list)
+    {
+        if (unlikely(!item.valid))
+        {
+            LOG(WARNING) << "Witness not valid item: " << item;
+        }
+        else
+        {
+            validate_magic(item.nid, item.tid, item.cid, item.magic_number);
+        }
+    }
+}
 
 void reg_latency(const std::string &name,
                  const OnePassBucketMonitor<uint64_t> &lat_m)
@@ -251,7 +302,7 @@ void test_basic_client_worker(
     auto handle = gen_handle(p, dir_id, handle_conf, meta_gaddr, &ctx);
 
     size_t put_succ_nr = 0;
-    size_t put_nomem_nr = 0;
+    size_t put_retry_nr = 0;
     size_t get_succ_nr = 0;
     size_t get_nomem_nr = 0;
     size_t rdma_protection_nr = 0;
@@ -263,9 +314,6 @@ void test_basic_client_worker(
     bool should_report_latency = (tid == 0 && coro_id == 0);
 
     QueueItem pop_entries[kEntryNrPerBlock];
-    size_t get_nr = 0;
-
-    std::map<std::tuple<uint64_t, uint64_t, uint64_t>, uint64_t> book;
 
     while (ex.get_private_data().thread_remain_task > 0)
     {
@@ -275,62 +323,44 @@ void test_basic_client_worker(
         }
         if (bench_conf.is_consumer(tid))
         {
-            QueueItem item;
-            auto rc =
-                handle->lk_pop_front(kEntryNrPerBlock, pop_entries, get_nr);
-            if (rc == kOk)
-            {
-                get_succ_nr++;
-                auto nid = item.nid;
-                auto tid = item.tid;
-                auto cid = item.cid;
-                auto op_id = item.op_id;
-                auto got_op_id = book[{nid, tid, cid}]++;
-                CHECK_EQ(got_op_id, op_id);
-                executed_nr++;
-            }
-            else
-            {
-                CHECK_EQ(rc, RC::kNotFound);
-                get_nomem_nr++;
-            }
+            CHECK(false) << "TODO: not supported under multithreads";
         }
         else
         {
-            QueueItem item{nid, tid, coro_id, executed_nr};
+            auto magic_number = gen_magic(nid, tid, coro_id);
+            QueueItem item{nid, tid, coro_id, magic_number};
             auto rc = handle->lk_push_back(item);
             if (rc == kOk)
             {
                 put_succ_nr++;
                 executed_nr++;
+                ex.get_private_data().thread_remain_task--;
             }
             else
             {
-                CHECK_EQ(rc, RC::kNoMem);
-                put_nomem_nr++;
+                CHECK_EQ(rc, RC::kRetry);
+                put_retry_nr++;
             }
         }
-
-        // TODO: delete me
-        handle->debug();
 
         if (should_report_latency)
         {
             lat_m.collect(timer.pin());
         }
-        ex.get_private_data().thread_remain_task--;
     }
+    auto lists = handle->debug_iterator();
+    validate_helper(lists);
     auto ns = timer.pin();
 
     auto &comm = ex.get_private_data();
     comm.put_succ_nr += put_succ_nr;
-    comm.put_nr += put_succ_nr + get_succ_nr;
+    comm.put_nr += put_succ_nr + put_retry_nr;
     comm.get_succ_nr += get_succ_nr;
     comm.get_nr += get_succ_nr + get_nomem_nr;
     comm.rdma_protection_nr += rdma_protection_nr;
 
     LOG(INFO) << "[bench] put: succ: " << put_succ_nr
-              << ", nomem: " << put_nomem_nr << ", get: succ: " << get_succ_nr
+              << ", retry: " << put_retry_nr << ", get: succ: " << get_succ_nr
               << ", not found: " << get_nomem_nr
               << ", rdma_protection_nr: " << rdma_protection_nr
               << ". executed: " << executed_nr << ", take: " << ns
@@ -561,15 +591,18 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     for (const auto &handle_conf : handle_configs)
     {
-        for (size_t thread_nr : {8})
+        for (size_t producer_nr : {8})
         {
             for (size_t coro_nr : {1})
             {
                 LOG_IF(INFO, is_master)
                     << "[bench] benching multiple threads for " << handle_conf;
                 key++;
+                // auto conf = BenchConfig::get_conf(
+                //     "default", 1_M, producer_nr, 0 /* consumer_nr */,
+                //     coro_nr);
                 auto conf = BenchConfig::get_conf(
-                    "default", 1_M, thread_nr, coro_nr, 1);
+                    "default", 100, producer_nr, 0 /* consumer_nr */, coro_nr);
                 if (is_client)
                 {
                     conf.validate();
