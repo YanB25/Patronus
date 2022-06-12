@@ -275,11 +275,15 @@ public:
     void clear()
     {
         records_.clear();
+        sum_ns_ = 0;
+        cached_vec_ = std::nullopt;
+        cached_map_ = std::nullopt;
     }
     void init(const std::string &name)
     {
         records_.clear();
         name_ = name;
+        sum_ns_ = 0;
         now_ = std::chrono::steady_clock::now();
     }
     uint64_t pin(const std::string &name)
@@ -290,6 +294,7 @@ public:
                 .count();
         now_ = now;
         records_.emplace_back(name, ns);
+        sum_ns_ += ns;
         return ns;
     }
     /**
@@ -297,35 +302,52 @@ public:
      *
      * @return std::vector<RetrieveTimerRecord>
      */
-    std::vector<RetrieveTimerRecord> retrieve_vec() const
+    const std::vector<RetrieveTimerRecord> &retrieve_vec() const
     {
+        if (cached_vec_.has_value())
+        {
+            return cached_vec_.value();
+        }
         std::vector<RetrieveTimerRecord> ret;
         ret.reserve(records_.size());
         for (const auto &record : records_)
         {
             ret.push_back(record);
         }
-        return ret;
+        cached_vec_ = std::move(ret);
+        return cached_vec_.value();
     }
     /**
      * @brief This will auto-ly combine pin(s) with same name
      *
      * @return std::map<std::string, uint64_t>
      */
-    std::map<std::string, uint64_t> retrieve_map() const
+    const std::map<std::string, uint64_t> &retrieve_map() const
     {
+        if (cached_map_.has_value())
+        {
+            return cached_map_.value();
+        }
         std::map<std::string, uint64_t> ret;
         for (const auto &record : records_)
         {
             ret[record.name] += record.ns;
         }
-        return ret;
+        cached_map_ = std::move(ret);
+        return cached_map_.value();
+    }
+    uint64_t sum_ns() const
+    {
+        return sum_ns_;
     }
 
 private:
     std::string name_;
     std::list<RetrieveTimerRecord> records_;
     std::chrono::time_point<std::chrono::steady_clock> now_;
+    uint64_t sum_ns_{0};
+    mutable std::optional<std::vector<RetrieveTimerRecord>> cached_vec_;
+    mutable std::optional<std::map<std::string, uint64_t>> cached_map_;
 };
 
 inline std::ostream &operator<<(std::ostream &os, const RetrieveTimer &timer)

@@ -2,6 +2,7 @@
 #ifndef SHERMEM_TRACER_H_
 #define SHERMEM_TRACER_H_
 
+#include <iomanip>
 #include <memory>
 
 #include "Common.h"
@@ -11,22 +12,50 @@
 namespace util
 {
 class TracerContext;
+struct TraceRecord;
 class TraceView
 {
 public:
     TraceView(TracerContext *impl) : impl_(impl)
     {
     }
-    std::vector<RetrieveTimerRecord> retrieve_vec() const;
-    std::map<std::string, uint64_t> retrieve_map() const;
+    const std::vector<RetrieveTimerRecord> &retrieve_vec() const;
+    const std::map<std::string, uint64_t> &retrieve_map() const;
     bool enabled() const;
+    std::string name() const;
+    uint64_t sum_ns() const;
+    std::vector<TraceRecord> get_flat_records(
+        size_t depth_limit = std::numeric_limits<size_t>::max()) const;
 
     uint64_t pin(const std::string &name);
+    TraceView child(const std::string &name);
     friend std::ostream &operator<<(std::ostream &os, const TraceView view);
 
 private:
     TracerContext *impl_{nullptr};
 };
+
+class pre_trace_ctx;
+
+struct TraceRecord
+{
+    uint64_t id;
+    std::string name;
+    uint64_t parent_id;
+    std::string parent_name;
+    uint64_t ns;
+    double local_ratio;
+    double global_ratio;
+    bool has_child;
+};
+inline std::ostream &operator<<(std::ostream &os, const TraceRecord &r)
+{
+    os << "{name: " << r.name << ", id: " << r.id << ", pid: " << r.parent_id
+       << ", pname: " << r.parent_name << ", ns: " << r.ns
+       << ", local: " << r.local_ratio << ", global_ratio: " << r.global_ratio
+       << ", has_child: " << r.has_child << "}";
+    return os;
+}
 
 class TracerContext
 {
@@ -39,24 +68,38 @@ public:
     TracerContext()
     {
     }
+    std::string name() const
+    {
+        return name_;
+    }
     void clear()
     {
         timer_.clear();
+        child_contexts_.clear();
+        sum_ns_ = std::nullopt;
     }
     void init(const std::string &name)
     {
         name_ = name;
         timer_.init(name);
+        child_contexts_.clear();
     }
     uint64_t pin(const std::string &name)
     {
         return timer_.pin(name);
     }
-    auto retrieve_vec() const
+    TracerContext *child_context(const std::string &name)
+    {
+        auto child_ctx = new_instance();
+        child_ctx->init(name);
+        child_contexts_.emplace_back(std::move(child_ctx));
+        return child_contexts_.back().get();
+    }
+    const auto &retrieve_vec() const
     {
         return timer_.retrieve_vec();
     }
-    auto retrieve_map() const
+    const auto &retrieve_map() const
     {
         return timer_.retrieve_map();
     }
@@ -65,10 +108,91 @@ public:
         return TraceView(this);
     }
     friend std::ostream &operator<<(std::ostream &os, const TracerContext &ctx);
+    friend std::ostream &operator<<(std::ostream &os, const pre_trace_ctx &c);
+
+    uint64_t sum_ns() const
+    {
+        if (sum_ns_.has_value())
+        {
+            return sum_ns_.value();
+        }
+        uint64_t sum = 0;
+        sum += timer_.sum_ns();
+        for (const auto &child : child_contexts_)
+        {
+            sum += child->sum_ns();
+        }
+        sum_ns_ = sum;
+        return sum;
+    }
+    const RetrieveTimer &timer() const
+    {
+        return timer_;
+    }
+    std::vector<TraceRecord> get_flat_records(
+        size_t depth_limit = std::numeric_limits<size_t>::max()) const
+    {
+        uint64_t id = 0;
+        auto ret = do_get_flat_records(id, 0, name(), depth_limit);
+        double sum_ns = 0;
+        for (const auto &r : ret)
+        {
+            sum_ns += r.ns;
+        }
+        for (auto &r : ret)
+        {
+            r.global_ratio = 1.0 * r.ns / sum_ns;
+        }
+        return ret;
+    }
+
+    std::vector<TraceRecord> do_get_flat_records(uint64_t &initial_id,
+                                                 uint64_t pid,
+                                                 const std::string &pname,
+                                                 size_t depth_limit) const
+    {
+        std::vector<TraceRecord> ret;
+        auto sum = sum_ns();
+        for (const auto &vec : retrieve_vec())
+        {
+            ret.push_back(TraceRecord{.id = initial_id++,
+                                      .name = vec.name,
+                                      .parent_id = pid,
+                                      .parent_name = pname,
+                                      .ns = vec.ns,
+                                      .local_ratio = 1.0 * vec.ns / sum,
+                                      .has_child = false});
+        }
+        for (const auto &child : child_contexts_)
+        {
+            auto this_id = initial_id++;
+            auto ns = child->sum_ns();
+            double ratio = 1.0 * ns / sum_ns();
+            ret.push_back(TraceRecord{.id = this_id,
+                                      .name = child->name(),
+                                      .parent_id = pid,
+                                      .parent_name = pname,
+                                      .ns = ns,
+                                      .local_ratio = ratio,
+                                      .has_child = true});
+            if (depth_limit > 0)
+            {
+                auto child_records = child->do_get_flat_records(
+                    initial_id, this_id, child->name(), depth_limit - 1);
+                ret.insert(ret.end(),
+                           std::make_move_iterator(child_records.begin()),
+                           std::make_move_iterator(child_records.end()));
+            }
+        }
+        return ret;
+    }
 
 private:
     std::string name_;
     RetrieveTimer timer_;
+    std::list<pointer> child_contexts_;
+
+    mutable std::optional<uint64_t> sum_ns_;
 };
 
 class TraceManager
@@ -135,21 +259,63 @@ static TraceView nulltrace{nullptr};
 inline std::ostream &operator<<(std::ostream &os, const TracerContext &ctx)
 {
     os << "{TracerContext: " << ctx.name_ << ", timer: " << ctx.timer_;
+    for (const auto &child : ctx.child_contexts_)
+    {
+        os << child->name() << ": " << *child;
+    }
+    os << "}";
+    return os;
+}
+
+class pre_trace_ctx
+{
+public:
+    pre_trace_ctx(TracerContext *ctx, size_t indent)
+        : ctx_(ctx), indent_(indent)
+    {
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const pre_trace_ctx &c);
+
+private:
+    TracerContext *ctx_;
+    size_t indent_{0};
+};
+inline std::ostream &operator<<(std::ostream &os, const pre_trace_ctx &c)
+{
+    const auto &timer = c.ctx_->timer();
+    std::string prefix = std::string(c.indent_ * 4, ' ');
+    auto sum_ns = c.ctx_->sum_ns();
+    for (const auto &record : timer.retrieve_vec())
+    {
+        double rate = sum_ns > 0 ? 1.0 * record.ns / sum_ns : 1;
+        os << prefix << "[" << record.name << "] takes " << record.ns << " ns ("
+           << rate * 100 << "%)" << std::endl;
+    }
+    for (const auto &child : c.ctx_->child_contexts_)
+    {
+        auto take_ns = child->sum_ns();
+        double rate = sum_ns > 0 ? 1.0 * take_ns / sum_ns : 1;
+        os << prefix << "[" << child->name() << "] takes " << take_ns << " ns ("
+           << rate * 100 << "%)" << std::endl;
+        os << pre_trace_ctx(child.get(), c.indent_ + 1);
+    }
     return os;
 }
 
 inline std::ostream &operator<<(std::ostream &os, const TraceView view)
 {
-    os << "{TraceView ";
-    if (view.impl_)
+    if (view.enabled())
     {
-        os << *view.impl_;
+        os << "{TraceView " << view.name() << " takes " << view.sum_ns()
+           << " ns " << std::endl;
+        os << pre_trace_ctx(view.impl_, 0 /* initial ident */);
+        os << "}";
     }
     else
     {
-        os << " null ";
+        os << "{TraceView }";
     }
-    os << "}";
     return os;
 }
 

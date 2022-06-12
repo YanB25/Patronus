@@ -95,13 +95,13 @@ struct BenchConfig
     {
         return name;
     }
-    bool is_consumer(uint64_t client_id) const
+    bool is_consumer(uint64_t tid) const
     {
-        return client_id < consumer_nr;
+        return tid < consumer_nr;
     }
-    bool is_producer(uint64_t client_id) const
+    bool is_producer(uint64_t tid) const
     {
-        return !is_consumer(client_id);
+        return !is_consumer(tid);
     }
 
     BenchConfig clone() const
@@ -236,7 +236,6 @@ typename QueueT::pointer gen_queue(Patronus::pointer p,
 void test_basic_client_worker(
     Patronus::pointer p,
     size_t coro_id,
-    uint64_t client_id,
     CoroYield &yield,
     const BenchConfig &bench_conf,
     const HandleConfig &handle_conf,
@@ -248,8 +247,7 @@ void test_basic_client_worker(
     auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
-    auto handle =
-        gen_handle(p, dir_id, client_id, handle_conf, meta_gaddr, &ctx);
+    auto handle = gen_handle(p, dir_id, handle_conf, meta_gaddr, &ctx);
 
     size_t put_succ_nr = 0;
     size_t put_retry_nr = 0;
@@ -270,7 +268,7 @@ void test_basic_client_worker(
         {
             op_timer.pin();
         }
-        if (bench_conf.is_consumer(client_id))
+        if (bench_conf.is_consumer(tid))
         {
             auto rc = handle->lk_pop_front(nullptr);
             if (rc == kOk)
@@ -458,13 +456,8 @@ void benchmark_client(Patronus::pointer p,
                           &ex,
                           &lat_m,
                           meta_gaddr = g_meta_gaddr](CoroYield &yield) {
-                    auto nid = p->get_node_id();
-                    auto tid = p->get_thread_id();
-                    auto cid = coro_id;
-                    auto client_id = calculate_client_id(nid, tid, cid);
                     test_basic_client_worker(p,
                                              coro_id,
-                                             client_id,
                                              yield,
                                              bench_conf,
                                              handle_conf,

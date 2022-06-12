@@ -3,6 +3,7 @@
 #define SHERMEM_UTIL_PRE_H_
 
 #include <iostream>
+#include <set>
 #include <vector>
 
 namespace util
