@@ -169,6 +169,10 @@ inline void fast_pseudo_fill_buf(char *s, size_t len)
 
 inline bool true_with_prob(double prob)
 {
+    if (unlikely(prob == 0))
+    {
+        return false;
+    }
     return fast_pseudo_rand_dbl(0, 1) <= prob;
 }
 

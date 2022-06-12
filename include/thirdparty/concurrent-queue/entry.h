@@ -29,6 +29,15 @@ struct QueueEntry
         return idx;
     }
 } __attribute__((packed));
+
+template <typename T, size_t kSize>
+inline std::ostream &operator<<(std::ostream &os,
+                                const QueueEntry<T, kSize> &entry)
+{
+    os << "{QueueEntry with size " << entry.idx << "}";
+
+    return os;
+}
 }  // namespace patronus::cqueue
 
 #endif

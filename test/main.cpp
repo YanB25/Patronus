@@ -1,5 +1,6 @@
 #include <boost/version.hpp>
 #include <iostream>
+#include <thread>
 
 #include "thirdparty/concurrent-queue/entry.h"
 #include "util/Pre.h"
@@ -8,6 +9,7 @@
 
 using namespace patronus::cqueue;
 using namespace util;
+using namespace std::chrono_literals;
 
 int main()
 {
@@ -53,6 +55,19 @@ int main()
     }
     {
         auto trace = tm.trace("empty");
+
+        LOG(INFO) << trace;
+    }
+    {
+        auto trace = tm.trace("correct");
+
+        std::this_thread::sleep_for(10ms);
+        auto t2 = trace.child("sleeped");
+        t2.pin("t2");
+
+        std::this_thread::sleep_for(10ms);
+        auto t3 = trace.child("sleeped again");
+        t3.pin("t3");
 
         LOG(INFO) << trace;
     }

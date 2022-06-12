@@ -262,6 +262,9 @@ void test_basic_client_worker(
     bool should_report_latency = (tid == 0 && coro_id == 0);
 
     auto value = Object{};
+    Object pop_entries[kEntryNrPerBlock];
+    size_t get_nr = 0;
+
     while (ex.get_private_data().thread_remain_task > 0)
     {
         if (should_report_latency)
@@ -270,7 +273,8 @@ void test_basic_client_worker(
         }
         if (bench_conf.is_consumer(tid))
         {
-            auto rc = handle->lk_pop_front(nullptr);
+            auto rc =
+                handle->lk_pop_front(kEntryNrPerBlock, pop_entries, get_nr);
             if (rc == kOk)
             {
                 get_succ_nr++;

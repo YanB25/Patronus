@@ -225,9 +225,14 @@ public:
         rdma_adpt_->put_all_rdma_buffer();
         trace.pin("read entry");
 
-        // 2.1) update meta phead
+        // 2.1) update meta phead, and ptail if needed.
         auto old_phead = meta.phead;
         meta.phead = head_next;
+        if (unlikely(meta.phead == nullgaddr))
+        {
+            // this pop make the list empty
+            meta.ptail = nullgaddr;
+        }
         prepare_write_meta();
 
         // 2.2) unlock
@@ -350,6 +355,11 @@ public:
     size_t meta_size() const
     {
         return Meta::size();
+    }
+
+    bool cached_empty() const
+    {
+        return cached_meta_.phead == nullgaddr;
     }
 
     ~ListHandle()
@@ -552,6 +562,8 @@ private:
     std::unordered_map<uint64_t, RemoteMemHandle> handles_;
 
     RemoteMemHandle meta_handle_;
+
+    T cached_tail_entry_;
 
     struct MemDesc
     {

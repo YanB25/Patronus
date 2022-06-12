@@ -12,7 +12,7 @@ namespace patronus::cqueue
 struct QueueConfig
 {
     list::ListConfig list_config;
-    size_t entry_per_block{1024};
+    size_t entry_per_block{};
 };
 
 inline std::ostream &operator<<(std::ostream &os, const QueueConfig &config)

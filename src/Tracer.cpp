@@ -28,6 +28,7 @@ uint64_t TraceView::sum_ns() const
 }
 TraceView TraceView::child(const std::string &name)
 {
+    pin("REACH " + name);
     if (unlikely(impl_ != nullptr))
     {
         return TraceView{impl_->child_context(name)};
