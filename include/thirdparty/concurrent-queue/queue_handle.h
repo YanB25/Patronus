@@ -2,7 +2,9 @@
 #ifndef PATRONUS_CONCURRENT_QUEUE_HANDLE_H_
 #define PATRONUS_CONCURRENT_QUEUE_HANDLE_H_
 
+#include "thirdparty/linked-list/list_handle.h"
 #include "util/RetCode.h"
+#include "util/Tracer.h"
 
 namespace patronus::cqueue
 {
@@ -10,7 +12,8 @@ struct HandleConfig
 {
     std::string name;
     bool bypass_prot{false};
-    size_t max_entry_nr;
+    size_t entry_per_block{1024};
+    list::HandleConfig list_handle_config;
 
     std::string conf_name() const
     {
@@ -21,293 +24,214 @@ struct HandleConfig
 inline std::ostream &operator<<(std::ostream &os, const HandleConfig &config)
 {
     os << "{HandleConfig name: " << config.name
-       << ", bypass_prot: " << config.bypass_prot << "}";
+       << ", bypass_prot: " << config.bypass_prot
+       << ", entry_per_block: " << config.entry_per_block << "}";
     return os;
 }
 
+// any T that behaves correctly under memcpy(&t, ..., sizeof(T))
 template <typename T,
+          size_t kSize,
           std::enable_if_t<std::is_trivially_copyable_v<T>, bool> = true>
 class QueueHandle
 {
 public:
-    using pointer = std::shared_ptr<QueueHandle<T>>;
+    using pointer = std::shared_ptr<QueueHandle<T, kSize>>;
+    using Entry = QueueEntry<T, kSize>;
     QueueHandle(uint16_t node_id,
-                uint64_t client_id,
                 GlobalAddress meta,
                 IRdmaAdaptor::pointer rdma_adpt,
                 const HandleConfig &config)
         : node_id_(node_id),
-          client_id_(client_id),
           meta_gaddr_(meta),
           rdma_adpt_(rdma_adpt),
           config_(config)
     {
+        list_handle_ = list::ListHandle<Entry>::new_instance(
+            node_id, meta, rdma_adpt, config.list_handle_config);
     }
     static pointer new_instance(uint16_t node_id,
-                                uint64_t client_id,
                                 GlobalAddress meta,
                                 IRdmaAdaptor::pointer rdma_adpt,
                                 const HandleConfig &conf)
     {
-        return std::make_shared<QueueHandle<T>>(
-            node_id, client_id, meta, rdma_adpt, conf);
+        return std::make_shared<QueueHandle<T, kSize>>(
+            node_id, meta, rdma_adpt, conf);
     }
 
-    RetCode push(const T &t)
+    RetCode lk_push_back(const T &t, util::TraceView trace = util::nulltrace)
     {
-        CHECK(false) << "TODO: " << sizeof(t);
+        std::ignore = trace;
+        // 0) update meta data and get the current tail
+        if (unlikely(!cached_entry_inited_))
+        {
+            update_cached_tail_entry();
+            CHECK(cached_entry_inited_);
+        }
+
+        // loop until we find an empty slot
+        std::optional<uint64_t> fetch_slot;
+        // we only retry at most 10 times
+        for (size_t retry_nr = 0; retry_nr <= 10; retry_nr++)
+        {
+            if (fetch_slot.has_value() &&
+                fetch_slot.value() < config_.entry_per_block)
+            {
+                // we got that
+                break;
+            }
+            const auto &tail_entry = cached_entry();
+            // this block is full
+            if (unlikely(tail_entry.idx >= config_.entry_per_block))
+            {
+                auto rc = try_expand_update_tail_entry();
+                if (unlikely(rc != RC::kOk))
+                {
+                    CHECK_EQ(rc, RC::kRetry);
+                    // concurrent expand detected
+                    return rc;
+                }
+                DCHECK_EQ(rc, RC::kOk);
+            }
+            // when reach here, we are possible to fetch one
+            auto entry_idx_size = sizeof(Entry::idx);
+            auto entry_idx_buf = rdma_adpt_->get_rdma_buffer(entry_idx_size);
+            auto &entry_handle = get_entry_handle(current_queue_entry_gaddr_);
+            auto entry_idx_gaddr =
+                current_queue_entry_gaddr_ + offsetof(Entry, idx);
+            rdma_adpt_
+                ->rdma_faa(
+                    entry_idx_gaddr, 1, entry_idx_buf.buffer, entry_handle)
+                .expect(RC::kOk);
+            rdma_adpt_->commit().expect(RC::kOk);
+            rdma_adpt_->put_all_rdma_buffer();
+            fetch_slot = *(uint64_t *) entry_idx_buf.buffer;
+        }
+
+        if (!fetch_slot.has_value() ||
+            fetch_slot.value() >= config_.entry_per_block)
+        {
+            return RC::kRetry;
+        }
+
+        // do the insertion
+        auto slot = fetch_slot.value();
+        auto object_size = sizeof(T);
+        auto object_gaddr =
+            current_queue_entry_gaddr_ + offsetof(Entry, entries[slot]);
+        auto &entry_handle = get_entry_handle(current_queue_entry_gaddr_);
+        auto rdma_object_buf = rdma_adpt_->get_rdma_buffer(object_size);
+        memcpy(rdma_object_buf.buffer, &t, object_size);
+        rdma_adpt_
+            ->rdma_write(
+                object_gaddr, rdma_object_buf.buffer, object_size, entry_handle)
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        rdma_adpt_->put_all_rdma_buffer();
+
+        return RC::kOk;
+    }
+    RetCode try_expand_update_tail_entry()
+    {
+        static Entry push_entry;
+        push_entry.idx = 0;
+        auto rc = list_handle_->lk_push_back(push_entry);
+        if (rc == RC::kOk)
+        {
+            // from list's implementation, the meta has been updated
+            const auto &list_meta = list_handle_->cached_meta();
+            current_queue_entry_gaddr_ = list_meta.ptail;
+        }
+        return rc;
+    }
+    RetCode lk_pop_front(T *t, util::TraceView trace = util::nulltrace)
+    {
+        CHECK(false) << "TODO: " << sizeof(t) << trace;
         return kOk;
     }
-    RetCode pop(T &t)
+
+    void update_cached_tail_entry()
     {
-        CHECK(false) << "TODO: " << sizeof(t);
-        return kOk;
+        list_handle_->read_meta();
+        const auto &list_meta = list_handle_->cached_meta();
+        current_queue_entry_gaddr_ = list_meta.ptail;
+        // dont rely on list implementation to fetch the tail
+        // because we only need a header.
+        auto idx_size = sizeof(Entry::idx);
+        auto entry_buf = rdma_adpt_->get_rdma_buffer(idx_size);
+        auto entry_idx_gaddr =
+            current_queue_entry_gaddr_ + offsetof(Entry, idx);
+        auto &entry_handle = get_entry_handle(current_queue_entry_gaddr_);
+        rdma_adpt_
+            ->rdma_read(
+                entry_buf.buffer, entry_idx_gaddr, idx_size, entry_handle)
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+
+        cached_entry_.idx = *(uint64_t *) entry_buf.buffer;
+        cached_entry_inited_ = true;
     }
 
     RetCode debug()
     {
-        {
-            auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
-            auto gaddr = self_finished_gaddr();
-            memcpy(rdma_buf.buffer, &client_id_, sizeof(uint64_t));
-            auto &handle = get_self_finished_handle();
-            auto rc = rdma_adpt_->rdma_write(
-                gaddr, rdma_buf.buffer, sizeof(uint64_t), handle);
-            CHECK_EQ(rc, kOk);
-            rc = rdma_adpt_->commit();
-            CHECK_EQ(rc, kOk);
-        }
-
-        {
-            auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
-            auto gaddr = self_finished_gaddr();
-            memset(rdma_buf.buffer, 0, sizeof(uint64_t));
-            auto &handle = get_self_finished_handle();
-            auto rc = rdma_adpt_->rdma_read(
-                rdma_buf.buffer, gaddr, sizeof(uint64_t), handle);
-            CHECK_EQ(rc, kOk);
-            rc = rdma_adpt_->commit();
-            CHECK_EQ(rc, kOk);
-
-            uint64_t got = *(uint64_t *) rdma_buf.buffer;
-            CHECK_EQ(got, client_id_);
-        }
-
-        rdma_adpt_->put_all_rdma_buffer();
         return kOk;
-    }
-
-    void read_meta()
-    {
-        auto &meta_handle = get_meta_handle();
-        auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
-        auto rc = rdma_adpt_->rdma_read(
-            rdma_buf.buffer, meta_gaddr_, meta_size(), meta_handle);
-        CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->commit();
-        CHECK_EQ(rc, kOk);
-        memcpy(&cached_meta_, rdma_buf.buffer, meta_size());
-
-        rdma_adpt_->put_all_rdma_buffer();
-        cached_inited_ = true;
-    }
-    Meta cached_meta() const
-    {
-        return cached_meta_;
-    }
-    size_t meta_size() const
-    {
-        return Meta::size();
     }
 
     ~QueueHandle()
     {
-        if (meta_handle_.valid())
-        {
-            auto rel_flag = (flag_t) 0;
-            rdma_adpt_->relinquish_perm(meta_handle_, 0 /* hint */, rel_flag);
-        }
-        if (entry_handle_.valid())
-        {
-            auto rel_flag = (flag_t) 0;
-            rdma_adpt_->relinquish_perm(entry_handle_, 0 /* hint */, rel_flag);
-        }
-        if (producer.witness_handle_.valid())
-        {
-            auto rel_flag = (flag_t) 0;
-            rdma_adpt_->relinquish_perm(
-                producer.witness_handle_, 0 /* hint */, rel_flag);
-        }
-        if (producer.finished_handle_.valid())
-        {
-            auto rel_flag = (flag_t) 0;
-            rdma_adpt_->relinquish_perm(
-                producer.finished_handle_, 0 /* hint */, rel_flag);
-        }
-        if (consumer.witness_handle_.valid())
-        {
-            auto rel_flag = (flag_t) 0;
-            rdma_adpt_->relinquish_perm(
-                consumer.witness_handle_, 0 /* hint */, rel_flag);
-        }
-        if (consumer.finished_handle_.valid())
-        {
-            auto rel_flag = (flag_t) 0;
-            rdma_adpt_->relinquish_perm(
-                consumer.finished_handle_, 0 /* hint */, rel_flag);
-        }
     }
 
 private:
-    GlobalAddress front_gaddr() const
+    const Entry &cached_entry() const
     {
-        return meta_gaddr_ + offsetof(Meta, front);
+        return cached_entry_;
     }
-    GlobalAddress rear_gaddr() const
+    Entry &cached_entry()
     {
-        return meta_gaddr_ + offsetof(Meta, rear);
+        return cached_entry_;
     }
-    GlobalAddress self_witness_gaddr() const
+
+    RemoteMemHandle &get_entry_handle(GlobalAddress gaddr)
     {
-        DCHECK(cached_inited_);
-        auto client_witness = cached_meta_.client_witness;
-        return client_witness + sizeof(uint64_t) * client_id_;
-    }
-    GlobalAddress self_finished_gaddr() const
-    {
-        DCHECK(cached_inited_);
-        auto client_finished = cached_meta_.client_finished;
-        return client_finished + sizeof(uint64_t) * client_id_;
-    }
-    GlobalAddress entry_gaddr(uint64_t entry_idx) const
-    {
-        DCHECK(cached_inited_);
-        auto entry_gaddr = cached_meta_.entries_gaddr;
-        auto round_entry_idx = entry_idx % config_.max_entry_nr;
-        return entry_gaddr + sizeof(T) * round_entry_idx;
-    }
-    RemoteMemHandle &get_meta_handle()
-    {
-        if (unlikely(!meta_handle_.valid()))
+        if (lru_entry_handle_.valid())
         {
-            update_meta_handle();
+            if (lru_entry_handle_.gaddr() == gaddr)
+            {
+                // hit
+                return lru_entry_handle_;
+            }
+            // miss, evit
+            if (lru_entry_handle_.gaddr() != gaddr)
+            {
+                auto rel_flag = (flag_t) 0;
+                rdma_adpt_->relinquish_perm(
+                    lru_entry_handle_, 0 /* hint */, rel_flag);
+            }
         }
-        return meta_handle_;
-    }
-    RemoteMemHandle &get_self_finished_handle()
-    {
-        if (unlikely(!producer.finished_handle_.valid()))
+        else
         {
+            // definitely not valid and not match when reach here.
             auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
                            (flag_t) AcquireRequestFlag::kNoBindPR;
-            producer.finished_handle_ =
-                rdma_adpt_->acquire_perm(self_finished_gaddr(),
-                                         0 /* alloc_hint */,
-                                         sizeof(uint64_t),
-                                         0ns,
-                                         ac_flag);
+            lru_entry_handle_ = rdma_adpt_->acquire_perm(
+                gaddr, 0 /* hint */, sizeof(Entry), 0ns, ac_flag);
+            DCHECK_EQ(lru_entry_handle_.gaddr(), gaddr);
+            DCHECK(lru_entry_handle_.valid());
         }
-        return producer.finished_handle_;
-    }
-    RemoteMemHandle &get_self_witnessed_handle()
-    {
-        if (unlikely(!producer.witness_handle_.valid()))
-        {
-            auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                           (flag_t) AcquireRequestFlag::kNoBindPR;
-            producer.witness_handle_ =
-                rdma_adpt_->acquire_perm(self_witness_gaddr(),
-                                         0 /* alloc_hint */,
-                                         sizeof(uint64_t),
-                                         0ns,
-                                         ac_flag);
-        }
-        return producer.witness_handle_;
-    }
-    RemoteMemHandle &get_finished_handle()
-    {
-        if (unlikely(!consumer.finished_handle_.valid()))
-        {
-            auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                           (flag_t) AcquireRequestFlag::kNoBindPR;
-            consumer.finished_handle_ =
-                rdma_adpt_->acquire_perm(cached_meta_.client_finished,
-                                         0 /* alloc_hint */,
-                                         cached_meta_.finished_buf_size(),
-                                         0ns,
-                                         ac_flag);
-        }
-        return consumer.finished_handle_;
-    }
-    RemoteMemHandle &get_witness_handle()
-    {
-        if (unlikely(!consumer.witness_handle_.valid()))
-        {
-            auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                           (flag_t) AcquireRequestFlag::kNoBindPR;
-            consumer.witness_handle_ =
-                rdma_adpt_->acquire_perm(cached_meta_.client_witness,
-                                         0 /* alloc_hint */,
-                                         cached_meta_.witness_buf_size(),
-                                         0ns,
-                                         ac_flag);
-        }
-        return consumer.witness_handle_;
-    }
-    size_t entry_buf_size() const
-    {
-        return config_.max_entry_nr * sizeof(T);
-    }
-    RemoteMemHandle &get_entry_handle(size_t entry_id)
-    {
-        // TODO: later, should use more complicated alg to handle the entry
-        // handle.
-        std::ignore = entry_id;
-        if (unlikely(!meta_handle_.valid()))
-        {
-            auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                           (flag_t) AcquireRequestFlag::kNoBindPR;
-            meta_handle_ = rdma_adpt_->acquire_perm(entry_gaddr(0),
-                                                    0 /* alloc_hint */,
-                                                    entry_buf_size(),
-                                                    0ns,
-                                                    ac_flag);
-        }
-        DCHECK(meta_handle_.valid());
-        return meta_handle_;
-    }
-    void update_meta_handle()
-    {
-        CHECK(!meta_handle_.valid());
-        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                       (flag_t) AcquireRequestFlag::kNoBindPR;
-        meta_handle_ = rdma_adpt_->acquire_perm(
-            meta_gaddr_, 0 /* alloc_hint */, meta_size(), 0ns, ac_flag);
-        CHECK(meta_handle_.valid());
+        return lru_entry_handle_;
     }
 
     uint16_t node_id_;
-    uint64_t client_id_;
     GlobalAddress meta_gaddr_;
     IRdmaAdaptor::pointer rdma_adpt_;
     HandleConfig config_;
 
-    RemoteMemHandle meta_handle_;
-    RemoteMemHandle entry_handle_;
+    typename list::ListHandle<Entry>::pointer list_handle_;
 
-    struct
-    {
-        RemoteMemHandle witness_handle_;
-        RemoteMemHandle finished_handle_;
-    } producer;
-    struct
-    {
-        RemoteMemHandle witness_handle_;
-        RemoteMemHandle finished_handle_;
-    } consumer;
-
-    bool cached_inited_{false};
-    Meta cached_meta_;
+    Entry cached_entry_;
+    bool cached_entry_inited_{false};
+    GlobalAddress current_queue_entry_gaddr_;
+    RemoteMemHandle lru_entry_handle_;
 };
 }  // namespace patronus::cqueue
 

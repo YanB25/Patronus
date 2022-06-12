@@ -56,6 +56,8 @@ public:
 
     RetCode lf_push_back(const T &t);
     RetCode lf_pop_front(const T &t);
+    // TODO: expose an API which handles the initialization of t
+    // so that reduces IO of the network
     RetCode lk_push_back(const T &t, util::TraceView trace = util::nulltrace)
     {
         auto rc = lock_push();
@@ -157,14 +159,14 @@ public:
                 (flag_t) AcquireRequestFlag::kNoBindPR);
     }
 
-    ListNode<T> &cached_node()
-    {
-        return cached_node_;
-    }
-    const ListNode<T> &cached_node() const
-    {
-        return cached_node_;
-    }
+    // ListNode<T> &cached_node()
+    // {
+    //     return cached_node_;
+    // }
+    // const ListNode<T> &cached_node() const
+    // {
+    //     return cached_node_;
+    // }
     RetCode lk_pop_front(T *t, util::TraceView trace = util::nulltrace)
     {
         auto rc = lock_pop();
@@ -302,11 +304,6 @@ public:
         return ret;
     }
 
-    void remote_free_list_node(GlobalAddress gaddr)
-    {
-        LOG_FIRST_N(WARNING, 1) << "[list] ignore remote free " << gaddr;
-    }
-
     void read_meta()
     {
         auto &meta_handle = get_meta_handle();
@@ -342,13 +339,6 @@ public:
             ->rdma_write(meta_gaddr_, rdma_buf.buffer, meta_size(), meta_handle)
             .expect(RC::kOk);
     }
-    void write_meta()
-    {
-        prepare_write_meta();
-        rdma_adpt_->commit().expect(RC::kOk);
-        rdma_adpt_->put_all_rdma_buffer();
-    }
-
     Meta &cached_meta()
     {
         return cached_meta_;
@@ -377,6 +367,18 @@ public:
     }
 
 private:
+    void write_meta()
+    {
+        prepare_write_meta();
+        rdma_adpt_->commit().expect(RC::kOk);
+        rdma_adpt_->put_all_rdma_buffer();
+    }
+
+    void remote_free_list_node(GlobalAddress gaddr)
+    {
+        LOG_FIRST_N(WARNING, 1) << "[list] ignore remote free " << gaddr;
+    }
+
     RemoteMemHandle &get_meta_handle()
     {
         if (unlikely(!meta_handle_.valid()))
@@ -545,7 +547,7 @@ private:
     bool cached_inited_{false};
     Meta cached_meta_;
 
-    ListNode<T> cached_node_;
+    // ListNode<T> cached_node_;
 
     std::unordered_map<uint64_t, RemoteMemHandle> handles_;
 

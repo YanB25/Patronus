@@ -27,6 +27,8 @@ constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = 32;
 constexpr static size_t kMaxCoroNr = 16;
 
+constexpr static size_t kEntryNrPerBlock = 1024;
+
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 std::vector<std::string> col_idx;
@@ -52,6 +54,14 @@ uint64_t calculate_client_id(uint64_t nid, uint64_t tid, uint64_t coro_id)
 {
     return nid * kMaxAppThread * kMaxCoroNr + tid * kMaxCoroNr + coro_id;
 }
+
+struct Object
+{
+    uint64_t nid;
+    uint64_t tid;
+    uint64_t coro_id;
+    uint64_t magic;
+};
 
 struct BenchConfig
 {
@@ -138,13 +148,14 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
     return os;
 }
 
-template <typename T>
-typename QueueHandle<T>::pointer gen_handle(Patronus::pointer p,
-                                            size_t dir_id,
-                                            uint64_t client_id,
-                                            const HandleConfig &conf,
-                                            GlobalAddress meta_gaddr,
-                                            CoroContext *ctx)
+using QueueHandleT = QueueHandle<Object, kEntryNrPerBlock>;
+using QueueT = Queue<Object, kEntryNrPerBlock>;
+
+typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
+                                          size_t dir_id,
+                                          const HandleConfig &conf,
+                                          GlobalAddress meta_gaddr,
+                                          CoroContext *ctx)
 {
     auto server_nid = ::config::get_server_nids().front();
 
@@ -153,12 +164,9 @@ typename QueueHandle<T>::pointer gen_handle(Patronus::pointer p,
     auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
         server_nid, dir_id, p, conf.bypass_prot, ctx);
 
-    auto handle = QueueHandle<T>::new_instance(
-        server_nid, client_id, meta_gaddr, rdma_adpt, conf);
+    auto handle =
+        QueueHandleT::new_instance(server_nid, meta_gaddr, rdma_adpt, conf);
 
-    // debug
-    handle->read_meta();
-    LOG(INFO) << "[debug] !! meta is " << handle->cached_meta();
     return handle;
 }
 
@@ -210,24 +218,21 @@ void reg_latency(const std::string &name,
         << "** duplicated test detected.";
 }
 
-template <typename T>
-typename Queue<T>::pointer gen_queue(Patronus::pointer p,
-                                     const QueueConfig &config)
+typename QueueT::pointer gen_queue(Patronus::pointer p,
+                                   const QueueConfig &config)
 {
     auto allocator = p->get_allocator(0 /* default hint */);
 
     auto server_rdma_adpt = patronus::RdmaAdaptor::new_instance(p);
-    auto queue = Queue<T>::new_instance(server_rdma_adpt, allocator, config);
+    auto queue = QueueT::new_instance(server_rdma_adpt, allocator, config);
 
     auto meta_gaddr = queue->meta_gaddr();
     p->put("race:meta_gaddr", meta_gaddr, 0ns);
     LOG(INFO) << "Puting to race:meta_gaddr with " << meta_gaddr;
 
-    LOG(INFO) << "[debug] !! meta is " << queue->meta();
     return queue;
 }
 
-template <typename T>
 void test_basic_client_worker(
     Patronus::pointer p,
     size_t coro_id,
@@ -244,10 +249,10 @@ void test_basic_client_worker(
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
     auto handle =
-        gen_handle<T>(p, dir_id, client_id, handle_conf, meta_gaddr, &ctx);
+        gen_handle(p, dir_id, client_id, handle_conf, meta_gaddr, &ctx);
 
     size_t put_succ_nr = 0;
-    size_t put_nomem_nr = 0;
+    size_t put_retry_nr = 0;
     size_t get_succ_nr = 0;
     size_t get_nomem_nr = 0;
     size_t rdma_protection_nr = 0;
@@ -258,7 +263,7 @@ void test_basic_client_worker(
     ChronoTimer op_timer;
     bool should_report_latency = (tid == 0 && coro_id == 0);
 
-    auto value = T{};
+    auto value = Object{};
     while (ex.get_private_data().thread_remain_task > 0)
     {
         if (should_report_latency)
@@ -267,7 +272,7 @@ void test_basic_client_worker(
         }
         if (bench_conf.is_consumer(client_id))
         {
-            auto rc = handle->pop(value);
+            auto rc = handle->lk_pop_front(nullptr);
             if (rc == kOk)
             {
                 get_succ_nr++;
@@ -280,15 +285,15 @@ void test_basic_client_worker(
         }
         else
         {
-            auto rc = handle->push(value);
+            auto rc = handle->lk_push_back(value);
             if (rc == kOk)
             {
                 put_succ_nr++;
             }
             else
             {
-                CHECK_EQ(rc, RC::kNoMem);
-                put_nomem_nr++;
+                CHECK_EQ(rc, RC::kRetry);
+                put_retry_nr++;
             }
         }
 
@@ -306,13 +311,13 @@ void test_basic_client_worker(
 
     auto &comm = ex.get_private_data();
     comm.put_succ_nr += put_succ_nr;
-    comm.put_nr += put_succ_nr + get_succ_nr;
+    comm.put_nr += put_succ_nr + put_retry_nr;
     comm.get_succ_nr += get_succ_nr;
     comm.get_nr += get_succ_nr + get_nomem_nr;
     comm.rdma_protection_nr += rdma_protection_nr;
 
     LOG(INFO) << "[bench] put: succ: " << put_succ_nr
-              << ", nomem: " << put_nomem_nr << ", get: succ: " << get_succ_nr
+              << ", retry: " << put_retry_nr << ", get: succ: " << get_succ_nr
               << ", not found: " << get_nomem_nr
               << ", rdma_protection_nr: " << rdma_protection_nr
               << ". executed: " << executed_nr << ", take: " << ns
@@ -395,7 +400,7 @@ void test_basic_client_master(
 
 std::atomic<ssize_t> g_total_test_nr;
 GlobalAddress g_meta_gaddr;
-template <typename T>
+
 void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
@@ -457,15 +462,15 @@ void benchmark_client(Patronus::pointer p,
                     auto tid = p->get_thread_id();
                     auto cid = coro_id;
                     auto client_id = calculate_client_id(nid, tid, cid);
-                    test_basic_client_worker<T>(p,
-                                                coro_id,
-                                                client_id,
-                                                yield,
-                                                bench_conf,
-                                                handle_conf,
-                                                meta_gaddr,
-                                                ex,
-                                                lat_m);
+                    test_basic_client_worker(p,
+                                             coro_id,
+                                             client_id,
+                                             yield,
+                                             bench_conf,
+                                             handle_conf,
+                                             meta_gaddr,
+                                             ex,
+                                             lat_m);
                 });
         }
         auto &master = ex.master();
@@ -506,7 +511,6 @@ void benchmark_client(Patronus::pointer p,
     }
 }
 
-template <typename T>
 void benchmark_server(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
@@ -520,12 +524,12 @@ void benchmark_server(Patronus::pointer p,
         thread_nr = std::max(thread_nr, conf.thread_nr);
     }
 
-    typename Queue<T>::pointer queue;
+    typename QueueT::pointer queue;
 
     if (is_master)
     {
         p->finished(key);
-        queue = gen_queue<T>(p, queue_config);
+        queue = gen_queue(p, queue_config);
     }
     // wait for everybody to finish preparing
     bar.wait();
@@ -551,7 +555,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     std::vector<HandleConfig> handle_configs;
     LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{.max_entry_nr = 102400});
+    handle_configs.push_back(HandleConfig{});
 
     for (const auto &handle_conf : handle_configs)
     {
@@ -569,19 +573,13 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                     conf.validate();
                     LOG_IF(INFO, is_master)
                         << "[sub-conf] running conf: " << conf;
-                    benchmark_client<Dummy<64>>(
-                        p, bar, is_master, conf, handle_conf, key);
+                    benchmark_client(p, bar, is_master, conf, handle_conf, key);
                 }
                 else
                 {
                     // TODO: let queue config be real.
-                    benchmark_server<Dummy<64>>(
-                        p,
-                        bar,
-                        is_master,
-                        {conf},
-                        QueueConfig{.max_entry_nr = 102400},
-                        key);
+                    benchmark_server(
+                        p, bar, is_master, {conf}, QueueConfig{}, key);
                 }
             }
         }
