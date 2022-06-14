@@ -50,7 +50,7 @@ public:
     {
         return to_exposed_remote_mem(meta_addr());
     }
-    Meta meta() const
+    const Meta &meta() const
     {
         return *(Meta *) meta_;
     }
@@ -58,15 +58,15 @@ public:
     {
         allocator_->free(meta_);
     }
+    void *meta_addr() const
+    {
+        return meta_;
+    }
 
 private:
     GlobalAddress to_exposed_remote_mem(void *mem) const
     {
         return rdma_adpt_->to_exposed_gaddr(DCHECK_NOTNULL(mem));
-    }
-    void *meta_addr() const
-    {
-        return meta_;
     }
     void init_meta()
     {
@@ -76,10 +76,14 @@ private:
     }
     void setup_meta()
     {
-        auto meta_size = Meta::size();
-        memset(meta_, 0, meta_size);
-        meta_->phead = nullgaddr;
-        meta_->ptail = nullgaddr;
+        auto *meta_phead = (std::atomic<uint64_t> *) &meta_->phead;
+        meta_phead->store(nullgaddr.val);
+        auto *meta_ptail = (std::atomic<uint64_t> *) &meta_->ptail;
+        meta_ptail->store(nullgaddr.val);
+        auto *meta_pop_lock = (std::atomic<uint64_t> *) &meta_->pop_lock;
+        meta_pop_lock->store(0);
+        auto *meta_push_lock = (std::atomic<uint64_t> *) &meta_->push_lock;
+        meta_push_lock->store(0);
     }
 
     size_t node_size() const

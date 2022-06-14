@@ -506,8 +506,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bar.wait();
 
     std::vector<HandleConfig> handle_configs;
-    LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{});
+    handle_configs.push_back(HandleConfig{.lock_free = true});
+    handle_configs.push_back(HandleConfig{.lock_free = false});
 
     for (const auto &handle_conf : handle_configs)
     {

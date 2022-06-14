@@ -11,6 +11,7 @@ struct HandleConfig
 {
     std::string name;
     bool bypass_prot{false};
+    bool lock_free{true};
 
     std::string conf_name() const
     {
@@ -21,7 +22,8 @@ struct HandleConfig
 inline std::ostream &operator<<(std::ostream &os, const HandleConfig &config)
 {
     os << "{HandleConfig name: " << config.name
-       << ", bypass_prot: " << config.bypass_prot << "}";
+       << ", bypass_prot: " << config.bypass_prot
+       << ", lock_free: " << config.lock_free << "}";
     return os;
 }
 
@@ -32,14 +34,12 @@ class ListHandle
 public:
     using pointer = std::shared_ptr<ListHandle<T>>;
     ListHandle(uint16_t node_id,
-               GlobalAddress meta,
+               GlobalAddress meta_gaddr,
                IRdmaAdaptor::pointer rdma_adpt,
                const HandleConfig &config)
-        : node_id_(node_id),
-          meta_gaddr_(meta),
-          rdma_adpt_(rdma_adpt),
-          config_(config)
+        : node_id_(node_id), rdma_adpt_(rdma_adpt), config_(config)
     {
+        meta.gaddr_ = meta_gaddr;
     }
     static pointer new_instance(uint16_t node_id,
                                 GlobalAddress meta,
@@ -52,6 +52,17 @@ public:
     {
         read_meta();
         return kOk;
+    }
+    RetCode push_back(const T &t, util::TraceView trace = util::nulltrace)
+    {
+        if (config_.lock_free)
+        {
+            return lf_push_back(t, trace);
+        }
+        else
+        {
+            return lk_push_back(t, trace);
+        }
     }
 
     /**
@@ -88,6 +99,17 @@ public:
             CHECK_EQ(rc, RC::kRetry);
         }
         return RC::kRetry;
+    }
+    RetCode pop_front(T *t, util::TraceView trace = util::nulltrace)
+    {
+        if (config_.lock_free)
+        {
+            return lf_pop_front(t, trace);
+        }
+        else
+        {
+            return lk_pop_front(t, trace);
+        }
     }
     RetCode lf_pop_front(T *t, util::TraceView trace = util::nulltrace)
     {
@@ -446,9 +468,11 @@ public:
         // 3.4) commit
         rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
-        trace.pin("write entry->next + write meta and unlock");
+        trace.pin("write entry->next + write meta and unlock " +
+                  std::to_string(new_entry_gaddr.val));
 
         rdma_adpt_->put_all_rdma_buffer();
+        consume_to_insert_node();
         return kOk;
     }
 
@@ -617,6 +641,20 @@ public:
             },
             trace);
 
+        return ret;
+    }
+
+    Meta debug_meta()
+    {
+        auto &meta_handle = get_meta_handle();
+        auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
+        rdma_adpt_
+            ->rdma_read(rdma_buf.buffer, meta_gaddr(), meta_size(), meta_handle)
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+
+        Meta ret;
+        memcpy(&ret, rdma_buf.buffer, meta_size());
         return ret;
     }
 
@@ -879,7 +917,6 @@ private:
     }
 
     uint16_t node_id_;
-    GlobalAddress meta_gaddr_;
     IRdmaAdaptor::pointer rdma_adpt_;
     HandleConfig config_;
 

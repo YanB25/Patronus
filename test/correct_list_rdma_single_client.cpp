@@ -131,9 +131,10 @@ typename ListHandle<T>::pointer gen_handle(Patronus::pointer p,
     auto handle =
         ListHandle<T>::new_instance(server_nid, meta_gaddr, rdma_adpt, conf);
 
-    // debug
-    handle->read_meta();
-    LOG(INFO) << "[debug] !! meta is " << handle->cached_meta();
+    auto meta = handle->debug_meta();
+    CHECK_EQ(meta.ptail, nullgaddr);
+    CHECK_EQ(meta.phead, nullgaddr);
+
     return handle;
 }
 
@@ -157,10 +158,10 @@ typename List<T>::pointer gen_list(Patronus::pointer p,
     auto list = List<T>::new_instance(server_rdma_adpt, allocator, config);
 
     auto meta_gaddr = list->meta_gaddr();
-    p->put("race:meta_gaddr", meta_gaddr, 0ns);
-    LOG(INFO) << "Puting to race:meta_gaddr with " << meta_gaddr;
 
-    LOG(INFO) << "[debug] !! meta is " << list->meta();
+    LOG(INFO) << "Puting to race:meta_gaddr with " << meta_gaddr;
+    p->put("race:meta_gaddr", meta_gaddr, 0ns);
+
     return list;
 }
 
@@ -169,8 +170,8 @@ void validate_helper(const std::list<ListItem> &reference,
                      util::TraceView trace = util::nulltrace)
 {
     CHECK_EQ(reference.size(), test.size())
-        << "[debug] size mismatch. " << util::pre_iter(reference, 10)
-        << " v.s. " << util::pre_iter(test, 10) << std::endl
+        << "** size mismatch. " << util::pre_iter(reference, 10) << " v.s. "
+        << util::pre_iter(test, 10) << std::endl
         << ". Trace: " << trace;
 
     auto ref_it = reference.cbegin();
@@ -227,7 +228,7 @@ void test_basic_client_worker(
 
     std::list<ListItem> book_list;
 
-    CHECK_EQ(handle->lk_pop_front(nullptr), kNotFound)
+    CHECK_EQ(handle->pop_front(nullptr), kNotFound)
         << "** list empty, should be unable to pop";
 
     util::TraceManager tm(1);
@@ -239,10 +240,11 @@ void test_basic_client_worker(
         {
             // pop
             ListItem item;
-            LOG(INFO) << "[debug] POP ";
-            auto rc = handle->lf_pop_front(&item, trace);
-            LOG(INFO) << "[bench] finished POPed "
-                      << ", got " << item;
+            // LOG(INFO) << "[debug] POP ";
+            auto rc = handle->pop_front(&item, trace);
+            // LOG(INFO) << "[bench] finished POPed "
+            //           << ", got " << item << ". meta: " <<
+            //           handle->debug_meta();
             if (book_list.empty())
             {
                 CHECK_EQ(rc, kNotFound)
@@ -265,10 +267,10 @@ void test_basic_client_worker(
             item.coro_id = coro_id;
             item.magic_number = fast_pseudo_rand_int();
             book_list.push_back(item);
-            LOG(INFO) << "[debug] PUSH " << item;
-            // auto rc = handle->lk_push_back(item);
-            auto rc = handle->lf_push_back(item, trace);
-            LOG(INFO) << "[bench] finished PUSH " << item;
+            // LOG(INFO) << "[debug] PUSH " << item;
+            auto rc = handle->push_back(item, trace);
+            // LOG(INFO) << "[bench] finished PUSH " << item
+            //           << ". meta: " << handle->debug_meta();
             CHECK_EQ(rc, kOk);
         }
 
@@ -396,6 +398,8 @@ void benchmark_client(Patronus::pointer p,
             // fetch meta_gaddr here by master thread
             // because it may be slow
             g_meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
+            LOG(INFO) << "[bench] getting from race:meta_gaddr: "
+                      << g_meta_gaddr;
         }
     }
     bar.wait();
@@ -489,8 +493,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bar.wait();
 
     std::vector<HandleConfig> handle_configs;
-    LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{});
+    handle_configs.push_back(HandleConfig{.lock_free = false});
+    handle_configs.push_back(HandleConfig{.lock_free = true});
 
     for (const auto &handle_conf : handle_configs)
     {

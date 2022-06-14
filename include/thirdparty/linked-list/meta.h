@@ -11,10 +11,10 @@ namespace patronus::list
 {
 struct Meta
 {
-    GlobalAddress phead;
-    GlobalAddress ptail;
-    uint64_t push_lock;
-    uint64_t pop_lock;
+    GlobalAddress phead{nullgaddr};
+    GlobalAddress ptail{nullgaddr};
+    uint64_t push_lock{0};
+    uint64_t pop_lock{0};
     static size_t size()
     {
         return sizeof(Meta);

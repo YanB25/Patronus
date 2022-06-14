@@ -26,12 +26,27 @@ constexpr static size_t kAllocSize = 4_KB;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
+constexpr static uint64_t kMagic = 0xaabbccdd14237624;
+struct Test
+{
+    uint64_t magic;
+    uint64_t inited;
+    GlobalAddress test_gaddr;
+};
+std::ostream &operator<<(std::ostream &os, const Test &t)
+{
+    os << "{Test magic: " << (void *) t.magic << ", inited: " << t.inited
+       << ", test_gaddr: " << t.test_gaddr << "}";
+    return os;
+}
+
 void client_worker(Patronus::pointer p,
                    size_t coro_id,
                    CoroYield &yield,
                    CoroExecutionContext<kCoroCnt> &exe_ctx)
 {
     CoroContext ctx(0, &yield, &exe_ctx.master(), coro_id);
+    p->keeper_barrier("ready", 100ms);
 
     auto gaddr = p->get_object<GlobalAddress>("p:gaddr", 1ms);
     auto dir_id = 0;
@@ -240,6 +255,30 @@ void client_worker(Patronus::pointer p,
         }
     }
 
+    // validating if these two address is consistent
+    // a) server: patronus_->patronus_alloc() => patronus_->to_exposed_gaddr()
+    // b) client: rdma_adpt_->read(gaddr);
+    {
+        auto test_gaddr = p->get_object<GlobalAddress>("p:test_gaddr", 1ms);
+        auto handle =
+            rdma_adpt->acquire_perm(test_gaddr,
+                                    0,
+                                    sizeof(Test),
+                                    0ns,
+                                    (flag_t) AcquireRequestFlag::kNoGc |
+                                        (flag_t) AcquireRequestFlag::kNoBindPR);
+        auto test_buf = rdma_adpt->get_rdma_buffer(sizeof(Test));
+        rdma_adpt->rdma_read(test_buf.buffer, test_gaddr, sizeof(Test), handle)
+            .expect(RC::kOk);
+        rdma_adpt->commit().expect(RC::kOk);
+        const auto &got_test = *(Test *) test_buf.buffer;
+        CHECK_EQ(got_test.inited, 1) << got_test;
+        CHECK_EQ(got_test.magic, kMagic) << got_test;
+        CHECK_EQ(got_test.test_gaddr, test_gaddr) << got_test;
+
+        rdma_adpt->relinquish_perm(handle, 0, 0);
+    }
+
     exe_ctx.worker_finished(coro_id);
     ctx.yield_to_master();
 }
@@ -295,18 +334,38 @@ void client(Patronus::pointer p)
 
     master();
 }
-
 void server(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
     LOG(INFO) << "[bench] server starts to work. tid " << tid;
 
-    auto *addr = p->patronus_alloc(4_KB, 0 /* hint */);
+    void *addr;
+    void *test_addr;
+    {
+        addr = p->patronus_alloc(4_KB, 0 /* hint */);
+        auto gaddr = p->to_exposed_gaddr(addr);
+        p->put("p:gaddr", gaddr, 0ns);
+        LOG(INFO) << "Allocated " << (void *) addr << ". gaddr: " << gaddr;
+    }
 
-    auto gaddr = p->to_exposed_gaddr(addr);
-    p->put("p:gaddr", gaddr, 0ns);
+    auto default_allocator = p->get_allocator(0);
+    {
+        // test_addr = p->patronus_alloc(sizeof(Test), 0 /* hint */);
+        test_addr = default_allocator->alloc(sizeof(Test), nullptr);
+        auto test_gaddr = p->to_exposed_gaddr(test_addr);
+        auto &test_obj = *(Test *) test_addr;
 
-    LOG(INFO) << "Allocated " << (void *) addr << ". gaddr: " << gaddr;
+        auto *magic = (std::atomic<uint64_t> *) &test_obj.magic;
+        magic->store(kMagic);
+        auto *init = (std::atomic<uint64_t> *) &test_obj.inited;
+        init->store(1);
+        auto *test_obj_gaddr = (std::atomic<uint64_t> *) &test_obj.test_gaddr;
+        test_obj_gaddr->store(test_gaddr.val);
+
+        p->put("p:test_gaddr", test_gaddr, 0ns);
+        LOG(INFO) << "Allocated for test: " << (void *) test_addr
+                  << ". gaddr: " << test_gaddr;
+    }
 
     // register allocator for kAllocHintA
     auto user_reserved_buf = p->get_user_reserved_buffer();
@@ -317,9 +376,12 @@ void server(Patronus::pointer p)
         user_reserved_buf.buffer, user_reserved_buf.size, slab_conf);
     p->reg_allocator(kAllocHintA, slab_allocator);
 
+    p->keeper_barrier("ready", 100ms);
+
     p->server_serve(kWaitKey);
 
     p->patronus_free(addr, 4_KB, 0 /* hint */);
+    default_allocator->free(test_addr, nullptr);
 }
 
 int main(int argc, char *argv[])

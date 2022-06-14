@@ -171,8 +171,8 @@ void validate_helper(const std::list<Item> &reference,
                      util::TraceView trace)
 {
     CHECK_EQ(reference.size(), test.size())
-        << "[debug] size mismatch. " << util::pre_iter(reference, 10)
-        << " v.s. " << util::pre_iter(test, 10) << std::endl
+        << "** size mismatch. " << util::pre_iter(reference, 10) << " v.s. "
+        << util::pre_iter(test, 10) << std::endl
         << "Possible helpful last trace: " << trace;
 
     auto ref_it = reference.cbegin();

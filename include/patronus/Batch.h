@@ -88,6 +88,10 @@ public:
         wr.wr.rdma.rkey = rkey;
 
         idx_++;
+        DVLOG(4) << "[patronus] [batch] WRITE node_id: " << node_id
+                 << ", dir_id: " << dir_id << ", source: " << (void *) source
+                 << ", dest: " << (void *) dest << ", size: " << size
+                 << ", at idx: " << idx_;
         return kOk;
     }
     RetCode prepare_read(ibv_qp *qp,
@@ -117,6 +121,10 @@ public:
         wr.wr.rdma.rkey = rkey;
 
         idx_++;
+        DVLOG(4) << "[patronus] [batch] READ node_id: " << node_id
+                 << ", dir_id: " << dir_id << ", source: " << (void *) source
+                 << ", dest: " << (void *) dest << ", size: " << size
+                 << ", at idx: " << idx_;
         return kOk;
     }
     RetCode prepare_faa(ibv_qp *qp,
@@ -150,6 +158,10 @@ public:
             << "** CAS addr should be 8-byte aligned. got " << (void *) dest;
 
         idx_++;
+        DVLOG(4) << "[patronus] [batch] FAA node_id: " << node_id
+                 << ", dir_id: " << dir_id << ", source: " << (void *) source
+                 << ", dest: " << (void *) dest << ", value: " << value
+                 << ", at idx: " << idx_;
         return kOk;
     }
     RetCode prepare_cas(ibv_qp *qp,
@@ -185,11 +197,20 @@ public:
             << "** CAS addr should be 8-byte aligned. got " << (void *) dest;
 
         idx_++;
+        DVLOG(4) << "[patronus] [batch] CAS node_id: " << node_id
+                 << ", dir_id: " << dir_id << ", source: " << (void *) source
+                 << ", dest: " << (void *) dest << ", compare: " << compare
+                 << ", swap: " << swap << ", at idx: " << idx_;
         return kOk;
     }
     RetCode commit(uint64_t wr_id, CoroContext *ctx)
     {
         DCHECK_LE(idx_, kMaxOp);
+        if (unlikely(idx_ == 0))
+        {
+            return RC::kNotFound;
+        }
+
         for (size_t i = 0; i < idx_; ++i)
         {
             bool last = (i + 1) == idx_;
@@ -202,6 +223,7 @@ public:
 
             send_wrs_[i].wr_id = wr_id;
         }
+        DVLOG(4) << "[patronus][batch] commiting " << idx_ << " WRs.";
 
         auto ret = ibv_post_send(qp_, send_wrs_, &bad_wr_);
         if (unlikely(ret))
