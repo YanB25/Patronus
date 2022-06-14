@@ -28,7 +28,7 @@ constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kMaxCoroNr = 1;
 
-constexpr static size_t kTestNr = 10_K;
+constexpr static size_t kTestNr = 1_K;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -148,7 +148,6 @@ typename ListHandle<T>::pointer gen_handle(Patronus::pointer p,
 
     // debug
     handle->read_meta();
-    LOG(INFO) << "[debug] !! meta is " << handle->cached_meta();
     return handle;
 }
 
@@ -175,7 +174,6 @@ typename List<T>::pointer gen_list(Patronus::pointer p,
     p->put("race:meta_gaddr", meta_gaddr, 0ns);
     LOG(INFO) << "Puting to race:meta_gaddr with " << meta_gaddr;
 
-    LOG(INFO) << "[debug] !! meta is " << list->meta();
     return list;
 }
 
@@ -255,7 +253,7 @@ void test_basic_client_worker(
         {
             // pop
             ListItem item;
-            auto rc = handle->lk_pop_front(&item);
+            auto rc = handle->pop_front(&item);
             if (rc == kOk)
             {
                 validate_magic(
@@ -279,17 +277,17 @@ void test_basic_client_worker(
             item.coro_id = coro_id;
             item.magic_number = gen_magic(nid, tid, coro_id);
             validate_magic(item.nid, item.tid, item.coro_id, item.magic_number);
-            auto rc = handle->lk_push_back(item);
+            auto rc = handle->push_back(item);
             if (rc == kOk)
             {
                 put_succ_nr++;
+                ex.get_private_data().thread_remain_task--;
             }
             else
             {
                 CHECK_EQ(rc, RC::kRetry);
                 put_retry_nr++;
             }
-            ex.get_private_data().thread_remain_task--;
         }
     }
     auto lists = handle->debug_iterator();
@@ -394,7 +392,6 @@ void benchmark_client(Patronus::pointer p,
                       const HandleConfig &handle_conf,
                       uint64_t key)
 {
-    auto selected_client = ::config::get_client_nids().front();
     auto coro_nr = bench_conf.coro_nr;
     bool first_enter = true;
     bool server_should_leave = true;
@@ -402,7 +399,6 @@ void benchmark_client(Patronus::pointer p,
     size_t actual_test_nr = bench_conf.test_nr;
 
     auto tid = p->get_thread_id();
-    auto nid = p->get_node_id();
     if (is_master)
     {
         // init here by master
@@ -419,7 +415,7 @@ void benchmark_client(Patronus::pointer p,
 
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
-    bool should_enter = bench_conf.should_enter(tid) && nid == selected_client;
+    bool should_enter = bench_conf.should_enter(tid);
 
     if (should_enter)
     {
