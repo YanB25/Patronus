@@ -54,9 +54,6 @@ public:
         return kOk;
     }
 
-    RetCode lf_push_back(const T &t);
-    RetCode lf_pop_front(const T &t);
-
     /**
      * @brief try to link the list_node
      *
@@ -65,68 +62,267 @@ public:
      */
     RetCode lf_push_back(const T &t, util::TraceView trace = util::nulltrace)
     {
+        // 0) init of allocated new node
         if (unlikely(!has_to_insert_node()))
         {
             allocate_to_insert_node().expect(RC::kOk);
+            trace.pin("allocate to insert node");
+            prepare_write_to_node(t,
+                                  to_insert_node_gaddr(),
+                                  nullgaddr /* next */,
+                                  to_insert_node_handle())
+                .expect(RC::kOk);
+            rdma_adpt_->commit().expect(RC::kOk);
+            trace.pin("write to allocated node");
         }
-        read_meta();
 
-        prepare_write_to_node(t,
-                              to_insert_node_gaddr(),
-                              nullgaddr /* next */,
-                              to_insert_node_handle(),
-                              trace)
+        for (size_t i = 0; i < 10; ++i)
+        {
+            auto rc = lf_link_back(to_insert_node_gaddr(),
+                                   trace.child(std::to_string(i)));
+            if (rc == kOk)
+            {
+                consume_to_insert_node().expect(RC::kOk);
+                return RC::kOk;
+            }
+            CHECK_EQ(rc, RC::kRetry);
+        }
+        return RC::kRetry;
+    }
+    RetCode lf_pop_front(T *t, util::TraceView trace = util::nulltrace)
+    {
+        // 0) read meta
+        read_meta();
+        trace.pin("read meta");
+
+        // 1) get GlobalAddress next = front->next;
+        const auto &meta = cached_meta();
+        if (unlikely(meta.phead == nullgaddr))
+        {
+            CHECK_EQ(meta.ptail, nullgaddr);
+            return RC::kNotFound;
+        }
+        GlobalAddress old_head = meta.phead;
+        auto front_node_gaddr = meta.phead;
+        auto front_node_next_gaddr =
+            front_node_gaddr + offsetof(ListNode<T>, next);
+        auto front_node_handle = get_entry_mem_handle(front_node_gaddr);
+        size_t node_next_size = sizeof(ListNode<T>::next);
+        auto front_node_next_buf = rdma_adpt_->get_rdma_buffer(node_next_size);
+        rdma_adpt_
+            ->rdma_read(front_node_next_buf.buffer,
+                        front_node_next_gaddr,
+                        node_next_size,
+                        front_node_handle)
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
+        GlobalAddress node_next = *(GlobalAddress *) front_node_next_buf.buffer;
+        rdma_adpt_->put_all_rdma_buffer();
 
-        return lf_link_back(to_insert_node_gaddr());
+        trace.pin("read front->next");
+
+        // 2) CAS meta.pfront to next
+        auto meta_pfront_buffer =
+            rdma_adpt_->get_rdma_buffer(sizeof(Meta::phead));
+        rdma_adpt_
+            ->rdma_cas(meta_head_gaddr(),
+                       old_head.val,
+                       node_next.val,
+                       meta_pfront_buffer.buffer,
+                       get_meta_handle())
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        GlobalAddress got_head = *(GlobalAddress *) meta_pfront_buffer.buffer;
+        rdma_adpt_->put_all_rdma_buffer();
+        trace.pin("cas meta.pfront");
+
+        RetCode rc;
+        if (got_head == old_head)
+        {
+            rc = kOk;
+            if (unlikely(node_next == nullgaddr))
+            {
+                // the last item. also update tail
+                CHECK_EQ(got_head, meta.ptail)
+                    << "If it is the last node, the previous head should also "
+                       "be the tail";
+
+                auto rdma_tail_buf =
+                    rdma_adpt_->get_rdma_buffer(sizeof(Meta::ptail));
+                *(GlobalAddress *) rdma_tail_buf.buffer = nullgaddr;
+                rdma_adpt_
+                    ->rdma_write(meta_tail_gaddr(),
+                                 rdma_tail_buf.buffer,
+                                 sizeof(Meta::ptail),
+                                 get_meta_handle())
+                    .expect(RC::kOk);
+                rdma_adpt_->commit().expect(RC::kOk);
+                rdma_adpt_->put_all_rdma_buffer();
+                trace.pin("also update meta.ptail");
+            }
+
+            remote_free_list_node(old_head);
+            trace.pin("remote free node");
+            if (t)
+            {
+                auto object_buf = rdma_adpt_->get_rdma_buffer(sizeof(T));
+                auto object_gaddr = old_head + offsetof(ListNode<T>, object);
+                rdma_adpt_
+                    ->rdma_read(object_buf.buffer,
+                                object_gaddr,
+                                sizeof(T),
+                                front_node_handle)
+                    .expect(RC::kOk);
+                rdma_adpt_->commit().expect(RC::kOk);
+                rdma_adpt_->put_all_rdma_buffer();
+                memcpy(t, object_buf.buffer, sizeof(T));
+                trace.pin("read back object");
+            }
+        }
+        else
+        {
+            rc = kRetry;
+        }
+        relinquish_entry_mem_handle(front_node_handle);
+        trace.pin("relinquish");
+        return rc;
     }
 
-    RetCode lf_link_back(GlobalAddress node)
+    RetCode lf_link_back_first_node(GlobalAddress node,
+                                    util::TraceView trace = util::nulltrace)
     {
+        const auto &meta = cached_meta();
         auto tail_node_gaddr = meta.ptail;
-        GlobalAddress old_ptail = meta.ptail;
-        auto entry_handle = get_entry_mem_handle(tail_node_gaddr);
+        DCHECK_EQ(tail_node_gaddr, nullgaddr) << "** precondition violated";
+        auto meta_tail_buf = rdma_adpt_->get_rdma_buffer(sizeof(Meta::ptail));
+        rdma_adpt_
+            ->rdma_cas(meta_tail_gaddr(),
+                       nullgaddr.val,
+                       node.val,
+                       meta_tail_buf.buffer,
+                       get_meta_handle())
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        GlobalAddress got_ptail = *(GlobalAddress *) meta_tail_buf.buffer;
+        rdma_adpt_->put_all_rdma_buffer();
+        trace.pin("cas meta.ptail");
+        if (got_ptail == nullgaddr)
+        {
+            // cas succeeded
+            auto meta_head_buf =
+                rdma_adpt_->get_rdma_buffer(sizeof(Meta::phead));
+            *(GlobalAddress *) meta_head_buf.buffer = node;
+            rdma_adpt_
+                ->rdma_cas(meta_head_gaddr(),
+                           nullgaddr.val,
+                           node.val,
+                           meta_head_buf.buffer,
+                           get_meta_handle())
+                .expect(RC::kOk);
+            rdma_adpt_->commit().expect(RC::kOk);
+            GlobalAddress got_phead = *(GlobalAddress *) meta_head_buf.buffer;
+            CHECK_EQ(got_phead, nullgaddr)
+                << "** the CAS here should succeed, because only the one "
+                   "succeeded in CAS-ing meta.ptail can reach here";
+            rdma_adpt_->put_all_rdma_buffer();
+            trace.pin("cas meta.phead");
+            return RC::kOk;
+        }
+        else
+        {
+            return RC::kRetry;
+        }
+    }
+    RetCode lf_link_back_not_first_node(GlobalAddress node,
+                                        util::TraceView trace = util::nulltrace)
+    {
+        const auto &meta = cached_meta();
+        auto tail_node_gaddr = meta.ptail;
+        GlobalAddress old_meta_ptail = meta.ptail;
+        auto tail_node_handle = get_entry_mem_handle(tail_node_gaddr);
+        trace.pin("get entry handle");
+
         auto next_ptr_buf =
             rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>::next));
         auto tail_next_ptr_gaddr =
             tail_node_gaddr + offsetof(ListNode<T>, next);
         rdma_adpt_
             ->rdma_cas(tail_next_ptr_gaddr,
-                       nullgaddr,
-                       node,
+                       nullgaddr.val,
+                       node.val,
                        next_ptr_buf.buffer,
-                       entry_handle)
+                       tail_node_handle)
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
-        GlobalAddress old_next = *(GlobalAddress *) next_ptr_buf.buffer;
+        GlobalAddress got_tail_node_next =
+            *(GlobalAddress *) next_ptr_buf.buffer;
+        trace.pin("cas meta.front");
+
         RetCode rc;
-        if (old_next == nullgaddr)
+        if (unlikely(got_tail_node_next == nullgaddr))
         {
-            // succeeded
-            // update meta
             rc = RC::kOk;
-            rdma_adpt_
-                ->rdma_cas(meta_tail_gaddr(),
-                           old_ptail,
-                           node,
-                           // use the buffer again, should be safe
-                           next_ptr_buf.buffer,
-                           get_meta_handle())
-                .expect(RC::kOk);
-            rdma_adpt_->commit().expect(RC::kOk);
-            GlobalAddress old_meta_ptail =
-                *(GlobalAddress *) next_ptr_buf.buffer;
-            CHECK_EQ(old_meta_ptail, old_ptail)
-                << "** The CAS has to be successful.";
+
+            auto meta_ptail_buf =
+                rdma_adpt_->get_rdma_buffer(sizeof(Meta::ptail));
+            size_t cas_tried{0};
+            while (true)
+            {
+                rdma_adpt_
+                    ->rdma_cas(meta_tail_gaddr(),
+                               old_meta_ptail.val,
+                               node.val,
+                               meta_ptail_buf.buffer,
+                               get_meta_handle())
+                    .expect(RC::kOk);
+                rdma_adpt_->commit().expect(RC::kOk);
+                GlobalAddress got_meta_ptail =
+                    *(GlobalAddress *) meta_ptail_buf.buffer;
+                trace.pin("cas meta.tail");
+                if (got_meta_ptail == old_meta_ptail)
+                {
+                    // cas succeeded
+                    break;
+                }
+                else
+                {
+                    // cas failed
+                    // wait for other clients to update the pre-condition
+                    cas_tried++;
+                    LOG_IF(INFO, cas_tried)
+                        << "** Failed to CAS meta for 100 tries. " << cas_tried
+                        << "-th. expect: " << old_meta_ptail << ", got "
+                        << got_meta_ptail;
+                    continue;
+                }
+            }
         }
         else
         {
-            rc = RC::kRetry;
+            rc = kRetry;
         }
 
-        relinquish_entry_mem_handle(entry_handle);
+        relinquish_entry_mem_handle(tail_node_handle);
+        trace.pin("relinquish entry handle");
         return rc;
+    }
+
+    RetCode lf_link_back(GlobalAddress node,
+                         util::TraceView trace = util::nulltrace)
+    {
+        read_meta();
+        trace.pin("read");
+
+        auto &meta = cached_meta();
+        if (unlikely(meta.phead == nullgaddr && meta.ptail == nullgaddr))
+        {
+            return lf_link_back_first_node(node, trace.child("first node"));
+        }
+        else
+        {
+            return lf_link_back_not_first_node(node,
+                                               trace.child("not first node"));
+        }
     }
     RetCode prepare_write_to_node(const T &t,
                                   GlobalAddress node_gaddr,
@@ -150,7 +346,8 @@ public:
     RetCode allocate_to_insert_node()
     {
         LOG_IF(WARNING, has_to_insert_node())
-            << "to_insert_node is not null. Allocating another one will leak "
+            << "to_insert_node is not null. Allocating another one will "
+               "leak "
                "the previous one.";
         // drop out the old ones.
         auto rc = consume_to_insert_node();
@@ -251,9 +448,6 @@ public:
         rdma_adpt_->put_all_rdma_buffer();
         trace.pin("write entry->next + write meta and unlock");
 
-        // 4) offload all the relinquish out of critical path.
-        consume_to_insert_node().expect(RC::kOk);
-        trace.pin("relinquish new_entry");
         rdma_adpt_->put_all_rdma_buffer();
         return kOk;
     }
@@ -267,6 +461,10 @@ public:
             0ns,
             (flag_t) AcquireRequestFlag::kNoGc |
                 (flag_t) AcquireRequestFlag::kNoBindPR);
+    }
+    void relinquish_entry_mem_handle(RemoteMemHandle &handle)
+    {
+        rdma_adpt_->relinquish_perm(handle, 0 /* hint */, 0 /* flag */);
     }
 
     // ListNode<T> &cached_node()
@@ -353,7 +551,7 @@ public:
         trace.pin("write meta + unlock");
 
         // 3) relinquish & free
-        rdma_adpt_->relinquish_perm(entry_handle, 0 /* hint */, 0 /* flag */);
+        relinquish_entry_mem_handle(entry_handle);
         remote_free_list_node(old_phead);
         rdma_adpt_->put_all_rdma_buffer();
         trace.pin("rel entry");
@@ -361,9 +559,9 @@ public:
         return kOk;
     }
     using Visitor = std::function<bool(const T &)>;
-    void lf_visit(const Visitor &visit)
+    void lf_visit(const Visitor &visit, TraceView trace = util::nulltrace)
     {
-        read_meta();
+        read_meta(trace);
         const auto &meta = cached_meta();
         if (unlikely(meta.phead == nullgaddr))
         {
@@ -403,29 +601,33 @@ public:
             {
                 break;
             }
+            trace.pin("Collect " + std::to_string(cur_list_node_gaddr.val));
         }
         rdma_adpt_->put_all_rdma_buffer();
         return;
     }
-    std::list<T> debug_iterator()
+    std::list<T> debug_iterator(TraceView trace = util::nulltrace)
     {
         std::list<T> ret;
 
-        lf_visit([&ret](const T &t) {
-            ret.push_back(t);
-            return true;
-        });
+        lf_visit(
+            [&ret](const T &t) {
+                ret.push_back(t);
+                return true;
+            },
+            trace);
 
         return ret;
     }
 
-    void read_meta()
+    void read_meta(TraceView trace = util::nulltrace)
     {
         auto rdma_buffer = prepare_read_meta();
         rdma_adpt_->commit().expect(RC::kOk);
         post_commit_read_meta(rdma_buffer);
 
         rdma_adpt_->put_all_rdma_buffer();
+        trace.pin("read_meta");
     }
     Buffer prepare_read_meta()
     {

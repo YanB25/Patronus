@@ -1,11 +1,17 @@
 #include "util/Tracer.h"
 
+#include "Common.h"
+
 namespace util
 {
 uint64_t TraceView::pin(const std::string &name)
 {
     if (unlikely(impl_ != nullptr))
     {
+        if constexpr (::config::kReportTraceViewRoute)
+        {
+            LOG(INFO) << "[traceview] " << impl_->name() << " -> " << name;
+        }
         return impl_->pin(name);
     }
     return 0;

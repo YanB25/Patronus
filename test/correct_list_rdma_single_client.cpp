@@ -165,11 +165,13 @@ typename List<T>::pointer gen_list(Patronus::pointer p,
 }
 
 void validate_helper(const std::list<ListItem> &reference,
-                     const std::list<ListItem> &test)
+                     const std::list<ListItem> &test,
+                     util::TraceView trace = util::nulltrace)
 {
     CHECK_EQ(reference.size(), test.size())
         << "[debug] size mismatch. " << util::pre_iter(reference, 10)
-        << " v.s. " << util::pre_iter(test, 10);
+        << " v.s. " << util::pre_iter(test, 10) << std::endl
+        << ". Trace: " << trace;
 
     auto ref_it = reference.cbegin();
     auto test_it = test.cbegin();
@@ -178,7 +180,9 @@ void validate_helper(const std::list<ListItem> &reference,
     {
         if (test_it == test.cend())
         {
-            LOG(FATAL) << "Size mismatch. test reach tail at " << ith << "-th";
+            LOG(FATAL) << "Size mismatch. test reach tail at " << ith << "-th"
+                       << std::endl
+                       << trace;
         }
         auto reference_magic = ref_it->magic_number;
         auto test_magic = test_it->magic_number;
@@ -190,7 +194,8 @@ void validate_helper(const std::list<ListItem> &reference,
     if (test_it != test.cend())
     {
         LOG(FATAL) << "Size mismatch. reference reaches tail at " << ith
-                   << "-th, but test is not.";
+                   << "-th, but test is not." << std::endl
+                   << trace;
     }
 }
 
@@ -225,14 +230,19 @@ void test_basic_client_worker(
     CHECK_EQ(handle->lk_pop_front(nullptr), kNotFound)
         << "** list empty, should be unable to pop";
 
+    util::TraceManager tm(1);
+    util::TraceManager iter_tm(1);
     while (ex.get_private_data().thread_remain_task > 0)
     {
+        auto trace = tm.trace("test");
         if (true_with_prob(0.2))
         {
             // pop
             ListItem item;
-            // LOG(INFO) << "[debug] POP ";
-            auto rc = handle->lk_pop_front(&item);
+            LOG(INFO) << "[debug] POP ";
+            auto rc = handle->lf_pop_front(&item, trace);
+            LOG(INFO) << "[bench] finished POPed "
+                      << ", got " << item;
             if (book_list.empty())
             {
                 CHECK_EQ(rc, kNotFound)
@@ -255,12 +265,16 @@ void test_basic_client_worker(
             item.coro_id = coro_id;
             item.magic_number = fast_pseudo_rand_int();
             book_list.push_back(item);
-            // LOG(INFO) << "[debug] PUSH " << item;
-            auto rc = handle->lk_push_back(item);
+            LOG(INFO) << "[debug] PUSH " << item;
+            // auto rc = handle->lk_push_back(item);
+            auto rc = handle->lf_push_back(item, trace);
+            LOG(INFO) << "[bench] finished PUSH " << item;
             CHECK_EQ(rc, kOk);
         }
-        auto lists = handle->debug_iterator();
-        validate_helper(book_list, lists);
+
+        auto debug_trace = iter_tm.trace("debug_iterator");
+        auto lists = handle->debug_iterator(debug_trace);
+        validate_helper(book_list, lists, trace);
 
         ex.get_private_data().thread_remain_task--;
     }
