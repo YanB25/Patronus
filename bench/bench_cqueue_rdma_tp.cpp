@@ -274,7 +274,7 @@ void test_basic_client_worker(
         if (bench_conf.is_consumer(tid))
         {
             auto rc =
-                handle->lk_pop_front(kEntryNrPerBlock, pop_entries, get_nr);
+                handle->lf_pop_front(kEntryNrPerBlock, pop_entries, get_nr);
             if (rc == kOk)
             {
                 get_succ_nr++;
@@ -287,7 +287,7 @@ void test_basic_client_worker(
         }
         else
         {
-            auto rc = handle->lk_push_back(value);
+            auto rc = handle->lf_push_back(value);
             if (rc == kOk)
             {
                 put_succ_nr++;

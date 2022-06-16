@@ -168,8 +168,6 @@ typename ListHandle<T>::pointer gen_handle(Patronus::pointer p,
     auto handle =
         ListHandle<T>::new_instance(server_nid, meta_gaddr, rdma_adpt, conf);
 
-    // debug
-    handle->read_meta();
     return handle;
 }
 
@@ -277,7 +275,7 @@ void test_basic_client_worker(
             // pop
             auto trace = tm.trace("pop");
             ListItem item;
-            auto rc = handle->lk_pop_front(&item, trace);
+            auto rc = handle->pop_front(&item, trace);
             if (rc == kOk)
             {
                 get_succ_nr++;
@@ -305,7 +303,7 @@ void test_basic_client_worker(
             item.tid = tid;
             item.coro_id = coro_id;
             item.magic_number = 0;
-            auto rc = handle->lk_push_back(item, trace);
+            auto rc = handle->push_back(item, trace);
             if (rc == kOk)
             {
                 put_succ_nr++;
@@ -562,7 +560,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     std::vector<HandleConfig> handle_configs;
     LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{});
+    handle_configs.push_back(HandleConfig{.lock_free = true});
 
     for (const auto &handle_conf : handle_configs)
     {

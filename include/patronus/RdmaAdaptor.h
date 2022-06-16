@@ -521,7 +521,7 @@ private:
 
     RdmaTraceRecord rdma_trace_record_;
 
-    Debug<std::unordered_set<RemoteMemHandle>> ongoing_remote_handle_;
+    Debug<std::unordered_set<RemoteMemHandleView>> ongoing_remote_handle_;
 
     /**
      * The global address returned to the caller (vaddr) is guaranteed to leave
@@ -551,7 +551,7 @@ private:
             std::unique_ptr<Lease>((Lease *) handle.private_data());
         if constexpr (debug())
         {
-            auto ret = ongoing_remote_handle_.get().erase(handle);
+            auto ret = ongoing_remote_handle_.get().erase(handle.view());
             CHECK_EQ(ret, 1) << "** freeing an not-allocated-handled.";
         }
 
@@ -567,7 +567,7 @@ private:
         handle.set_private_data(stored_lease.release());
         if constexpr (debug())
         {
-            CHECK(ongoing_remote_handle_.get().insert(handle).second);
+            CHECK(ongoing_remote_handle_.get().insert(handle.view()).second);
         }
         CHECK(handle.valid());
         if (unlikely(!success))

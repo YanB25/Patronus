@@ -882,9 +882,9 @@ public:
             rdma_adpt_->relinquish_perm(
                 subtable_mem_handles_[next_subtable_idx], c.alloc_hint, c.flag);
         }
-        auto next_subtable_handle =
+        subtable_mem_handles_[next_subtable_idx] =
             remote_alloc_acquire_subtable_directory(alloc_size);
-        subtable_mem_handles_[next_subtable_idx] = next_subtable_handle;
+        auto &next_subtable_handle = subtable_mem_handles_[next_subtable_idx];
         auto new_remote_subtable =
             subtable_mem_handles_[next_subtable_idx].gaddr();
         LOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
@@ -1805,7 +1805,7 @@ private:
         {
             return;
         }
-        read_kvblock_handles_.push_back(rdma_adpt_->acquire_perm(
+        read_kvblock_handles_.emplace_back(rdma_adpt_->acquire_perm(
             gaddr, conf.alloc_hint, size, conf.lease_time, conf.flag));
     }
     void end_read_kvblock()
@@ -1891,7 +1891,7 @@ private:
                                                    alloc_size,
                                                    conf.lease_time,
                                                    conf.flag);
-            insert_kvblock_handles_.push_back(handle);
+            insert_kvblock_handles_.emplace_back(std::move(handle));
             begin_insert_nr_++;
             return handle.gaddr();
         }

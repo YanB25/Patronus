@@ -230,7 +230,7 @@ void test_basic_client_worker(
     Item pop_items[kEntryNrPerBlock];
 
     size_t get_nr = 0;
-    CHECK_EQ(handle->lk_pop_front(kEntryNrPerBlock, pop_items, get_nr),
+    CHECK_EQ(handle->lf_pop_front(kEntryNrPerBlock, pop_items, get_nr),
              kNotFound)
         << "** list empty, actions should succeed";
     CHECK_EQ(get_nr, 0) << "** list empty, should get nothing";
@@ -242,7 +242,7 @@ void test_basic_client_worker(
         auto trace = tm.trace("test");
         if (true_with_prob(1.0 / kEntryNrPerBlock / 5))
         {
-            handle->lk_pop_front(kEntryNrPerBlock, pop_items, get_nr, trace)
+            handle->lf_pop_front(kEntryNrPerBlock, pop_items, get_nr, trace)
                 .expect(RC::kOk);
             LOG(INFO) << "[debug] POP-ed " << get_nr << " items";
             for (size_t i = 0; i < get_nr; ++i)
@@ -267,7 +267,7 @@ void test_basic_client_worker(
             LOG(INFO) << "[debug] PUSH " << item;
             book_list.push_back(item);
 
-            handle->lk_push_back(item, trace).expect(RC::kOk);
+            handle->lf_push_back(item, trace).expect(RC::kOk);
         }
         auto lists = handle->debug_iterator();
         LOG(INFO) << "[debug] list size is " << lists.size();
@@ -279,7 +279,7 @@ void test_basic_client_worker(
     // pop until empty
     while (true)
     {
-        auto rc = handle->lk_pop_front(kEntryNrPerBlock, pop_items, get_nr);
+        auto rc = handle->lf_pop_front(kEntryNrPerBlock, pop_items, get_nr);
         if (rc == kNotFound)
         {
             auto lists = handle->debug_iterator();

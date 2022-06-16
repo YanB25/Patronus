@@ -329,7 +329,7 @@ void test_basic_client_worker(
         {
             auto magic_number = gen_magic(nid, tid, coro_id);
             QueueItem item{nid, tid, coro_id, magic_number};
-            auto rc = handle->lk_push_back(item);
+            auto rc = handle->lf_push_back(item);
             if (rc == kOk)
             {
                 put_succ_nr++;

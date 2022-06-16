@@ -12,6 +12,42 @@
 #include "util/RetCode.h"
 
 /**
+ * @brief Used for debug purpose
+ *
+ */
+struct RemoteMemHandleView
+{
+    GlobalAddress gaddr;
+    size_t size;
+    void *private_data;
+    bool operator==(const RemoteMemHandleView &view) const
+    {
+        return view.gaddr == gaddr && view.size == size &&
+               view.private_data == private_data;
+    }
+};
+inline std::ostream &operator<<(std::ostream &os,
+                                const RemoteMemHandleView &view)
+{
+    os << "{RemoteMemHandleView gaddr: " << view.gaddr
+       << ", size: " << view.size << ", private_data: " << view.private_data
+       << "}";
+    return os;
+}
+
+namespace std
+{
+template <>
+struct hash<RemoteMemHandleView>
+{
+    std::size_t operator()(const RemoteMemHandleView &v) const
+    {
+        return v.gaddr.val;
+    }
+};
+}  // namespace std
+
+/**
  * @brief Stand for the permission over a range of memory
  */
 class RemoteMemHandle
@@ -29,6 +65,33 @@ public:
           valid_(false),
           ec_(patronus::AcquireRequestStatus::kReserved)
     {
+    }
+    RemoteMemHandleView view() const
+    {
+        CHECK(valid_);
+        return RemoteMemHandleView{
+            .gaddr = gaddr_, .size = size_, .private_data = private_data_};
+    }
+    RemoteMemHandle(const RemoteMemHandle &) = delete;
+    RemoteMemHandle &operator=(const RemoteMemHandle &) = delete;
+
+    RemoteMemHandle(RemoteMemHandle &&rhs)
+    {
+        (*this) = std::move(rhs);
+    }
+    RemoteMemHandle &operator=(RemoteMemHandle &&rhs)
+    {
+        gaddr_ = rhs.gaddr_;
+        rhs.gaddr_ = nullgaddr;
+        size_ = rhs.size_;
+        rhs.size_ = 0;
+        valid_ = rhs.valid_;
+        rhs.valid_ = false;
+        ec_ = rhs.ec_;
+        rhs.ec_ = patronus::AcquireRequestStatus::kReserved;
+        private_data_ = rhs.private_data_;
+        rhs.private_data_ = nullptr;
+        return *this;
     }
     GlobalAddress gaddr() const
     {
