@@ -15,6 +15,7 @@
 #include "thirdparty/concurrent-queue/queue_handle.h"
 #include "util/BenchRand.h"
 #include "util/DataFrameF.h"
+#include "util/Pre.h"
 #include "util/Rand.h"
 #include "util/TimeConv.h"
 
@@ -29,25 +30,6 @@ constexpr static size_t kMaxCoroNr = 16;
 constexpr static size_t kEntryNrPerBlock = 64;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
-
-std::vector<std::string> col_idx;
-std::vector<size_t> col_x_thread_nr;
-std::vector<size_t> col_x_coro_nr;
-std::vector<size_t> col_x_producer_nr;
-std::vector<size_t> col_x_consumer_nr;
-std::vector<size_t> col_test_nr;
-std::vector<size_t> col_ns;
-
-std::vector<double> col_producer_succ_rate;
-std::vector<double> col_consumer_succ_rate;
-std::vector<size_t> col_rdma_protection_err;
-
-std::vector<std::string> col_lat_idx;
-std::vector<uint64_t> col_lat_min;
-std::vector<uint64_t> col_lat_p5;
-std::vector<uint64_t> col_lat_p9;
-std::vector<uint64_t> col_lat_p99;
-std::unordered_map<std::string, std::vector<uint64_t>> lat_data;
 
 uint64_t calculate_client_id(uint64_t nid, uint64_t tid, uint64_t coro_id)
 {
@@ -188,55 +170,11 @@ struct AdditionalCoroCtx
     size_t rdma_protection_nr{0};
 };
 
-void reg_result(const std::string &name,
-                const BenchConfig &bench_conf,
-                const AdditionalCoroCtx &prv,
-                uint64_t ns)
-{
-    col_idx.push_back(name);
-    col_x_thread_nr.push_back(bench_conf.thread_nr);
-    col_x_coro_nr.push_back(bench_conf.coro_nr);
-    col_x_producer_nr.push_back(bench_conf.producer_nr);
-    col_x_consumer_nr.push_back(bench_conf.consumer_nr);
-    col_ns.push_back(ns);
-    col_test_nr.push_back(bench_conf.test_nr);
-
-    col_consumer_succ_rate.push_back(1.0 * prv.get_succ_nr / prv.get_nr);
-    col_producer_succ_rate.push_back(1.0 * prv.put_succ_nr / prv.put_nr);
-
-    col_rdma_protection_err.push_back(prv.rdma_protection_nr);
-}
-uint64_t gen_magic(size_t nid, size_t tid, size_t coro_id)
-{
-    auto cluster_size =
-        ::config::get_client_nids().size() + ::config::get_server_nids().size();
-    size_t max_round = cluster_size * kMaxAppThread * kMaxCoroNr;
-    size_t id = nid * kMaxAppThread * kMaxCoroNr + tid * kMaxCoroNr + coro_id;
-    CHECK_LT(id, max_round);
-    auto multiple = fast_pseudo_rand_int(100000);
-    return max_round * multiple + id;
-}
-void validate_magic(size_t nid, size_t tid, size_t coro_id, uint64_t magic)
-{
-    auto cluster_size =
-        ::config::get_client_nids().size() + ::config::get_server_nids().size();
-    size_t max_round = cluster_size * kMaxAppThread * kMaxCoroNr;
-    auto id = magic % max_round;
-    auto expect_coro_id = id % kMaxCoroNr;
-    CHECK_EQ(expect_coro_id, coro_id)
-        << "** coro_id mismatch. id: " << id << ", max_round: " << max_round
-        << ", id % max_round: " << (id % max_round)
-        << ", % kMaxCoroNr: " << expect_coro_id;
-    id -= coro_id;
-    auto expect_tid = (id % kMaxAppThread) / kMaxCoroNr;
-    CHECK_EQ(expect_tid, tid);
-    id -= tid * kMaxCoroNr;
-    auto expect_nid = id / kMaxAppThread / kMaxCoroNr;
-    CHECK_EQ(expect_nid, nid);
-}
-
 void validate_helper(const std::list<QueueItem> &list)
 {
+    LOG(INFO) << "Validating lists: " << util::pre_iter(list, 10);
+    uint64_t book[MAX_MACHINE][kMaxAppThread][kMaxCoroNr]{};
+    size_t ith = 0;
     for (const auto &item : list)
     {
         if (unlikely(!item.valid))
@@ -245,28 +183,20 @@ void validate_helper(const std::list<QueueItem> &list)
         }
         else
         {
-            validate_magic(item.nid, item.tid, item.cid, item.magic_number);
+            if (unlikely(!item.valid))
+            {
+                LOG(WARNING) << "Ignoring " << ith << "-th item: " << item
+                             << " (not valid)";
+            }
+            auto expect = book[item.nid][item.tid][item.cid];
+            CHECK_GT(item.magic_number, expect)
+                << "nid: " << item.nid << ", tid: " << item.tid
+                << ", cid: " << item.cid << ", expect > " << expect
+                << ", got: " << item.magic_number;
+            book[item.nid][item.tid][item.cid] = expect;
         }
+        ith++;
     }
-}
-
-void reg_latency(const std::string &name,
-                 const OnePassBucketMonitor<uint64_t> &lat_m)
-{
-    if (col_lat_idx.empty())
-    {
-        col_lat_idx.push_back("lat_min");
-        col_lat_idx.push_back("lat_p5");
-        col_lat_idx.push_back("lat_p9");
-        col_lat_idx.push_back("lat_p99");
-    }
-    lat_data[name].push_back(lat_m.min());
-    lat_data[name].push_back(lat_m.percentile(0.5));
-    lat_data[name].push_back(lat_m.percentile(0.9));
-    lat_data[name].push_back(lat_m.percentile(0.99));
-
-    CHECK_EQ(lat_data[name].size(), col_lat_idx.size())
-        << "** duplicated test detected.";
 }
 
 typename QueueT::pointer gen_queue(Patronus::pointer p,
@@ -315,8 +245,11 @@ void test_basic_client_worker(
 
     QueueItem pop_entries[kEntryNrPerBlock];
 
+    util::TraceManager tm(1);
+    uint64_t magic = 1;
     while (ex.get_private_data().thread_remain_task > 0)
     {
+        auto trace = tm.trace("op");
         if (should_report_latency)
         {
             op_timer.pin();
@@ -327,13 +260,17 @@ void test_basic_client_worker(
         }
         else
         {
-            auto magic_number = gen_magic(nid, tid, coro_id);
-            QueueItem item{nid, tid, coro_id, magic_number};
-            auto rc = handle->lf_push_back(item);
+            QueueItem item{nid, tid, coro_id, magic};
+            // LOG(INFO) << "[bench] LF PUSH " << item;
+            auto rc = handle->lf_push_back(item, trace);
+            // LOG(INFO) << "[bench] finished LF PUSH " << item << ". rc: " <<
+            // rc;
+            CHECK_EQ(rc, kOk) << trace;
             if (rc == kOk)
             {
                 put_succ_nr++;
                 executed_nr++;
+                magic++;
                 ex.get_private_data().thread_remain_task--;
             }
             else
@@ -534,18 +471,6 @@ void benchmark_client(Patronus::pointer p,
         LOG(INFO) << "p->finished(" << key << ")";
         p->finished(key);
     }
-
-    auto report_name =
-        bench_conf.conf_name() + "[" + handle_conf.conf_name() + "]";
-    if (is_master && bench_conf.should_report)
-    {
-        reg_result(report_name, bench_conf, ex.get_private_data(), ns);
-
-        if (bench_conf.should_report_lat())
-        {
-            reg_latency(report_name, lat_m);
-        }
-    }
 }
 
 void benchmark_server(Patronus::pointer p,
@@ -586,12 +511,11 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bar.wait();
 
     std::vector<HandleConfig> handle_configs;
-    LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{});
+    handle_configs.push_back(HandleConfig{.entry_per_block = kEntryNrPerBlock});
 
     for (const auto &handle_conf : handle_configs)
     {
-        for (size_t producer_nr : {8})
+        for (size_t producer_nr : {kMaxAppThread})
         {
             for (size_t coro_nr : {1})
             {
@@ -602,7 +526,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 //     "default", 1_M, producer_nr, 0 /* consumer_nr */,
                 //     coro_nr);
                 auto conf = BenchConfig::get_conf(
-                    "default", 100, producer_nr, 0 /* consumer_nr */, coro_nr);
+                    "default", 1_M, producer_nr, 0 /* consumer_nr */, coro_nr);
                 if (is_client)
                 {
                     conf.validate();
@@ -692,78 +616,6 @@ int main(int argc, char *argv[])
         {
             t.join();
         }
-    }
-
-    {
-        StrDataFrame df;
-        df.load_index(std::move(col_idx));
-        df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
-        df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
-        df.load_column<size_t>("x_producer_nr", std::move(col_x_producer_nr));
-        df.load_column<size_t>("x_consumer_nr", std::move(col_x_consumer_nr));
-        df.load_column<size_t>("test_nr(total)", std::move(col_test_nr));
-        df.load_column<size_t>("test_ns(total)", std::move(col_ns));
-
-        df.load_column<size_t>("rdma_prot_err_nr",
-                               std::move(col_rdma_protection_err));
-        df.load_column<double>("produce_succ_rate",
-                               std::move(col_producer_succ_rate));
-        df.load_column<double>("consume_succ_rate",
-                               std::move(col_consumer_succ_rate));
-
-        auto div_f = gen_F_div<size_t, size_t, double>();
-        auto div_f2 = gen_F_div<double, size_t, double>();
-        auto ops_f = gen_F_ops<size_t, size_t, double>();
-        auto mul_f = gen_F_mul<double, size_t, double>();
-        auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
-        df.consolidate<size_t, size_t, size_t>(
-            "x_thread_nr", "x_coro_nr", "client_nr(effective)", mul_f2, false);
-        df.consolidate<size_t, size_t, size_t>("test_ns(total)",
-                                               "client_nr(effective)",
-                                               "test_ns(effective)",
-                                               mul_f2,
-                                               false);
-        df.consolidate<size_t, size_t, double>(
-            "test_ns(total)", "test_nr(total)", "lat(div)", div_f, false);
-        df.consolidate<size_t, size_t, double>(
-            "test_ns(effective)", "test_nr(total)", "lat(avg)", div_f, false);
-        df.consolidate<size_t, size_t, double>(
-            "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
-
-        auto client_nr = ::config::get_client_nids().size();
-        auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
-        df.load_column<double>("ops(cluster)",
-                               df.get_column<double>("ops(total)"));
-        df.replace<double>("ops(cluster)", replace_mul_f);
-
-        df.consolidate<double, size_t, double>(
-            "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
-        df.consolidate<double, size_t, double>(
-            "ops(thread)", "x_coro_nr", "ops(coro)", div_f2, false);
-
-        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
-        df.write<std::ostream, std::string, size_t, double>(std::cout,
-                                                            io_format::csv2);
-        df.write<std::string, size_t, double>(filename.c_str(),
-                                              io_format::csv2);
-    }
-
-    {
-        StrDataFrame df;
-        df.load_index(std::move(col_lat_idx));
-        for (auto &[name, vec] : lat_data)
-        {
-            df.load_column<uint64_t>(name.c_str(), std::move(vec));
-        }
-
-        std::map<std::string, std::string> info;
-        info.emplace("kind", "lat");
-
-        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
-        df.write<std::ostream, std::string, size_t, double>(std::cout,
-                                                            io_format::csv2);
-        df.write<std::string, size_t, double>(filename.c_str(),
-                                              io_format::csv2);
     }
 
     patronus->keeper_barrier("finished", 100ms);

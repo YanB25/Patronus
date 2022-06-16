@@ -137,17 +137,14 @@ public:
         return rc;
     }
 
-    RetCode lf_push_back_first_node(GlobalAddress node,
+    RetCode lf_push_back_first_node(GlobalAddress new_node_gaddr,
                                     util::TraceView trace = util::nulltrace)
     {
-        const auto &meta = cached_meta();
-        auto tail_node_gaddr = meta.ptail;
-        DCHECK_EQ(tail_node_gaddr, nullgaddr) << "** precondition violated";
         auto meta_tail_buf = rdma_adpt_->get_rdma_buffer(sizeof(Meta::ptail));
         rdma_adpt_
             ->rdma_cas(meta_tail_gaddr(),
                        nullgaddr.val,
-                       node.val,
+                       new_node_gaddr.val,
                        meta_tail_buf.buffer,
                        get_meta_handle())
             .expect(RC::kOk);
@@ -155,16 +152,17 @@ public:
         GlobalAddress got_ptail = *(GlobalAddress *) meta_tail_buf.buffer;
         rdma_adpt_->put_all_rdma_buffer();
         trace.pin("cas meta.ptail");
+
         if (got_ptail == nullgaddr)
         {
             // cas succeeded
             auto meta_head_buf =
                 rdma_adpt_->get_rdma_buffer(sizeof(Meta::phead));
-            *(GlobalAddress *) meta_head_buf.buffer = node;
+            *(GlobalAddress *) meta_head_buf.buffer = new_node_gaddr;
             rdma_adpt_
                 ->rdma_cas(meta_head_gaddr(),
                            nullgaddr.val,
-                           node.val,
+                           new_node_gaddr.val,
                            meta_head_buf.buffer,
                            get_meta_handle())
                 .expect(RC::kOk);
@@ -179,18 +177,17 @@ public:
         }
         else
         {
+            trace.pin("cas retry");
             return RC::kRetry;
         }
     }
-    RetCode lf_push_back_not_first_node(GlobalAddress node,
+
+    RetCode lf_push_back_not_first_node(GlobalAddress tail_node_gaddr,
+                                        GlobalAddress new_node_gaddr,
+                                        RemoteMemHandle &tail_node_handle,
                                         util::TraceView trace = util::nulltrace)
     {
-        const auto &meta = cached_meta();
-        auto tail_node_gaddr = meta.ptail;
-        GlobalAddress old_meta_ptail = meta.ptail;
-        auto tail_node_handle = get_entry_mem_handle(tail_node_gaddr);
-        trace.pin("get entry handle");
-
+        auto old_meta_ptail = tail_node_gaddr;
         auto next_ptr_buf =
             rdma_adpt_->get_rdma_buffer(sizeof(ListNode<T>::next));
         auto tail_next_ptr_gaddr =
@@ -198,7 +195,7 @@ public:
         rdma_adpt_
             ->rdma_cas(tail_next_ptr_gaddr,
                        nullgaddr.val,
-                       node.val,
+                       new_node_gaddr.val,
                        next_ptr_buf.buffer,
                        tail_node_handle)
             .expect(RC::kOk);
@@ -208,7 +205,7 @@ public:
         trace.pin("cas meta.front");
 
         RetCode rc;
-        if (unlikely(got_tail_node_next == nullgaddr))
+        if (got_tail_node_next == nullgaddr)
         {
             rc = RC::kOk;
 
@@ -220,7 +217,7 @@ public:
                 rdma_adpt_
                     ->rdma_cas(meta_tail_gaddr(),
                                old_meta_ptail.val,
-                               node.val,
+                               new_node_gaddr.val,
                                meta_ptail_buf.buffer,
                                get_meta_handle())
                     .expect(RC::kOk);
@@ -251,8 +248,15 @@ public:
             rc = kRetry;
         }
 
-        relinquish_entry_mem_handle(tail_node_handle);
-        trace.pin("relinquish entry handle");
+        if (rc == kOk)
+        {
+            trace.pin("ok");
+        }
+        else
+        {
+            trace.pin("retry");
+        }
+
         return rc;
     }
 
@@ -269,8 +273,15 @@ public:
         }
         else
         {
-            return lf_push_back_not_first_node(node,
-                                               trace.child("not first node"));
+            auto tail_node_gaddr = meta.ptail;
+            auto tail_node_handle = get_entry_mem_handle(tail_node_gaddr);
+            auto rc =
+                lf_push_back_not_first_node(tail_node_gaddr,
+                                            node,
+                                            tail_node_handle,
+                                            trace.child("not first node"));
+            relinquish_entry_mem_handle(tail_node_handle);
+            return rc;
         }
     }
     RetCode prepare_write_to_node(const T &t,
