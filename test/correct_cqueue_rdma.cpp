@@ -143,7 +143,7 @@ using QueueT = Queue<QueueItem, kEntryNrPerBlock>;
 
 typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
                                           size_t dir_id,
-                                          const HandleConfig &conf,
+                                          const QueueHandleConfig &conf,
                                           GlobalAddress meta_gaddr,
                                           CoroContext *ctx)
 {
@@ -219,7 +219,7 @@ void test_basic_client_worker(
     size_t coro_id,
     CoroYield &yield,
     const BenchConfig &bench_conf,
-    const HandleConfig &handle_conf,
+    const QueueHandleConfig &handle_conf,
     GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
     OnePassBucketMonitor<uint64_t> &lat_m)
@@ -384,7 +384,7 @@ void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
                       const BenchConfig &bench_conf,
-                      const HandleConfig &handle_conf,
+                      const QueueHandleConfig &handle_conf,
                       uint64_t key)
 {
     auto coro_nr = bench_conf.coro_nr;
@@ -510,8 +510,13 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bool is_master = p->get_thread_id() == 0;
     bar.wait();
 
-    std::vector<HandleConfig> handle_configs;
-    handle_configs.push_back(HandleConfig{.entry_per_block = kEntryNrPerBlock});
+    std::vector<QueueHandleConfig> handle_configs;
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_mw("mw", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_unprotected("unprot", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_mr("mr", kEntryNrPerBlock));
 
     for (const auto &handle_conf : handle_configs)
     {
@@ -525,8 +530,11 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 // auto conf = BenchConfig::get_conf(
                 //     "default", 1_M, producer_nr, 0 /* consumer_nr */,
                 //     coro_nr);
-                auto conf = BenchConfig::get_conf(
-                    "default", 1_M, producer_nr, 0 /* consumer_nr */, coro_nr);
+                auto conf = BenchConfig::get_conf("default",
+                                                  1_M * handle_conf.task_scale,
+                                                  producer_nr,
+                                                  0 /* consumer_nr */,
+                                                  coro_nr);
                 if (is_client)
                 {
                     conf.validate();

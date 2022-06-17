@@ -1123,8 +1123,6 @@ Lease Patronus::get_wlease(uint16_t node_id,
     if constexpr (debug())
     {
         debug_validate_acquire_request_flag(flag);
-        CHECK(!only_alloc)
-            << "** API integrity: please use patronus::alloc() instead";
         if (alloc_semantics)
         {
             CHECK(bind_gaddr.is_null()) << "** API integrity: set bind_gaddr "

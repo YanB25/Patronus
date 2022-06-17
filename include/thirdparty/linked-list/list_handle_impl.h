@@ -16,7 +16,7 @@ public:
     ListHandleImpl(uint16_t node_id,
                    GlobalAddress meta_gaddr,
                    IRdmaAdaptor::pointer rdma_adpt,
-                   const HandleConfig &config)
+                   const ListImplConfig &config)
         : node_id_(node_id), rdma_adpt_(rdma_adpt), config_(config)
     {
         meta.gaddr_ = meta_gaddr;
@@ -24,7 +24,7 @@ public:
     static pointer new_instance(uint16_t node_id,
                                 GlobalAddress meta,
                                 IRdmaAdaptor::pointer rdma_adpt,
-                                const HandleConfig &conf)
+                                const ListImplConfig &conf)
     {
         return std::make_shared<ListHandleImpl<T>>(
             node_id, meta, rdma_adpt, conf);
@@ -34,11 +34,12 @@ public:
         read_meta();
         return kOk;
     }
-    RetCode commit()
+    [[nodiscard]] RetCode commit()
     {
         return rdma_adpt_->commit();
     }
-    RetCode lf_pop_front(T *t, util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lf_pop_front(T *t,
+                                       util::TraceView trace = util::nulltrace)
     {
         // 0) read meta
         read_meta();
@@ -110,7 +111,7 @@ public:
                 trace.pin("also update meta.ptail");
             }
 
-            remote_free_list_node(old_head);
+            default_remote_deallocate(old_head);
             trace.pin("remote free node");
             if (t)
             {
@@ -137,8 +138,8 @@ public:
         return rc;
     }
 
-    RetCode lf_push_back_first_node(GlobalAddress new_node_gaddr,
-                                    util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lf_push_back_first_node(
+        GlobalAddress new_node_gaddr, util::TraceView trace = util::nulltrace)
     {
         auto meta_tail_buf = rdma_adpt_->get_rdma_buffer(sizeof(Meta::ptail));
         rdma_adpt_
@@ -182,10 +183,11 @@ public:
         }
     }
 
-    RetCode lf_push_back_not_first_node(GlobalAddress tail_node_gaddr,
-                                        GlobalAddress new_node_gaddr,
-                                        RemoteMemHandle &tail_node_handle,
-                                        util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lf_push_back_not_first_node(
+        GlobalAddress tail_node_gaddr,
+        GlobalAddress new_node_gaddr,
+        RemoteMemHandle &tail_node_handle,
+        util::TraceView trace = util::nulltrace)
     {
         auto old_meta_ptail = tail_node_gaddr;
         auto next_ptr_buf =
@@ -260,8 +262,8 @@ public:
         return rc;
     }
 
-    RetCode lf_push_back(GlobalAddress node,
-                         util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lf_push_back(GlobalAddress node,
+                                       util::TraceView trace = util::nulltrace)
     {
         read_meta();
         trace.pin("read");
@@ -299,16 +301,13 @@ public:
                                       node_handle);
     }
 
-    [[nodiscard]] RemoteMemHandle allocate_to_insert_node() {
-        auto ac_flag = (flag_t) AcquireRequestFlag::kWithAllocation |
-                       (flag_t) AcquireRequestFlag::kNoGc |
-                       (flag_t) AcquireRequestFlag::kNoBindPR;
-        return rdma_adpt_->acquire_perm(
-            nullgaddr, 0 /* hint */, sizeof(ListNode<T>), 0ns, ac_flag);
+    [[nodiscard]] RemoteMemHandle allocate_to_insert_node()
+    {
+        return default_remote_allocate(sizeof(ListNode<T>));
     }
 
-    RetCode lk_push_back(GlobalAddress new_entry_gaddr,
-                         util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lk_push_back(GlobalAddress new_entry_gaddr,
+                                       util::TraceView trace = util::nulltrace)
     {
         auto rc = lock_push();
         trace.pin("lock_push");
@@ -363,22 +362,18 @@ public:
     }
 
     // TODO: make it a cache, so that we wont relinquish it each time.
-    RemoteMemHandle get_entry_mem_handle(GlobalAddress entry_gaddr)
+    [[nodiscard]] RemoteMemHandle get_entry_mem_handle(
+        GlobalAddress entry_gaddr)
     {
-        return rdma_adpt_->acquire_perm(
-            entry_gaddr,
-            0 /* hint */,
-            sizeof(ListNode<T>),
-            0ns,
-            (flag_t) AcquireRequestFlag::kNoGc |
-                (flag_t) AcquireRequestFlag::kNoBindPR);
+        return default_acquire_perm(entry_gaddr, sizeof(ListNode<T>));
     }
     void relinquish_entry_mem_handle(RemoteMemHandle &handle)
     {
-        rdma_adpt_->relinquish_perm(handle, 0 /* hint */, 0 /* flag */);
+        default_relinquish_handle(handle);
     }
 
-    RetCode lk_pop_front(T *t, util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lk_pop_front(T *t,
+                                       util::TraceView trace = util::nulltrace)
     {
         auto rc = lock_pop();
         if (rc != kOk)
@@ -455,7 +450,7 @@ public:
 
         // 3) relinquish & free
         relinquish_entry_mem_handle(entry_handle);
-        remote_free_list_node(old_phead);
+        default_remote_deallocate(old_phead);
         rdma_adpt_->put_all_rdma_buffer();
         trace.pin("rel entry");
 
@@ -475,13 +470,8 @@ public:
         auto cur_list_node_gaddr = meta.phead;
         while (true)
         {
-            auto handle = rdma_adpt_->acquire_perm(
-                cur_list_node_gaddr,
-                0 /* hint */,
-                sizeof(ListNode<T>),
-                0ns,
-                (flag_t) AcquireRequestFlag::kNoGc |
-                    (flag_t) AcquireRequestFlag::kNoBindPR);
+            auto handle =
+                default_acquire_perm(cur_list_node_gaddr, sizeof(ListNode<T>));
             rdma_adpt_
                 ->rdma_read(list_node_buf.buffer,
                             cur_list_node_gaddr,
@@ -489,7 +479,7 @@ public:
                             handle)
                 .expect(RC::kOk);
             rdma_adpt_->commit().expect(RC::kOk);
-            rdma_adpt_->relinquish_perm(handle, 0 /* hint */, 0 /* flag */);
+            default_relinquish_handle(handle);
 
             const auto &list_node = *(ListNode<T> *) list_node_buf.buffer;
             const auto &object = list_node.object;
@@ -546,7 +536,7 @@ public:
         rdma_adpt_->put_all_rdma_buffer();
         trace.pin("read_meta");
     }
-    Buffer prepare_read_meta()
+    [[nodiscard]] Buffer prepare_read_meta()
     {
         auto &meta_handle = get_meta_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
@@ -599,7 +589,6 @@ public:
 
     ~ListHandleImpl()
     {
-        auto rel_flag = (flag_t) 0;
         relinquish_meta_handle();
         if (tail_node.handle_.valid())
         {
@@ -608,44 +597,68 @@ public:
         for (auto &[_, handle] : handles_)
         {
             std::ignore = _;
-            rdma_adpt_->relinquish_perm(handle, 0 /* hint */, rel_flag);
+            default_relinquish_handle(handle);
         }
     }
-
-private:
-    void remote_free_list_node(GlobalAddress gaddr)
+    [[nodiscard]] RemoteMemHandle default_acquire_perm(GlobalAddress gaddr,
+                                                       size_t size)
     {
-        LOG_FIRST_N(WARNING, 1) << "[list] ignore remote free " << gaddr;
-    }
-
-    RemoteMemHandle &get_meta_handle()
-    {
-        if (unlikely(!meta.handle_.valid()))
-        {
-            meta.handle_ = default_acquire_perm(meta.gaddr_, meta_size());
-            CHECK(meta.handle_.valid());
-        }
-        return meta.handle_;
-    }
-    RemoteMemHandle default_acquire_perm(GlobalAddress gaddr, size_t size)
-    {
-        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                       (flag_t) AcquireRequestFlag::kNoBindPR;
+        const auto &c = config_.rdma.default_;
         return rdma_adpt_->acquire_perm(
-            gaddr, 0 /* hint */, size, 0ns, ac_flag);
+            gaddr, c.alloc_hint, size, c.ns, c.acquire_flag);
     }
     void default_relinquish_handle(RemoteMemHandle &handle)
     {
         if (handle.valid())
         {
-            rdma_adpt_->relinquish_perm(handle, 0 /* hint */, 0 /* flag */);
+            const auto &c = config_.rdma.default_;
+            rdma_adpt_->relinquish_perm(
+                handle, c.alloc_hint, c.relinquish_flag);
         }
+    }
+
+private:
+    RemoteMemHandle meta_acquire_perm(GlobalAddress gaddr, size_t size)
+    {
+        const auto &c = config_.rdma.meta_;
+        return rdma_adpt_->acquire_perm(
+            gaddr, c.alloc_hint, size, c.ns, c.acquire_flag);
+    }
+    void meta_relinquish_handle(RemoteMemHandle &handle)
+    {
+        if (handle.valid())
+        {
+            const auto &c = config_.rdma.meta_;
+            rdma_adpt_->relinquish_perm(
+                handle, c.alloc_hint, c.relinquish_flag);
+        }
+    }
+    [[nodiscard]] RemoteMemHandle default_remote_allocate(size_t size)
+    {
+        const auto &c = config_.rdma.alloc_;
+        return rdma_adpt_->acquire_perm(
+            nullgaddr, c.alloc_hint, size, c.ns, c.acquire_flag);
+    }
+
+    void default_remote_deallocate(GlobalAddress gaddr)
+    {
+        LOG_FIRST_N(WARNING, 1) << "[list] ignore remote free " << gaddr;
+    }
+
+    [[nodiscard]] RemoteMemHandle &get_meta_handle()
+    {
+        if (unlikely(!meta.handle_.valid()))
+        {
+            meta.handle_ = meta_acquire_perm(meta.gaddr_, meta_size());
+            CHECK(meta.handle_.valid());
+        }
+        return meta.handle_;
     }
     void relinquish_meta_handle()
     {
         if (meta.handle_.valid())
         {
-            default_relinquish_handle(meta.handle_);
+            meta_relinquish_handle(meta.handle_);
         }
     }
     GlobalAddress meta_gaddr() const
@@ -660,7 +673,7 @@ private:
     {
         return meta_gaddr() + offsetof(Meta, phead);
     }
-    RetCode lock_push()
+    [[nodiscard]] RetCode lock_push()
     {
         auto &push_lock_handle = get_push_lock_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
@@ -703,7 +716,7 @@ private:
                          push_lock_handle)
             .expect(RC::kOk);
     }
-    RetCode lock_pop()
+    [[nodiscard]] RetCode lock_pop()
     {
         auto &pop_lock_handle = get_pop_lock_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
@@ -763,16 +776,14 @@ private:
     {
         return get_handle_impl(1, pop_lock_gaddr(), sizeof(uint64_t));
     }
-    RemoteMemHandle &get_handle_impl(uint64_t id,
-                                     GlobalAddress gaddr,
-                                     size_t size)
+    [[nodiscard]] RemoteMemHandle &get_handle_impl(uint64_t id,
+                                                   GlobalAddress gaddr,
+                                                   size_t size)
     {
         auto &ret = handles_[id];
         if (unlikely(!ret.valid()))
         {
-            auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                           (flag_t) AcquireRequestFlag::kNoBindPR;
-            ret = rdma_adpt_->acquire_perm(gaddr, 0, size, 0ns, ac_flag);
+            ret = default_acquire_perm(gaddr, size);
         }
         if constexpr (debug())
         {
@@ -793,7 +804,7 @@ private:
 
     uint16_t node_id_;
     IRdmaAdaptor::pointer rdma_adpt_;
-    HandleConfig config_;
+    ListImplConfig config_;
 
     struct
     {
@@ -805,11 +816,9 @@ private:
 
     struct
     {
-        // std::optional<T> cache_obj_;
-        // std::optional<GlobalAddress> cached_next_;
         RemoteMemHandle handle_;
     } tail_node;
-    RemoteMemHandle &get_tail_node_handle(GlobalAddress gaddr)
+    [[nodiscard]] RemoteMemHandle &get_tail_node_handle(GlobalAddress gaddr)
     {
         if (tail_node.handle_.valid())
         {

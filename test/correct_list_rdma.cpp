@@ -132,7 +132,7 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 template <typename T>
 typename ListHandle<T>::pointer gen_handle(Patronus::pointer p,
                                            size_t dir_id,
-                                           const HandleConfig &conf,
+                                           const ListHandleConfig &conf,
                                            GlobalAddress meta_gaddr,
                                            CoroContext *ctx)
 {
@@ -219,7 +219,7 @@ void test_basic_client_worker(
     size_t coro_id,
     CoroYield &yield,
     const BenchConfig &bench_conf,
-    const HandleConfig &handle_conf,
+    const ListHandleConfig &handle_conf,
     GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
@@ -389,7 +389,7 @@ void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
                       const BenchConfig &bench_conf,
-                      const HandleConfig &handle_conf,
+                      const ListHandleConfig &handle_conf,
                       uint64_t key)
 {
     auto coro_nr = bench_conf.coro_nr;
@@ -501,9 +501,11 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bool is_master = p->get_thread_id() == 0;
     bar.wait();
 
-    std::vector<HandleConfig> handle_configs;
-    handle_configs.push_back(HandleConfig{.lock_free = true});
-    handle_configs.push_back(HandleConfig{.lock_free = false});
+    std::vector<ListHandleConfig> handle_configs;
+    handle_configs.push_back(
+        ListHandleConfig(true /* lock_free */, false /* bypass prot */));
+    handle_configs.push_back(
+        ListHandleConfig(false /* lock free */, false /* bypass prot */));
 
     for (const auto &handle_conf : handle_configs)
     {

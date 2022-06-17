@@ -218,8 +218,11 @@ void debug_validate_acquire_request_flag(flag_t flag)
         {
             DCHECK(!with_alloc) << "with_alloc conflict with only_alloc";
             DCHECK(no_gc) << "Set no-gc for allocation semantics";
+            DCHECK(no_bind_pr) << "Set no-bind-pr too.";
             DCHECK(!with_conflict_detect)
                 << "Allocation semantics will not detect conflict";
+            DCHECK(!use_mr) << "Conflict with use_mr";
+            DCHECK(!no_rpc) << "Conflict with no_rpc";
         }
         if (use_mr)
         {

@@ -154,7 +154,7 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 template <typename T>
 typename ListHandle<T>::pointer gen_handle(Patronus::pointer p,
                                            size_t dir_id,
-                                           const HandleConfig &conf,
+                                           const ListHandleConfig &conf,
                                            GlobalAddress meta_gaddr,
                                            CoroContext *ctx)
 {
@@ -239,7 +239,7 @@ void test_basic_client_worker(
     size_t coro_id,
     CoroYield &yield,
     const BenchConfig &bench_conf,
-    const HandleConfig &handle_conf,
+    const ListHandleConfig &handle_conf,
     GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
     OnePassBucketMonitor<uint64_t> &lat_m)
@@ -420,7 +420,7 @@ void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
                       const BenchConfig &bench_conf,
-                      const HandleConfig &handle_conf,
+                      const ListHandleConfig &handle_conf,
                       uint64_t key)
 {
     auto coro_nr = bench_conf.coro_nr;
@@ -508,8 +508,7 @@ void benchmark_client(Patronus::pointer p,
         p->finished(key);
     }
 
-    auto report_name =
-        bench_conf.conf_name() + "[" + handle_conf.conf_name() + "]";
+    auto report_name = bench_conf.conf_name();
     if (is_master && bench_conf.should_report)
     {
         reg_result(report_name, bench_conf, ex.get_private_data(), ns);
@@ -558,9 +557,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bool is_master = p->get_thread_id() == 0;
     bar.wait();
 
-    std::vector<HandleConfig> handle_configs;
-    LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{.lock_free = true});
+    std::vector<ListHandleConfig> handle_configs;
+    handle_configs.push_back(
+        ListHandleConfig(true /* lock free */, false /* bypass_prot */));
 
     for (const auto &handle_conf : handle_configs)
     {

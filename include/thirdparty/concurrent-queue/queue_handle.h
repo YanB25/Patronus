@@ -2,34 +2,13 @@
 #ifndef PATRONUS_CONCURRENT_QUEUE_HANDLE_H_
 #define PATRONUS_CONCURRENT_QUEUE_HANDLE_H_
 
+#include "./conf.h"
 #include "thirdparty/linked-list/list_handle.h"
 #include "util/RetCode.h"
 #include "util/Tracer.h"
 
 namespace patronus::cqueue
 {
-struct HandleConfig
-{
-    std::string name;
-    bool bypass_prot{false};
-    size_t entry_per_block{};
-    size_t retry_nr{std::numeric_limits<size_t>::max()};
-    list::HandleConfig list_handle_config;
-
-    std::string conf_name() const
-    {
-        return name;
-    }
-};
-
-inline std::ostream &operator<<(std::ostream &os, const HandleConfig &config)
-{
-    os << "{HandleConfig name: " << config.name
-       << ", bypass_prot: " << config.bypass_prot
-       << ", entry_per_block: " << config.entry_per_block << "}";
-    return os;
-}
-
 // any T that behaves correctly under memcpy(&t, ..., sizeof(T))
 template <typename T,
           size_t kSize,
@@ -43,20 +22,20 @@ public:
     QueueHandle(uint16_t node_id,
                 GlobalAddress meta,
                 IRdmaAdaptor::pointer rdma_adpt,
-                const HandleConfig &config)
+                const QueueHandleConfig &config)
         : node_id_(node_id),
           meta_gaddr_(meta),
           rdma_adpt_(rdma_adpt),
           config_(config)
     {
         list_handle_ = list::ListHandleImpl<Entry>::new_instance(
-            node_id, meta, rdma_adpt, config.list_handle_config);
+            node_id, meta, rdma_adpt, config.list_impl_config);
         CHECK_GT(config_.entry_per_block, 0);
     }
     static pointer new_instance(uint16_t node_id,
                                 GlobalAddress meta,
                                 IRdmaAdaptor::pointer rdma_adpt,
-                                const HandleConfig &conf)
+                                const QueueHandleConfig &conf)
     {
         return std::make_shared<QueueHandle<T, kSize>>(
             node_id, meta, rdma_adpt, conf);
@@ -92,7 +71,8 @@ public:
         return cached_tail_node.gaddr_.has_value();
     }
 
-    RetCode lf_push_back(const T &t, util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lf_push_back(const T &t,
+                                       util::TraceView trace = util::nulltrace)
     {
         for (size_t i = 0; i < config_.retry_nr; ++i)
         {
@@ -105,7 +85,8 @@ public:
         return kRetry;
     }
 
-    RetCode lf_do_push_back(const T &t, util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lf_do_push_back(
+        const T &t, util::TraceView trace = util::nulltrace)
     {
         // 0) If no cached tail, or cached tail is full, or suspect it is empty
         // try to read tail to avoid stale cache
@@ -188,7 +169,7 @@ public:
         DCHECK_EQ(cached_tail_node.handle_.gaddr(),
                   cached_tail_node.gaddr_.value());
     }
-    RetCode try_expand_update_tail_entry(TraceView trace)
+    [[nodiscard]] RetCode try_expand_update_tail_entry(TraceView trace)
     {
         // NOTE: in this function, we should not update meta.
         // We have to try linking the new block to the *known* meta
@@ -258,10 +239,10 @@ public:
         cached_tail_node.handle_ = std::move(handle);
         cached_tail_node.idx_ = idx;
     }
-    RetCode lf_pop_front(size_t limit_nr,
-                         T *t,
-                         size_t &get_nr,
-                         util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lf_pop_front(size_t limit_nr,
+                                       T *t,
+                                       size_t &get_nr,
+                                       util::TraceView trace = util::nulltrace)
     {
         static Entry pop_entry;
         auto rc = list_handle_->lk_pop_front(&pop_entry, trace);
@@ -279,6 +260,7 @@ public:
                 *(t + i) = pop_entry.entry(i);
                 get_nr = i + 1;
             }
+            trace.pin("write entries to local buffer");
         }
         else
         {
@@ -319,16 +301,14 @@ public:
     {
         return list_handle_->cached_empty();
     }
-    RemoteMemHandle default_acquire_perm(GlobalAddress gaddr, size_t size)
+    [[nodiscard]] RemoteMemHandle default_acquire_perm(GlobalAddress gaddr,
+                                                       size_t size)
     {
-        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                       (flag_t) AcquireRequestFlag::kNoBindPR;
-        return rdma_adpt_->acquire_perm(
-            gaddr, 0 /* hint */, size, 0ns, ac_flag);
+        return list_handle_->default_acquire_perm(gaddr, size);
     }
     void default_relinquish_handle(RemoteMemHandle &handle)
     {
-        rdma_adpt_->relinquish_perm(handle, 0 /* hint */, 0 /* flag */);
+        return list_handle_->default_relinquish_handle(handle);
     }
 
     RetCode debug()
@@ -353,7 +333,7 @@ public:
     }
 
 private:
-    RemoteMemHandle &get_entry_handle(GlobalAddress gaddr)
+    [[nodiscard]] RemoteMemHandle &get_entry_handle(GlobalAddress gaddr)
     {
         if (lru_entry_handle_.valid())
         {
@@ -366,17 +346,12 @@ private:
             // miss, evit
             if (lru_entry_handle_.gaddr() != gaddr)
             {
-                auto rel_flag = (flag_t) 0;
-                rdma_adpt_->relinquish_perm(
-                    lru_entry_handle_, 0 /* hint */, rel_flag);
+                default_relinquish_handle(lru_entry_handle_);
             }
         }
 
         // definitely not valid and not match when reach here.
-        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                       (flag_t) AcquireRequestFlag::kNoBindPR;
-        lru_entry_handle_ = rdma_adpt_->acquire_perm(
-            gaddr, 0 /* hint */, sizeof(ListEntry), 0ns, ac_flag);
+        lru_entry_handle_ = default_acquire_perm(gaddr, sizeof(ListEntry));
         DCHECK_EQ(lru_entry_handle_.gaddr(), gaddr);
         DCHECK(lru_entry_handle_.valid());
         return lru_entry_handle_;
@@ -385,7 +360,7 @@ private:
     uint16_t node_id_;
     GlobalAddress meta_gaddr_;
     IRdmaAdaptor::pointer rdma_adpt_;
-    HandleConfig config_;
+    QueueHandleConfig config_;
 
     typename list::ListHandleImpl<Entry>::pointer list_handle_;
     struct

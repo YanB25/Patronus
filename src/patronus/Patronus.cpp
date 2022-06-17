@@ -148,6 +148,8 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     bool no_gc = flag & (flag_t) AcquireRequestFlag::kNoGc;
     if (unlikely(no_rpc))
     {
+        // if no_rpc, has to set no_gc = true
+        no_gc = true;
         Lease ret;
         ret.node_id_ = node_id;
         ret.no_gc_ = no_gc;

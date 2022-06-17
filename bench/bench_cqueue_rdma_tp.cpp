@@ -153,7 +153,7 @@ using QueueT = Queue<Object, kEntryNrPerBlock>;
 
 typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
                                           size_t dir_id,
-                                          const HandleConfig &conf,
+                                          const QueueHandleConfig &conf,
                                           GlobalAddress meta_gaddr,
                                           CoroContext *ctx)
 {
@@ -238,7 +238,7 @@ void test_basic_client_worker(
     size_t coro_id,
     CoroYield &yield,
     const BenchConfig &bench_conf,
-    const HandleConfig &handle_conf,
+    const QueueHandleConfig &handle_conf,
     GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
     OnePassBucketMonitor<uint64_t> &lat_m)
@@ -407,7 +407,7 @@ void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
                       const BenchConfig &bench_conf,
-                      const HandleConfig &handle_conf,
+                      const QueueHandleConfig &handle_conf,
                       uint64_t key)
 {
     auto coro_nr = bench_conf.coro_nr;
@@ -550,9 +550,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bool is_master = p->get_thread_id() == 0;
     bar.wait();
 
-    std::vector<HandleConfig> handle_configs;
+    std::vector<QueueHandleConfig> handle_configs;
     LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{});
+    handle_configs.push_back(QueueHandleConfig{});
 
     for (const auto &handle_conf : handle_configs)
     {

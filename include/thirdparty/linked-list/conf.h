@@ -4,24 +4,44 @@
 
 namespace patronus::list
 {
-struct HandleConfig
+struct ListImplConfig
 {
-    std::string name;
-    bool bypass_prot{false};
-    bool lock_free{true};
-    size_t retry_nr{std::numeric_limits<size_t>::max()};
-
-    std::string conf_name() const
+    // bool bypass_prot{false};
+    struct
     {
-        return name;
-    }
+        MemHandleDecision default_;
+        MemHandleDecision meta_;
+        MemHandleDecision alloc_;
+    } rdma;
 };
 
-inline std::ostream &operator<<(std::ostream &os, const HandleConfig &config)
+inline std::ostream &operator<<(std::ostream &os, const ListImplConfig &c)
 {
-    os << "{HandleConfig name: " << config.name
-       << ", bypass_prot: " << config.bypass_prot
-       << ", lock_free: " << config.lock_free << "}";
+    os << "{ListImplConfig default: " << c.rdma.default_
+       << ", meta: " << c.rdma.meta_ << ", alloc: " << c.rdma.alloc_ << "}";
+    return os;
+}
+
+struct ListHandleConfig
+{
+    bool lock_free{true};
+    bool bypass_prot{false};
+    size_t retry_nr{std::numeric_limits<size_t>::max()};
+
+    ListImplConfig list_impl_config;
+    ListHandleConfig(bool lock_free, bool bypass_prot)
+        : lock_free(lock_free), bypass_prot(bypass_prot)
+    {
+        list_impl_config.rdma.default_.use_mw().wo_expire();
+        list_impl_config.rdma.meta_ = list_impl_config.rdma.default_;
+        list_impl_config.rdma.alloc_.use_mw().with_alloc(0).wo_expire();
+    }
+};
+inline std::ostream &operator<<(std::ostream &os, const ListHandleConfig &c)
+{
+    os << "{ListHandleConfig lock_free: " << c.lock_free
+       << ", retry_nr: " << c.retry_nr << ", bypass_prot: " << c.bypass_prot
+       << ", list_impl_config: " << c.list_impl_config << "}";
     return os;
 }
 

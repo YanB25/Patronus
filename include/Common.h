@@ -232,7 +232,8 @@ std::shared_ptr<T> make_shared(Args &&... args)
 
 struct Data
 {
-    union {
+    union
+    {
         struct
         {
             uint32_t lower;

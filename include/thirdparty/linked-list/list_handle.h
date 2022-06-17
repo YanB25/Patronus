@@ -13,17 +13,16 @@ public:
     ListHandle(uint16_t node_id,
                GlobalAddress meta_gaddr,
                IRdmaAdaptor::pointer rdma_adpt,
-               const HandleConfig &config)
-        : rdma_adpt_(rdma_adpt),
-          config_(config),
+               const ListHandleConfig &config)
+        : config_(config),
           impl_(ListHandleImpl<T>::new_instance(
-              node_id, meta_gaddr, rdma_adpt, config))
+              node_id, meta_gaddr, rdma_adpt, config.list_impl_config))
     {
     }
     static pointer new_instance(uint16_t node_id,
                                 GlobalAddress meta_gaddr,
                                 IRdmaAdaptor::pointer rdma_adpt,
-                                const HandleConfig &config)
+                                const ListHandleConfig &config)
     {
         return std::make_shared<ListHandle<T>>(
             node_id, meta_gaddr, rdma_adpt, config);
@@ -36,15 +35,16 @@ public:
     {
         return do_push_back(t, config_.retry_nr, false /* lock free */, trace);
     }
-    RetCode lf_push_back(const T &t, util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode lf_push_back(const T &t,
+                                       util::TraceView trace = util::nulltrace)
     {
         return do_push_back(t, config_.retry_nr, true /* lock free */, trace);
     }
 
-    RetCode do_push_back(const T &t,
-                         size_t retry_nr,
-                         bool lock_free,
-                         util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode do_push_back(const T &t,
+                                       size_t retry_nr,
+                                       bool lock_free,
+                                       util::TraceView trace = util::nulltrace)
     {
         fill_to_insert_node_if_needed(t);
         DCHECK(to_insert_node_gaddr_.has_value());
@@ -69,7 +69,8 @@ public:
         return RC::kRetry;
     }
 
-    RetCode pop_front(T *t, util::TraceView trace = util::nulltrace)
+    [[nodiscard]] RetCode pop_front(T *t,
+                                    util::TraceView trace = util::nulltrace)
     {
         if (config_.lock_free)
         {
@@ -92,7 +93,7 @@ public:
     {
         if (to_insert_node_handle_.valid())
         {
-            default_relinquish_perm(to_insert_node_handle_);
+            default_relinquish_handle(to_insert_node_handle_);
         }
     }
     void read_meta()
@@ -136,7 +137,7 @@ private:
         // if old handle exists, should relinquish it. Otherwise, resource leaks
         if (unlikely(to_insert_node_handle_.valid()))
         {
-            default_relinquish_perm(to_insert_node_handle_);
+            default_relinquish_handle(to_insert_node_handle_);
         }
         to_insert_node_handle_ = impl_->allocate_to_insert_node();
         DCHECK(to_insert_node_handle_.valid());
@@ -150,12 +151,11 @@ private:
                                     to_insert_node_handle_)
             .expect(RC::kOk);
     }
-    void default_relinquish_perm(RemoteMemHandle &handle)
+    void default_relinquish_handle(RemoteMemHandle &handle)
     {
-        rdma_adpt_->relinquish_perm(handle, 0 /* hint */, 0 /* flag */);
+        impl_->default_relinquish_handle(handle);
     }
-    IRdmaAdaptor::pointer rdma_adpt_;
-    const HandleConfig &config_;
+    const ListHandleConfig &config_;
     typename ListHandleImpl<T>::pointer impl_;
 
     std::optional<GlobalAddress> to_insert_node_gaddr_;

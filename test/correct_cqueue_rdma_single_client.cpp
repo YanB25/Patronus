@@ -124,7 +124,7 @@ using QueueHandleT = QueueHandle<Item, kEntryNrPerBlock>;
 
 typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
                                           size_t dir_id,
-                                          const HandleConfig &conf,
+                                          const QueueHandleConfig &conf,
                                           GlobalAddress meta_gaddr,
                                           CoroContext *ctx)
 {
@@ -205,10 +205,13 @@ void test_basic_client_worker(
     size_t coro_id,
     CoroYield &yield,
     const BenchConfig &bench_conf,
-    const HandleConfig &handle_conf,
+    const QueueHandleConfig &handle_conf,
     GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
+    LOG(INFO) << "[debug] Entered function";
+    util::TraceManager tm(1);
+
     std::ignore = bench_conf;
 
     auto nid = p->get_node_id();
@@ -216,7 +219,9 @@ void test_basic_client_worker(
     auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
+    LOG(INFO) << "[debug] before gen_handle";
     auto handle = gen_handle(p, dir_id, handle_conf, meta_gaddr, &ctx);
+    LOG(INFO) << "[debug] after gen_handle";
 
     size_t put_succ_nr = 0;
     size_t put_nomem_nr = 0;
@@ -229,13 +234,14 @@ void test_basic_client_worker(
 
     Item pop_items[kEntryNrPerBlock];
 
+    LOG(INFO) << "[debug] before lf pop front";
     size_t get_nr = 0;
-    CHECK_EQ(handle->lf_pop_front(kEntryNrPerBlock, pop_items, get_nr),
+    CHECK_EQ(handle->lf_pop_front(
+                 kEntryNrPerBlock, pop_items, get_nr, tm.trace("first pop")),
              kNotFound)
         << "** list empty, actions should succeed";
     CHECK_EQ(get_nr, 0) << "** list empty, should get nothing";
-
-    util::TraceManager tm(1);
+    LOG(INFO) << "[debug] after lf pop front";
 
     while (ex.get_private_data().thread_remain_task > 0)
     {
@@ -398,7 +404,7 @@ void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
                       const BenchConfig &bench_conf,
-                      const HandleConfig &handle_conf,
+                      const QueueHandleConfig &handle_conf,
                       uint64_t key)
 {
     auto selected_client = ::config::get_client_nids().front();
@@ -513,9 +519,13 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bool is_master = p->get_thread_id() == 0;
     bar.wait();
 
-    std::vector<HandleConfig> handle_configs;
-    LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(HandleConfig{.entry_per_block = kEntryNrPerBlock});
+    std::vector<QueueHandleConfig> handle_configs;
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_mw("mw", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_unprotected("unprot", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_mr("mr", kEntryNrPerBlock));
 
     for (const auto &handle_conf : handle_configs)
     {

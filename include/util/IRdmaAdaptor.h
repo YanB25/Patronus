@@ -10,6 +10,9 @@
 #include "GlobalAddress.h"
 #include "patronus/memory/allocator.h"
 #include "util/RetCode.h"
+#include "util/TimeConv.h"
+
+using namespace std::chrono_literals;
 
 /**
  * @brief Used for debug purpose
@@ -46,6 +49,126 @@ struct hash<RemoteMemHandleView>
     }
 };
 }  // namespace std
+
+struct MemHandleDecision
+{
+    using flag_t = patronus::flag_t;
+    using AcquireRequestFlag = patronus::AcquireRequestFlag;
+    using AcquireRequestFlagOut = patronus::AcquireRequestFlagOut;
+    using LeaseModifyFlag = patronus::LeaseModifyFlag;
+    using LeaseModifyFlagOut = patronus::LeaseModifyFlagOut;
+
+    flag_t acquire_flag{0};
+    flag_t relinquish_flag{0};
+    std::chrono::nanoseconds ns{};
+    uint64_t alloc_hint{0};
+
+    void validate(flag_t ac_invalid, flag_t rel_invalid) const
+    {
+        CHECK_EQ(acquire_flag & ac_invalid, 0)
+            << "acquire_flag " << AcquireRequestFlagOut(acquire_flag)
+            << " conflict with " << AcquireRequestFlagOut(ac_invalid);
+
+        CHECK_EQ(relinquish_flag & rel_invalid, 0)
+            << "relinquish_flag " << LeaseModifyFlagOut(relinquish_flag)
+            << " confict with " << LeaseModifyFlagOut(rel_invalid);
+    }
+
+    MemHandleDecision &no_rpc()
+    {
+        auto ac_invalid = (flag_t) AcquireRequestFlag::kNoBindAny |
+                          (flag_t) AcquireRequestFlag::kNoBindPR |
+                          (flag_t) AcquireRequestFlag::kNoGc |
+                          (flag_t) AcquireRequestFlag::kUseMR |
+                          (flag_t) AcquireRequestFlag::kWithConflictDetect;
+        auto rel_invalid = (flag_t) LeaseModifyFlag::kDebugExtendDoNothing |
+                           (flag_t) LeaseModifyFlag::kForceUnbind |
+                           (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny |
+                           (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny |
+                           (flag_t) LeaseModifyFlag::kOnlyDeallocation |
+                           (flag_t) LeaseModifyFlag::kReserved |
+                           (flag_t) LeaseModifyFlag::kUseMR |
+                           (flag_t) LeaseModifyFlag::kWithDeallocation;
+        validate(ac_invalid, rel_invalid);
+
+        acquire_flag |= (flag_t) AcquireRequestFlag::kNoRpc;
+        relinquish_flag |= (flag_t) AcquireRequestFlag::kNoRpc;
+        return *this;
+    }
+    MemHandleDecision &no_bind_any()
+    {
+        acquire_flag |= (flag_t) AcquireRequestFlag::kNoBindAny;
+        return *this;
+    }
+    MemHandleDecision &no_bind_pr()
+    {
+        acquire_flag |= (flag_t) AcquireRequestFlag::kNoBindPR;
+        return *this;
+    }
+    MemHandleDecision &use_mw()
+    {
+        auto ac_invalid = (flag_t) AcquireRequestFlag::kUseMR;
+        auto rel_invalid = (flag_t) LeaseModifyFlag::kUseMR;
+        validate(ac_invalid, rel_invalid);
+
+        acquire_flag |= (flag_t) AcquireRequestFlag::kNoBindPR;
+        return *this;
+    }
+    MemHandleDecision &use_mr()
+    {
+        use_mw();
+        acquire_flag |= (flag_t) AcquireRequestFlag::kUseMR;
+        relinquish_flag |= (flag_t) LeaseModifyFlag::kUseMR;
+        return *this;
+    }
+    MemHandleDecision &wo_expire()
+    {
+        acquire_flag |= (flag_t) AcquireRequestFlag::kNoGc;
+        ns = 0ns;
+        return *this;
+    }
+    MemHandleDecision &with_expire(std::chrono::nanoseconds expire_ns)
+    {
+        ns = expire_ns;
+        relinquish_flag |= (flag_t) LeaseModifyFlag::kNoRpc;
+        return *this;
+    }
+    MemHandleDecision &with_alloc(uint64_t hint)
+    {
+        acquire_flag |= (flag_t) AcquireRequestFlag::kWithAllocation;
+        alloc_hint = hint;
+        return *this;
+    }
+    MemHandleDecision &only_alloc(uint64_t hint)
+    {
+        auto ac_invalid = (flag_t) AcquireRequestFlag::kNoGc |
+                          (flag_t) AcquireRequestFlag::kUseMR |
+                          (flag_t) AcquireRequestFlag::kWithConflictDetect;
+        auto rel_invalid = (flag_t) LeaseModifyFlag::kDebugExtendDoNothing |
+                           (flag_t) LeaseModifyFlag::kForceUnbind |
+                           (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny |
+                           (flag_t) LeaseModifyFlag::kNoRelinquishUnbindAny |
+                           (flag_t) LeaseModifyFlag::kReserved |
+                           (flag_t) LeaseModifyFlag::kUseMR |
+                           (flag_t) LeaseModifyFlag::kWithDeallocation;
+        validate(ac_invalid, rel_invalid);
+        // only allocation sticks with no-gc and no-bind-pr
+        acquire_flag |= (flag_t) AcquireRequestFlag::kOnlyAllocation |
+                        (flag_t) AcquireRequestFlag::kNoGc |
+                        (flag_t) AcquireRequestFlag::kNoBindPR;
+        alloc_hint = hint;
+        return *this;
+    }
+};
+inline std::ostream &operator<<(std::ostream &os, const MemHandleDecision &d)
+{
+    auto ns = util::time::to_ns(d.ns);
+    os << "{acquire_flag: " << patronus::AcquireRequestFlagOut(d.acquire_flag)
+       << ", relinquish_flag: "
+       << patronus::LeaseModifyFlagOut(d.relinquish_flag) << ", ns: " << ns
+       << ", hint: " << d.alloc_hint << "}";
+    return os;
+}
 
 /**
  * @brief Stand for the permission over a range of memory

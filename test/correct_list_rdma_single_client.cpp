@@ -117,7 +117,7 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 template <typename T>
 typename ListHandle<T>::pointer gen_handle(Patronus::pointer p,
                                            size_t dir_id,
-                                           const HandleConfig &conf,
+                                           const ListHandleConfig &conf,
                                            GlobalAddress meta_gaddr,
                                            CoroContext *ctx)
 {
@@ -205,10 +205,12 @@ void test_basic_client_worker(
     size_t coro_id,
     CoroYield &yield,
     const BenchConfig &bench_conf,
-    const HandleConfig &handle_conf,
+    const ListHandleConfig &handle_conf,
     GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
+    util::TraceManager tm(1);
+    util::TraceManager iter_tm(1);
     std::ignore = bench_conf;
 
     auto nid = p->get_node_id();
@@ -216,6 +218,7 @@ void test_basic_client_worker(
     auto dir_id = tid % kServerThreadNr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
+    LOG(INFO) << "[bench] generating handle";
     auto handle =
         gen_handle<ListItem>(p, dir_id, handle_conf, meta_gaddr, &ctx);
 
@@ -228,11 +231,10 @@ void test_basic_client_worker(
 
     std::list<ListItem> book_list;
 
-    CHECK_EQ(handle->pop_front(nullptr), kNotFound)
+    LOG(INFO) << "[bench] trying first pop.";
+    CHECK_EQ(handle->pop_front(nullptr, tm.trace("first pop")), kNotFound)
         << "** list empty, should be unable to pop";
 
-    util::TraceManager tm(1);
-    util::TraceManager iter_tm(1);
     while (ex.get_private_data().thread_remain_task > 0)
     {
         auto trace = tm.trace("test");
@@ -375,7 +377,7 @@ void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
                       bool is_master,
                       const BenchConfig &bench_conf,
-                      const HandleConfig &handle_conf,
+                      const ListHandleConfig &handle_conf,
                       uint64_t key)
 {
     auto selected_client = ::config::get_client_nids().front();
@@ -492,9 +494,11 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bool is_master = p->get_thread_id() == 0;
     bar.wait();
 
-    std::vector<HandleConfig> handle_configs;
-    handle_configs.push_back(HandleConfig{.lock_free = false});
-    handle_configs.push_back(HandleConfig{.lock_free = true});
+    std::vector<ListHandleConfig> handle_configs;
+    handle_configs.push_back(
+        ListHandleConfig(false /* lock free */, false /* bypass prot */));
+    handle_configs.push_back(
+        ListHandleConfig(true /* lock free */, false /* bypass prot */));
 
     for (const auto &handle_conf : handle_configs)
     {
