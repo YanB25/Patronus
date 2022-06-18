@@ -494,7 +494,7 @@ public:
             {
                 break;
             }
-            trace.pin("Collect " + std::to_string(cur_list_node_gaddr.val));
+            trace.pin("collect");
         }
         rdma_adpt_->put_all_rdma_buffer();
         return;

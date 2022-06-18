@@ -27,8 +27,8 @@ public:
     std::vector<TraceRecord> get_flat_records(
         size_t depth_limit = std::numeric_limits<size_t>::max()) const;
 
-    uint64_t pin(const std::string &name);
-    TraceView child(const std::string &name);
+    uint64_t pin(std::string_view name);
+    TraceView child(std::string_view name);
     friend std::ostream &operator<<(std::ostream &os, const TraceView view);
 
 private:

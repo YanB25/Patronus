@@ -4,7 +4,7 @@
 
 namespace util
 {
-uint64_t TraceView::pin(const std::string &name)
+uint64_t TraceView::pin(std::string_view name)
 {
     if (unlikely(impl_ != nullptr))
     {
@@ -12,7 +12,7 @@ uint64_t TraceView::pin(const std::string &name)
         {
             LOG(INFO) << "[traceview] " << impl_->name() << " -> " << name;
         }
-        return impl_->pin(name);
+        return impl_->pin(std::string(name));
     }
     return 0;
 }
@@ -32,12 +32,12 @@ uint64_t TraceView::sum_ns() const
     }
     return 0;
 }
-TraceView TraceView::child(const std::string &name)
+TraceView TraceView::child(std::string_view name)
 {
-    pin("REACH " + name);
     if (unlikely(impl_ != nullptr))
     {
-        return TraceView{impl_->child_context(name)};
+        pin(name);
+        return TraceView{impl_->child_context(std::string(name))};
     }
     return TraceView(nullptr);
 }
