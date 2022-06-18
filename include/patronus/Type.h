@@ -58,7 +58,8 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status);
 
 struct ClientID
 {
-    union {
+    union
+    {
         struct
         {
             uint16_t node_id;
@@ -256,7 +257,8 @@ enum class RWFlag : uint8_t
     kWithCache = 1 << 2,
     kUseUniversalRkey = 1 << 3,
     kEnableTrace = 1 << 4,
-    kReserved = 1 << 5,
+    kUseTwoSided = 1 << 5,
+    kReserved = 1 << 6,
 };
 
 struct RWFlagOut
@@ -272,7 +274,8 @@ enum class MemoryRequestFlag : uint8_t
 {
     kRead,
     kWrite,
-    kCAS
+    kCAS,
+    kFAA
 };
 std::ostream &operator<<(std::ostream &os, MemoryRequestFlag flag);
 struct MemoryRequest

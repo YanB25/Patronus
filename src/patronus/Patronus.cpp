@@ -1817,6 +1817,11 @@ void Patronus::handle_response_memory_access(MemoryResponse *resp,
         {
             memcpy(rpc_context->buffer_addr, resp->buffer, resp->size);
         }
+        if (mf == MemoryRequestFlag::kFAA)
+        {
+            DCHECK_EQ(resp->size, sizeof(uint64_t));
+            memcpy(rpc_context->buffer_addr, resp->buffer, resp->size);
+        }
     }
     else
     {
@@ -2385,9 +2390,8 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
                  << ", remote_addr: " << (void *) req->remote_addr << " from "
                  << req->cid;
     }
-    else
+    else if (mf == MemoryRequestFlag::kCAS)
     {
-        CHECK_EQ(mf, MemoryRequestFlag::kCAS);
         auto *patomic = (std::atomic<uint64_t> *) addr;
         DCHECK_EQ(req->size, 2 * sizeof(uint64_t));
         uint64_t compare = *((uint64_t *) req->buffer);
@@ -2404,6 +2408,23 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
                  << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
                  << ", remote_addr: " << (void *) req->remote_addr << " from "
                  << req->cid << ". compare: " << compare << ", swap: " << swap;
+    }
+    else
+    {
+        CHECK_EQ(mf, MemoryRequestFlag::kFAA);
+        auto *patomic = (std::atomic<int64_t> *) addr;
+        DCHECK_EQ(req->size, sizeof(int64_t));
+        int64_t value = *(int64_t *) req->buffer;
+        int64_t got = patomic->fetch_add(value, std::memory_order_relaxed);
+        resp_msg.success = true;
+        resp_msg.size = sizeof(int64_t);
+        memcpy(resp_msg.buffer, &got, sizeof(int64_t));
+        DVLOG(4) << "[patronus][rpc-mem] handling rpc memory FAA at "
+                 << (void *) addr << " with size " << (size_t) req->size
+                 << ". dsm_base: " << (void *) dsm->get_base_addr()
+                 << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
+                 << ", remote_addr: " << (void *) req->remote_addr << " from "
+                 << req->cid << ". value: " << value << ", got: " << got;
     }
 
     if constexpr (debug())
@@ -3119,8 +3140,16 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
                                 size_t size,
                                 size_t offset,
                                 flag_t flag,
-                                CoroContext *ctx)
+                                CoroContext *ctx,
+                                TraceView trace)
 {
+    bool use_two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (use_two_sided)
+    {
+        debug_validate_rpc_rwcas_flag(flag);
+        return rpc_write(lease, ibuf, size, offset, ctx);
+    }
+
     auto ec = handle_batch_op_flag(flag);
     if (unlikely(ec != RC::kOk))
     {
@@ -3151,7 +3180,7 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
     uint32_t lkey = dsm_->get_icon_lkey();
     auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
     return batch.prepare_write(
-        qp, node_id, dir_id, dest, source, size, lkey, rkey, ctx);
+        qp, node_id, dir_id, dest, source, size, lkey, rkey, ctx, trace);
 }
 
 RetCode Patronus::prepare_read(PatronusBatchContext &batch,
@@ -3160,8 +3189,16 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
                                size_t size,
                                size_t offset,
                                flag_t flag,
-                               CoroContext *ctx)
+                               CoroContext *ctx,
+                               TraceView trace)
 {
+    bool use_two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (unlikely(use_two_sided))
+    {
+        debug_validate_rpc_rwcas_flag(flag);
+        return rpc_read(lease, obuf, size, offset, ctx);
+    }
+
     auto ec = handle_batch_op_flag(flag);
     if (unlikely(ec != RC::kOk))
     {
@@ -3192,7 +3229,7 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
     uint32_t lkey = dsm_->get_icon_lkey();
     auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
     return batch.prepare_read(
-        qp, node_id, dir_id, source, dest, size, lkey, rkey, ctx);
+        qp, node_id, dir_id, source, dest, size, lkey, rkey, ctx, trace);
 }
 
 RetCode Patronus::prepare_faa(PatronusBatchContext &batch,
@@ -3201,8 +3238,16 @@ RetCode Patronus::prepare_faa(PatronusBatchContext &batch,
                               size_t offset,
                               int64_t value,
                               flag_t flag,
-                              CoroContext *ctx)
+                              CoroContext *ctx,
+                              TraceView trace)
 {
+    bool use_two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (use_two_sided)
+    {
+        debug_validate_rpc_rwcas_flag(flag);
+        return rpc_faa(lease, iobuf, offset, value, ctx);
+    }
+
     auto ec = handle_batch_op_flag(flag);
     if (unlikely(ec != RC::kOk))
     {
@@ -3233,7 +3278,7 @@ RetCode Patronus::prepare_faa(PatronusBatchContext &batch,
     uint32_t lkey = dsm_->get_icon_lkey();
     auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
     return batch.prepare_faa(
-        qp, node_id, dir_id, dest, source, value, lkey, rkey, ctx);
+        qp, node_id, dir_id, dest, source, value, lkey, rkey, ctx, trace);
 }
 
 RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
@@ -3243,8 +3288,16 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
                               uint64_t compare,
                               uint64_t swap,
                               flag_t flag,
-                              CoroContext *ctx)
+                              CoroContext *ctx,
+                              TraceView trace)
 {
+    bool use_two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (use_two_sided)
+    {
+        debug_validate_rpc_rwcas_flag(flag);
+        return rpc_cas(lease, iobuf, offset, compare, swap, ctx);
+    }
+
     auto ec = handle_batch_op_flag(flag);
     if (unlikely(ec != RC::kOk))
     {
@@ -3274,8 +3327,17 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
     uint64_t dest = dsm_->gaddr_to_addr(gaddr);
     uint32_t lkey = dsm_->get_icon_lkey();
     auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
-    return batch.prepare_cas(
-        qp, node_id, dir_id, dest, source, compare, swap, lkey, rkey, ctx);
+    return batch.prepare_cas(qp,
+                             node_id,
+                             dir_id,
+                             dest,
+                             source,
+                             compare,
+                             swap,
+                             lkey,
+                             rkey,
+                             ctx,
+                             trace);
 }
 
 RetCode Patronus::handle_batch_op_flag(flag_t flag) const
@@ -3295,7 +3357,9 @@ RetCode Patronus::handle_batch_op_flag(flag_t flag) const
     return kOk;
 }
 
-RetCode Patronus::commit(PatronusBatchContext &batch, CoroContext *ctx)
+RetCode Patronus::commit(PatronusBatchContext &batch,
+                         CoroContext *ctx,
+                         TraceView trace)
 {
     RetCode rc = kOk;
     RWContext *rw_context = nullptr;
@@ -3318,7 +3382,7 @@ RetCode Patronus::commit(PatronusBatchContext &batch, CoroContext *ctx)
     rw_context->dir_id = batch.dir_id();
 
     WRID wr_id(WRID_PREFIX_PATRONUS_BATCH_RWCAS, rw_ctx_id);
-    rc = batch.commit(wr_id.val, ctx);
+    rc = batch.commit(wr_id.val, ctx, trace);
     if (unlikely(rc != kOk))
     {
         goto ret;
@@ -3345,6 +3409,7 @@ RetCode Patronus::commit(PatronusBatchContext &batch, CoroContext *ctx)
 
 ret:
     put_rw_context(rw_context);
+    trace.pin("finished");
     return rc;
 }
 

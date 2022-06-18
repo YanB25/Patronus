@@ -11,13 +11,13 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 using namespace patronus;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
-// constexpr static size_t kClientThreadNr = 1;
+// constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
+constexpr static size_t kClientThreadNr = 1;
 
 static_assert(kClientThreadNr <= kMaxAppThread);
 static_assert(kServerThreadNr <= NR_DIRECTORY);
-constexpr static size_t kCoroCnt = 16;
-// constexpr static size_t kCoroCnt = 1;
+// constexpr static size_t kCoroCnt = 16;
+constexpr static size_t kCoroCnt = 1;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
@@ -116,12 +116,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
-        auto ec = p->rpc_read(lease,
-                              rdma_buf.buffer,
-                              sizeof(Object),
-                              0 /* offset */,
-                              //   0 /* flag */,
-                              &ctx);
+        auto ec = p->rpc_read(
+            lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
         if (unlikely(ec != RC::kOk))
         {
             CHECK(false) << "[bench] client READ failed. lease " << lease
@@ -207,6 +203,33 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             CHECK_EQ(ec, kOk);
             uint64_t read_old = *(uint64_t *) rdma_buf.buffer;
             CHECK_EQ(read_old, coro_magic + 1);
+        }
+
+        {
+            // FAA correct
+
+            // 0) initial state is correct
+            p->rpc_read(lease, rdma_buf.buffer, sizeof(Object), 0, &ctx)
+                .expect(RC::kOk);
+            Object &magic_object = *(Object *) rdma_buf.buffer;
+            CHECK_EQ(magic_object.target, coro_magic)
+                << "Initial state is correct";
+
+            p->rpc_faa(
+                 lease, rdma_buf.buffer, offsetof(Object, target), 1, &ctx)
+                .expect(RC::kOk);
+            int64_t got = *(int64_t *) rdma_buf.buffer;
+            CHECK_EQ(got, coro_magic);
+            p->rpc_faa(
+                 lease, rdma_buf.buffer, offsetof(Object, target), -1, &ctx)
+                .expect(RC::kOk);
+            int64_t got2 = *(int64_t *) rdma_buf.buffer;
+            CHECK_EQ(got2, coro_magic + 1);
+
+            p->rpc_read(lease, rdma_buf.buffer, sizeof(Object), 0, &ctx)
+                .expect(RC::kOk);
+            int64_t finally_got = *(int64_t *) rdma_buf.buffer;
+            CHECK_EQ(finally_got, coro_magic);
         }
 
         DVLOG(2) << "[bench] client coro " << ctx

@@ -9,6 +9,7 @@
 
 #include "CoroContext.h"
 #include "util/RetCode.h"
+#include "util/Tracer.h"
 
 namespace patronus
 {
@@ -69,7 +70,8 @@ public:
                           size_t size,
                           uint32_t lkey,
                           uint32_t rkey,
-                          CoroContext *ctx)
+                          CoroContext *ctx,
+                          util::TraceView trace = util::nulltrace)
     {
         std::ignore = ctx;
         if (unlikely(idx_ >= kMaxOp))
@@ -92,6 +94,7 @@ public:
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", size: " << size
                  << ", at idx: " << idx_;
+        trace.pin("prepare");
         return kOk;
     }
     RetCode prepare_read(ibv_qp *qp,
@@ -102,7 +105,8 @@ public:
                          size_t size,
                          uint32_t lkey,
                          uint32_t rkey,
-                         CoroContext *ctx)
+                         CoroContext *ctx,
+                         util::TraceView trace = util::nulltrace)
     {
         std::ignore = ctx;
         if (unlikely(idx_ >= kMaxOp))
@@ -125,6 +129,7 @@ public:
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", size: " << size
                  << ", at idx: " << idx_;
+        trace.pin("prepare");
         return kOk;
     }
     RetCode prepare_faa(ibv_qp *qp,
@@ -135,7 +140,8 @@ public:
                         int64_t value,
                         uint32_t lkey,
                         uint32_t rkey,
-                        CoroContext *ctx)
+                        CoroContext *ctx,
+                        util::TraceView trace = util::nulltrace)
     {
         std::ignore = ctx;
         if (unlikely(idx_ >= kMaxOp))
@@ -162,6 +168,7 @@ public:
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", value: " << value
                  << ", at idx: " << idx_;
+        trace.pin("prepare");
         return kOk;
     }
     RetCode prepare_cas(ibv_qp *qp,
@@ -173,7 +180,8 @@ public:
                         uint64_t swap,
                         uint32_t lkey,
                         uint32_t rkey,
-                        CoroContext *ctx)
+                        CoroContext *ctx,
+                        util::TraceView trace = util::nulltrace)
     {
         std::ignore = ctx;
         if (unlikely(idx_ >= kMaxOp))
@@ -201,9 +209,12 @@ public:
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", compare: " << compare
                  << ", swap: " << swap << ", at idx: " << idx_;
+        trace.pin("prepare");
         return kOk;
     }
-    RetCode commit(uint64_t wr_id, CoroContext *ctx)
+    RetCode commit(uint64_t wr_id,
+                   CoroContext *ctx,
+                   util::TraceView trace = util::nulltrace)
     {
         DCHECK_LE(idx_, kMaxOp);
         if (unlikely(idx_ == 0))
@@ -236,6 +247,7 @@ public:
         CHECK_NOTNULL(ctx)->yield_to_master();
 
         clear();
+        trace.pin("ibv_post");
         return RC::kOk;
     }
     dir_t dir_id() const

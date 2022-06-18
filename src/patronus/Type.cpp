@@ -511,6 +511,9 @@ std::ostream &operator<<(std::ostream &os, MemoryRequestFlag flag)
     case MemoryRequestFlag::kCAS:
         os << "CAS";
         break;
+    case MemoryRequestFlag::kFAA:
+        os << "FAA";
+        break;
     default:
         LOG(FATAL) << "** Unknown flag " << (int) flag;
     }

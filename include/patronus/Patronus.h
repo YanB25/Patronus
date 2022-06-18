@@ -163,36 +163,36 @@ public:
      * @param ctx
      * @return @see GlobalAddress
      */
-    inline GlobalAddress alloc(uint16_t node_id,
-                               uint16_t dir_id,
-                               size_t size,
-                               uint64_t hint,
-                               CoroContext *ctx);
+    [[nodiscard]] inline GlobalAddress alloc(uint16_t node_id,
+                                             uint16_t dir_id,
+                                             size_t size,
+                                             uint64_t hint,
+                                             CoroContext *ctx);
     /**
      * @brief @see get_rlease
      */
-    inline Lease get_wlease(uint16_t node_id,
-                            uint16_t dir_id,
-                            GlobalAddress bind_gaddr,
-                            uint64_t alloc_hint,
-                            size_t size,
-                            std::chrono::nanoseconds ns,
-                            flag_t flag /* AcquireRequestFlag */,
-                            CoroContext *ctx = nullptr);
-    inline Lease upgrade(Lease &lease,
-                         flag_t flag /*LeaseModifyFlag */,
-                         CoroContext *ctx = nullptr);
+    [[nodiscard]] inline Lease get_wlease(uint16_t node_id,
+                                          uint16_t dir_id,
+                                          GlobalAddress bind_gaddr,
+                                          uint64_t alloc_hint,
+                                          size_t size,
+                                          std::chrono::nanoseconds ns,
+                                          flag_t flag /* AcquireRequestFlag */,
+                                          CoroContext *ctx = nullptr);
+    [[nodiscard]] inline Lease upgrade(Lease &lease,
+                                       flag_t flag /*LeaseModifyFlag */,
+                                       CoroContext *ctx = nullptr);
     /**
      * @brief extend the lifecycle of lease for another more ns.
      */
-    inline RetCode extend(Lease &lease,
-                          std::chrono::nanoseconds ns,
-                          flag_t flag /* LeaseModifyFlag */,
-                          CoroContext *ctx = nullptr);
-    inline RetCode rpc_extend(Lease &lease,
-                              std::chrono::nanoseconds ns,
-                              flag_t flag /* LeaseModifyFlag */,
-                              CoroContext *ctx = nullptr);
+    [[nodiscard]] inline RetCode extend(Lease &lease,
+                                        std::chrono::nanoseconds ns,
+                                        flag_t flag /* LeaseModifyFlag */,
+                                        CoroContext *ctx = nullptr);
+    [[nodiscard]] inline RetCode rpc_extend(Lease &lease,
+                                            std::chrono::nanoseconds ns,
+                                            flag_t flag /* LeaseModifyFlag */,
+                                            CoroContext *ctx = nullptr);
     /**
      * when allocation is ON, hint is sent to the server
      */
@@ -215,72 +215,90 @@ public:
                         size_t size,
                         uint64_t hint,
                         CoroContext *ctx = nullptr);
-    inline RetCode read(Lease &lease,
-                        char *obuf,
-                        size_t size,
-                        size_t offset,
-                        flag_t flag /* RWFlag */,
-                        CoroContext *ctx,
-                        TraceView = util::nulltrace);
-    inline RetCode rpc_read(
-        Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx);
-    inline RetCode write(Lease &lease,
-                         const char *ibuf,
-                         size_t size,
-                         size_t offset,
-                         flag_t flag /* RWFlag */,
-                         CoroContext *ctx,
-                         TraceView = util::nulltrace);
-    inline RetCode rpc_write(Lease &lease,
-                             const char *ibuf,
-                             size_t size,
-                             size_t offset,
-                             CoroContext *ctx);
-    inline RetCode cas(Lease &lease,
-                       char *iobuf,
-                       size_t offset,
-                       uint64_t compare,
-                       uint64_t swap,
-                       flag_t flag /* RWFlag */,
-                       CoroContext *ctx,
-                       TraceView = util::nulltrace);
-    inline RetCode rpc_cas(Lease &lease,
-                           char *iobuf,
-                           size_t offset,
-                           uint64_t compare,
-                           uint64_t swap,
-                           CoroContext *ctx);
+    [[nodiscard]] inline RetCode read(Lease &lease,
+                                      char *obuf,
+                                      size_t size,
+                                      size_t offset,
+                                      flag_t flag /* RWFlag */,
+                                      CoroContext *ctx,
+                                      TraceView = util::nulltrace);
+    [[nodiscard]] inline RetCode rpc_read(Lease &lease,
+                                          char *obuf,
+                                          size_t size,
+                                          size_t offset,
+                                          CoroContext *ctx,
+                                          TraceView = util::nulltrace);
+    [[nodiscard]] inline RetCode write(Lease &lease,
+                                       const char *ibuf,
+                                       size_t size,
+                                       size_t offset,
+                                       flag_t flag /* RWFlag */,
+                                       CoroContext *ctx,
+                                       TraceView = util::nulltrace);
+    [[nodiscard]] inline RetCode rpc_write(Lease &lease,
+                                           const char *ibuf,
+                                           size_t size,
+                                           size_t offset,
+                                           CoroContext *ctx,
+                                           TraceView = util::nulltrace);
+    [[nodiscard]] inline RetCode cas(Lease &lease,
+                                     char *iobuf,
+                                     size_t offset,
+                                     uint64_t compare,
+                                     uint64_t swap,
+                                     flag_t flag /* RWFlag */,
+                                     CoroContext *ctx,
+                                     TraceView = util::nulltrace);
+    [[nodiscard]] inline RetCode rpc_cas(Lease &lease,
+                                         char *iobuf,
+                                         size_t offset,
+                                         uint64_t compare,
+                                         uint64_t swap,
+                                         CoroContext *ctx,
+                                         TraceView = util::nulltrace);
     // below for batch API
-    RetCode prepare_write(PatronusBatchContext &batch,
-                          Lease &lease,
-                          const char *ibuf,
-                          size_t size,
-                          size_t offset,
-                          flag_t flag,
-                          CoroContext *ctx = nullptr);
-    RetCode prepare_read(PatronusBatchContext &batch,
-                         Lease &lease,
-                         char *obuf,
-                         size_t size,
-                         size_t offset,
-                         flag_t flag,
-                         CoroContext *ctx = nullptr);
-    RetCode prepare_cas(PatronusBatchContext &batch,
-                        Lease &lease,
-                        char *iobuf,
-                        size_t offset,
-                        uint64_t compare,
-                        uint64_t swap,
-                        flag_t flag,
-                        CoroContext *ctx = nullptr);
-    RetCode prepare_faa(PatronusBatchContext &batch,
-                        Lease &lease,
-                        char *iobuf,
-                        size_t offset,
-                        int64_t value,
-                        flag_t flag,
-                        CoroContext *ctx = nullptr);
-    RetCode commit(PatronusBatchContext &batch, CoroContext *ctx = nullptr);
+    [[nodiscard]] RetCode prepare_write(PatronusBatchContext &batch,
+                                        Lease &lease,
+                                        const char *ibuf,
+                                        size_t size,
+                                        size_t offset,
+                                        flag_t flag,
+                                        CoroContext *ctx = nullptr,
+                                        util::TraceView = util::nulltrace);
+    [[nodiscard]] RetCode prepare_read(PatronusBatchContext &batch,
+                                       Lease &lease,
+                                       char *obuf,
+                                       size_t size,
+                                       size_t offset,
+                                       flag_t flag,
+                                       CoroContext *ctx = nullptr,
+                                       TraceView = util::nulltrace);
+    [[nodiscard]] RetCode prepare_cas(PatronusBatchContext &batch,
+                                      Lease &lease,
+                                      char *iobuf,
+                                      size_t offset,
+                                      uint64_t compare,
+                                      uint64_t swap,
+                                      flag_t flag,
+                                      CoroContext *ctx = nullptr,
+                                      TraceView = util::nulltrace);
+    [[nodiscard]] RetCode prepare_faa(PatronusBatchContext &batch,
+                                      Lease &lease,
+                                      char *iobuf,
+                                      size_t offset,
+                                      int64_t value,
+                                      flag_t flag,
+                                      CoroContext *ctx = nullptr,
+                                      TraceView = util::nulltrace);
+    [[nodiscard]] inline RetCode rpc_faa(Lease &lease,
+                                         char *iobuf,
+                                         size_t offset,
+                                         int64_t value,
+                                         CoroContext *ctx = nullptr,
+                                         TraceView = util::nulltrace);
+    [[nodiscard]] RetCode commit(PatronusBatchContext &batch,
+                                 CoroContext *ctx = nullptr,
+                                 TraceView = util::nulltrace);
     auto patronus_now() const
     {
         return time_syncer_->patronus_now();
@@ -412,7 +430,7 @@ public:
                                           CoroContext *ctx);
     void post_handle_request_admin(AdminRequest *req, CoroContext *ctx);
 
-    Buffer get_rdma_buffer_8B()
+    [[nodiscard]] Buffer get_rdma_buffer_8B()
     {
         CHECK(!self_managing_client_rdma_buffer_);
         auto *ret = (char *) rdma_client_buffer_8B_->get();
@@ -431,7 +449,7 @@ public:
         }
     }
 
-    Buffer get_self_managed_rdma_buffer()
+    [[nodiscard]] Buffer get_self_managed_rdma_buffer()
     {
         CHECK(!self_managing_client_rdma_buffer_);
         self_managing_client_rdma_buffer_ = true;
@@ -445,7 +463,7 @@ public:
         self_managing_client_rdma_buffer_ = false;
     }
 
-    Buffer get_rdma_buffer(size_t size)
+    [[nodiscard]] Buffer get_rdma_buffer(size_t size)
     {
         CHECK(!self_managing_client_rdma_buffer_);
         if (size <= 8)
@@ -518,7 +536,7 @@ public:
     {
         return conf_.reserved_buffer_size;
     }
-    Buffer get_lease_buffer() const
+    [[nodiscard]] Buffer get_lease_buffer() const
     {
         auto server_buf = dsm_->get_server_buffer();
         auto *buf_addr = server_buf.buffer;
@@ -526,7 +544,7 @@ public:
         DCHECK_GE(server_buf.size, buf_size);
         return Buffer(buf_addr, buf_size);
     }
-    Buffer get_alloc_buffer() const
+    [[nodiscard]] Buffer get_alloc_buffer() const
     {
         auto server_buf = dsm_->get_server_buffer();
         auto *buf_addr = server_buf.buffer + lease_buffer_size();
@@ -534,7 +552,7 @@ public:
         DCHECK_GE(server_buf.size, lease_buffer_size() + alloc_buffer_size());
         return Buffer(buf_addr, buf_size);
     }
-    Buffer get_user_reserved_buffer() const
+    [[nodiscard]] Buffer get_user_reserved_buffer() const
     {
         auto server_buffer = dsm_->get_server_buffer();
         auto *buf_addr =
@@ -926,7 +944,8 @@ private:
                                   size_t dir_id,
                                   size_t remote_addr,
                                   MemoryRequestFlag rwcas,
-                                  CoroContext *ctx);
+                                  CoroContext *ctx,
+                                  TraceView = util::nulltrace);
     inline RetCode extend_impl(Lease &lease,
                                size_t extend_unit_nr,
                                flag_t flag,
@@ -966,6 +985,7 @@ private:
     void debug_analysis_per_qp_batch(const char *msg_buf,
                                      size_t msg_nr,
                                      OnePassBucketMonitor<double> &m);
+    inline void debug_validate_rpc_rwcas_flag(flag_t flag);
 
     // owned by both
     DSM::pointer dsm_;
@@ -1418,6 +1438,13 @@ RetCode Patronus::write(Lease &lease,
                         CoroContext *ctx,
                         TraceView v)
 {
+    bool two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (two_sided)
+    {
+        debug_validate_rpc_rwcas_flag(flag);
+        return rpc_write(lease, ibuf, size, offset, ctx, v);
+    }
+
     auto ec = handle_rwcas_flag(lease, flag, ctx);
     if (unlikely(ec != RC::kOk))
     {
@@ -1816,12 +1843,32 @@ void Patronus::handle_response_admin_qp_modification(AdminResponse *resp,
     rpc_context->ready.store(true, std::memory_order_release);
 }
 
+RetCode Patronus::rpc_faa(Lease &lease,
+                          char *iobuf,
+                          size_t offset,
+                          int64_t value,
+                          CoroContext *ctx,
+                          TraceView trace)
+{
+    *((int64_t *) iobuf) = value;
+    uint64_t remote_addr = lease.base_addr_ + offset;
+    return rpc_rwcas_impl(iobuf,
+                          sizeof(uint64_t),
+                          lease.node_id_,
+                          lease.dir_id_,
+                          remote_addr,
+                          MemoryRequestFlag::kFAA,
+                          ctx,
+                          trace);
+}
+
 RetCode Patronus::rpc_cas(Lease &lease,
                           char *iobuf,
                           size_t offset,
                           uint64_t compare,
                           uint64_t swap,
-                          CoroContext *ctx)
+                          CoroContext *ctx,
+                          TraceView trace)
 {
     uint64_t *data = (uint64_t *) iobuf;
     *data = compare;
@@ -1833,11 +1880,16 @@ RetCode Patronus::rpc_cas(Lease &lease,
                           lease.dir_id_,
                           remote_addr,
                           MemoryRequestFlag::kCAS,
-                          ctx);
+                          ctx,
+                          trace);
 }
 
-RetCode Patronus::rpc_read(
-    Lease &lease, char *obuf, size_t size, size_t offset, CoroContext *ctx)
+RetCode Patronus::rpc_read(Lease &lease,
+                           char *obuf,
+                           size_t size,
+                           size_t offset,
+                           CoroContext *ctx,
+                           TraceView trace)
 {
     uint64_t remote_addr = lease.base_addr_ + offset;
     return rpc_rwcas_impl(obuf,
@@ -1846,14 +1898,16 @@ RetCode Patronus::rpc_read(
                           lease.dir_id_,
                           remote_addr,
                           MemoryRequestFlag::kRead,
-                          ctx);
+                          ctx,
+                          trace);
 }
 
 RetCode Patronus::rpc_write(Lease &lease,
                             const char *ibuf,
                             size_t size,
                             size_t offset,
-                            CoroContext *ctx)
+                            CoroContext *ctx,
+                            TraceView trace)
 {
     uint64_t remote_addr = lease.base_addr_ + offset;
     return rpc_rwcas_impl((char *) ibuf,
@@ -1862,7 +1916,8 @@ RetCode Patronus::rpc_write(Lease &lease,
                           lease.dir_id_,
                           remote_addr,
                           MemoryRequestFlag::kWrite,
-                          ctx);
+                          ctx,
+                          trace);
 }
 
 RetCode Patronus::rpc_rwcas_impl(char *iobuf,
@@ -1871,7 +1926,8 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
                                  size_t dir_id,
                                  size_t remote_addr,
                                  MemoryRequestFlag rwcas,
-                                 CoroContext *ctx)
+                                 CoroContext *ctx,
+                                 TraceView trace)
 {
     char *rdma_buf = get_rdma_message_buffer();
     auto *rpc_context = get_rpc_context();
@@ -1907,6 +1963,11 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
         DCHECK_EQ(size, 2 * sizeof(uint64_t));
         memcpy(msg->buffer, iobuf, size);
     }
+    if (rwcas == MemoryRequestFlag::kFAA)
+    {
+        DCHECK_EQ(size, sizeof(uint64_t));
+        memcpy(msg->buffer, iobuf, size);
+    }
 
     if constexpr (debug())
     {
@@ -1915,6 +1976,7 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
     }
 
     dsm_->unreliable_send(rdma_buf, msg->msg_size(), node_id, dir_id);
+    trace.pin("send");
 
     DCHECK_NOTNULL(ctx)->yield_to_master();
 
@@ -1924,7 +1986,15 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
     put_rpc_context(rpc_context);
     put_rdma_message_buffer(rdma_buf);
 
+    trace.pin("ret");
     return ret;
+}
+void Patronus::debug_validate_rpc_rwcas_flag(flag_t flag)
+{
+    if constexpr (debug())
+    {
+        CHECK_EQ(flag, (flag_t) RWFlag::kUseTwoSided);
+    }
 }
 
 }  // namespace patronus
