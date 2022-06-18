@@ -41,8 +41,13 @@ RaceHandleT::pointer gen_rhh(Patronus::pointer p,
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
     LOG(INFO) << "[bench] got meta of hashtable: " << meta_gaddr;
     RaceHashingHandleConfig handle_conf;
-    auto handle_rdma_ctx = patronus::RdmaAdaptor::new_instance(
-        kServerNodeId, dir_id, p, false /* bypass_prot */, ctx);
+    auto handle_rdma_ctx =
+        patronus::RdmaAdaptor::new_instance(kServerNodeId,
+                                            dir_id,
+                                            p,
+                                            false /* bypass prot */,
+                                            false /* two sided */,
+                                            ctx);
     auto prhh = std::make_shared<RaceHandleT>(
         kServerNodeId, meta_gaddr, handle_conf, auto_expand, handle_rdma_ctx);
     prhh->init();

@@ -81,6 +81,28 @@ inline std::ostream &operator<<(std::ostream &os, const RdmaTraceRecord &r)
     os << r.trace_timer;
     return os;
 }
+
+// struct RdmaAdptConfig
+// {
+//     bool bypass_prot{false};
+//     bool use_two_sided{false};
+//     RdmaAdptConfig &unprot()
+//     {
+//         bypass_prot = true;
+//         return *this;
+//     }
+//     RdmaAdptConfig &use_rpc()
+//     {
+//         use_two_sided = true;
+//         return *this;
+//     }
+//     RdmaAdptConfig &clear()
+//     {
+//         bypass_prot = false;
+//         use_two_sided = false;
+//         return *this;
+//     }
+// };
 class RdmaAdaptor : public IRdmaAdaptor
 {
 public:
@@ -96,6 +118,7 @@ public:
                 uint32_t dir_id,
                 Patronus::pointer patronus,
                 bool bypass_protection,
+                bool use_two_sided,
                 bool is_server,
                 CoroContext *ctx)
         : node_id_(node_id),
@@ -103,6 +126,7 @@ public:
           patronus_(patronus),
           coro_ctx_(ctx),
           bypass_prot_(bypass_protection),
+          use_two_sided_(use_two_sided),
           is_server_(is_server)
     {
         ongoing_rdma_bufs_.reserve(kMaxOngoingRdmaBuf);
@@ -126,13 +150,15 @@ public:
     static pointer new_instance(uint16_t node_id,
                                 uint32_t dir_id,
                                 Patronus::pointer patronus,
-                                bool bypass_protection,
+                                bool bypass_prot,
+                                bool use_two_sided,
                                 CoroContext *ctx)
     {
         return std::make_shared<RdmaAdaptor>(node_id,
                                              dir_id,
                                              patronus,
-                                             bypass_protection,
+                                             bypass_prot,
+                                             use_two_sided,
                                              false /* is_server */,
                                              ctx);
     }
@@ -143,6 +169,7 @@ public:
                                              0,
                                              patronus,
                                              false /* bypass_prot */,
+                                             false /* use_two_sided */,
                                              true /* is_server */,
                                              nullptr);
     }
@@ -307,6 +334,10 @@ public:
         {
             flag |= (flag_t) RWFlag::kUseUniversalRkey;
         }
+        if (use_two_sided_)
+        {
+            flag |= (flag_t) RWFlag::kUseTwoSided;
+        }
         auto ec = patronus_->prepare_read(
             batch_, lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
         if (unlikely(ec == kNoMem))
@@ -344,6 +375,10 @@ public:
         if (bypass_prot_)
         {
             flag |= (flag_t) RWFlag::kUseUniversalRkey;
+        }
+        if (use_two_sided_)
+        {
+            flag |= (flag_t) RWFlag::kUseTwoSided;
         }
         auto ec = patronus_->prepare_write(
             batch_, lease, (char *) rdma_buf, size, offset, flag, coro_ctx_);
@@ -389,6 +424,10 @@ public:
         {
             flag |= (flag_t) RWFlag::kUseUniversalRkey;
         }
+        if (use_two_sided_)
+        {
+            flag |= (flag_t) RWFlag::kUseTwoSided;
+        }
         auto rc = patronus_->prepare_faa(
             batch_, lease, (char *) rdma_buf, offset, value, flag, coro_ctx_);
         if (unlikely(rc == kNoMem))
@@ -422,6 +461,10 @@ public:
         if (bypass_prot_)
         {
             flag |= (flag_t) RWFlag::kUseUniversalRkey;
+        }
+        if (use_two_sided_)
+        {
+            flag |= (flag_t) RWFlag::kUseTwoSided;
         }
         auto rc = patronus_->prepare_cas(batch_,
                                          lease,
@@ -510,6 +553,7 @@ private:
     CoroContext *coro_ctx_{nullptr};
     std::vector<Buffer> ongoing_rdma_bufs_;
     bool bypass_prot_{false};
+    bool use_two_sided_{false};
     bool is_server_;
     bool enable_trace_{false};
     std::string trace_name_;

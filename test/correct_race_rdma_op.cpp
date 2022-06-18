@@ -134,8 +134,13 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
 
     RaceHashingHandleConfig handle_conf;
     handle_conf.kvblock_expect_size = kKVBlockExpectSize;
-    auto handle_rdma_ctx = patronus::RdmaAdaptor::new_instance(
-        kServerNodeId, dir_id, p, false /* bypass_prot */, ctx);
+    auto handle_rdma_ctx =
+        patronus::RdmaAdaptor::new_instance(kServerNodeId,
+                                            dir_id,
+                                            p,
+                                            false /* bypass_prot */,
+                                            false /* two sided */,
+                                            ctx);
 
     auto prhh = HandleT::new_instance(
         kServerNodeId, meta_gaddr, handle_conf, auto_expand, handle_rdma_ctx);

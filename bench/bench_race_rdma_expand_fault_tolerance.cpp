@@ -251,7 +251,7 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     auto handle_rdma_ctx = patronus::RdmaAdaptor::new_instance(
-        kServerNodeId, dir_id, p, conf.bypass_prot, ctx);
+        kServerNodeId, dir_id, p, conf.bypass_prot, false /* two sided */, ctx);
 
     auto prhh = HandleT::new_instance(
         kServerNodeId, meta_gaddr, conf, auto_expand, handle_rdma_ctx);

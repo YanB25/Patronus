@@ -133,7 +133,7 @@ typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
-        server_nid, dir_id, p, conf.bypass_prot, ctx);
+        server_nid, dir_id, p, conf.bypass_prot, false /* two sided */, ctx);
 
     auto handle =
         QueueHandleT::new_instance(server_nid, meta_gaddr, rdma_adpt, conf);

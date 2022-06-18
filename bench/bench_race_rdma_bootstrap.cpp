@@ -348,8 +348,12 @@ void test_basic_client_worker(
     size_t executed_op_nr = 0;
     ChronoTimer timer;
 
-    auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
-        server_nid, dir_id, p, rhh_conf.bypass_prot, &ctx);
+    auto rdma_adpt = patronus::RdmaAdaptor::new_instance(server_nid,
+                                                         dir_id,
+                                                         p,
+                                                         rhh_conf.bypass_prot,
+                                                         false /* two sided */,
+                                                         &ctx);
 
     std::string key;
     key.resize(sizeof(uint64_t));
