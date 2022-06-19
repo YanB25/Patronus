@@ -336,7 +336,12 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
     bool enable_trace = flag.flag & (flag_t) RWFlag::kEnableTrace;
     if (enable_trace)
     {
-        os << "enable-trace";
+        os << "enable-trace, ";
+    }
+    bool use_two_sided = flag.flag & (flag_t) RWFlag::kUseTwoSided;
+    if (use_two_sided)
+    {
+        os << "use-two-sided, ";
     }
     bool reserve = flag.flag & (flag_t) RWFlag::kReserved;
     DCHECK(!reserve);

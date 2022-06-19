@@ -9,6 +9,7 @@ struct QueueHandleConfig
 {
     std::string name;
     bool bypass_prot{false};
+    bool use_two_sided{false};
     size_t entry_per_block{};
     size_t retry_nr{std::numeric_limits<size_t>::max()};
     list::ListImplConfig list_impl_config;
@@ -21,11 +22,13 @@ struct QueueHandleConfig
 
     static QueueHandleConfig get_basic(const std::string &name,
                                        bool bypass_prot,
+                                       bool use_two_sided,
                                        size_t entry_per_block)
     {
         QueueHandleConfig conf;
         conf.name = name;
         conf.bypass_prot = bypass_prot;
+        conf.use_two_sided = use_two_sided;
         conf.entry_per_block = entry_per_block;
         return conf;
     }
@@ -33,8 +36,10 @@ struct QueueHandleConfig
     static QueueHandleConfig get_mw(const std::string &name,
                                     size_t entry_per_block)
     {
-        QueueHandleConfig conf =
-            get_basic(name, false /* bypass prot */, entry_per_block);
+        QueueHandleConfig conf = get_basic(name,
+                                           false /* bypass prot */,
+                                           false /* use two-sided */,
+                                           entry_per_block);
         MemHandleDecision default_dec;
         default_dec.use_mw().wo_expire();
         conf.list_impl_config.rdma.default_ = default_dec;
@@ -47,8 +52,10 @@ struct QueueHandleConfig
     static QueueHandleConfig get_unprotected(const std::string &name,
                                              size_t entry_per_block)
     {
-        QueueHandleConfig conf =
-            get_basic(name, true /* bypass prot */, entry_per_block);
+        QueueHandleConfig conf = get_basic(name,
+                                           true /* bypass prot */,
+                                           false /* use two-sided */,
+                                           entry_per_block);
         conf.list_impl_config.rdma.default_.no_rpc();
         conf.list_impl_config.rdma.meta_ = conf.list_impl_config.rdma.default_;
         conf.list_impl_config.rdma.alloc_.only_alloc(0);
@@ -57,11 +64,26 @@ struct QueueHandleConfig
     static QueueHandleConfig get_mr(const std::string &name,
                                     size_t entry_per_block)
     {
-        QueueHandleConfig conf =
-            get_basic(name, false /* bypass prot */, entry_per_block);
+        QueueHandleConfig conf = get_basic(name,
+                                           false /* bypass prot */,
+                                           false /* use two-sided */,
+                                           entry_per_block);
         conf.list_impl_config.rdma.default_.use_mr().wo_expire();
         conf.list_impl_config.rdma.meta_ = conf.list_impl_config.rdma.default_;
         conf.list_impl_config.rdma.alloc_.with_alloc(0).use_mr().wo_expire();
+        conf.task_scale = 0.1;
+        return conf;
+    }
+    static QueueHandleConfig get_rpc(const std::string &name,
+                                     size_t entry_per_block)
+    {
+        QueueHandleConfig conf = get_basic(name,
+                                           false /* bypass prot */,
+                                           true /* two_sided */,
+                                           entry_per_block);
+        conf.list_impl_config.rdma.default_.no_rpc();
+        conf.list_impl_config.rdma.meta_ = conf.list_impl_config.rdma.default_;
+        conf.list_impl_config.rdma.alloc_.only_alloc(0);
         conf.task_scale = 0.1;
         return conf;
     }

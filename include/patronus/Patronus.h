@@ -1953,15 +1953,36 @@ RetCode Patronus::rpc_read(Lease &lease,
                            CoroContext *ctx,
                            TraceView trace)
 {
-    uint64_t remote_addr = lease.base_addr_ + offset;
-    return rpc_rwcas_impl(obuf,
-                          size,
-                          lease.node_id_,
-                          lease.dir_id_,
-                          remote_addr,
-                          MemoryRequestFlag::kRead,
-                          ctx,
-                          trace);
+    for (size_t i = 0; i < size; i += MemoryResponse::buffer_capacity())
+    {
+        if (unlikely(i > 0))
+        {
+            LOG_FIRST_N(WARNING, 1)
+                << "[patronus] rpc_read with size " << size
+                << " breaks into several sub-requests with allowed size "
+                << MemoryResponse::buffer_capacity();
+        }
+
+        char *cur_obuf = obuf + i;
+        size_t cur_size =
+            std::min((size - i), MemoryResponse::buffer_capacity());
+        size_t cur_offset = offset + i;
+        uint64_t cur_remote_addr = lease.base_addr_ + cur_offset;
+        CHECK_LE(cur_offset, lease.buffer_size_);
+        auto rc = rpc_rwcas_impl(cur_obuf,
+                                 cur_size,
+                                 lease.node_id_,
+                                 lease.dir_id_,
+                                 cur_remote_addr,
+                                 MemoryRequestFlag::kRead,
+                                 ctx,
+                                 trace);
+        if (unlikely(rc != RC::kOk))
+        {
+            return rc;
+        }
+    }
+    return RC::kOk;
 }
 
 RetCode Patronus::rpc_write(Lease &lease,
@@ -1971,15 +1992,35 @@ RetCode Patronus::rpc_write(Lease &lease,
                             CoroContext *ctx,
                             TraceView trace)
 {
-    uint64_t remote_addr = lease.base_addr_ + offset;
-    return rpc_rwcas_impl((char *) ibuf,
-                          size,
-                          lease.node_id_,
-                          lease.dir_id_,
-                          remote_addr,
-                          MemoryRequestFlag::kWrite,
-                          ctx,
-                          trace);
+    for (size_t i = 0; i < size; i += MemoryRequest::buffer_capacity())
+    {
+        const char *cur_ibuf = ibuf + i;
+        size_t cur_size =
+            std::min((size - i), MemoryRequest::buffer_capacity());
+        size_t cur_offset = offset + i;
+        uint64_t cur_remote_addr = lease.base_addr_ + cur_offset;
+        CHECK_LE(cur_offset, lease.buffer_size_);
+        auto rc = rpc_rwcas_impl((char *) cur_ibuf,
+                                 cur_size,
+                                 lease.node_id_,
+                                 lease.dir_id_,
+                                 cur_remote_addr,
+                                 MemoryRequestFlag::kWrite,
+                                 ctx,
+                                 trace);
+        if (unlikely(rc != RC::kOk))
+        {
+            return rc;
+        }
+        if (unlikely(i > 0))
+        {
+            LOG_FIRST_N(WARNING, 1)
+                << "[patronus] rpc_write with size " << size
+                << " breaks into several sub-requests with allowed size "
+                << MemoryRequest::buffer_capacity();
+        }
+    }
+    return RC::kOk;
 }
 
 RetCode Patronus::rpc_rwcas_impl(char *iobuf,
@@ -2002,6 +2043,8 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
     msg->cid.coro_id = ctx ? ctx->coro_id() : kNotACoro;
     msg->cid.rpc_ctx_id = rpc_ctx_id;
     msg->remote_addr = remote_addr;
+    CHECK_LE(size, std::numeric_limits<decltype(msg->size)>::max())
+        << "** msg overflowed.";
     msg->size = size;
     msg->flag = (flag_t) rwcas;
 
@@ -2013,7 +2056,7 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
     if (unlikely(!msg->validate()))
     {
         CHECK(false) << "** msg invalid. msg: " << msg
-                     << ". possible size too large.";
+                     << ". possible size too large. size: " << size;
         return RC::kInvalid;
     }
     if (rwcas == MemoryRequestFlag::kWrite)
@@ -2055,7 +2098,11 @@ void Patronus::debug_validate_rpc_rwcas_flag(flag_t flag)
 {
     if constexpr (debug())
     {
-        CHECK_EQ(flag, (flag_t) RWFlag::kUseTwoSided);
+        bool with_auto_extend = flag & (flag_t) RWFlag::kWithAutoExtend;
+        CHECK(!with_auto_extend)
+            << "TODO: two_sided with auto-extend is not implemented";
+        bool with_cache = flag & (flag_t) RWFlag::kWithCache;
+        CHECK(!with_cache) << "TODO: two_sided with with-cache is not tested";
     }
 }
 

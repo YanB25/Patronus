@@ -15,6 +15,7 @@
 #include "thirdparty/concurrent-queue/queue_handle.h"
 #include "util/BenchRand.h"
 #include "util/DataFrameF.h"
+#include "util/Hexdump.hpp"
 #include "util/Pre.h"
 #include "util/Rand.h"
 #include "util/TimeConv.h"
@@ -133,7 +134,7 @@ typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
-        server_nid, dir_id, p, conf.bypass_prot, false /* two sided */, ctx);
+        server_nid, dir_id, p, conf.bypass_prot, conf.use_two_sided, ctx);
 
     auto handle =
         QueueHandleT::new_instance(server_nid, meta_gaddr, rdma_adpt, conf);
@@ -187,7 +188,12 @@ void validate_helper(const std::list<Item> &reference,
         }
         auto reference_magic = ref_it->magic_number;
         auto test_magic = test_it->magic_number;
-        CHECK_EQ(reference_magic, test_magic);
+        const Item &got = *test_it;
+        CHECK_EQ(reference_magic, test_magic)
+            << "** magic mismatch. got: " << *ref_it << ", expect: " << *test_it
+            << std::endl
+            << "got hexdump: " << std::endl
+            << util::Hexdump(&got, sizeof(got));
         ref_it++;
         test_it++;
         ith++;
@@ -526,6 +532,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         QueueHandleConfig::get_unprotected("unprot", kEntryNrPerBlock));
     handle_configs.emplace_back(
         QueueHandleConfig::get_mr("mr", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_rpc("rpc", kEntryNrPerBlock));
 
     for (const auto &handle_conf : handle_configs)
     {

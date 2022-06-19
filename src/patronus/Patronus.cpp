@@ -1825,14 +1825,9 @@ void Patronus::handle_response_memory_access(MemoryResponse *resp,
     }
     else
     {
-        if (mf == MemoryRequestFlag::kCAS)
-        {
-            rpc_context->ret_code = RC::kRetry;
-        }
-        else
-        {
-            rpc_context->ret_code = RC::kRdmaExecutionErr;
-        }
+        CHECK(false) << "** two-sided RPC memory request should not get rdma "
+                        "execution error.";
+        rpc_context->ret_code = RC::kRdmaExecutionErr;
     }
 
     if (mf == MemoryRequestFlag::kCAS)
@@ -2402,9 +2397,9 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
         uint64_t compare = *((uint64_t *) req->buffer);
         // uint64_t remember_compare = compare;
         uint64_t swap = *(((uint64_t *) req->buffer) + 1);
-        bool succ = patomic->compare_exchange_strong(
+        patomic->compare_exchange_strong(
             compare, swap, std::memory_order_relaxed);
-        resp_msg.success = succ;
+        resp_msg.success = true;
         resp_msg.size = sizeof(uint64_t);
         memcpy(resp_msg.buffer, &compare, sizeof(compare));
         DVLOG(4) << "[patronus][rpc-mem] handling rpc memory CAS at "

@@ -38,9 +38,9 @@ uint64_t calculate_client_id(uint64_t nid, uint64_t tid, uint64_t coro_id)
 
 struct QueueItem
 {
-    uint64_t nid;
-    uint64_t tid;
-    uint64_t cid;
+    uint32_t nid;
+    uint32_t tid;
+    uint32_t cid;
     uint64_t magic_number;
     bool valid{true};
 };
@@ -152,7 +152,7 @@ typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
-        server_nid, dir_id, p, conf.bypass_prot, false /* two sided */, ctx);
+        server_nid, dir_id, p, conf.bypass_prot, conf.use_two_sided, ctx);
 
     auto handle =
         QueueHandleT::new_instance(server_nid, meta_gaddr, rdma_adpt, conf);
@@ -260,7 +260,8 @@ void test_basic_client_worker(
         }
         else
         {
-            QueueItem item{nid, tid, coro_id, magic};
+            QueueItem item{
+                (uint32_t) nid, (uint32_t) tid, (uint32_t) coro_id, magic};
             // LOG(INFO) << "[bench] LF PUSH " << item;
             auto rc = handle->lf_push_back(item, trace);
             // LOG(INFO) << "[bench] finished LF PUSH " << item << ". rc: " <<
@@ -517,10 +518,13 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         QueueHandleConfig::get_unprotected("unprot", kEntryNrPerBlock));
     handle_configs.emplace_back(
         QueueHandleConfig::get_mr("mr", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_rpc("rpc", kEntryNrPerBlock));
 
     for (const auto &handle_conf : handle_configs)
     {
         for (size_t producer_nr : {kMaxAppThread})
+        // for (size_t producer_nr : {1})
         {
             for (size_t coro_nr : {1})
             {

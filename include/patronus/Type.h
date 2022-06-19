@@ -295,7 +295,7 @@ struct MemoryRequest
     {
         return size <= buffer_capacity();
     }
-    constexpr size_t buffer_capacity() const
+    static constexpr size_t buffer_capacity()
     {
         return 32;
     }
@@ -322,7 +322,7 @@ struct MemoryResponse
     {
         return size <= buffer_capacity();
     }
-    constexpr size_t buffer_capacity() const
+    static constexpr size_t buffer_capacity()
     {
         return 32;
     }

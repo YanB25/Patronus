@@ -116,6 +116,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
+        memset(rdma_buf.buffer, 0, rdma_buf.size);
         auto ec = p->rpc_read(
             lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
         if (unlikely(ec != RC::kOk))

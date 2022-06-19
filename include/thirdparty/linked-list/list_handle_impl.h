@@ -2,6 +2,7 @@
 #ifndef PATRONUS_LINKED_LIST_HANDLE_IMPL_H_
 #define PATRONUS_LINKED_LIST_HANDLE_IMPL_H_
 
+#include "util/Hexdump.hpp"
 #include "util/RetCode.h"
 #include "util/Tracer.h"
 
@@ -761,8 +762,7 @@ private:
                                        0 /* flag */,
                                        pop_lock_handle);
         CHECK_EQ(rc, kOk);
-        rc = rdma_adpt_->commit();
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
 
         uint64_t got = *(uint64_t *) rdma_buf.buffer;
