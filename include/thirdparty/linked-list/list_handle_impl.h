@@ -650,8 +650,6 @@ private:
     RemoteMemHandle meta_acquire_perm(GlobalAddress gaddr, size_t size)
     {
         const auto &c = config_.rdma.meta_;
-        DCHECK(c.acquire_flag & (flag_t) AcquireRequestFlag::kNoGc)
-            << "** meta acquire without kNoGc ON";
         return rdma_adpt_->acquire_perm(
             gaddr, c.alloc_hint, size, c.ns, c.acquire_flag);
     }

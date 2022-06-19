@@ -414,7 +414,7 @@ void benchmark_client(Patronus::pointer p,
         }
     }
     bar.wait();
-    LOG(INFO) << "[debug] client begin to run...";
+    // LOG(INFO) << "[debug] client begin to run...";
 
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
@@ -505,19 +505,19 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bar.wait();
 
     std::vector<ListHandleConfig> handle_configs;
-    // handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_free());
-    // handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_base());
-    // handle_configs.emplace_back(ListHandleConfig().use_rpc());
-    // handle_configs.emplace_back(ListHandleConfig().use_mr().use_lock_base());
+    handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_free());
+    handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_base());
+    handle_configs.emplace_back(ListHandleConfig().use_rpc());
+    handle_configs.emplace_back(ListHandleConfig().use_mr().use_lock_base());
     handle_configs.emplace_back(
-        ListHandleConfig().use_mw_lease(1ms).use_lock_free());
+        ListHandleConfig().use_mw_lease(10ms).use_lock_free());
 
     for (const auto &handle_conf : handle_configs)
     {
         LOG_IF(INFO, is_master)
             << "[bench] benching multiple threads for " << handle_conf;
-        // for (size_t producer_nr : {1, 2, 8, 16})
-        for (size_t producer_nr : {1})
+        for (size_t producer_nr : {1, 16})
+        // for (size_t producer_nr : {1})
         // for (size_t producer_nr : {1, 2, 8, 16})
         // for (size_t producer_nr : {8})
         {
