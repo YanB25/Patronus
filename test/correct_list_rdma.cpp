@@ -223,6 +223,7 @@ void test_basic_client_worker(
     GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex)
 {
+    util::TraceManager tm(1);
     std::ignore = bench_conf;
 
     auto nid = p->get_node_id();
@@ -247,13 +248,14 @@ void test_basic_client_worker(
 
     while (ex.get_private_data().thread_remain_task > 0)
     {
+        auto trace = tm.trace("op");
         auto magic = gen_magic(nid, tid, coro_id);
         validate_magic(nid, tid, coro_id, magic);
         if (is_consumer)
         {
             // pop
             ListItem item;
-            auto rc = handle->pop_front(&item);
+            auto rc = handle->pop_front(&item, trace);
             if (rc == kOk)
             {
                 validate_magic(
@@ -277,7 +279,7 @@ void test_basic_client_worker(
             item.coro_id = coro_id;
             item.magic_number = gen_magic(nid, tid, coro_id);
             validate_magic(item.nid, item.tid, item.coro_id, item.magic_number);
-            auto rc = handle->push_back(item);
+            auto rc = handle->push_back(item, trace);
             if (rc == kOk)
             {
                 put_succ_nr++;
@@ -290,7 +292,7 @@ void test_basic_client_worker(
             }
         }
     }
-    auto lists = handle->debug_iterator();
+    auto lists = handle->debug_iterator(tm.trace("debug_iterator"));
     LOG(INFO) << "validating size " << lists.size() << " from ctx: " << ctx;
     validate_helper(lists);
 
@@ -412,6 +414,7 @@ void benchmark_client(Patronus::pointer p,
         }
     }
     bar.wait();
+    LOG(INFO) << "[debug] client begin to run...";
 
     ChronoTimer timer;
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> ex;
@@ -502,16 +505,21 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bar.wait();
 
     std::vector<ListHandleConfig> handle_configs;
-    handle_configs.push_back(
-        ListHandleConfig(true /* lock_free */, false /* bypass prot */));
-    handle_configs.push_back(
-        ListHandleConfig(false /* lock free */, false /* bypass prot */));
+    // handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_free());
+    // handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_base());
+    // handle_configs.emplace_back(ListHandleConfig().use_rpc());
+    // handle_configs.emplace_back(ListHandleConfig().use_mr().use_lock_base());
+    handle_configs.emplace_back(
+        ListHandleConfig().use_mw_lease(1ms).use_lock_free());
 
     for (const auto &handle_conf : handle_configs)
     {
         LOG_IF(INFO, is_master)
             << "[bench] benching multiple threads for " << handle_conf;
-        for (size_t producer_nr : {1, 2, 8, 16})
+        // for (size_t producer_nr : {1, 2, 8, 16})
+        for (size_t producer_nr : {1})
+        // for (size_t producer_nr : {1, 2, 8, 16})
+        // for (size_t producer_nr : {8})
         {
             for (size_t consumer_nr : {0})
             {

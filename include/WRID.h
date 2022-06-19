@@ -20,7 +20,7 @@
 #define WRID_PREFIX_PATRONUS_GENERATE_FAULT 11
 // The outer-most benchmark only prefix
 #define WRID_PREFIX_BENCHMARK_ONLY 12
-#define WRID_PREFIX_RESERVED_1 13
+#define WRID_PREFIX_NULLWRID 13
 #define WRID_PREFIX_PATRONUS_BIND_MW_MAGIC_ERR 14
 #define WRID_PREFIX_PATRONUS_BATCH 15
 
@@ -77,8 +77,8 @@ inline std::ostream &operator<<(std::ostream &os, pre_wrid_prefix p)
     case WRID_PREFIX_BENCHMARK_ONLY:
         os << "BENCHMARK_ONLY";
         return os;
-    case WRID_PREFIX_RESERVED_1:
-        os << "RESERVED_1";
+    case WRID_PREFIX_NULLWRID:
+        os << "NULL_WRID";
         return os;
     case WRID_PREFIX_PATRONUS_BIND_MW_MAGIC_ERR:
         os << "PATRONUS_BIND_MW_MAGIC_ERR";
@@ -108,12 +108,22 @@ struct WRID
     WRID(uint16_t p, uint16_t a16, uint32_t id) : prefix(p), u16_a(a16), id(id)
     {
     }
-    union {
+    bool operator==(const WRID &rhs) const
+    {
+        return val == rhs.val;
+    }
+    bool operator!=(const WRID &rhs) const
+    {
+        return !(val == rhs.val);
+    }
+    union
+    {
         struct
         {
             uint16_t prefix;
             uint16_t u16_a;
-            union {
+            union
+            {
                 struct
                 {
                     uint16_t u16_b;
@@ -134,6 +144,6 @@ inline std::ostream &operator<<(std::ostream &os, WRID wrid)
     return os;
 }
 
-static WRID nullwrid{WRID_PREFIX_RESERVED_1, get_WRID_ID_RESERVED()};
+static WRID nullwrid{WRID_PREFIX_NULLWRID, get_WRID_ID_RESERVED()};
 
 #endif

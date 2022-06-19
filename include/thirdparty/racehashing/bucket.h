@@ -135,6 +135,7 @@ public:
                                     expect_val,
                                     new_slot.val(),
                                     rdma_buf.buffer,
+                                    0 /* flag */,
                                     subtable_mem_handle),
                  kOk);
         CHECK_EQ(rdma_adpt.commit(), kOk);
@@ -185,6 +186,7 @@ public:
             CHECK_EQ(rdma_adpt.rdma_read(DCHECK_NOTNULL(rdma_buf.buffer),
                                          kvblock_remote_addr,
                                          kvblock_len,
+                                         0 /* flag */,
                                          kvblock_mem_handle),
                      kOk);
             CHECK_EQ(rdma_adpt.commit(), kOk);
@@ -217,8 +219,11 @@ public:
         auto &header = *(BucketHeader *) rdma_buf.buffer;
         header.ld = ld;
         header.suffix = suffix;
-        return rdma_adpt.rdma_write(
-            gaddr_, rdma_buf.buffer, sizeof(BucketHeader), mem_handle);
+        return rdma_adpt.rdma_write(gaddr_,
+                                    rdma_buf.buffer,
+                                    sizeof(BucketHeader),
+                                    0 /* flag */,
+                                    mem_handle);
     }
 
     GlobalAddress slot_remote_addr(size_t idx) const

@@ -4,23 +4,68 @@
 
 #include "Common.h"
 
+class CoroControlBlock
+{
+public:
+    using pointer = std::shared_ptr<CoroControlBlock>;
+    CoroControlBlock(size_t coro_nr)
+    {
+        worker_wait_wr_ids_.resize(coro_nr, nullwrid);
+        worker_is_waiting_.resize(coro_nr, true);
+    }
+    static pointer new_instance(size_t coro_nr)
+    {
+        return std::make_shared<CoroControlBlock>(coro_nr);
+    }
+
+    void yield_to_master(size_t coro_id, WRID wr_id)
+    {
+        CHECK_LT(coro_id, worker_is_waiting_.size());
+        CHECK(!worker_is_waiting_[coro_id]);
+        worker_is_waiting_[coro_id] = true;
+
+        CHECK_LT(coro_id, worker_wait_wr_ids_.size());
+        worker_wait_wr_ids_[coro_id] = wr_id;
+    }
+
+    void yield_to_worker(size_t coro_id, WRID wr_id)
+    {
+        CHECK_LT(coro_id, worker_is_waiting_.size());
+        CHECK(worker_is_waiting_[coro_id]);
+        worker_is_waiting_[coro_id] = false;
+
+        CHECK_LT(coro_id, worker_wait_wr_ids_.size());
+        CHECK_EQ(worker_wait_wr_ids_[coro_id], wr_id);
+        worker_wait_wr_ids_[coro_id] = nullwrid;
+    }
+
+private:
+    std::vector<WRID> worker_wait_wr_ids_;
+    std::vector<bool> worker_is_waiting_;
+};
+
 struct CoroContext
 {
 public:
     CoroContext(size_t thread_id,
                 CoroYield *yield,
                 CoroCall *master,
-                coro_t coro_id)
+                coro_t coro_id,
+                CoroControlBlock::pointer cb = {})
         : thread_id_(thread_id),
           yield_(yield),
           master_(master),
-          coro_id_(coro_id)
+          coro_id_(coro_id),
+          cb_(cb)
     {
         CHECK_NE(coro_id, kMasterCoro) << "** This coro should not be a master";
         CHECK_NE(coro_id, kNotACoro) << "** This coro should not be nullctx";
     }
-    CoroContext(size_t thread_id, CoroYield *yield, CoroCall *workers)
-        : thread_id_(thread_id), yield_(yield), workers_(workers)
+    CoroContext(size_t thread_id,
+                CoroYield *yield,
+                CoroCall *workers,
+                CoroControlBlock::pointer cb = {})
+        : thread_id_(thread_id), yield_(yield), workers_(workers), cb_(cb)
     {
         coro_id_ = kMasterCoro;
     }
@@ -55,7 +100,17 @@ public:
     {
         DVLOG(4) << "[Coro] " << *this << " yielding to master for " << wr_id;
         DCHECK(is_worker()) << *this;
+
+        if constexpr (debug())
+        {
+            if (cb_)
+            {
+                cb_->yield_to_master(coro_id_, wr_id);
+            }
+        }
+
         (*yield_)(*master_);
+
         DVLOG(4) << "[Coro] " << *this
                  << " yielded back from master, expecting " << wr_id;
     }
@@ -64,7 +119,17 @@ public:
         DVLOG(4) << "[Coro] " << *this << " yielding to worker " << (int) wid
                  << " for " << wr_id;
         DCHECK(is_master()) << *this;
+
+        if constexpr (debug())
+        {
+            if (cb_)
+            {
+                cb_->yield_to_worker(wid, wr_id);
+            }
+        }
+
         (*yield_)(workers_[wid]);
+
         DVLOG(4) << "[Coro] " << *this << " yielded back from worker "
                  << (int) wid;
     }
@@ -89,9 +154,12 @@ private:
     CoroCall *master_{nullptr};
     CoroCall *workers_{nullptr};
     coro_t coro_id_{kNotACoro};
+    CoroControlBlock::pointer cb_{};
 
     trace_t trace_{0};
     ContTimer<::config::kEnableTrace> timer_;
+
+    WRID wait_wrid_{nullwrid};
 };
 
 static CoroContext nullctx;

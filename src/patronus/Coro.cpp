@@ -31,7 +31,8 @@ ServerCoroBatchExecutionContext::get_qp_rr()
 }
 
 bool ServerCoroBatchExecutionContext::commit(uint16_t prefix,
-                                             uint64_t rw_ctx_id)
+                                             uint64_t rw_ctx_id,
+                                             WRID &o_wrid)
 {
     if (unlikely(prepared_tasks_.empty()))
     {
@@ -42,11 +43,11 @@ bool ServerCoroBatchExecutionContext::commit(uint16_t prefix,
     bool ret = true;
     if (reuse_mw_opt_enabled_)
     {
-        ret = commit_with_mw_reuse_optimization(prefix, rw_ctx_id);
+        ret = commit_with_mw_reuse_optimization(prefix, rw_ctx_id, o_wrid);
     }
     else
     {
-        ret = commit_wo_mw_reuse_optimization(prefix, rw_ctx_id);
+        ret = commit_wo_mw_reuse_optimization(prefix, rw_ctx_id, o_wrid);
     }
 
     while (!free_mws_.empty())
@@ -86,9 +87,9 @@ void ServerCoroBatchExecutionContext::put_mw(ibv_mw *mw)
     }
 }
 bool ServerCoroBatchExecutionContext::commit_wo_mw_reuse_optimization(
-    uint16_t prefix, uint64_t rw_ctx_id)
+    uint16_t prefix, uint64_t rw_ctx_id, WRID &o_wrid)
 {
-    WRID signal_wrid{WRID_PREFIX_RESERVED_1, get_WRID_ID_RESERVED()};
+    WRID signal_wrid{WRID_PREFIX_NULLWRID, get_WRID_ID_RESERVED()};
 
     static thread_local ibv_send_wr wrs[max_wr_size()];
     static thread_local size_t wr_idx_to_task_idx[max_wr_size()];
@@ -150,6 +151,7 @@ bool ServerCoroBatchExecutionContext::commit_wo_mw_reuse_optimization(
             wr.next = nullptr;
             wr.send_flags |= IBV_SEND_SIGNALED;
             signal_wrid = wr.wr_id;
+            o_wrid = wr.wr_id;
         }
         else
         {
@@ -212,9 +214,9 @@ bool ServerCoroBatchExecutionContext::commit_wo_mw_reuse_optimization(
 }
 
 bool ServerCoroBatchExecutionContext::commit_with_mw_reuse_optimization(
-    uint16_t prefix, uint64_t rw_ctx_id)
+    uint16_t prefix, uint64_t rw_ctx_id, WRID &o_wrid)
 {
-    WRID signal_wrid{WRID_PREFIX_RESERVED_1, get_WRID_ID_RESERVED()};
+    WRID signal_wrid{WRID_PREFIX_NULLWRID, get_WRID_ID_RESERVED()};
 
     static thread_local ibv_send_wr wrs[max_wr_size()];
     static thread_local size_t wr_idx_to_task_idx[max_wr_size()];
@@ -304,6 +306,7 @@ bool ServerCoroBatchExecutionContext::commit_with_mw_reuse_optimization(
             wr.next = nullptr;
             wr.send_flags |= IBV_SEND_SIGNALED;
             signal_wrid = wr.wr_id;
+            o_wrid = wr.wr_id;
         }
         else
         {

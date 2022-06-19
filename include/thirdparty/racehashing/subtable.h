@@ -136,13 +136,15 @@ public:
         auto clear_view = slot_handle.view_after_clear();
         auto rdma_buf = rdma_adpt.get_rdma_buffer(8);
         DCHECK_GE(rdma_buf.size, 8);
-        CHECK_EQ(rdma_adpt.rdma_cas(remote,
-                                    expect_val,
-                                    clear_view.val(),
-                                    rdma_buf.buffer,
-                                    st_mem_handle_),
-                 kOk);
-        CHECK_EQ(rdma_adpt.commit(), kOk);
+        rdma_adpt
+            .rdma_cas(remote,
+                      expect_val,
+                      clear_view.val(),
+                      rdma_buf.buffer,
+                      0 /* flag */,
+                      st_mem_handle_)
+            .expect(RC::kOk);
+        rdma_adpt.commit().expect(RC::kOk);
         uint64_t read = *(uint64_t *) rdma_buf.buffer;
         bool success = read == expect_val;
         if (success)
@@ -329,10 +331,14 @@ public:
             bucket.header().suffix = suffix;
         }
 
-        CHECK_EQ(rdma_adpt.rdma_write(
-                     st_gaddr_, rdma_buf.buffer, st_size, st_mem_handle_),
-                 kOk);
-        CHECK_EQ(rdma_adpt.commit(), kOk);
+        rdma_adpt
+            .rdma_write(st_gaddr_,
+                        rdma_buf.buffer,
+                        st_size,
+                        0 /* flag */,
+                        st_mem_handle_)
+            .expect(RC::kOk);
+        rdma_adpt.commit().expect(RC::kOk);
 
         return kOk;
     }

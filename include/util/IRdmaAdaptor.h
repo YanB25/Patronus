@@ -127,9 +127,10 @@ struct MemHandleDecision
         ns = 0ns;
         return *this;
     }
-    MemHandleDecision &with_expire(std::chrono::nanoseconds expire_ns)
+    template <typename Duration>
+    MemHandleDecision &with_expire(Duration d)
     {
-        ns = expire_ns;
+        ns = d;
         relinquish_flag |= (flag_t) LeaseModifyFlag::kNoRpc;
         return *this;
     }
@@ -318,19 +319,23 @@ public:
     [[nodiscard]] virtual RetCode rdma_read(void *rdma_buf,
                                             GlobalAddress gaddr,
                                             size_t size,
+                                            flag_t flag,  // RWFlag
                                             RemoteMemHandle &) = 0;
     [[nodiscard]] virtual RetCode rdma_write(GlobalAddress gaddr,
                                              void *rdma_buf,
                                              size_t size,
+                                             flag_t flag,  // RWFlag
                                              RemoteMemHandle &) = 0;
     [[nodiscard]] virtual RetCode rdma_cas(GlobalAddress gaddr,
                                            uint64_t expect,
                                            uint64_t desired,
                                            void *rdma_buf,
+                                           flag_t flag,  // RWFlag
                                            RemoteMemHandle &) = 0;
     [[nodiscard]] virtual RetCode rdma_faa(GlobalAddress gaddr,
                                            int64_t value,
                                            void *rdma_buf,
+                                           flag_t flag,  // RWFlag
                                            RemoteMemHandle &) = 0;
     [[nodiscard]] virtual RetCode commit() = 0;
     virtual void put_all_rdma_buffer() = 0;

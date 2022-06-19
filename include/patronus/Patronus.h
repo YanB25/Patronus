@@ -145,14 +145,14 @@ public:
      * @param ctx sync call if ctx is nullptr. Otherwise coroutine context.
      * @return Read Lease
      */
-    inline Lease get_rlease(uint16_t node_id,
-                            uint16_t dir_id,
-                            GlobalAddress bind_gaddr,
-                            uint64_t alloc_hint,
-                            size_t size,
-                            std::chrono::nanoseconds ns,
-                            flag_t flag /* AcquireRequestFlag */,
-                            CoroContext *ctx);
+    [[nodiscard]] inline Lease get_rlease(uint16_t node_id,
+                                          uint16_t dir_id,
+                                          GlobalAddress bind_gaddr,
+                                          uint64_t alloc_hint,
+                                          size_t size,
+                                          std::chrono::nanoseconds ns,
+                                          flag_t flag /* AcquireRequestFlag */,
+                                          CoroContext *ctx);
     /**
      * @brief Alloc a piece of remote memory, without any permission binded
      *
@@ -666,6 +666,24 @@ private:
             mw_pool_[dirID].push(mw);
         }
     }
+    [[nodiscard]] inline Lease do_get_wlease(
+        uint16_t node_id,
+        uint16_t dir_id,
+        GlobalAddress bind_gaddr,
+        uint64_t alloc_hint,
+        size_t size,
+        std::chrono::nanoseconds ns,
+        flag_t flag /* AcquireRequestFlag */,
+        CoroContext *ctx = nullptr);
+    [[nodiscard]] inline Lease do_get_rlease(
+        uint16_t node_id,
+        uint16_t dir_id,
+        GlobalAddress bind_gaddr,
+        uint64_t alloc_hint,
+        size_t size,
+        std::chrono::nanoseconds ns,
+        flag_t flag /* AcquireRequestFlag */,
+        CoroContext *ctx);
 
 public:
     char *get_rdma_message_buffer()
@@ -1073,15 +1091,37 @@ GlobalAddress Patronus::alloc(uint16_t node_id,
     return get_gaddr(lease);
 }
 
-// gaddr is buffer offset
 Lease Patronus::get_rlease(uint16_t node_id,
                            uint16_t dir_id,
                            GlobalAddress bind_gaddr,
                            uint64_t alloc_hint,
                            size_t size,
-                           std::chrono::nanoseconds chrono_ns,
-                           flag_t flag,
+                           std::chrono::nanoseconds ns,
+                           flag_t flag /* AcquireRequestFlag */,
                            CoroContext *ctx)
+{
+    while (true)
+    {
+        auto ret = do_get_rlease(
+            node_id, dir_id, bind_gaddr, alloc_hint, size, ns, flag, ctx);
+        if (unlikely(!ret.success()) &&
+            ret.ec() == AcquireRequestStatus::kMagicMwErr)
+        {
+            continue;
+        }
+        return ret;
+    }
+}
+
+// gaddr is buffer offset
+Lease Patronus::do_get_rlease(uint16_t node_id,
+                              uint16_t dir_id,
+                              GlobalAddress bind_gaddr,
+                              uint64_t alloc_hint,
+                              size_t size,
+                              std::chrono::nanoseconds chrono_ns,
+                              flag_t flag,
+                              CoroContext *ctx)
 {
     bool only_alloc = flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
     bool with_alloc = flag & (flag_t) AcquireRequestFlag::kWithAllocation;
@@ -1126,15 +1166,37 @@ Lease Patronus::get_rlease(uint16_t node_id,
                           ctx);
 }
 
-// gaddr is buffer offset
 Lease Patronus::get_wlease(uint16_t node_id,
                            uint16_t dir_id,
                            GlobalAddress bind_gaddr,
                            uint64_t alloc_hint,
                            size_t size,
-                           std::chrono::nanoseconds chrono_ns,
-                           flag_t flag,
+                           std::chrono::nanoseconds ns,
+                           flag_t flag /* AcquireRequestFlag */,
                            CoroContext *ctx)
+{
+    while (true)
+    {
+        auto ret = do_get_wlease(
+            node_id, dir_id, bind_gaddr, alloc_hint, size, ns, flag, ctx);
+        if (unlikely(!ret.success()) &&
+            ret.ec() == AcquireRequestStatus::kMagicMwErr)
+        {
+            continue;
+        }
+        return ret;
+    }
+}
+
+// gaddr is buffer offset
+Lease Patronus::do_get_wlease(uint16_t node_id,
+                              uint16_t dir_id,
+                              GlobalAddress bind_gaddr,
+                              uint64_t alloc_hint,
+                              size_t size,
+                              std::chrono::nanoseconds chrono_ns,
+                              flag_t flag,
+                              CoroContext *ctx)
 {
     bool only_alloc = flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
     bool with_alloc = flag & (flag_t) AcquireRequestFlag::kWithAllocation;

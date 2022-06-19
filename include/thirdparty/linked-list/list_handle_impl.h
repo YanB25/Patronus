@@ -63,6 +63,7 @@ public:
             ->rdma_read(front_node_next_buf.buffer,
                         front_node_next_gaddr,
                         node_next_size,
+                        0 /* flag */,
                         front_node_handle)
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
@@ -79,6 +80,7 @@ public:
                        old_head.val,
                        node_next.val,
                        meta_pfront_buffer.buffer,
+                       0 /* flag */,
                        get_meta_handle())
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
@@ -104,6 +106,7 @@ public:
                     ->rdma_write(meta_tail_gaddr(),
                                  rdma_tail_buf.buffer,
                                  sizeof(Meta::ptail),
+                                 0 /* flag */,
                                  get_meta_handle())
                     .expect(RC::kOk);
                 rdma_adpt_->commit().expect(RC::kOk);
@@ -121,6 +124,7 @@ public:
                     ->rdma_read(object_buf.buffer,
                                 object_gaddr,
                                 sizeof(T),
+                                0 /* flag */,
                                 front_node_handle)
                     .expect(RC::kOk);
                 rdma_adpt_->commit().expect(RC::kOk);
@@ -147,6 +151,7 @@ public:
                        nullgaddr.val,
                        new_node_gaddr.val,
                        meta_tail_buf.buffer,
+                       0 /* flag */,
                        get_meta_handle())
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
@@ -165,6 +170,7 @@ public:
                            nullgaddr.val,
                            new_node_gaddr.val,
                            meta_head_buf.buffer,
+                           0 /* flag */,
                            get_meta_handle())
                 .expect(RC::kOk);
             rdma_adpt_->commit().expect(RC::kOk);
@@ -199,6 +205,7 @@ public:
                        nullgaddr.val,
                        new_node_gaddr.val,
                        next_ptr_buf.buffer,
+                       0 /* flag */,
                        tail_node_handle)
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
@@ -221,6 +228,7 @@ public:
                                old_meta_ptail.val,
                                new_node_gaddr.val,
                                meta_ptail_buf.buffer,
+                               0 /* flag */,
                                get_meta_handle())
                     .expect(RC::kOk);
                 rdma_adpt_->commit().expect(RC::kOk);
@@ -298,6 +306,7 @@ public:
         return rdma_adpt_->rdma_write(node_gaddr,
                                       object_rdma_buf.buffer,
                                       sizeof(ListNode<T>),
+                                      0 /* flag */,
                                       node_handle);
     }
 
@@ -339,6 +348,7 @@ public:
             ->rdma_write(tail_next_ptr_gaddr,
                          next_ptr_buf.buffer,
                          sizeof(ListNode<T>::next),
+                         0 /* flag */,
                          tail_node_handle)
             .expect(RC::kOk);
         // 3.2) update the meta->ptail, and meta->phead if necessary
@@ -406,8 +416,11 @@ public:
             auto node_size = sizeof(ListNode<T>);
             auto entry_buf = rdma_adpt_->get_rdma_buffer(node_size);
             rdma_adpt_
-                ->rdma_read(
-                    entry_buf.buffer, head_gaddr, node_size, entry_handle)
+                ->rdma_read(entry_buf.buffer,
+                            head_gaddr,
+                            node_size,
+                            0 /* flag */,
+                            entry_handle)
                 .expect(RC::kOk);
             rdma_adpt_->commit().expect(RC::kOk);
             const auto &node = *(ListNode<T> *) entry_buf.buffer;
@@ -423,6 +436,7 @@ public:
                 ->rdma_read(head_next_ptr_buf.buffer,
                             head_next_gaddr,
                             sizeof(ListNode<T>::next),
+                            0 /* flag */,
                             entry_handle)
                 .expect(RC::kOk);
             rdma_adpt_->commit().expect(RC::kOk);
@@ -476,6 +490,8 @@ public:
                 ->rdma_read(list_node_buf.buffer,
                             cur_list_node_gaddr,
                             sizeof(ListNode<T>),
+                            // TODO: make this never accessing expired handle
+                            (flag_t) RWFlag::kUseUniversalRkey,
                             handle)
                 .expect(RC::kOk);
             rdma_adpt_->commit().expect(RC::kOk);
@@ -518,7 +534,11 @@ public:
         auto &meta_handle = get_meta_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
         rdma_adpt_
-            ->rdma_read(rdma_buf.buffer, meta_gaddr(), meta_size(), meta_handle)
+            ->rdma_read(rdma_buf.buffer,
+                        meta_gaddr(),
+                        meta_size(),
+                        0 /* flag */,
+                        meta_handle)
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
 
@@ -539,9 +559,15 @@ public:
     [[nodiscard]] Buffer prepare_read_meta()
     {
         auto &meta_handle = get_meta_handle();
+        DCHECK(meta_handle.valid());
+        DCHECK_EQ(meta_handle.gaddr(), meta_gaddr());
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(meta_size());
         rdma_adpt_
-            ->rdma_read(rdma_buf.buffer, meta_gaddr(), meta_size(), meta_handle)
+            ->rdma_read(rdma_buf.buffer,
+                        meta_gaddr(),
+                        meta_size(),
+                        0 /* flag */,
+                        meta_handle)
             .expect(RC::kOk);
         return rdma_buf;
     }
@@ -565,8 +591,11 @@ public:
         const auto &m = cached_meta();
         memcpy(rdma_buf.buffer, &m, meta_size());
         rdma_adpt_
-            ->rdma_write(
-                meta_gaddr(), rdma_buf.buffer, meta_size(), meta_handle)
+            ->rdma_write(meta_gaddr(),
+                         rdma_buf.buffer,
+                         meta_size(),
+                         0 /* flag */,
+                         meta_handle)
             .expect(RC::kOk);
     }
     Meta &cached_meta()
@@ -621,6 +650,8 @@ private:
     RemoteMemHandle meta_acquire_perm(GlobalAddress gaddr, size_t size)
     {
         const auto &c = config_.rdma.meta_;
+        DCHECK(c.acquire_flag & (flag_t) AcquireRequestFlag::kNoGc)
+            << "** meta acquire without kNoGc ON";
         return rdma_adpt_->acquire_perm(
             gaddr, c.alloc_hint, size, c.ns, c.acquire_flag);
     }
@@ -678,8 +709,12 @@ private:
         auto &push_lock_handle = get_push_lock_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
         rdma_adpt_
-            ->rdma_cas(
-                push_lock_gaddr(), 0, 1, rdma_buf.buffer, push_lock_handle)
+            ->rdma_cas(push_lock_gaddr(),
+                       0,
+                       1,
+                       rdma_buf.buffer,
+                       0 /* flag */,
+                       push_lock_handle)
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
         rdma_adpt_->put_all_rdma_buffer();
@@ -713,6 +748,7 @@ private:
             ->rdma_write(push_lock_gaddr(),
                          rdma_buf.buffer,
                          sizeof(uint64_t),
+                         0 /* flag */,
                          push_lock_handle)
             .expect(RC::kOk);
     }
@@ -720,8 +756,12 @@ private:
     {
         auto &pop_lock_handle = get_pop_lock_handle();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(uint64_t));
-        auto rc = rdma_adpt_->rdma_cas(
-            pop_lock_gaddr(), 0, 1, rdma_buf.buffer, pop_lock_handle);
+        auto rc = rdma_adpt_->rdma_cas(pop_lock_gaddr(),
+                                       0,
+                                       1,
+                                       rdma_buf.buffer,
+                                       0 /* flag */,
+                                       pop_lock_handle);
         CHECK_EQ(rc, kOk);
         rc = rdma_adpt_->commit();
         CHECK_EQ(rc, kOk);
@@ -750,6 +790,7 @@ private:
             ->rdma_write(pop_lock_gaddr(),
                          rdma_buf.buffer,
                          sizeof(uint64_t),
+                         0 /* flag */,
                          pop_lock_handle)
             .expect(RC::kOk);
     }

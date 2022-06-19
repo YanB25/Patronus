@@ -1879,9 +1879,15 @@ void Patronus::handle_response_lease_extend(LeaseModifyResponse *resp)
 
 void Patronus::server_serve(uint64_t key)
 {
+    CHECK(ddl_manager_.empty());
+    const auto &comm = server_coro_ctx_.comm;
+    CHECK(comm.task_queue.empty());
+
     DVLOG(1) << "[patronus] server_serve(" << key << ")";
     auto &server_workers = server_coro_ctx_.server_workers;
     auto &server_master = server_coro_ctx_.server_master;
+
+    server_coro_ctx_.cb = CoroControlBlock::new_instance(kServerCoroNr);
 
     for (size_t i = 0; i < kServerCoroNr; ++i)
     {
@@ -1893,6 +1899,7 @@ void Patronus::server_serve(uint64_t key)
         [this, key](CoroYield &yield) { server_coro_master(yield, key); });
 
     server_master();
+    LOG(INFO) << "[debug] server_serve(" << key << ") leaved";
 }
 
 void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
@@ -1901,7 +1908,7 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
     auto dir_id = tid;
 
     auto &server_workers = server_coro_ctx_.server_workers;
-    CoroContext mctx(tid, &yield, server_workers);
+    CoroContext mctx(tid, &yield, server_workers, server_coro_ctx_.cb);
     auto &comm = server_coro_ctx_.comm;
     auto &task_pool = server_coro_ctx_.task_pool;
     auto &task_queue = comm.task_queue;
@@ -1930,6 +1937,7 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
         (uint64_t) 0, (uint64_t) config::umsg::kRecvLimit, (uint64_t) 1);
 
     while (likely(!should_exit(wait_key) || likely(!task_queue.empty())) ||
+           likely(!ddl_manager_.empty()) ||
            likely(!std::all_of(std::begin(comm.finished),
                                std::end(comm.finished),
                                [](bool i) { return i; })))
@@ -1953,20 +1961,19 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
             buffer_pool.put(buffer);
         }
 
-        if (!comm.task_queue.empty())
+        for (size_t i = 0; i < kMaxCoroNr; ++i)
         {
-            for (size_t i = 0; i < kMaxCoroNr; ++i)
+            // each loop will context switch to worker coro
+            // so need to check the condition each time.
+            if (!comm.task_queue.empty() || !ddl_manager_.empty())
             {
-                if (!comm.task_queue.empty())
+                // it finished its last reqeust.
+                if (comm.finished[i])
                 {
-                    // it finished its last reqeust.
-                    if (comm.finished[i])
-                    {
-                        comm.finished[i] = false;
-                        DVLOG(4) << "[patronus] yield to " << (int) i
-                                 << " for further new task. " << mctx;
-                        mctx.yield_to_worker(i);
-                    }
+                    comm.finished[i] = false;
+                    DVLOG(4) << "[patronus] yield to " << (int) i
+                             << " for further new task. " << mctx;
+                    mctx.yield_to_worker(i);
                 }
             }
         }
@@ -1977,8 +1984,6 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
         // handle finished CQEs
         nr = dsm_->try_poll_dir_cq(wc_buffer, dir_id, kBufferSize);
 
-        // TODO(patronus): server can recovery before client telling it to do.
-        // bool need_recovery = false;
         for (size_t i = 0; i < nr; ++i)
         {
             auto &wc = wc_buffer[i];
@@ -2937,8 +2942,13 @@ void Patronus::server_coro_worker(coro_t coro_id,
                                   uint64_t wait_key)
 {
     auto tid = get_thread_id();
-    CoroContext ctx(tid, &yield, &server_coro_ctx_.server_master, coro_id);
     auto &comm = server_coro_ctx_.comm;
+    CoroContext ctx(tid,
+                    &yield,
+                    &server_coro_ctx_.server_master,
+                    coro_id,
+                    server_coro_ctx_.cb);
+
     auto &task_queue = comm.task_queue;
     auto &task_pool = server_coro_ctx_.task_pool;
     auto &buffer_pool = *server_coro_ctx_.buffer_pool;
@@ -2949,41 +2959,54 @@ void Patronus::server_coro_worker(coro_t coro_id,
     // OnePassBucketMonitor<double> per_qp_batch_m(min, max, rng);
 
     auto &ex_ctx = coro_ex_ctx(coro_id);
-    while (likely(!should_exit(wait_key) || !task_queue.empty()))
+    while (likely(!should_exit(wait_key) || likely(!task_queue.empty())) ||
+           likely(!ddl_manager_.empty()))
     {
-        DCHECK(!task_queue.empty());
-        auto task = task_queue.front();
-        task->active_coro_nr++;
-        DCHECK_GT(task->msg_nr, 0);
-        size_t remain_task_nr = task->msg_nr - task->fetched_nr;
-        DCHECK_GE(remain_task_nr, 0);
-        size_t acquire_task = std::min(
-            remain_task_nr, config::patronus::kHandleRequestBatchLimit);
-        auto *msg_buf = task->buf + kMessageSize * task->fetched_nr;
-
-        task->fetched_nr += acquire_task;
-        DCHECK_LE(task->fetched_nr, task->msg_nr);
-
-        DVLOG(4) << "[patronus] server acquiring task @" << (void *) task
-                 << ": " << *task << ", handle " << acquire_task
-                 << ". coro: " << ctx;
-
-        if (task->fetched_nr == task->msg_nr)
+        // try to fetch tasks from task_queue (if exists)
+        const char *msg_buf = nullptr;
+        size_t acquire_task = 0;
+        ServerCoroTask *task = nullptr;
+        if (likely(!task_queue.empty()))
         {
-            // pop the task from the queue
-            // so that the following coroutine will not be able to access this
-            // task however, the task is still ACTIVE, becase
-            // @task->active_coro_nr coroutines are still sharing the task
-            task_queue.pop();
+            task = DCHECK_NOTNULL(task_queue.front());
+            task->active_coro_nr++;
+            DCHECK_GT(task->msg_nr, 0);
+            size_t remain_task_nr = task->msg_nr - task->fetched_nr;
+            DCHECK_GE(remain_task_nr, 0);
+            acquire_task = std::min(remain_task_nr,
+                                    config::patronus::kHandleRequestBatchLimit);
+            msg_buf = task->buf + kMessageSize * task->fetched_nr;
+
+            task->fetched_nr += acquire_task;
+            DCHECK_LE(task->fetched_nr, task->msg_nr);
+
+            DVLOG(4) << "[patronus] server acquiring task @" << (void *) task
+                     << ": " << *task << ", handle " << acquire_task
+                     << ". coro: " << ctx;
+
+            if (task->fetched_nr == task->msg_nr)
+            {
+                // pop the task from the queue
+                // so that the following coroutine will not be able to access
+                // this task however, the task is still ACTIVE, becase
+                // @task->active_coro_nr coroutines are still sharing the task
+                task_queue.pop();
+            }
+
+            ex_ctx.clear();
+
+            DVLOG(4) << "[patronus] server handling task @" << (void *) task
+                     << ", message_nr " << task->msg_nr << ", handle "
+                     << acquire_task << ". coro: " << ctx;
         }
 
-        ex_ctx.clear();
-
-        DVLOG(4) << "[patronus] server handling task @" << (void *) task
-                 << ", message_nr " << task->msg_nr << ", handle "
-                 << acquire_task << ". coro: " << ctx;
         // prepare never switches
-        prepare_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
+        if (task)
+        {
+            prepare_handle_request_messages(
+                msg_buf, acquire_task, ex_ctx, &ctx);
+        }
+
         // NOTE: worker coroutine poll tasks here
         // NOTE: we combine wrs, so put do_task here.
         DCHECK_GE(2 * ex_ctx.remain_size(), ex_ctx.max_wr_size())
@@ -2997,20 +3020,26 @@ void Patronus::server_coro_worker(coro_t coro_id,
                                  // one task may have two wr at most
                                  ex_ctx.remain_size() / 2);
         }
+
+        // this function must call even if acquire_task == 0
+        // because we have tasks from ddl_maanger
         commit_handle_request_messages(ex_ctx, &ctx);
-        post_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
+
+        if (task)
+        {
+            post_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
+            DCHECK_NOTNULL(task)->active_coro_nr--;
+
+            if (task->active_coro_nr == 0 && (task->fetched_nr == task->msg_nr))
+            {
+                DVLOG(4) << "[patronus] server handling callback of task @"
+                         << (void *) task << ": " << *task << ". coro: " << ctx;
+                buffer_pool.put((void *) task->buf);
+                task_pool.put(task);
+            }
+        }
 
         // debug_analysis_per_qp_batch(msg_buf, acquire_task, per_qp_batch_m);
-
-        task->active_coro_nr--;
-
-        if (task->active_coro_nr == 0 && (task->fetched_nr == task->msg_nr))
-        {
-            DVLOG(4) << "[patronus] server handling callback of task @"
-                     << (void *) task << ": " << *task << ". coro: " << ctx;
-            buffer_pool.put((void *) task->buf);
-            task_pool.put(task);
-        }
 
         DVLOG(4) << "[patronus] server " << ctx
                  << " finished current task. yield to master.";
@@ -3020,7 +3049,9 @@ void Patronus::server_coro_worker(coro_t coro_id,
     }
 
     DVLOG(3) << "[bench] server coro: " << ctx << " exit.";
+    comm.finished[coro_id] = true;
     ctx.yield_to_master();
+    CHECK(false) << "** never reach here";
 }
 
 void Patronus::commit_handle_request_messages(
@@ -3033,10 +3064,13 @@ void Patronus::commit_handle_request_messages(
     rw_ctx->ready = false;
     rw_ctx->wc_status = IBV_WC_SUCCESS;
 
-    bool has_work = ex_ctx.commit(WRID_PREFIX_PATRONUS_BATCH, rw_ctx_id);
+    WRID wait_wrid{nullwrid};
+    bool has_work =
+        ex_ctx.commit(WRID_PREFIX_PATRONUS_BATCH, rw_ctx_id, wait_wrid);
     if (has_work)
     {
-        ctx->yield_to_master();
+        DCHECK_NE(wait_wrid, nullwrid);
+        ctx->yield_to_master(wait_wrid);
         DCHECK(rw_ctx->ready);
     }
 

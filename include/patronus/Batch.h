@@ -244,7 +244,7 @@ public:
                         << WRID(bad_wr_->wr_id) << ", ret: " << ret;
             return RC::kRdmaExecutionErr;
         }
-        CHECK_NOTNULL(ctx)->yield_to_master();
+        CHECK_NOTNULL(ctx)->yield_to_master(wr_id);
 
         clear();
         trace.pin("ibv_post");

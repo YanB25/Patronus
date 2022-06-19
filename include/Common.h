@@ -306,7 +306,7 @@ constexpr static bool kMonitorReconnection = false;
 constexpr static bool kMonitorFailureRecovery = false;
 constexpr static bool kMonitorAddressConversion = false;
 
-constexpr static bool kReportTraceViewRoute = false;
+constexpr static bool kReportTraceViewRoute = true;
 
 constexpr static bool kEnableReliableMessageSingleThread = true;
 constexpr static bool kEnableSkipMagicMw = true;

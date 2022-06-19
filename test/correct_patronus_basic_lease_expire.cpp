@@ -7,21 +7,19 @@
 #include "gflags/gflags.h"
 #include "patronus/Patronus.h"
 #include "util/PerformanceReporter.h"
+#include "util/TimeConv.h"
 #include "util/monitor.h"
 using namespace std::chrono_literals;
 using namespace define::literals;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-constexpr static size_t kTestTime = 5_K;
+constexpr static size_t kTestTime = 50_K;
 
 using namespace patronus;
 constexpr static size_t kCoroCnt = 1;
 thread_local CoroCall workers[kCoroCnt];
 thread_local CoroCall master;
-
-constexpr static size_t kMachineNr = 2;
-constexpr static size_t kClientNodeId = 1;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static uint64_t kKey = 0;
@@ -56,6 +54,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     auto key = kKey;
     auto &syncer = p->time_syncer();
 
+    LOG(INFO) << "[debug] !!! client entered. tid: " << tid;
+
     auto server_nid = ::config::get_server_nids().front();
 
     CoroContext ctx(tid, &yield, &master, coro_id);
@@ -64,29 +64,30 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     client_comm.finish_cur_task[coro_id] = false;
     client_comm.finish_all_task[coro_id] = false;
 
-    OnePassMonitor read_nr_before_expire_m;
-    OnePassMonitor fail_to_unbind_m;
+    // OnePassMonitor read_nr_before_expire_m;
+    // OnePassMonitor fail_to_unbind_m;
+    auto min = util::time::to_ns(0ns);
+    auto max = util::time::to_ns(10ms);
+    auto avg = util::time::to_ns(1us);
     OnePassMonitor remain_ddl_m;
+    OnePassBucketMonitor get_rlease_ns_m(min, max, avg);
 
     for (size_t i = 0; i < kTestTime; ++i)
     {
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
-        auto before_get_rlease = std::chrono::steady_clock::now();
         auto locate_offset = bench_locator(key);
+        ChronoTimer get_rlease_timer;
         Lease lease = p->get_rlease(server_nid,
                                     dir_id,
                                     GlobalAddress(0, locate_offset),
                                     0 /* alloc_hint */,
                                     sizeof(Object),
-                                    100us,
+                                    1ms,
                                     0 /* no flag */,
                                     &ctx);
-        auto after_get_rlease = std::chrono::steady_clock::now();
-        auto get_rlease_ns =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                after_get_rlease - before_get_rlease)
-                .count();
-        CHECK(lease.success());
+        auto get_rlease_ns = get_rlease_timer.pin();
+        get_rlease_ns_m.collect(get_rlease_ns);
+        CHECK(lease.success()) << "** get_rlease failed. lease: " << lease;
 
         auto lease_ddl = lease.ddl_term();
         auto now = syncer.patronus_now();
@@ -105,84 +106,40 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         VLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
 
-        size_t read_nr = 0;
-        for (size_t t = 0; t < 100; ++t)
-        {
-            auto ec = p->read(lease,
-                              rdma_buf.buffer,
-                              sizeof(Object),
-                              0 /* offset */,
-                              0 /* flag */,
-                              &ctx);
-            if (ec != RC::kOk)
-            {
-                auto patronus_now = syncer.patronus_now();
-                time::ns_t ns_diff = lease.ddl_term() - patronus_now;
-                if (ns_diff <= syncer.epsilon())
-                {
-                    VLOG(2) << "[bench] read fails because of lease expired";
-                }
-                else
-                {
-                    CHECK_EQ(ec, RC::kOk)
-                        << "[bench] " << i << "-th, read " << t
-                        << "-th failed. lease until DDL: " << ns_diff
-                        << ", patronus_now: " << patronus_now;
-                }
-            }
-            else
-            {
-                read_nr++;
-                DVLOG(2) << "[bench] client coro " << ctx << " read finished";
-                Object magic_object = *(Object *) rdma_buf.buffer;
-                CHECK_EQ(magic_object.target, kMagic)
-                    << "coro_id " << ctx << ", Read at key " << key
-                    << ", lease.base: " << (void *) lease.base_addr();
-            }
-        }
-        read_nr_before_expire_m.collect(read_nr);
-
-        // to make sure the server really gc the lea se
-        std::this_thread::sleep_for(100us +
-                                    std::chrono::nanoseconds(syncer.epsilon()));
-        // the lease is expired (maybe by client's decision)
-        // force to send here
-        // if actually issue read, QP should fails
-        VLOG(3) << "[bench] before read, patronus_time: "
-                << syncer.patronus_now();
-        auto ec = p->read(lease,
+        // size_t read_nr = 0;
+        auto rc = p->read(lease,
                           rdma_buf.buffer,
                           sizeof(Object),
-                          0,
-                          (flag_t) RWFlag::kNoLocalExpireCheck,
+                          0 /* offset */,
+                          0 /* flag */,
                           &ctx);
-
-        if (ec == RC::kOk)
+        if (unlikely(rc != RC::kOk))
         {
-            fail_to_unbind_m.collect(1);
-        }
-        else
-        {
-            fail_to_unbind_m.collect(0);
+            auto now = syncer.patronus_now();
+            auto now_to_ddl = lease.ddl_term() - now;
+            CHECK_EQ(rc, RC::kOk)
+                << "** Failed to read. get_lease takes " << get_rlease_ns
+                << " ns, when lease is got, remains " << diff_ns
+                << " ns to ddl. now: " << now
+                << ", now to ddl remains: " << now_to_ddl
+                << " ns. lease: " << lease;
         }
 
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
 
-        // make sure this will take no harm.
-        p->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);
-
         p->put_rdma_buffer(rdma_buf);
     }
 
-    LOG(INFO) << "[bench] remain_ddl: " << remain_ddl_m;
-    LOG(INFO) << "[bench] read_nr before lease expire: "
-              << read_nr_before_expire_m;
+    // LOG(INFO) << "[bench] remain_ddl: " << remain_ddl_m;
+    // LOG(INFO) << "[bench] read_nr before lease expire: "
+    //           << read_nr_before_expire_m;
 
-    LOG_IF(ERROR, fail_to_unbind_m.max() > 0)
-        << "[bench] in some tests, server fails to expire the lease "
-           "immediately. fail_to_unbind_nr: "
-        << fail_to_unbind_m << ". failed_nr: " << fail_to_unbind_m.sum();
+    // LOG_IF(ERROR, fail_to_unbind_m.max() > 0)
+    //     << "[bench] in some tests, server fails to expire the lease "
+    //        "immediately. fail_to_unbind_nr: "
+    //     << fail_to_unbind_m << ". failed_nr: " << fail_to_unbind_m.sum();
+    LOG(INFO) << "[bench] get_rlease_ns_m: " << get_rlease_ns_m;
 
     client_comm.still_has_work[coro_id] = false;
     client_comm.finish_cur_task[coro_id] = true;
@@ -238,12 +195,7 @@ void client_master(Patronus::pointer p, CoroYield &yield)
 void client(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
-    auto nid = p->get_node_id();
     LOG(INFO) << "I am client. tid " << tid;
-    if (nid != kClientNodeId)
-    {
-        return;
-    }
     for (size_t i = 0; i < kCoroCnt; ++i)
     {
         workers[i] =
@@ -274,13 +226,14 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
 
     auto patronus = Patronus::ins(config);
 
     auto nid = patronus->get_node_id();
     if (::config::is_client(nid))
     {
+        LOG(INFO) << "[debug] !!!! I am client";
         patronus->registerClientThread();
         patronus->keeper_barrier("begin", 100ms);
         client(patronus);

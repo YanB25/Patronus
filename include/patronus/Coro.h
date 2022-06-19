@@ -50,6 +50,7 @@ struct ServerCoroContext
         task_pool;
     std::unique_ptr<ThreadUnsafeBufferPool<::config::umsg::kMaxRecvBuffer>>
         buffer_pool;
+    CoroControlBlock::pointer cb;
 };
 
 struct HandleReqContext
@@ -244,7 +245,7 @@ public:
         DCHECK_LT(req_id, req_idx_);
         return req_ctx_[req_id];
     }
-    bool commit(uint16_t prefix, uint64_t rw_ctx_id);
+    bool commit(uint16_t prefix, uint64_t rw_ctx_id, WRID &o_wrid);
 
     size_t prepared_size() const
     {
@@ -259,8 +260,12 @@ public:
                                     const ServerCoroBatchExecutionContext &ctx);
 
 private:
-    bool commit_wo_mw_reuse_optimization(uint16_t prefix, uint64_t rw_ctx_id);
-    bool commit_with_mw_reuse_optimization(uint16_t prefix, uint64_t rw_ctx_id);
+    bool commit_wo_mw_reuse_optimization(uint16_t prefix,
+                                         uint64_t rw_ctx_id,
+                                         WRID &o_wrid);
+    bool commit_with_mw_reuse_optimization(uint16_t prefix,
+                                           uint64_t rw_ctx_id,
+                                           WRID &o_wrid);
 
     Patronus *patronus_{nullptr};
     DSM::pointer dsm_;

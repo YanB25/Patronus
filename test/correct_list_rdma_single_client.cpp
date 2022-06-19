@@ -495,10 +495,11 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bar.wait();
 
     std::vector<ListHandleConfig> handle_configs;
-    handle_configs.push_back(
-        ListHandleConfig(false /* lock free */, false /* bypass prot */));
-    handle_configs.push_back(
-        ListHandleConfig(true /* lock free */, false /* bypass prot */));
+
+    handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_free());
+    handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_base());
+    handle_configs.emplace_back(ListHandleConfig().use_rpc());
+    handle_configs.emplace_back(ListHandleConfig().use_mw_lease(1ms));
 
     for (const auto &handle_conf : handle_configs)
     {

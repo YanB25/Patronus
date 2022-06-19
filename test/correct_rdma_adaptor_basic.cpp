@@ -71,7 +71,8 @@ void client_worker(Patronus::pointer p,
         DCHECK_GE(rdma_buf.size, 128);
         // expect okay
         {
-            auto rc = rdma_adpt->rdma_write(gaddr, rdma_buf.buffer, 64, handle);
+            auto rc = rdma_adpt->rdma_write(
+                gaddr, rdma_buf.buffer, 64, 0 /* flag */, handle);
             CHECK_EQ(rc, kOk);
             rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
@@ -80,7 +81,7 @@ void client_worker(Patronus::pointer p,
         // write with offset 32 and length 32 (till the end)
         {
             auto rc = rdma_adpt->rdma_write(
-                gaddr + 32, rdma_buf.buffer + 32, 32, handle);
+                gaddr + 32, rdma_buf.buffer + 32, 32, 0 /* flag */, handle);
             CHECK_EQ(rc, kOk);
             rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
@@ -89,8 +90,8 @@ void client_worker(Patronus::pointer p,
         // this will generate protection error
         // write one more byte than protected
         {
-            auto rc1 =
-                rdma_adpt->rdma_write(gaddr, rdma_buf.buffer, 65, handle);
+            auto rc1 = rdma_adpt->rdma_write(
+                gaddr, rdma_buf.buffer, 65, 0 /* flag */, handle);
             auto rc2 = rdma_adpt->commit();
             if (rc1 == kOk && rc2 == kOk)
             {
@@ -106,8 +107,8 @@ void client_worker(Patronus::pointer p,
         // this will generate protection error
         // write 64 byte but with one byte offset
         {
-            auto rc1 =
-                rdma_adpt->rdma_write(gaddr + 1, rdma_buf.buffer, 64, handle);
+            auto rc1 = rdma_adpt->rdma_write(
+                gaddr + 1, rdma_buf.buffer, 64, 0 /* flag */, handle);
             auto rc2 = rdma_adpt->commit();
             if (rc1 == kOk && rc2 == kOk)
             {
@@ -140,7 +141,7 @@ void client_worker(Patronus::pointer p,
         // expect okay
         {
             auto rc = rdma_adpt->rdma_write(
-                handle.gaddr(), rdma_buf.buffer, 64, handle);
+                handle.gaddr(), rdma_buf.buffer, 64, 0 /* flag */, handle);
             CHECK_EQ(rc, kOk);
             rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
@@ -148,8 +149,11 @@ void client_worker(Patronus::pointer p,
         // expact okay again
         {
             // write with offset 32 and length 32 (till the end)
-            auto rc = rdma_adpt->rdma_write(
-                handle.gaddr() + 32, rdma_buf.buffer + 32, 32, handle);
+            auto rc = rdma_adpt->rdma_write(handle.gaddr() + 32,
+                                            rdma_buf.buffer + 32,
+                                            32,
+                                            0 /* flag */,
+                                            handle);
             CHECK_EQ(rc, kOk);
             rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
@@ -159,7 +163,7 @@ void client_worker(Patronus::pointer p,
         // write one more byte
         {
             auto rc1 = rdma_adpt->rdma_write(
-                handle.gaddr(), rdma_buf.buffer, 65, handle);
+                handle.gaddr(), rdma_buf.buffer, 65, 0 /* flag */, handle);
             auto rc2 = rdma_adpt->commit();
             if (rc1 == kOk && rc2 == kOk)
             {
@@ -176,7 +180,7 @@ void client_worker(Patronus::pointer p,
         // write one 64 byte but with additional offset 1
         {
             auto rc1 = rdma_adpt->rdma_write(
-                handle.gaddr() + 1, rdma_buf.buffer, 64, handle);
+                handle.gaddr() + 1, rdma_buf.buffer, 64, 0 /* flag */, handle);
             auto rc2 = rdma_adpt->commit();
             if (rc1 == kOk && rc2 == kOk)
             {
@@ -226,7 +230,7 @@ void client_worker(Patronus::pointer p,
             CHECK_GE(rdma_w_buf.size, kAllocSize);
             fast_pseudo_fill_buf(rdma_w_buf.buffer, kAllocSize);
             auto rc = rdma_adpt->rdma_write(
-                gaddr, rdma_w_buf.buffer, kAllocSize, handle);
+                gaddr, rdma_w_buf.buffer, kAllocSize, 0 /* flag */, handle);
             CHECK_EQ(rc, kOk);
             rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
@@ -235,7 +239,7 @@ void client_worker(Patronus::pointer p,
             auto rdma_r_buf = rdma_adpt->get_rdma_buffer(kAllocSize);
             CHECK_GE(rdma_r_buf.size, kAllocSize);
             rc = rdma_adpt->rdma_read(
-                rdma_r_buf.buffer, gaddr, kAllocSize, handle);
+                rdma_r_buf.buffer, gaddr, kAllocSize, 0 /* flag */, handle);
             CHECK_EQ(rc, kOk);
             rc = rdma_adpt->commit();
             CHECK_EQ(rc, kOk);
@@ -273,7 +277,9 @@ void client_worker(Patronus::pointer p,
                                     (flag_t) AcquireRequestFlag::kNoGc |
                                         (flag_t) AcquireRequestFlag::kNoBindPR);
         auto test_buf = rdma_adpt->get_rdma_buffer(sizeof(Test));
-        rdma_adpt->rdma_read(test_buf.buffer, test_gaddr, sizeof(Test), handle)
+        rdma_adpt
+            ->rdma_read(
+                test_buf.buffer, test_gaddr, sizeof(Test), 0 /* flag */, handle)
             .expect(RC::kOk);
         rdma_adpt->commit().expect(RC::kOk);
         const auto &got_test = *(Test *) test_buf.buffer;

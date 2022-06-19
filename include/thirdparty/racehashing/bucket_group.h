@@ -79,7 +79,7 @@ public:
             << "[race][mem] in bucket_group::read: gaddr_: " << gaddr_
             << ", buffer: " << (void *) buffer_;
         return rdma_adpt.rdma_read(
-            (char *) buffer_, gaddr_, size_bytes(), handle);
+            (char *) buffer_, gaddr_, size_bytes(), 0 /* flag */, handle);
     }
 
     RetCode locate(uint8_t fp,

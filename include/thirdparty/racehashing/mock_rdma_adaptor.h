@@ -215,6 +215,7 @@ public:
     RetCode rdma_read(void *rdma_buf,
                       GlobalAddress gaddr,
                       size_t size,
+                      [[maybe_unused]] flag_t flag,
                       RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
@@ -231,6 +232,7 @@ public:
     RetCode rdma_write(GlobalAddress gaddr,
                        void *rdma_buf,
                        size_t size,
+                       [[maybe_unused]] flag_t flag,
                        RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
@@ -248,6 +250,7 @@ public:
     RetCode rdma_faa(GlobalAddress gaddr,
                      int64_t value,
                      void *rdma_buf,
+                     [[maybe_unused]] flag_t flag,
                      RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);
@@ -267,6 +270,7 @@ public:
                      uint64_t expect,
                      uint64_t desired,
                      void *rdma_buf,
+                     [[maybe_unused]] flag_t flag,
                      RemoteMemHandle &handle) override
     {
         auto *addr = from_exposed_gaddr(gaddr);

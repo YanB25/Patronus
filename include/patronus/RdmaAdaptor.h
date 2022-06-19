@@ -322,6 +322,7 @@ public:
     RetCode rdma_read(void *rdma_buf,
                       GlobalAddress vaddr,
                       size_t size,
+                      flag_t flag,
                       RemoteMemHandle &handle) override
     {
         CHECK(handle.valid());
@@ -329,7 +330,7 @@ public:
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        flag |= (flag_t) RWFlag::kNoLocalExpireCheck;
         if (bypass_prot_)
         {
             flag |= (flag_t) RWFlag::kUseUniversalRkey;
@@ -344,7 +345,7 @@ public:
         {
             CHECK_EQ(patronus_->commit(batch_, coro_ctx_), kOk);
             DCHECK(batch_.empty());
-            return rdma_read(rdma_buf, vaddr, size, handle);
+            return rdma_read(rdma_buf, vaddr, size, flag, handle);
         }
 
         if constexpr (::config::kEnableRdmaTrace)
@@ -364,6 +365,7 @@ public:
     RetCode rdma_write(GlobalAddress vaddr,
                        void *rdma_buf,
                        size_t size,
+                       flag_t flag,
                        RemoteMemHandle &handle) override
     {
         CHECK(handle.valid());
@@ -371,7 +373,7 @@ public:
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        flag |= (flag_t) RWFlag::kNoLocalExpireCheck;
         if (bypass_prot_)
         {
             flag |= (flag_t) RWFlag::kUseUniversalRkey;
@@ -386,7 +388,7 @@ public:
         {
             CHECK_EQ(patronus_->commit(batch_, coro_ctx_), kOk);
             DCHECK(batch_.empty());
-            return rdma_write(vaddr, rdma_buf, size, handle);
+            return rdma_write(vaddr, rdma_buf, size, flag, handle);
         }
 
         if constexpr (::config::kEnableRdmaTrace)
@@ -404,6 +406,7 @@ public:
     RetCode rdma_faa(GlobalAddress vaddr,
                      int64_t value,
                      void *rdma_buf,
+                     flag_t flag,
                      RemoteMemHandle &handle) override
     {
         CHECK(handle.valid());
@@ -419,7 +422,7 @@ public:
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        flag |= (flag_t) RWFlag::kNoLocalExpireCheck;
         if (bypass_prot_)
         {
             flag |= (flag_t) RWFlag::kUseUniversalRkey;
@@ -434,7 +437,7 @@ public:
         {
             CHECK_EQ(patronus_->commit(batch_, coro_ctx_), kOk);
             DCHECK(batch_.empty());
-            return rdma_faa(vaddr, value, rdma_buf, handle);
+            return rdma_faa(vaddr, value, rdma_buf, flag, handle);
         }
         return rc;
     }
@@ -442,6 +445,7 @@ public:
                      uint64_t expect,
                      uint64_t desired,
                      void *rdma_buf,
+                     flag_t flag,
                      RemoteMemHandle &handle) override
     {
         CHECK(handle.valid());
@@ -457,7 +461,7 @@ public:
         auto &lease = *(Lease *) handle.private_data();
         CHECK_GE(gaddr.offset, handle.gaddr().offset);
         auto offset = gaddr.offset - handle.gaddr().offset;
-        auto flag = (flag_t) RWFlag::kNoLocalExpireCheck;
+        flag |= (flag_t) RWFlag::kNoLocalExpireCheck;
         if (bypass_prot_)
         {
             flag |= (flag_t) RWFlag::kUseUniversalRkey;
@@ -478,7 +482,7 @@ public:
         {
             CHECK_EQ(patronus_->commit(batch_, coro_ctx_), kOk);
             DCHECK(batch_.empty());
-            return rdma_cas(vaddr, expect, desired, rdma_buf, handle);
+            return rdma_cas(vaddr, expect, desired, rdma_buf, flag, handle);
         }
         return rc;
     }

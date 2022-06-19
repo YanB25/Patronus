@@ -215,8 +215,11 @@ public:
         DCHECK_GE(rdma_buf.size, meta_size());
         RetCode rc;
         auto &dir_mem_handle = get_directory_mem_handle();
-        rc = rdma_adpt_->rdma_read(
-            rdma_buf.buffer, table_meta_addr_, meta_size(), dir_mem_handle);
+        rc = rdma_adpt_->rdma_read(rdma_buf.buffer,
+                                   table_meta_addr_,
+                                   meta_size(),
+                                   0 /* flag */,
+                                   dir_mem_handle);
         CHECK_EQ(rc, kOk);
 
         rc = rdma_adpt_->commit();
@@ -452,10 +455,14 @@ public:
             uint64_t expect = 0;   // no lock
             uint64_t desired = 1;  // lock
             auto &dir_mem_handle = get_directory_mem_handle();
-            CHECK_EQ(
-                rdma_adpt_->rdma_cas(
-                    remote, expect, desired, rdma_buf.buffer, dir_mem_handle),
-                kOk);
+            rdma_adpt_
+                ->rdma_cas(remote,
+                           expect,
+                           desired,
+                           rdma_buf.buffer,
+                           0 /* flag */,
+                           dir_mem_handle)
+                .expect(RC::kOk);
             auto rc = rdma_adpt_->commit();
             if (unlikely(rc == kRdmaProtectionErr))
             {
@@ -498,8 +505,11 @@ public:
             auto remote = lock_remote_addr(subtable_idx);
             *(uint64_t *) DCHECK_NOTNULL(rdma_buf.buffer) = 0;  // no lock
             auto &dir_mem_handle = get_directory_mem_handle();
-            return rdma_adpt_->rdma_write(
-                remote, (char *) rdma_buf.buffer, 8, dir_mem_handle);
+            return rdma_adpt_->rdma_write(remote,
+                                          (char *) rdma_buf.buffer,
+                                          8,
+                                          0 /* flag */,
+                                          dir_mem_handle);
         }
     }
     RetCode expand_write_entry_nodrain(size_t subtable_idx,
@@ -512,8 +522,11 @@ public:
         *(uint64_t *) rdma_buf.buffer = subtable_remote_addr.val;
         auto remote = entries_remote_addr(subtable_idx);
         auto &dir_mem_handle = get_directory_mem_handle();
-        return rdma_adpt_->rdma_write(
-            remote, (char *) rdma_buf.buffer, entry_size, dir_mem_handle);
+        return rdma_adpt_->rdma_write(remote,
+                                      (char *) rdma_buf.buffer,
+                                      entry_size,
+                                      0 /* flag */,
+                                      dir_mem_handle);
     }
     GlobalAddress entries_remote_addr(size_t subtable_idx) const
     {
@@ -543,8 +556,11 @@ public:
         *(ld_t *) rdma_buf.buffer = ld;
         auto remote = ld_remote_addr(subtable_idx);
         auto &dir_mem_handle = get_directory_mem_handle();
-        return rdma_adpt_->rdma_write(
-            remote, (char *) rdma_buf.buffer, entry_size, dir_mem_handle);
+        return rdma_adpt_->rdma_write(remote,
+                                      (char *) rdma_buf.buffer,
+                                      entry_size,
+                                      0 /* flag */,
+                                      dir_mem_handle);
     }
     GlobalAddress gd_remote_addr() const
     {
@@ -556,9 +572,14 @@ public:
         DCHECK_GE(rdma_buf.size, 8);
         auto remote = gd_remote_addr();
         auto &dir_mem_handle = get_directory_mem_handle();
-        CHECK_EQ(rdma_adpt_->rdma_cas(
-                     remote, expect, desired, rdma_buf.buffer, dir_mem_handle),
-                 kOk);
+        rdma_adpt_
+            ->rdma_cas(remote,
+                       expect,
+                       desired,
+                       rdma_buf.buffer,
+                       0 /* flag */,
+                       dir_mem_handle)
+            .expect(RC::kOk);
         auto rc = rdma_adpt_->commit();
         if (unlikely(rc == kRdmaProtectionErr))
         {
@@ -616,8 +637,11 @@ public:
         *(uint64_t *) rdma_buf.buffer = new_remote_subtable.val;
         auto remote = entries_remote_addr(subtable_idx);
         auto &dir_mem_handle = get_directory_mem_handle();
-        return rdma_adpt_->rdma_write(
-            remote, (char *) rdma_buf.buffer, size, dir_mem_handle);
+        return rdma_adpt_->rdma_write(remote,
+                                      (char *) rdma_buf.buffer,
+                                      size,
+                                      0 /* flag */,
+                                      dir_mem_handle);
     }
     /**
      * pre-condition: the subtable of dst_staddr is all empty.
@@ -631,11 +655,13 @@ public:
         auto st_size = SubTableT::size_bytes();
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(st_size);
         DCHECK_GE(rdma_buf.size, st_size);
-        CHECK_EQ(rdma_adpt_->rdma_read(rdma_buf.buffer,
-                                       src_st_handle.gaddr(),
-                                       st_size,
-                                       src_st_handle.mem_handle()),
-                 kOk);
+        rdma_adpt_
+            ->rdma_read(rdma_buf.buffer,
+                        src_st_handle.gaddr(),
+                        st_size,
+                        0 /* flag */,
+                        src_st_handle.mem_handle())
+            .expect(RC::kOk);
         auto rc = rdma_adpt_->commit();
         if (unlikely(rc == kRdmaProtectionErr))
         {
@@ -1054,12 +1080,14 @@ public:
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(MetaT));
         DCHECK_GE(rdma_buf.size, sizeof(MetaT));
         auto &dir_mem_handle = get_directory_mem_handle();
-        CHECK_EQ(rdma_adpt_->rdma_read(rdma_buf.buffer,
-                                       table_meta_addr_,
-                                       sizeof(MetaT),
-                                       dir_mem_handle),
-                 kOk);
-        CHECK_EQ(rdma_adpt_->commit(), kOk);
+        rdma_adpt_
+            ->rdma_read(rdma_buf.buffer,
+                        table_meta_addr_,
+                        sizeof(MetaT),
+                        0 /* flag */,
+                        dir_mem_handle)
+            .expect(RC::kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
         auto &meta = *(MetaT *) rdma_buf.buffer;
         DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
             << "[race][expand][result][debug] The latest remote meta: " << meta
@@ -1094,11 +1122,13 @@ public:
                 auto ld_rdma_buf = rdma_adpt.get_rdma_buffer(sizeof(uint32_t));
                 DCHECK_GE(ld_rdma_buf.size, sizeof(uint32_t));
                 *(uint32_t *) ld_rdma_buf.buffer = ld;
-                CHECK_EQ(rdma_adpt.rdma_write(ld_remote,
-                                              ld_rdma_buf.buffer,
-                                              sizeof(uint32_t),
-                                              dir_mem_handle),
-                         kOk);
+                rdma_adpt
+                    .rdma_write(ld_remote,
+                                ld_rdma_buf.buffer,
+                                sizeof(uint32_t),
+                                0 /* flag */,
+                                dir_mem_handle)
+                    .expect(RC::kOk);
                 cached_meta_.lds[i] = ld;
                 DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
                     << "[race][trace] expand_cascade_update_entries_drain: "
@@ -1116,11 +1146,13 @@ public:
                     *(uint64_t *) entry_rdma_buf.buffer =
                         next_subtable_addr.val;
                     auto entry_remote = entries_remote_addr(i);
-                    CHECK_EQ(rdma_adpt.rdma_write(entry_remote,
-                                                  entry_rdma_buf.buffer,
-                                                  sizeof(next_subtable_addr),
-                                                  dir_mem_handle),
-                             kOk);
+                    rdma_adpt
+                        .rdma_write(entry_remote,
+                                    entry_rdma_buf.buffer,
+                                    sizeof(next_subtable_addr),
+                                    0 /* flag */,
+                                    dir_mem_handle)
+                        .expect(RC::kOk);
                     DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
                         << "[race][trace] expand_cascade_update_entries_drain: "
                            "UPDATE ENTRY "
@@ -1222,12 +1254,14 @@ public:
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(8);
         DCHECK_GE(rdma_buf.size, 8);
         auto &subtable_mem_handle = get_subtable_mem_handle(subtable_idx);
-        CHECK_EQ(rdma_adpt_->rdma_cas(slot_handle.remote_addr(),
-                                      expect_val,
-                                      desired_slot.val(),
-                                      rdma_buf.buffer,
-                                      subtable_mem_handle),
-                 kOk);
+        rdma_adpt_
+            ->rdma_cas(slot_handle.remote_addr(),
+                       expect_val,
+                       desired_slot.val(),
+                       rdma_buf.buffer,
+                       0 /* flag */,
+                       subtable_mem_handle)
+            .expect(RC::kOk);
         auto rc = rdma_adpt_->commit();
         if (unlikely(rc == kRdmaProtectionErr))
         {
@@ -1486,6 +1520,7 @@ public:
         CHECK_EQ(rdma_adpt.rdma_write(remote_buf,
                                       (char *) rdma_buf.buffer,
                                       kvblock_size,
+                                      0 /* flag */,
                                       global_kvblock_mem_handle),
                  kOk);
         (*remote_kvblock_addr) = remote_buf;
@@ -1536,6 +1571,7 @@ public:
             CHECK_EQ(rdma_adpt_->rdma_read((char *) rdma_buffer.buffer,
                                            remote_kvblock_addr,
                                            actual_size,
+                                           0 /* flag */,
                                            global_kvblock_mem_handle),
                      kOk);
             slots_rdma_buffers.emplace(
@@ -1674,6 +1710,7 @@ public:
                                         expect_val,
                                         new_slot.val(),
                                         rdma_buf.buffer,
+                                        0 /* flag */,
                                         st_mem_handle),
                      kOk);
             auto ret = rdma_adpt.commit();

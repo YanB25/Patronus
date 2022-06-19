@@ -128,6 +128,7 @@ public:
             ->rdma_faa(tail_node_idx_gaddr,
                        1,
                        tail_node_idx_buf.buffer,
+                       0 /* flag */,
                        tail_node_handle)
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
@@ -154,6 +155,7 @@ public:
             ->rdma_write(object_gaddr,
                          rdma_object_buf.buffer,
                          object_size,
+                         0 /* flag */,
                          cached_tail_node.handle_)
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
@@ -403,6 +405,7 @@ private:
             ->rdma_write(to_insert_node_idx_gaddr,
                          idx_buf.buffer,
                          idx_size,
+                         0 /* flag */,
                          to_insert_node.handle_)
             .expect(RC::kOk);
         trace.pin("allocate to_insert_node");
