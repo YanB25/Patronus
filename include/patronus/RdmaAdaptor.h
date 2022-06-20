@@ -189,22 +189,45 @@ public:
                                  std::chrono::nanoseconds ns,
                                  flag_t flag) override
     {
-        size_t try_nr = 0;
-        // break recursive call into loops
-        // to avoid stack overflow
-        while (true)
+        if constexpr (::config::kEnableRdmaTrace)
         {
-            try_nr++;
-            auto handle = do_acquire_perm(gaddr, alloc_hint, size, ns, flag);
-            if (handle.valid())
+            if (trace_enabled())
             {
-                return handle;
+                rdma_trace_record_.alloc_acquire_nr++;
+                rdma_trace_record_.indv_two_sided++;
             }
-            DCHECK_EQ(handle.ec(), AcquireRequestStatus::kMagicMwErr);
-            CHECK_LE(try_nr, 102400)
-                << "** Keep failing to acquire_perm for too many times. gaddr: "
-                << gaddr << ", hint: " << alloc_hint << ", size: " << size
-                << ", flag: " << AcquireRequestFlagOut(flag);
+        }
+        DCHECK(gaddr.nodeID == 0 || gaddr.nodeID == node_id_)
+            << "Invalid gaddr.nodeID: " << gaddr.nodeID
+            << " with node_id_: " << node_id_ << ". gaddr: " << gaddr;
+        gaddr.nodeID = 0;
+
+        DCHECK(!is_server_);
+
+        auto lease = patronus_->get_wlease(
+            node_id_, dir_id_, gaddr, alloc_hint, size, ns, flag, coro_ctx_);
+        if (likely(lease.success()))
+        {
+            return alloc_handle(lease_to_exposed_gaddr(lease), size, lease);
+        }
+        else
+        {
+            // if (lease.ec() != AcquireRequestStatus::kNoMem &&
+            //     lease.ec() != AcquireRequestStatus::kNoMw &&
+            //     lease.ec() != AcquireRequestStatus::kLockedErr)
+            // {
+            //     CHECK(false) << "** Unexpected lease failure: " << lease.ec()
+            //                  << ". expect kNoMem or kNoMw. Lease " << lease
+            //                  << ". Lease success: " << lease.success();
+            // }
+            auto ret = RemoteMemHandle{nullgaddr, 0, lease.ec()};
+            ret.set_invalid();
+            CHECK(false) << "** Failed to acquire_perm: " << lease.ec()
+                         << ". Detail: gaddr: " << gaddr << ", size: " << size
+                         << ", hint: " << alloc_hint
+                         << ", flag: " << AcquireRequestFlagOut(flag)
+                         << ". Got lease: " << lease;
+            return ret;
         }
     }
     RetCode extend(RemoteMemHandle &handle,

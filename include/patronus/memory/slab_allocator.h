@@ -319,7 +319,8 @@ public:
         else
         {
             LOG_IF(WARNING, ret == nullptr)
-                << "Failed to allocate size " << size << ": "
+                << "Failed to allocate size " << size
+                << ". Slab info: " << std::endl
                 << pre_class_info(class_info_);
         }
 

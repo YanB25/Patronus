@@ -163,3 +163,15 @@ No DDL-manager (run task_gc_lease directly), No unbind: 6.2 Mops
 No DDL-manager (run task_gc_lease directly), unbind: 5.9 Mops (unbind low overhead)
 With DDL-manager, No unbind: 5.1 Mops (DDL-manager has higher impact on performance)
 With DDL-manager, unbind: 3.7 Mops (DDL-manager with unbind has great impact on performance)
+
+## cqueue
+mw v.s. rpc
+When client threads are seldom (<= 8), mw better than rpc, because lower RPC overheads.
+T 1 2 4 8
+mw 576Kops, 1.05Mops, 1.72Mops, 1.74Mops
+rpc 326Kops, 611Kops, 1.08 Mops, 1.73Mops
+
+When threads are more, rpc better than mw, because RDMA FAA bottleneck. RDMA FAA needs two PCIe transaction to read and than add, while RPC enables batching.
+T 16 32
+mw 1.78Mops, 1.75Mops
+rpc 22.6Mops, 23.7Mops

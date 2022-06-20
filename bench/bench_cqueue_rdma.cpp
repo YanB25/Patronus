@@ -27,7 +27,8 @@ constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = 32;
 constexpr static size_t kMaxCoroNr = 16;
 
-constexpr static size_t kEntryNrPerBlock = 1024;
+constexpr static size_t kEntryNrPerBlock = 32768;
+// constexpr static size_t kEntryNrPerBlock = 64;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -162,7 +163,7 @@ typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
-        server_nid, dir_id, p, conf.bypass_prot, false /* two sided */, ctx);
+        server_nid, dir_id, p, conf.bypass_prot, conf.use_two_sided, ctx);
 
     auto handle =
         QueueHandleT::new_instance(server_nid, meta_gaddr, rdma_adpt, conf);
@@ -237,7 +238,7 @@ void test_basic_client_worker(
     Patronus::pointer p,
     size_t coro_id,
     CoroYield &yield,
-    const BenchConfig &bench_conf,
+    [[maybe_unused]] const BenchConfig &bench_conf,
     const QueueHandleConfig &handle_conf,
     GlobalAddress meta_gaddr,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
@@ -262,45 +263,25 @@ void test_basic_client_worker(
     bool should_report_latency = (tid == 0 && coro_id == 0);
 
     auto value = Object{};
-    Object pop_entries[kEntryNrPerBlock];
-    size_t get_nr = 0;
-
+    // util::TraceManager tm(tid == 0 && coro_id == 0 ? 1.0 / 10_K : 0);
     while (ex.get_private_data().thread_remain_task > 0)
     {
+        // auto trace = tm.trace("push");
         if (should_report_latency)
         {
             op_timer.pin();
         }
-        if (bench_conf.is_consumer(tid))
+        // auto rc = handle->lf_push_back(value, trace);
+        auto rc = handle->lf_push_back(value);
+        if (rc == kOk)
         {
-            auto rc =
-                handle->lf_pop_front(kEntryNrPerBlock, pop_entries, get_nr);
-            if (rc == kOk)
-            {
-                get_succ_nr++;
-            }
-            else
-            {
-                CHECK_EQ(rc, RC::kNotFound);
-                get_nomem_nr++;
-            }
+            put_succ_nr++;
         }
         else
         {
-            auto rc = handle->lf_push_back(value);
-            if (rc == kOk)
-            {
-                put_succ_nr++;
-            }
-            else
-            {
-                CHECK_EQ(rc, RC::kRetry);
-                put_retry_nr++;
-            }
+            CHECK_EQ(rc, RC::kRetry);
+            put_retry_nr++;
         }
-
-        // TODO: delete me
-        handle->debug();
 
         if (should_report_latency)
         {
@@ -308,6 +289,7 @@ void test_basic_client_worker(
         }
         executed_nr++;
         ex.get_private_data().thread_remain_task--;
+        // LOG_IF(INFO, trace.enabled()) << trace;
     }
     auto ns = timer.pin();
 
@@ -551,47 +533,56 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bar.wait();
 
     std::vector<QueueHandleConfig> handle_configs;
-    LOG(WARNING) << "TODO: set up handle config well";
-    handle_configs.push_back(QueueHandleConfig{});
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_mw("mw", kEntryNrPerBlock));
+    // handle_configs.emplace_back(
+    //     QueueHandleConfig::get_unprotected("unprot", kEntryNrPerBlock));
+    // handle_configs.emplace_back(
+    //     QueueHandleConfig::get_mr("mr", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_rpc("rpc", kEntryNrPerBlock));
 
     for (const auto &handle_conf : handle_configs)
     {
         for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+        // for (size_t thread_nr : {1, 4, 8, 32})
+        // for (size_t thread_nr : {1, 8, 32})
         {
-            for (size_t coro_nr : {1})
+            constexpr static size_t kCoroNr = 1;
+            LOG_IF(INFO, is_master)
+                << "[bench] benching multiple threads for " << handle_conf;
+            key++;
+            auto conf =
+                BenchConfig::get_conf("lf_push", 1_M, thread_nr, kCoroNr, 1);
+            if (is_client)
             {
-                LOG_IF(INFO, is_master)
-                    << "[bench] benching multiple threads for " << handle_conf;
-                key++;
-                auto conf = BenchConfig::get_conf(
-                    "default", 1_M, thread_nr, coro_nr, 1);
-                if (is_client)
-                {
-                    conf.validate();
-                    LOG_IF(INFO, is_master)
-                        << "[sub-conf] running conf: " << conf;
-                    benchmark_client(p, bar, is_master, conf, handle_conf, key);
-                }
-                else
-                {
-                    // TODO: let queue config be real.
-                    benchmark_server(
-                        p, bar, is_master, {conf}, QueueConfig{}, key);
-                }
+                conf.validate();
+                LOG_IF(INFO, is_master) << "[sub-conf] running conf: " << conf;
+                benchmark_client(p, bar, is_master, conf, handle_conf, key);
+            }
+            else
+            {
+                benchmark_server(p, bar, is_master, {conf}, QueueConfig{}, key);
             }
         }
     }
 }
+
+constexpr static size_t kExpectAllocationSize =
+    QueueHandleT::alloc_block_size();
 
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
+    LOG(INFO) << "[debug] !! expected allocation size: "
+              << kExpectAllocationSize;
+
     PatronusConfig pconfig;
     pconfig.machine_nr = ::config::kMachineNr;
-    pconfig.block_class = {32_MB, 2_MB, 4_KB};
-    pconfig.block_ratio = {0.1, 0.5, 0.4};
+    pconfig.block_class = {kExpectAllocationSize};
+    pconfig.block_ratio = {1};
     pconfig.reserved_buffer_size = 2_GB;
     pconfig.lease_buffer_size = (kDSMCacheSize - 2_GB) / 2;
     pconfig.alloc_buffer_size = (kDSMCacheSize - 2_GB) / 2;

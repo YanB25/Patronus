@@ -56,6 +56,10 @@ public:
             return true;
         });
     }
+    constexpr static size_t alloc_block_size()
+    {
+        return sizeof(ListEntry);
+    }
     std::list<T> debug_iterator()
     {
         std::list<T> ret;

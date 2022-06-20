@@ -1175,8 +1175,10 @@ Lease Patronus::get_wlease(uint16_t node_id,
                            flag_t flag /* AcquireRequestFlag */,
                            CoroContext *ctx)
 {
+    size_t try_nr = 0;
     while (true)
     {
+        try_nr++;
         auto ret = do_get_wlease(
             node_id, dir_id, bind_gaddr, alloc_hint, size, ns, flag, ctx);
         if (unlikely(!ret.success()) &&
@@ -1184,6 +1186,8 @@ Lease Patronus::get_wlease(uint16_t node_id,
         {
             continue;
         }
+        CHECK_LT(try_nr, 102400)
+            << "** Failed too many times. Please see to it.";
         return ret;
     }
 }
