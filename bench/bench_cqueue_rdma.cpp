@@ -27,22 +27,18 @@ constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = 32;
 constexpr static size_t kMaxCoroNr = 16;
 
-constexpr static size_t kEntryNrPerBlock = 32768;
+constexpr static size_t kEntryNrPerBlock = 1024;
 // constexpr static size_t kEntryNrPerBlock = 64;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 std::vector<std::string> col_idx;
+std::vector<size_t> col_x_queue_nr;
+std::vector<size_t> col_x_entry_per_block;
 std::vector<size_t> col_x_thread_nr;
 std::vector<size_t> col_x_coro_nr;
-std::vector<size_t> col_x_producer_nr;
-std::vector<size_t> col_x_consumer_nr;
 std::vector<size_t> col_test_nr;
 std::vector<size_t> col_ns;
-
-std::vector<double> col_producer_succ_rate;
-std::vector<double> col_consumer_succ_rate;
-std::vector<size_t> col_rdma_protection_err;
 
 std::vector<std::string> col_lat_idx;
 std::vector<uint64_t> col_lat_min;
@@ -67,8 +63,8 @@ struct Object
 struct BenchConfig
 {
     std::string name;
-    double producer_nr{0};
-    double consumer_nr{0};
+    size_t queue_nr{1};
+    size_t entry_per_block{0};
     size_t thread_nr{1};
     size_t coro_nr{1};
     size_t test_nr{0};
@@ -76,13 +72,12 @@ struct BenchConfig
 
     bool should_report_lat() const
     {
-        return should_report && thread_nr == 32 && coro_nr == 1;
+        return should_report && thread_nr == kClientThreadNr && coro_nr == 1;
     }
 
     void validate() const
     {
-        double sum = producer_nr + consumer_nr;
-        CHECK_DOUBLE_EQ(sum, local_client_nr());
+        CHECK_GT(queue_nr, 0) << "** should have at least one queue";
     }
     size_t cluster_client_nr() const
     {
@@ -96,32 +91,23 @@ struct BenchConfig
     {
         return name;
     }
-    bool is_consumer(uint64_t tid) const
-    {
-        return tid < consumer_nr;
-    }
-    bool is_producer(uint64_t tid) const
-    {
-        return !is_consumer(tid);
-    }
-
     BenchConfig clone() const
     {
         BenchConfig ret;
         ret.name = name;
-        ret.producer_nr = producer_nr;
-        ret.consumer_nr = consumer_nr;
         ret.thread_nr = thread_nr;
         ret.coro_nr = coro_nr;
         ret.test_nr = test_nr;
         ret.should_report = should_report;
+        ret.queue_nr = queue_nr;
         return ret;
     }
     static BenchConfig get_conf(const std::string &name,
                                 size_t test_nr,
                                 size_t thread_nr,
                                 size_t coro_nr,
-                                size_t consumer_nr)
+                                size_t queue_nr,
+                                size_t entry_per_block)
     {
         BenchConfig conf;
         conf.name = name;
@@ -129,18 +115,17 @@ struct BenchConfig
         conf.thread_nr = thread_nr;
         conf.coro_nr = coro_nr;
         conf.test_nr = test_nr;
-        conf.consumer_nr = consumer_nr;
-        conf.producer_nr = conf.local_client_nr() - consumer_nr;
+        conf.queue_nr = queue_nr;
         conf.should_report = true;
-
+        conf.entry_per_block = entry_per_block;
         conf.validate();
         return conf;
     }
 };
 std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
 {
-    os << "{conf: name: " << conf.name << ", producer: " << conf.producer_nr
-       << ", consumer: " << conf.consumer_nr
+    os << "{conf: name: " << conf.name << ", queue_nr: " << conf.queue_nr
+       << ", entry_per_block: " << conf.entry_per_block
        << ", thread_nr: " << conf.thread_nr << ", coro_nr: " << conf.coro_nr
        << "(local_client_nr: " << conf.local_client_nr()
        << ", cluster: " << conf.cluster_client_nr()
@@ -160,7 +145,7 @@ typename QueueHandleT::pointer gen_handle(Patronus::pointer p,
 {
     auto server_nid = ::config::get_server_nids().front();
 
-    DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
+    DVLOG(1) << "Generating queue handle with gaddr " << meta_gaddr;
 
     auto rdma_adpt = patronus::RdmaAdaptor::new_instance(
         server_nid, dir_id, p, conf.bypass_prot, conf.use_two_sided, ctx);
@@ -183,21 +168,16 @@ struct AdditionalCoroCtx
 
 void reg_result(const std::string &name,
                 const BenchConfig &bench_conf,
-                const AdditionalCoroCtx &prv,
+                [[maybe_unused]] const AdditionalCoroCtx &prv,
                 uint64_t ns)
 {
     col_idx.push_back(name);
     col_x_thread_nr.push_back(bench_conf.thread_nr);
     col_x_coro_nr.push_back(bench_conf.coro_nr);
-    col_x_producer_nr.push_back(bench_conf.producer_nr);
-    col_x_consumer_nr.push_back(bench_conf.consumer_nr);
+    col_x_queue_nr.push_back(bench_conf.queue_nr);
+    col_x_entry_per_block.push_back(bench_conf.entry_per_block);
     col_ns.push_back(ns);
     col_test_nr.push_back(bench_conf.test_nr);
-
-    col_consumer_succ_rate.push_back(1.0 * prv.get_succ_nr / prv.get_nr);
-    col_producer_succ_rate.push_back(1.0 * prv.put_succ_nr / prv.put_nr);
-
-    col_rdma_protection_err.push_back(prv.rdma_protection_nr);
 }
 
 void reg_latency(const std::string &name,
@@ -210,6 +190,11 @@ void reg_latency(const std::string &name,
         col_lat_idx.push_back("lat_p9");
         col_lat_idx.push_back("lat_p99");
     }
+    if (unlikely(!lat_data[name].empty()))
+    {
+        LOG(WARNING) << "[bench] Skip recording latency because duplicated.";
+        return;
+    }
     lat_data[name].push_back(lat_m.min());
     lat_data[name].push_back(lat_m.percentile(0.5));
     lat_data[name].push_back(lat_m.percentile(0.9));
@@ -220,6 +205,7 @@ void reg_latency(const std::string &name,
 }
 
 typename QueueT::pointer gen_queue(Patronus::pointer p,
+                                   size_t id,  // base 0
                                    const QueueConfig &config)
 {
     auto allocator = p->get_allocator(0 /* default hint */);
@@ -228,7 +214,7 @@ typename QueueT::pointer gen_queue(Patronus::pointer p,
     auto queue = QueueT::new_instance(server_rdma_adpt, allocator, config);
 
     auto meta_gaddr = queue->meta_gaddr();
-    p->put("race:meta_gaddr", meta_gaddr, 0ns);
+    p->put("race:meta_gaddr[" + std::to_string(id) + "]", meta_gaddr, 0ns);
     LOG(INFO) << "Puting to race:meta_gaddr with " << meta_gaddr;
 
     return queue;
@@ -240,15 +226,19 @@ void test_basic_client_worker(
     CoroYield &yield,
     [[maybe_unused]] const BenchConfig &bench_conf,
     const QueueHandleConfig &handle_conf,
-    GlobalAddress meta_gaddr,
+    std::vector<GlobalAddress> meta_gaddrs,
     CoroExecutionContextWith<kMaxCoroNr, AdditionalCoroCtx> &ex,
     OnePassBucketMonitor<uint64_t> &lat_m)
 {
     auto tid = p->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
+    auto use_queue_id = tid % bench_conf.queue_nr;
     CoroContext ctx(tid, &yield, &ex.master(), coro_id);
 
-    auto handle = gen_handle(p, dir_id, handle_conf, meta_gaddr, &ctx);
+    CHECK_EQ(meta_gaddrs.size(), bench_conf.queue_nr);
+    CHECK_LT(use_queue_id, meta_gaddrs.size());
+    auto cur_meta_gaddr = meta_gaddrs[use_queue_id];
+    auto handle = gen_handle(p, dir_id, handle_conf, cur_meta_gaddr, &ctx);
 
     size_t put_succ_nr = 0;
     size_t put_retry_nr = 0;
@@ -383,7 +373,7 @@ void test_basic_client_master(
 }
 
 std::atomic<ssize_t> g_total_test_nr;
-GlobalAddress g_meta_gaddr;
+std::vector<GlobalAddress> g_meta_gaddrs;
 
 void benchmark_client(Patronus::pointer p,
                       boost::barrier &bar,
@@ -410,7 +400,14 @@ void benchmark_client(Patronus::pointer p,
             p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
             // fetch meta_gaddr here by master thread
             // because it may be slow
-            g_meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
+
+            g_meta_gaddrs.clear();
+            g_meta_gaddrs.resize(bench_conf.queue_nr);
+            for (size_t i = 0; i < bench_conf.queue_nr; ++i)
+            {
+                g_meta_gaddrs[i] = p->get_object<GlobalAddress>(
+                    "race:meta_gaddr[" + std::to_string(i) + "]", 1ms);
+            }
         }
     }
     bar.wait();
@@ -434,20 +431,15 @@ void benchmark_client(Patronus::pointer p,
         }
         for (size_t i = 0; i < coro_nr; ++i)
         {
-            ex.worker(i) =
-                CoroCall([p,
-                          coro_id = i,
-                          &bench_conf,
-                          &handle_conf,
-                          &ex,
-                          &lat_m,
-                          meta_gaddr = g_meta_gaddr](CoroYield &yield) {
+            ex.worker(i) = CoroCall(
+                [p, coro_id = i, &bench_conf, &handle_conf, &ex, &lat_m](
+                    CoroYield &yield) {
                     test_basic_client_worker(p,
                                              coro_id,
                                              yield,
                                              bench_conf,
                                              handle_conf,
-                                             meta_gaddr,
+                                             g_meta_gaddrs,
                                              ex,
                                              lat_m);
                 });
@@ -498,18 +490,26 @@ void benchmark_server(Patronus::pointer p,
                       uint64_t key)
 {
     auto thread_nr = confs[0].thread_nr;
+    auto queue_nr = confs.front().queue_nr;
     for (const auto &conf : confs)
     {
         thread_nr = std::max(thread_nr, conf.thread_nr);
+        CHECK_EQ(queue_nr, conf.queue_nr);
     }
 
     typename QueueT::pointer queue;
+    std::vector<QueueT::pointer> queues;
 
     if (is_master)
     {
+        queues.resize(queue_nr);
+        for (size_t i = 0; i < queue_nr; ++i)
+        {
+            queues[i] = gen_queue(p, i, queue_config);
+        }
         p->finished(key);
-        queue = gen_queue(p, queue_config);
     }
+
     // wait for everybody to finish preparing
     bar.wait();
     if (is_master)
@@ -535,37 +535,89 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     std::vector<QueueHandleConfig> handle_configs;
     handle_configs.emplace_back(
         QueueHandleConfig::get_mw("mw", kEntryNrPerBlock));
-    // handle_configs.emplace_back(
-    //     QueueHandleConfig::get_unprotected("unprot", kEntryNrPerBlock));
-    // handle_configs.emplace_back(
-    //     QueueHandleConfig::get_mr("mr", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_unprotected("unprot", kEntryNrPerBlock));
+    handle_configs.emplace_back(
+        QueueHandleConfig::get_mr("mr", kEntryNrPerBlock));
     handle_configs.emplace_back(
         QueueHandleConfig::get_rpc("rpc", kEntryNrPerBlock));
 
     for (const auto &handle_conf : handle_configs)
     {
+        // for (size_t thread_nr : {1, 4, 8, 16, 32})
         for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
         // for (size_t thread_nr : {1, 4, 8, 32})
         // for (size_t thread_nr : {1, 8, 32})
         {
-            constexpr static size_t kCoroNr = 1;
-            LOG_IF(INFO, is_master)
-                << "[bench] benching multiple threads for " << handle_conf;
-            key++;
-            auto conf =
-                BenchConfig::get_conf("lf_push", 1_M, thread_nr, kCoroNr, 1);
-            if (is_client)
+            for (size_t queue_nr : {4})
+            // for (size_t queue_nr : {1})
             {
-                conf.validate();
-                LOG_IF(INFO, is_master) << "[sub-conf] running conf: " << conf;
-                benchmark_client(p, bar, is_master, conf, handle_conf, key);
-            }
-            else
-            {
-                benchmark_server(p, bar, is_master, {conf}, QueueConfig{}, key);
+                constexpr static size_t kCoroNr = 1;
+                LOG_IF(INFO, is_master)
+                    << "[bench] benching multiple threads for " << handle_conf;
+                key++;
+                auto conf = BenchConfig::get_conf("lf_push",
+                                                  1_M * handle_conf.task_scale,
+                                                  thread_nr,
+                                                  kCoroNr,
+                                                  queue_nr,
+                                                  kEntryNrPerBlock);
+                if (is_client)
+                {
+                    conf.validate();
+                    LOG_IF(INFO, is_master)
+                        << "[sub-conf] running conf: " << conf;
+                    benchmark_client(p, bar, is_master, conf, handle_conf, key);
+                }
+                else
+                {
+                    benchmark_server(
+                        p, bar, is_master, {conf}, QueueConfig{}, key);
+                }
             }
         }
     }
+
+    // for (const auto &handle_conf : handle_configs)
+    // {
+    //     LOG(WARNING)
+    //         << "** In this experiments, not recommend to bench with
+    //         coroutine.";
+    //     LOG(WARNING) << "** cqueue is a lock free algorithm. Using coroutine
+    //     "
+    //                     "brings extra latency, which degrades performance.";
+    //     constexpr static size_t kThreadNr = 32;
+    //     for (size_t coro_nr : {2, 4, 8, 16})
+    //     {
+    //         for (size_t queue_nr : {4})
+    //         {
+    //             LOG_IF(INFO, is_master)
+    //                 << "[bench] benching multiple threads for " <<
+    //                 handle_conf;
+    //             key++;
+    //             auto conf = BenchConfig::get_conf("lf_push",
+    //                                               1_M *
+    //                                               handle_conf.task_scale,
+    //                                               kThreadNr,
+    //                                               coro_nr,
+    //                                               queue_nr,
+    //                                               kEntryNrPerBlock);
+    //             if (is_client)
+    //             {
+    //                 conf.validate();
+    //                 LOG_IF(INFO, is_master)
+    //                     << "[sub-conf] running conf: " << conf;
+    //                 benchmark_client(p, bar, is_master, conf, handle_conf,
+    //                 key);
+    //             }
+    //             else
+    //             {
+    //                 benchmark_server(
+    //                     p, bar, is_master, {conf}, QueueConfig{}, key);
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 constexpr static size_t kExpectAllocationSize =
@@ -575,9 +627,6 @@ int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
-
-    LOG(INFO) << "[debug] !! expected allocation size: "
-              << kExpectAllocationSize;
 
     PatronusConfig pconfig;
     pconfig.machine_nr = ::config::kMachineNr;
@@ -652,17 +701,11 @@ int main(int argc, char *argv[])
         df.load_index(std::move(col_idx));
         df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
         df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
-        df.load_column<size_t>("x_producer_nr", std::move(col_x_producer_nr));
-        df.load_column<size_t>("x_consumer_nr", std::move(col_x_consumer_nr));
+        df.load_column<size_t>("x_queue_nr", std::move(col_x_queue_nr));
+        df.load_column<size_t>("x_entry_per_block",
+                               std::move(col_x_entry_per_block));
         df.load_column<size_t>("test_nr(total)", std::move(col_test_nr));
         df.load_column<size_t>("test_ns(total)", std::move(col_ns));
-
-        df.load_column<size_t>("rdma_prot_err_nr",
-                               std::move(col_rdma_protection_err));
-        df.load_column<double>("produce_succ_rate",
-                               std::move(col_producer_succ_rate));
-        df.load_column<double>("consume_succ_rate",
-                               std::move(col_consumer_succ_rate));
 
         auto div_f = gen_F_div<size_t, size_t, double>();
         auto div_f2 = gen_F_div<double, size_t, double>();

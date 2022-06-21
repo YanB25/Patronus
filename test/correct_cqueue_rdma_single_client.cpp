@@ -550,12 +550,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         }
         else
         {
-            benchmark_server(p,
-                             bar,
-                             is_master,
-                             {conf},
-                             QueueConfig{.entry_per_block = kEntryNrPerBlock},
-                             key);
+            benchmark_server(p, bar, is_master, {conf}, QueueConfig{}, key);
         }
     }
 }

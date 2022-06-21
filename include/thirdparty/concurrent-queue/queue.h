@@ -12,13 +12,12 @@ namespace patronus::cqueue
 struct QueueConfig
 {
     list::ListConfig list_config;
-    size_t entry_per_block{};
 };
 
 inline std::ostream &operator<<(std::ostream &os, const QueueConfig &config)
 {
     std::ignore = config;
-    os << "{QueueConfig }";
+    os << "{QueueConfig list_config: " << config.list_config << "}";
     return os;
 }
 
