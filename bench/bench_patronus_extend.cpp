@@ -64,9 +64,15 @@ struct BenchConfig
     size_t extend_nr;
     std::chrono::nanoseconds extend_ns;
     bool extend_use_rpc;
+    bool extend_use_acquire_again;
     flag_t extend_flag;
     std::string name;
     bool report;
+
+    bool should_report_lat() const
+    {
+        return report && thread_nr == kMaxAppThread && coro_nr == 1;
+    }
 
     static BenchConfig get_empty_conf(const std::string &name,
                                       size_t thread_nr,
@@ -93,6 +99,7 @@ std::ostream &operator<<(std::ostream &os, const BenchConfig &conf)
        << ", task_nr: " << conf.task_nr << ", acquire_ns: " << acq_ns
        << ", extend_ns: " << ext_ns << ", extend_nr: " << conf.extend_nr
        << ", use_rpc: " << conf.extend_use_rpc
+       << ", use_acquire_again: " << conf.extend_use_acquire_again
        << ", extend_flag: " << LeaseModifyFlagOut(conf.extend_flag)
        << ", report: " << conf.report << "}";
     return os;
@@ -114,6 +121,7 @@ public:
         conf.extend_nr = extend_nr;
         conf.extend_ns = 1ms;
         conf.extend_use_rpc = false;
+        conf.extend_use_acquire_again = false;
         conf.extend_flag = (flag_t) 0;
         return pipeline({conf, conf});
     }
@@ -129,6 +137,21 @@ public:
         for (auto &conf : confs)
         {
             conf.extend_use_rpc = true;
+        }
+        return confs;
+    }
+    static std::vector<BenchConfig> get_acquire_again(const std::string &name,
+                                                      size_t thread_nr,
+                                                      size_t coro_nr,
+                                                      size_t block_size,
+                                                      size_t task_nr,
+                                                      size_t extend_nr)
+    {
+        auto confs = get_extend(
+            name, thread_nr, coro_nr, block_size, task_nr, extend_nr);
+        for (auto &conf : confs)
+        {
+            conf.extend_use_acquire_again = true;
         }
         return confs;
     }
@@ -172,7 +195,9 @@ void reg_result(const BenchConfig &conf, uint64_t total_ns)
 }
 
 std::unordered_map<std::string, std::vector<uint64_t>> lat_data_;
-void reg_latency(const std::string &name, OnePassBucketMonitor<uint64_t> &m)
+void reg_latency(const std::string &name,
+                 OnePassBucketMonitor<uint64_t> &m,
+                 const BenchConfig &conf)
 {
     if (unlikely(col_lat_idx.empty()))
     {
@@ -182,10 +207,25 @@ void reg_latency(const std::string &name, OnePassBucketMonitor<uint64_t> &m)
         col_lat_idx.push_back("lat_p99");
     }
 
+    if (unlikely(!lat_data_[name].empty()))
+    {
+        LOG(WARNING) << "Latency record duplicated for name " << name
+                     << ". skip.";
+        return;
+    }
+
     lat_data_[name].push_back(m.min());
     lat_data_[name].push_back(m.percentile(0.5));
     lat_data_[name].push_back(m.percentile(0.9));
     lat_data_[name].push_back(m.percentile(0.99));
+
+    {
+        auto avg_name = name + "(avg)";
+        lat_data_[avg_name].push_back(m.min() / conf.extend_nr);
+        lat_data_[avg_name].push_back(m.percentile(0.5) / conf.extend_nr);
+        lat_data_[avg_name].push_back(m.percentile(0.9) / conf.extend_nr);
+        lat_data_[avg_name].push_back(m.percentile(0.99) / conf.extend_nr);
+    }
 }
 
 void bench_alloc_thread_coro_master(Patronus::pointer patronus,
@@ -287,12 +327,9 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     CoroYield &yield,
                                     CoroCommunication &coro_comm,
                                     OnePassBucketMonitor<uint64_t> &lat_m,
-                                    bool is_master,
+                                    [[maybe_unused]] bool is_master,
                                     const BenchConfig &conf)
 {
-    // TODO: latency
-    std::ignore = lat_m;
-
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
     auto server_nid = ::config::get_server_nids().front();
@@ -305,12 +342,20 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
     size_t fail_nr = 0;
     size_t succ_nr = 0;
 
+    bool use_rpc = conf.extend_use_rpc;
+    bool use_acquire_again = conf.extend_use_acquire_again;
+    CHECK_LE(use_rpc + use_acquire_again, 1)
+        << "** only allow at most one flag ON.";
+
     ChronoTimer timer;
     ChronoTimer op_timer;
+
+    auto rel_flag = (flag_t) 0;
+    bool should_report_latency = (tid == 0 && coro_id == 0);
+
     while (coro_comm.thread_remain_task > 0)
     {
-        // bool succ = true;
-        if (is_master && coro_id == 0)
+        if (unlikely(should_report_latency))
         {
             op_timer.pin();
         }
@@ -323,11 +368,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                           acquire_ns,
                                           acquire_flag,
                                           &ctx);
-        if (unlikely(!lease.success()))
-        {
-            CHECK_EQ(lease.ec(), AcquireRequestStatus::kMagicMwErr);
-            continue;
-        }
+        CHECK(lease.success());
 
         for (size_t i = 0; i < conf.extend_nr; ++i)
         {
@@ -336,6 +377,19 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                 auto rc = patronus->rpc_extend(
                     lease, conf.extend_ns, conf.extend_flag, &ctx);
                 CHECK_EQ(rc, RC::kOk);
+            }
+            else if (conf.extend_use_acquire_again)
+            {
+                patronus->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
+                lease = patronus->get_rlease(server_nid,
+                                             dir_id,
+                                             nullgaddr,
+                                             0 /* hint */,
+                                             alloc_size,
+                                             acquire_ns,
+                                             acquire_flag,
+                                             &ctx);
+                CHECK(lease.success());
             }
             else
             {
@@ -346,8 +400,12 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             }
         }
 
-        auto rel_flag = (flag_t) 0;
         patronus->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
+
+        if (unlikely(should_report_latency))
+        {
+            lat_m.collect(op_timer.pin());
+        }
 
         coro_comm.thread_remain_task--;
     }
@@ -444,16 +502,11 @@ void bench_template(Patronus::pointer patronus,
     auto total_ns = timer.pin();
     if (is_master && report)
     {
-        // reg_result(conf.name,
-        //            conf.task_nr,
-        //            total_ns,
-        //            conf.block_size,
-        //            conf.thread_nr,
-        //            conf.coro_nr,
-        //            conf.acquire_ns,
-        //            conf.extend_nr);
         reg_result(conf, total_ns);
-        reg_latency(conf.name, lat_m);
+        if (conf.should_report_lat())
+        {
+            reg_latency(conf.name, lat_m, conf);
+        }
     }
     bar.wait();
 }
@@ -539,7 +592,7 @@ void benchmark(Patronus::pointer patronus,
     size_t key = 0;
     // for (size_t thread_nr : {1})
     for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-    // for (size_t thread_nr : {32})
+    // for (size_t thread_nr : {1, 32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t extend_nr : {2, 4, 8, 6, 10, 12, 16})
@@ -547,7 +600,8 @@ void benchmark(Patronus::pointer patronus,
         {
             for (size_t coro_nr : {1})
             {
-                auto total_test_times = kTestTimePerThread * thread_nr;
+                auto total_test_times =
+                    kTestTimePerThread * std::min(thread_nr, size_t(8));
                 {
                     auto configs =
                         BenchConfigFactory::get_extend("ext",
@@ -567,6 +621,17 @@ void benchmark(Patronus::pointer patronus,
                                                            kBlockSize,
                                                            total_test_times,
                                                            extend_nr);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+                {
+                    auto configs = BenchConfigFactory::get_acquire_again(
+                        "re-acquire",
+                        thread_nr,
+                        coro_nr,
+                        kBlockSize,
+                        total_test_times * 0.1,
+                        extend_nr);
                     run_benchmark(
                         patronus, configs, bar, is_client, is_master, key);
                 }
@@ -616,6 +681,18 @@ void benchmark(Patronus::pointer patronus,
                     run_benchmark(
                         patronus, configs, bar, is_client, is_master, key);
                 }
+                {
+                    auto configs = BenchConfigFactory::get_acquire_again(
+                        "re-acquire",
+                        thread_nr,
+                        coro_nr,
+                        kBlockSize,
+                        total_test_times * 0.1,
+                        extend_nr);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
+
                 {
                     auto configs = BenchConfigFactory::get_rpc("rpc",
                                                                thread_nr,
@@ -748,23 +825,22 @@ int main(int argc, char *argv[])
                                               io_format::csv2);
     }
 
-    // {
-    //     StrDataFrame df;
-    //     df.load_index(std::move(col_lat_idx));
-    //     for (auto &[name, vec] : lat_data_)
-    //     {
-    //         df.load_column<uint64_t>(name.c_str(), std::move(vec));
-    //     }
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_lat_idx));
+        for (auto &[name, vec] : lat_data_)
+        {
+            df.load_column<uint64_t>(name.c_str(), std::move(vec));
+        }
 
-    //     std::map<std::string, std::string> info;
-    //     info.emplace("kind", "lat");
-    //     auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta,
-    //     info); df.write<std::ostream, std::string, size_t,
-    //     double>(std::cout,
-    //                                                         io_format::csv2);
-    //     df.write<std::string, size_t, double>(filename.c_str(),
-    //                                           io_format::csv2);
-    // }
+        std::map<std::string, std::string> info;
+        info.emplace("kind", "lat");
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
+    }
 
     patronus->keeper_barrier("finished", 100ms);
     LOG(INFO) << "Exiting...";
