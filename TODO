@@ -300,8 +300,8 @@ will see an unexpected cases:
 [-] bench list and cqueue. get the throughput and latency numbers
 - refine the RACE hashing experiments. 
     - Let the RW and RO tests runnable. 
-    - refine the config setting.
-    - see if race hashing can be optimized. be like caching to_insert_node ?
+    [-] refine the config setting.
+    [-] see if race hashing can be optimized. be like caching to_insert_node ?
 - implement wait_client_list in LeaseContext, so that we can use it to re-write the locks of cqueue
 
 AFTER all these implemented, try to run GAM and run some comparison experiments on that.
