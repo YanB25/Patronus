@@ -8,14 +8,13 @@ option(SANITIZE "Turn on sanitization" OFF)
 # set (CMAKE_C_COMPILER "mpicxx")
 # set (CMAKE_CXX_COMPILER ${CMAKE_C_COMPILER})
 
-#Compiler options
-set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wno-unused-private-field -Wsign-compare -Wno-address-of-packed-member")
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -W")
+# Compiler options
+set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare -Wno-address-of-packed-member")
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -W -Werror")
 
 # enable profiling
 # set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg ")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg ")
-
 add_subdirectory(thirdparty/DataFrame)
 
 # disable boost warning
@@ -31,13 +30,15 @@ find_package(
     thread
 )
 
-set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)
+
 # message(STATUS ${CMAKE_MODULE_PATH})
 find_package(
     glog REQUIRED
 )
 
 find_package(gflags REQUIRED)
+
 # find_package(benchmark REQUIRED)
 # link_libraries(benchmark::benchmark)
 
@@ -51,22 +52,21 @@ link_libraries(unwind)
 
 # boost coroutine does not work well with boost::coroutine and boost::coroutine2
 # if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    # set(ASAN_OPTIONS "fast_unwind_on_fatal=1")
-    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address")
-#     add_definitions(-DBOOST_USE_ASAN)
+# set(ASAN_OPTIONS "fast_unwind_on_fatal=1")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address")
+# add_definitions(-DBOOST_USE_ASAN)
 # endif()
 
 # set(ASAN_OPTIONS "fast_unwind_on_fatal=1")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address")
-
 set(INCLUDE_BASE ${PROJECT_SOURCE_DIR}/include)
 include_directories(${INCLUDE_BASE})
 include_directories(${GLOG_INCLUDE_DIRS})
 
-#Source file define
+# Source file define
 set(COMMON_SRC ${PROJECT_SOURCE_DIR}/src)
 
-#Used by both server and clients
+# Used by both server and clients
 file(GLOB_RECURSE COMMON_FILE ${COMMON_SRC}/*.cpp)
 add_library(sherman STATIC ${COMMON_FILE})
 link_libraries(sherman)
@@ -74,9 +74,10 @@ link_libraries(${GLOG_LIBRARIES})
 link_libraries(${GFLAGS_LIBRARIES})
 
 # bench
-if (${BUILD_BENCH})
+if(${BUILD_BENCH})
     file(GLOB BENCHMARK_SRC ${PROJECT_SOURCE_DIR}/bench/*.cpp)
-    foreach (BENCHMARK ${BENCHMARK_SRC})
+
+    foreach(BENCHMARK ${BENCHMARK_SRC})
         get_filename_component(BENCHMARK_NAME ${BENCHMARK} NAME_WE)
         add_executable(${BENCHMARK_NAME} ${BENCHMARK})
         target_link_libraries(${BENCHMARK_NAME} PRIVATE ${LINKS_FLAGS} ${Boost_LIBRARIES} sherman DataFrame::DataFrame)
@@ -85,9 +86,10 @@ if (${BUILD_BENCH})
 endif()
 
 # test
-if (${BUILD_TEST})
+if(${BUILD_TEST})
     file(GLOB TEST_SRC ${PROJECT_SOURCE_DIR}/test/*.cpp)
-    foreach (TEST ${TEST_SRC})
+
+    foreach(TEST ${TEST_SRC})
         get_filename_component(TEST_NAME ${TEST} NAME_WE)
         add_executable(${TEST_NAME} ${TEST})
         target_link_libraries(${TEST_NAME} PRIVATE ${LINKS_FLAGS} ${Boost_LIBRARIES} sherman DataFrame::DataFrame)

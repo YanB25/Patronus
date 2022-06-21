@@ -267,15 +267,15 @@ void test_basic_client_worker(
     CHECK_EQ(is_producer + is_consumer, 1);
 
     ChronoTimer op_timer;
-    util::TraceManager tm(0.1);
+    // util::TraceManager tm(0.1);
     while (ex.get_private_data().thread_remain_task > 0)
     {
         if (is_consumer)
         {
             // pop
-            auto trace = tm.trace("pop");
+            // auto trace = tm.trace("pop");
             ListItem item;
-            auto rc = handle->pop_front(&item, trace);
+            auto rc = handle->pop_front(&item);
             if (rc == kOk)
             {
                 get_succ_nr++;
@@ -284,10 +284,10 @@ void test_basic_client_worker(
                     lat_m.collect(op_timer.pin());
                 }
                 ex.get_private_data().thread_remain_task--;
-                if (trace.enabled())
-                {
-                    LOG(INFO) << trace;
-                }
+                // if (trace.enabled())
+                // {
+                //     LOG(INFO) << trace;
+                // }
             }
             else
             {
@@ -297,13 +297,13 @@ void test_basic_client_worker(
         else
         {
             // push
-            auto trace = tm.trace("push");
+            // auto trace = tm.trace("push");
             ListItem item;
             item.nid = nid;
             item.tid = tid;
             item.coro_id = coro_id;
             item.magic_number = 0;
-            auto rc = handle->push_back(item, trace);
+            auto rc = handle->push_back(item);
             if (rc == kOk)
             {
                 put_succ_nr++;
@@ -312,10 +312,10 @@ void test_basic_client_worker(
                     lat_m.collect(op_timer.pin());
                 }
                 ex.get_private_data().thread_remain_task--;
-                if (trace.enabled())
-                {
-                    LOG(INFO) << trace;
-                }
+                // if (trace.enabled())
+                // {
+                //     LOG(INFO) << trace;
+                // }
             }
             else
             {
@@ -558,13 +558,14 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     bar.wait();
 
     std::vector<ListHandleConfig> handle_configs;
-    handle_configs.emplace_back(ListHandleConfig().use_lock_free());
+    handle_configs.emplace_back(ListHandleConfig().unprot().use_lock_free());
+    handle_configs.emplace_back(ListHandleConfig().use_mw().use_lock_free());
 
     for (const auto &handle_conf : handle_configs)
     {
         // for (size_t producer_nr : {1, 2, 8, 16, 32})
         // for (size_t producer_nr : {1, 8, 32})
-        for (size_t producer_nr : {1})
+        for (size_t producer_nr : {1, 2, 4})
         {
             for (size_t consumer_nr : {0})
             {
@@ -575,7 +576,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 // auto conf = BenchConfig::get_conf(
                 //     "default", 10_K, producer_nr, consumer_nr, kCoroNr);
                 auto conf = BenchConfig::get_conf(
-                    "default", 1_K, producer_nr, consumer_nr, kCoroNr);
+                    "default", 10_K, producer_nr, consumer_nr, kCoroNr);
                 if (is_client)
                 {
                     conf.validate();
