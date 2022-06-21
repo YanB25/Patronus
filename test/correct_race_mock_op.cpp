@@ -63,8 +63,9 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
     std::vector<std::shared_ptr<RaceHashingHandleT>> rhhs;
     for (size_t i = 0; i < thread_nr; ++i)
     {
-        RaceHashingHandleConfig handle_conf;
-        handle_conf.kvblock_expect_size = kvblock_size;
+        // RaceHashingHandleConfig handle_conf;
+        auto handle_conf =
+            RaceHashingConfigFactory::get_unprotected("mock", kvblock_size, 1);
         auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
         auto rhh = std::make_shared<RaceHashingHandleT>(0 /* node_id */,
                                                         rh->meta_gaddr(),
@@ -178,11 +179,19 @@ void test_capacity(size_t initial_subtable)
         dctx.key = key;
         dctx.value = expect_value;
         dctx.op = "get";
-        CHECK_EQ(rhh.get(key, get_val, &dctx), kOk);
-        CHECK_EQ(get_val, expect_value);
-        CHECK_EQ(rhh.del(key, &dctx), kOk);
-        CHECK_EQ(rhh.del(key), kNotFound);
-        CHECK_EQ(rhh.get(key, get_val), kNotFound);
+        CHECK_EQ(rhh.get(key, get_val, &dctx), kOk)
+            << "** Failed to get back key `" << key << "`";
+        CHECK_EQ(get_val, expect_value)
+            << "** getting key `" << key << "` expect value `" << expect_value
+            << "`";
+        CHECK_EQ(rhh.del(key, &dctx), kOk)
+            << "** Failed to delete existing key `" << key << "`";
+        CHECK_EQ(rhh.del(key), kNotFound)
+            << "** delete an already-deleted-key `" << key
+            << "` expects failure";
+        CHECK_EQ(rhh.get(key, get_val), kNotFound)
+            << "** Getting an already-deleted-key `" << key
+            << "` expects failure";
     }
     CHECK_EQ(rh.utilization(), 0)
         << "Removed all the items should result in 0 utilization";

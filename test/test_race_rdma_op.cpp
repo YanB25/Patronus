@@ -21,9 +21,8 @@ constexpr static size_t kKVBlockReserveSize = 512_MB;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-[[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
-constexpr uint32_t kMachineNr = 2;
+// [[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
+// [[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
 constexpr static size_t kCoroCnt = 1;
 
 constexpr static size_t kWaitKey = 0;
@@ -37,19 +36,22 @@ RaceHandleT::pointer gen_rhh(Patronus::pointer p,
 {
     auto tid = p->get_thread_id();
     auto dir_id = tid;
+    auto server_nid = ::config::get_server_nids().front();
 
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
     LOG(INFO) << "[bench] got meta of hashtable: " << meta_gaddr;
-    RaceHashingHandleConfig handle_conf;
+    // RaceHashingHandleConfig handle_conf;
+    auto handle_conf = RaceHashingConfigFactory::get_mw_protected(
+        "test rdma", 64, 1 /* batch */);
     auto handle_rdma_ctx =
-        patronus::RdmaAdaptor::new_instance(kServerNodeId,
+        patronus::RdmaAdaptor::new_instance(server_nid,
                                             dir_id,
                                             p,
-                                            false /* bypass prot */,
+                                            handle_conf.bypass_prot,
                                             false /* two sided */,
                                             ctx);
     auto prhh = std::make_shared<RaceHandleT>(
-        kServerNodeId, meta_gaddr, handle_conf, auto_expand, handle_rdma_ctx);
+        server_nid, meta_gaddr, handle_conf, auto_expand, handle_rdma_ctx);
     prhh->init();
     return prhh;
 }
@@ -160,33 +162,39 @@ void client_master(Patronus::pointer p,
             mctx.yield_to_worker(coro_id);
         }
     }
-
-    p->finished(kWaitKey);
-    LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
 void client_test_capacity(Patronus::pointer p)
 {
     CoroExecutionContext<kCoroCnt> coro_exe_ctx;
     auto tid = p->get_thread_id();
+    auto nid = p->get_node_id();
     LOG(INFO) << "I am client. tid " << tid;
 
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
     LOG(INFO) << "[bench] got meta of hashtable: " << meta_gaddr;
 
-    for (size_t i = 0; i < kCoroCnt; ++i)
-    {
-        coro_exe_ctx.worker(i) =
-            CoroCall([p, coro_id = i, &coro_exe_ctx](CoroYield &yield) {
-                client_worker(p, coro_id, yield, coro_exe_ctx);
-            });
-    }
-    auto &master = coro_exe_ctx.master();
-    master = CoroCall([p, &coro_exe_ctx](CoroYield &yield) {
-        client_master(p, yield, coro_exe_ctx);
-    });
+    bool should_enter = nid == ::config::get_client_nids().front();
 
-    master();
+    if (should_enter)
+    {
+        for (size_t i = 0; i < kCoroCnt; ++i)
+        {
+            coro_exe_ctx.worker(i) =
+                CoroCall([p, coro_id = i, &coro_exe_ctx](CoroYield &yield) {
+                    client_worker(p, coro_id, yield, coro_exe_ctx);
+                });
+        }
+        auto &master = coro_exe_ctx.master();
+        master = CoroCall([p, &coro_exe_ctx](CoroYield &yield) {
+            client_master(p, yield, coro_exe_ctx);
+        });
+
+        master();
+    }
+
+    p->finished(kWaitKey);
+    LOG(WARNING) << "[bench] all worker finish their work. exiting...";
 }
 
 void server(Patronus::pointer p, size_t initial_subtable)
@@ -232,8 +240,8 @@ void server(Patronus::pointer p, size_t initial_subtable)
 
     p->server_serve(kWaitKey);
 
-    p->patronus_free(
-        conf.g_kvblock_pool_addr, conf.g_kvblock_pool_size, 0 /* hint */);
+    // p->patronus_free(
+    //     conf.g_kvblock_pool_addr, conf.g_kvblock_pool_size, 0 /* hint */);
 }
 
 int main(int argc, char *argv[])
@@ -242,13 +250,14 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     PatronusConfig config;
-    config.machine_nr = kMachineNr;
+    config.machine_nr = ::config::kMachineNr;
     config.block_class = {2_MB, 4_KB};
     config.block_ratio = {0.5, 0.5};
 
     auto patronus = Patronus::ins(config);
     auto nid = patronus->get_node_id();
-    if (nid == kClientNodeId)
+    bool is_client = ::config::is_client(nid);
+    if (is_client)
     {
         patronus->registerClientThread();
         client_test_capacity(patronus);
@@ -259,5 +268,6 @@ int main(int argc, char *argv[])
         patronus->finished(kWaitKey);
         server(patronus, 1 /* subtable */);
     }
+    patronus->keeper_barrier("finished", 100ms);
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

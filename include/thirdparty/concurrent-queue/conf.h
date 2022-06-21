@@ -41,12 +41,13 @@ struct QueueHandleConfig
                                            false /* use two-sided */,
                                            entry_per_block);
         MemHandleDecision default_dec;
-        default_dec.use_mw().wo_expire();
+        default_dec.use_mw().wo_expire().no_bind_pr();
         conf.list_impl_config.rdma.default_ = default_dec;
         conf.list_impl_config.rdma.meta_ = default_dec;
         conf.list_impl_config.rdma.alloc_.with_alloc(0 /* hint */)
             .use_mw()
-            .wo_expire();
+            .wo_expire()
+            .no_bind_pr();
         return conf;
     }
     static QueueHandleConfig get_unprotected(const std::string &name,
@@ -68,9 +69,12 @@ struct QueueHandleConfig
                                            false /* bypass prot */,
                                            false /* use two-sided */,
                                            entry_per_block);
-        conf.list_impl_config.rdma.default_.use_mr().wo_expire();
+        conf.list_impl_config.rdma.default_.use_mr().wo_expire().no_bind_pr();
         conf.list_impl_config.rdma.meta_ = conf.list_impl_config.rdma.default_;
-        conf.list_impl_config.rdma.alloc_.with_alloc(0).use_mr().wo_expire();
+        conf.list_impl_config.rdma.alloc_.with_alloc(0)
+            .use_mr()
+            .wo_expire()
+            .no_bind_pr();
         conf.task_scale = 0.1;
         return conf;
     }

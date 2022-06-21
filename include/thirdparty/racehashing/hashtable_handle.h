@@ -87,35 +87,35 @@ public:
           rdma_adpt_(rdma_adpt),
           bootstrap_timer_("ctor()")
     {
-        CHECK(!conf.insert_kvblock.enable_batch_alloc)
-            << "TODO: support batching";
-
         read_kvblock_handles_.reserve(kOngoingHandleSize);
     }
     ~RaceHashingHandleImpl()
     {
         maybe_trace_bootstrap("before ~kvblock_mem_handle");
-        const auto &c = conf_.meta.dtor;
-        // NOTE: kvblock_mem_handle_ does not listen to config
-        if (kvblock_mem_handle_.valid())
-        {
-            auto rel_flag = (flag_t) 0;
-            rdma_adpt_->relinquish_perm(kvblock_mem_handle_, 0, rel_flag);
-        }
-        maybe_trace_bootstrap("before ~dir_mem_handle");
+        const auto &c = conf_.meta.d;
         if (directory_mem_handle_.valid())
         {
             rdma_adpt_->relinquish_perm(
-                directory_mem_handle_, c.alloc_hint, c.flag);
+                directory_mem_handle_, c.alloc_hint, c.relinquish_flag);
         }
         maybe_trace_bootstrap("before ~subtable_mem_handles");
         for (auto &handle : subtable_mem_handles_)
         {
             if (handle.valid())
             {
-                rdma_adpt_->relinquish_perm(handle, c.alloc_hint, c.flag);
+                rdma_adpt_->relinquish_perm(
+                    handle, c.alloc_hint, c.relinquish_flag);
             }
         }
+        if (fake_handle_.valid())
+        {
+            auto rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
+            rdma_adpt_->relinquish_perm(fake_handle_, 0, rel_flag);
+        }
+
+        end_read_kvblock();
+        consume_kv_block();
+
         maybe_trace_bootstrap("~finished()");
         maybe_trace_end_bootstrap();
     }
@@ -164,7 +164,7 @@ public:
 
         while (unlikely(ret == kRdmaProtectionErr))
         {
-            LOG(ERROR) << "[race] update_dcache got " << ret << ". Retry.";
+            LOG(FATAL) << "[race] update_dcache got " << ret << ". Retry.";
             ret = update_directory_cache(dctx);
         }
         CHECK_EQ(ret, kOk);
@@ -172,10 +172,8 @@ public:
         // init_kvblock_mem_handle AFTER getting the directory cache
         // because we need to know where server places the kvblock pool
         maybe_trace_bootstrap("before init_kvblock_mem_handle()");
-        init_kvblock_mem_handle();
 
-        const auto &c = conf_.meta.ctor;
-        if (c.eager_bind_subtable)
+        if (conf_.meta.eager_bind_subtable)
         {
             maybe_trace_bootstrap("before eager_init_subtable_mem_handle()");
             eager_init_subtable_mem_handle();
@@ -222,12 +220,12 @@ public:
                                    dir_mem_handle);
         CHECK_EQ(rc, kOk);
 
-        rc = rdma_adpt_->commit();
-        if (rc == kRdmaProtectionErr)
-        {
-            return rc;
-        }
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        // if (rc == kRdmaProtectionErr)
+        // {
+        //     return rc;
+        // }
+        // CHECK_EQ(rc, kOk);
         memcpy(&cached_meta_, rdma_buf.buffer, meta_size());
 
         LOG_IF(INFO, config::kEnableDebug)
@@ -320,11 +318,10 @@ public:
         return for_the_real_match_do(slot_handles, key, f, dctx);
     }
 
-    RetCode put(const Key &key, const Value &value, HashContext *dctx = nullptr)
+    RetCode do_put(const Key &key, uint64_t hash, HashContext *dctx = nullptr)
     {
         DCHECK(inited_);
 
-        auto hash = hash_impl(key.data(), key.size());
         auto [h1, h2] = hash_h1_h2(hash);
         auto fp = hash_fp(hash);
         auto m = hash_m(hash);
@@ -332,9 +329,12 @@ public:
         auto rounded_m = round_to_bits(m, cached_gd);
         auto ld = cached_ld(rounded_m);
 
-        maybe_trace_pin("before put_phase_one");
-
-        auto rc = put_phase_one(key, value, hash, dctx);
+        DCHECK(to_insert_block.gaddr_.has_value());
+        auto rc = put_phase_one(key,
+                                to_insert_block.gaddr_.value(),
+                                to_insert_block.tagged_len_,
+                                hash,
+                                dctx);
         if (rc == kCacheStale && auto_update_dir_)
         {
             maybe_trace_pin("before update dcache");
@@ -344,7 +344,8 @@ public:
                 return ret;
             }
             CHECK_EQ(ret, kOk);
-            return put(key, value, dctx);
+            // okay, but we let outer to retry
+            return RC::kRetry;
         }
         if (rc == kNoMem && auto_expand_)
         {
@@ -355,7 +356,8 @@ public:
                 return rc;
             }
             CHECK_EQ(rc, kOk);
-            return put(key, value, dctx);
+            // okay, but we let outer to retry
+            return RC::kRetry;
         }
         if (rc != kOk)
         {
@@ -364,6 +366,7 @@ public:
         maybe_trace_pin("before phase_two_deduplicate");
         rc = phase_two_deduplicate(key, hash, ld, 10 /* retry nr */, dctx);
         CHECK_NE(rc, kNoMem);
+        CHECK_NE(rc, kRetry) << "** why dedup will require retry?";
         if constexpr (debug())
         {
             LOG_IF(INFO, config::kEnableDebug && dctx != nullptr && rc == kOk)
@@ -374,6 +377,46 @@ public:
                 << ". cached_ld: " << ld << ". " << *dctx;
         }
         return rc;
+    }
+
+    RetCode put(const Key &key, const Value &value, HashContext *dctx = nullptr)
+    {
+        if (unlikely(!to_insert_block.gaddr_.has_value()))
+        {
+            // need allocation
+            prepare_alloc_kv(key, value).expect(RC::kOk);
+        }
+        DCHECK(to_insert_block.gaddr_.has_value());
+        // each enter needs an individual write
+        auto hash = hash_impl(key.data(), key.size());
+        prepare_write_kv(key,
+                         value,
+                         hash,
+                         to_insert_block.gaddr_.value(),
+                         to_insert_block.kvblock_size_,
+                         to_insert_block.handle_,
+                         *rdma_adpt_,
+                         dctx)
+            .expect(RC::kOk);
+
+        size_t retry_nr{0};
+        while (true)
+        {
+            retry_nr++;
+            CHECK_LT(retry_nr, 102400) << "** Failed to many times";
+
+            auto rc = do_put(key, hash, dctx);
+            if (rc == kRetry)
+            {
+                continue;
+            }
+            if (rc == kOk)
+            {
+                consume_kv_block();
+                return RC::kOk;
+            }
+            return rc;
+        }
     }
     constexpr static size_t subtable_nr()
     {
@@ -669,7 +712,11 @@ public:
         }
         CHECK_EQ(rc, kOk);
 
-        auto &global_kvblock_mem_handle = get_global_kvblock_mem_handle();
+        if (unlikely(!fake_handle_.valid()))
+        {
+            alloc_fake_handle();
+        }
+
         for (size_t i = 0; i < SubTableHandleT::kTotalBucketNr; ++i)
         {
             auto remote_bucket_addr = GlobalAddress(
@@ -678,11 +725,8 @@ public:
                 (char *) rdma_buf.buffer + i * Bucket<kSlotNr>::size_bytes();
             BucketHandle<kSlotNr> b(remote_bucket_addr,
                                     (char *) bucket_buffer_addr);
-            CHECK_EQ(b.should_migrate(bit,
-                                      *rdma_adpt_,
-                                      global_kvblock_mem_handle,
-                                      should_migrate,
-                                      dctx),
+            CHECK_EQ(b.should_migrate(
+                         bit, *rdma_adpt_, fake_handle_, should_migrate, dctx),
                      kOk);
         }
 
@@ -904,9 +948,11 @@ public:
         auto alloc_size = SubTableT::size_bytes();
         if (subtable_mem_handles_[next_subtable_idx].valid())
         {
-            const auto &c = conf_.meta.dtor;
+            const auto &c = conf_.meta.d;
             rdma_adpt_->relinquish_perm(
-                subtable_mem_handles_[next_subtable_idx], c.alloc_hint, c.flag);
+                subtable_mem_handles_[next_subtable_idx],
+                c.alloc_hint,
+                c.relinquish_flag);
         }
         subtable_mem_handles_[next_subtable_idx] =
             remote_alloc_acquire_subtable_directory(alloc_size);
@@ -1311,7 +1357,8 @@ public:
         return for_the_real_match_do(slot_handles, key, f, dctx);
     }
     RetCode put_phase_one(const Key &key,
-                          const Value &value,
+                          GlobalAddress kv_block,
+                          size_t len,
                           uint64_t hash,
                           HashContext *dctx)
     {
@@ -1328,18 +1375,6 @@ public:
             << ". fp: " << pre_fp(fp) << ", cached_ld: " << ld;
         auto st = subtable_handle(rounded_m);
 
-        maybe_trace_pin("before p1.parallel_write_kv");
-        GlobalAddress kv_block;
-        size_t len = 0;
-        rc = parallel_write_kv(
-            key, value, hash, *rdma_adpt_, &kv_block, &len, dctx);
-        if (unlikely(rc == kRdmaProtectionErr))
-        {
-            free_insert_kvblock();
-            return rc;
-        }
-        CHECK_EQ(rc, kOk);
-
         DCHECK_EQ(kv_block.nodeID, 0)
             << "The gaddr we got here should have been transformed: the upper "
                "bits should be zeros";
@@ -1351,13 +1386,12 @@ public:
 
         if (unlikely(rc == kRdmaProtectionErr))
         {
-            free_insert_kvblock();
             return rc;
         }
         CHECK_EQ(rc, kOk);
 
         DLOG_IF(INFO, config::kEnableMemoryDebug)
-            << "[race][mem] new remote kv_block gaddr: " << kv_block
+            << "[race][mem] allocated kv_block gaddr: " << kv_block
             << " with len: " << len
             << ". actual len: " << new_slot.actual_len_bytes();
 
@@ -1383,7 +1417,7 @@ public:
 
         if (rc == kOk)
         {
-            end_insert_kvblock();
+            consume_kv_block();
             return rc;
         }
         else if (rc == kRetry || rc == kRdmaProtectionErr)
@@ -1402,16 +1436,14 @@ public:
         }
         if (rc == kOk)
         {
-            end_insert_kvblock();
-            return rc;
+            consume_kv_block();
+            return RC::kOk;
         }
 
     handle_err:
         DCHECK_NE(rc, kOk);
-        // TODO(patronus): the management of kvblock
         maybe_trace_pin("before p1.remote_free_kvblock");
-        // call when insert fail: collect all the resources
-        free_insert_kvblock();
+
         if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
@@ -1422,7 +1454,8 @@ public:
                 return ret;
             }
             CHECK_EQ(ret, kOk);
-            return put(key, value, dctx);
+            // okey, but let outer to retry
+            return RC::kRetry;
         }
         return rc;
     }
@@ -1478,17 +1511,13 @@ public:
         }
         return kNoMem;
     }
-
-    RetCode parallel_write_kv(const Key &key,
-                              const Value &value,
-                              uint64_t hash,
-                              IRdmaAdaptor &rdma_adpt,
-                              GlobalAddress *remote_kvblock_addr,
-                              size_t *len,
-                              HashContext *dctx)
+    RetCode prepare_alloc_kv(const Key &key, const Value &value)
     {
-        auto &global_kvblock_mem_handle = get_global_kvblock_mem_handle();
-
+        auto rc = RC::kOk;
+        if (to_insert_block.gaddr_.has_value())
+        {
+            return rc;
+        }
         size_t kvblock_size = sizeof(KVBlock) + key.size() + value.size();
         // scale kvblock_size here, because may be overflow by limited bits in
         // tagged ptr
@@ -1501,6 +1530,39 @@ public:
             << conf_.kvblock_expect_size << ". tag_ptr_len: " << tag_ptr_len
             << ", convert back to " << kvblock_size << ". Possible overflow";
 
+        to_insert_block.kvblock_size_ = kvblock_size;
+        DCHECK_GE(
+            std::numeric_limits<decltype(to_insert_block.tagged_len_)>::max(),
+            tag_ptr_len);
+        to_insert_block.tagged_len_ = tag_ptr_len;
+        return begin_insert_kvblock(kvblock_size);
+    }
+    RetCode consume_kv_block()
+    {
+        to_insert_block.tagged_len_ = 0;
+        to_insert_block.kvblock_size_ = 0;
+        if (to_insert_block.gaddr_.has_value())
+        {
+            to_insert_block.gaddr_ = std::nullopt;
+        }
+        if (to_insert_block.handle_.valid())
+        {
+            const auto &c = conf_.alloc_kvblock;
+            rdma_adpt_->relinquish_perm(
+                to_insert_block.handle_, c.alloc_hint, c.relinquish_flag);
+        }
+        return RC::kOk;
+    }
+
+    RetCode prepare_write_kv(const Key &key,
+                             const Value &value,
+                             uint64_t hash,
+                             GlobalAddress kv_gaddr,
+                             size_t kvblock_size,
+                             RemoteMemHandle &kvblock_handle,
+                             IRdmaAdaptor &rdma_adpt,
+                             HashContext *dctx)
+    {
         auto rdma_buf = rdma_adpt.get_rdma_buffer(kvblock_size);
         DCHECK_GE(rdma_buf.size, kvblock_size);
         auto &kv_block = *(KVBlock *) rdma_buf.buffer;
@@ -1510,33 +1572,17 @@ public:
         memcpy(kv_block.buf, key.data(), key.size());
         memcpy(kv_block.buf + key.size(), value.data(), value.size());
 
-        auto remote_buf = begin_insert_kvblock(kvblock_size);
-
-        CHECK(!remote_buf.is_null())
-            << "** failed to remote_alloc_kvblock for size: " << kvblock_size
-            << ". Possibly run out of memory. This handle allocated kvblocks: "
-            << begin_insert_nr_ << ", ended: " << end_insert_nr_
-            << ", free: " << free_insert_nr_;
-        CHECK_EQ(rdma_adpt.rdma_write(remote_buf,
-                                      (char *) rdma_buf.buffer,
-                                      kvblock_size,
-                                      0 /* flag */,
-                                      global_kvblock_mem_handle),
-                 kOk);
-        (*remote_kvblock_addr) = remote_buf;
-        (*len) = tag_ptr_len;
+        CHECK(kvblock_handle.valid());
 
         DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
-            << "[race][trace] parallel_write_kv: allocate kv_block: "
-            << remote_kvblock_addr << ", allocated_size: " << kvblock_size
-            << ", ptr.len: " << tag_ptr_len << ". " << *dctx;
-        // TODO(patronus): about the management of kv block
-        // Now all the kv blocks shares the same handle in the huge memory pool
-        // So, no communication is neede during the whole kv block memory
-        // handling.
-        // Consider to change me when doing the following experiments
+            << "[race][trace] prepare_write_kv: allocate kv_block: " << kv_gaddr
+            << ", allocated_size: " << kvblock_size << ". " << *dctx;
 
-        return kOk;
+        return rdma_adpt.rdma_write(kv_gaddr,
+                                    (char *) rdma_buf.buffer,
+                                    kvblock_size,
+                                    0 /* flag */,
+                                    kvblock_handle);
     }
     using ApplyF = std::function<RetCode(
         const Key &, SlotHandle, KVBlockHandle, HashContext *)>;
@@ -1551,8 +1597,6 @@ public:
         // TODO: maybe enable batching here. Patronus API?
         for (auto slot_handle : slot_handles)
         {
-            auto &global_kvblock_mem_handle = get_global_kvblock_mem_handle();
-
             size_t actual_size = slot_handle.slot_view().actual_len_bytes();
             DCHECK_GT(actual_size, 0)
                 << "make no sense to have actual size == 0. slot_handle: "
@@ -1566,13 +1610,14 @@ public:
                 << remote_kvblock_addr << " with size " << actual_size
                 << ", fp: " << pre_fp(slot_handle.fp());
 
-            begin_read_kvblock(remote_kvblock_addr, actual_size);
+            auto &kvblock_handle =
+                begin_read_kvblock(remote_kvblock_addr, actual_size);
 
             CHECK_EQ(rdma_adpt_->rdma_read((char *) rdma_buffer.buffer,
                                            remote_kvblock_addr,
                                            actual_size,
                                            0 /* flag */,
-                                           global_kvblock_mem_handle),
+                                           kvblock_handle),
                      kOk);
             slots_rdma_buffers.emplace(
                 slot_handle,
@@ -1774,6 +1819,9 @@ public:
             //          << pre(key) << " miss: key content mismatch";
             DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
                 << "[race][stable] is_real_match FAILED: key content mismatch. "
+                   "expect: "
+                << key << ", got: "
+                << std::string((const char *) kvblock->buf, key.size())
                 << *dctx;
             return kNotFound;
         }
@@ -1785,6 +1833,16 @@ public:
     }
 
 private:
+    void alloc_fake_handle()
+    {
+        if (!fake_handle_.valid())
+        {
+            auto ac_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+            fake_handle_ = rdma_adpt_->acquire_perm(
+                nullgaddr, 0, std::numeric_limits<size_t>::max(), 1ns, ac_flag);
+        }
+    }
+
     RemoteMemHandle remote_alloc_acquire_subtable_directory(size_t size)
     {
         auto flag = (flag_t) AcquireRequestFlag::kNoGc |
@@ -1802,8 +1860,9 @@ private:
     bool auto_update_dir_;
     IRdmaAdaptor::pointer rdma_adpt_;
     std::array<RemoteMemHandle, subtable_nr()> subtable_mem_handles_{};
-    RemoteMemHandle kvblock_mem_handle_;
     RemoteMemHandle directory_mem_handle_;
+
+    RemoteMemHandle fake_handle_;
 
     bool inited_{false};
 
@@ -1835,57 +1894,34 @@ private:
     }
 
     std::vector<RemoteMemHandle> read_kvblock_handles_;
-    void begin_read_kvblock(GlobalAddress gaddr, size_t size)
+    RemoteMemHandle &begin_read_kvblock(GlobalAddress gaddr, size_t size)
     {
-        const auto &conf = conf_.read_kvblock.begin;
-        if (conf.do_nothing)
-        {
-            return;
-        }
+        const auto &c = conf_.read_kvblock;
         read_kvblock_handles_.emplace_back(rdma_adpt_->acquire_perm(
-            gaddr, conf.alloc_hint, size, conf.lease_time, conf.flag));
+            gaddr, c.alloc_hint, size, c.ns, c.acquire_flag));
+        return read_kvblock_handles_.back();
     }
     void end_read_kvblock()
     {
-        const auto &conf = conf_.read_kvblock.end;
-        if (conf.do_nothing)
-        {
-            read_kvblock_handles_.clear();
-            return;
-        }
+        const auto &c = conf_.read_kvblock;
         for (auto &handle : read_kvblock_handles_)
         {
-            rdma_adpt_->relinquish_perm(handle, conf.alloc_hint, conf.flag);
+            rdma_adpt_->relinquish_perm(
+                handle, c.alloc_hint, c.relinquish_flag);
         }
         read_kvblock_handles_.clear();
     }
 
-    GlobalAddress begin_insert_kvblock(size_t alloc_size)
+    struct
     {
-        bool enable_batch = conf_.insert_kvblock.enable_batch_alloc;
-        size_t batch_size = conf_.insert_kvblock.batch_alloc_size;
-        if (enable_batch)
-        {
-            DCHECK_GT(batch_size, 1);
-            return begin_insert_kvblock_batch(alloc_size, batch_size);
-        }
-        else
-        {
-            return begin_insert_kvblock_nobatch(alloc_size);
-        }
-    }
-    void end_insert_kvblock()
+        std::optional<GlobalAddress> gaddr_;
+        RemoteMemHandle handle_;
+        uint8_t tagged_len_;
+        size_t kvblock_size_;
+    } to_insert_block;
+    RetCode begin_insert_kvblock(size_t alloc_size)
     {
-        auto enable_batch = conf_.insert_kvblock.enable_batch_alloc;
-        size_t batch_size = conf_.insert_kvblock.batch_alloc_size;
-        if (enable_batch)
-        {
-            end_insert_kvblock_batch(batch_size);
-        }
-        else
-        {
-            end_insert_kvblock_nobatch();
-        }
+        return begin_insert_kvblock_nobatch(alloc_size);
     }
 
     RemoteMemHandle insert_kvblock_batch_handle_;
@@ -1906,117 +1942,40 @@ private:
     }
 
     // insert no batch
-    std::vector<RemoteMemHandle> insert_kvblock_handles_;
-    std::vector<GlobalAddress> insert_kvblock_gaddrs_;
     size_t begin_insert_nr_{0};
     size_t end_insert_nr_{0};
     size_t free_insert_nr_{0};
-    GlobalAddress begin_insert_kvblock_nobatch(size_t alloc_size)
+    RetCode begin_insert_kvblock_nobatch(size_t alloc_size)
     {
-        const auto &conf = conf_.insert_kvblock.begin;
-        if (conf.use_alloc_api)
-        {
-            auto gaddr = rdma_adpt_->remote_alloc(alloc_size, conf.alloc_hint);
-            insert_kvblock_gaddrs_.push_back(gaddr);
-            begin_insert_nr_++;
-            return gaddr;
-        }
-        else
-        {
-            auto handle = rdma_adpt_->acquire_perm(nullgaddr,
-                                                   conf.alloc_hint,
-                                                   alloc_size,
-                                                   conf.lease_time,
-                                                   conf.flag);
-            insert_kvblock_handles_.emplace_back(std::move(handle));
-            begin_insert_nr_++;
-            return handle.gaddr();
-        }
-    }
-    void end_insert_kvblock_nobatch()
-    {
-        const auto &conf = conf_.insert_kvblock.end;
-        if (conf.do_nothing)
-        {
-            insert_kvblock_gaddrs_.clear();
-            insert_kvblock_handles_.clear();
-            return;
-        }
-        if (conf.use_alloc_api)
-        {
-            DCHECK(insert_kvblock_handles_.empty());
-            // then do nothing.
-            insert_kvblock_gaddrs_.clear();
-        }
-        else
-        {
-            DCHECK(insert_kvblock_gaddrs_.empty());
-            for (auto &handle : insert_kvblock_handles_)
-            {
-                rdma_adpt_->relinquish_perm(handle, conf.alloc_hint, conf.flag);
-                end_insert_nr_++;
-            }
-            insert_kvblock_handles_.clear();
-        }
-    }
-    void free_insert_kvblock()
-    {
-        auto enable_batch = conf_.insert_kvblock.enable_batch_alloc;
-        size_t batch_size = conf_.insert_kvblock.batch_alloc_size;
-        if (enable_batch)
-        {
-            free_insert_kvblock_batch(batch_size);
-        }
-        else
-        {
-            free_insert_kvblock_nobatch();
-        }
-    }
-    void free_insert_kvblock_nobatch()
-    {
-        const auto &c = conf_.insert_kvblock.free;
-        auto size = conf_.kvblock_expect_size;
-        if (c.do_nothing)
-        {
-            insert_kvblock_gaddrs_.clear();
-            insert_kvblock_handles_.clear();
-            return;
-        }
-        if (c.use_dealloc_api)
-        {
-            DCHECK(insert_kvblock_handles_.empty());
-            // then do nothing.
-            for (auto gaddr : insert_kvblock_gaddrs_)
-            {
-                rdma_adpt_->remote_free(gaddr, size, c.alloc_hint);
-                free_insert_nr_++;
-            }
-            insert_kvblock_gaddrs_.clear();
-        }
-        else
-        {
-            DCHECK(insert_kvblock_gaddrs_.empty());
-            for (auto &handle : insert_kvblock_handles_)
-            {
-                rdma_adpt_->relinquish_perm(handle, c.alloc_hint, c.flag);
-                free_insert_nr_++;
-            }
-            insert_kvblock_handles_.clear();
-        }
+        const auto &c = conf_.alloc_kvblock;
+        DCHECK(!to_insert_block.gaddr_.has_value());
+        DCHECK(!to_insert_block.handle_.valid());
+        to_insert_block.handle_ = rdma_adpt_->acquire_perm(
+            nullgaddr, c.alloc_hint, alloc_size, c.ns, c.acquire_flag);
+        begin_insert_nr_++;
+        CHECK(to_insert_block.handle_.valid())
+            << "** failed to remote_alloc_kvblock for size: " << alloc_size
+            << ". Possibly run out of memory. Debug: allocated kvblocks: "
+            << begin_insert_nr_ << ", ended: " << end_insert_nr_
+            << ", free: " << free_insert_nr_;
+
+        to_insert_block.gaddr_ = to_insert_block.handle_.gaddr();
+        return RC::kOk;
     }
     void free_insert_kvblock_batch(size_t batch_size)
     {
         CHECK(false) << "TODO: " << batch_size;
     }
-    void do_free_kvblock(GlobalAddress gaddr)
+    void do_free_kvblock([[maybe_unused]] GlobalAddress gaddr)
     {
-        auto size = conf_.kvblock_expect_size;
-        const auto &c = conf_.free_kvblock;
-        if (c.do_nothing)
-        {
-            return;
-        }
-        rdma_adpt_->remote_free(gaddr, size, c.alloc_hint);
+        // auto size = conf_.kvblock_expect_size;
+        // const auto &c = conf_.free_kvblock;
+        // if (c.do_nothing)
+        // {
+        //     return;
+        // }
+        // rdma_adpt_->remote_free(gaddr, size, c.alloc_hint);
+        LOG_FIRST_N(WARNING, 1) << "** Not actually doing remote freeing.";
     }
 
     size_t cached_gd() const
@@ -2058,29 +2017,32 @@ private:
     }
     void build_subtable_mem_handle(size_t idx)
     {
+        const auto &c = conf_.meta.d;
         if (unlikely(subtable_mem_handles_[idx].valid()))
         {
             // exist old handle, free it before going on
-            const auto &c = conf_.meta.dtor;
             rdma_adpt_->relinquish_perm(
-                subtable_mem_handles_[idx], c.alloc_hint, c.flag);
+                subtable_mem_handles_[idx], c.alloc_hint, c.relinquish_flag);
         }
 
-        const auto &c = conf_.meta.ctor;
         DCHECK(!subtable_mem_handles_[idx].valid());
         subtable_mem_handles_[idx] =
             rdma_adpt_->acquire_perm(cached_meta_.entries[idx],
                                      c.alloc_hint,
                                      SubTableT::size_bytes(),
-                                     c.lease_time,
-                                     c.ac_flag);
+                                     c.ns,
+                                     c.acquire_flag);
     }
-    RemoteMemHandle &get_global_kvblock_mem_handle()
-    {
-        return kvblock_mem_handle_;
-    }
+    // RemoteMemHandle &get_global_kvblock_mem_handle()
+    // {
+    //     return kvblock_mem_handle_;
+    // }
     RemoteMemHandle &get_directory_mem_handle()
     {
+        if (unlikely(!directory_mem_handle_.valid()))
+        {
+            init_directory_mem_handle();
+        }
         return directory_mem_handle_;
     }
     uint32_t cached_ld(size_t idx)
@@ -2092,36 +2054,17 @@ private:
         return (GlobalAddress) cached_meta_.entries[idx];
     }
 
-    void init_kvblock_mem_handle()
-    {
-        // init the global covering handle of kvblock
-        auto g_kvblock_pool_gaddr = cached_meta_.kvblock_pool_gaddr;
-        auto g_kvblock_pool_size = cached_meta_.kvblock_pool_size;
-        CHECK(!g_kvblock_pool_gaddr.is_null());
-        CHECK_GT(g_kvblock_pool_size, 0);
-
-        // NOTE:
-        // kvblock_mem_handle_ does not listen to the config
-        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                       (flag_t) AcquireRequestFlag::kNoBindPR;
-        if (conf_.bypass_prot)
-        {
-            ac_flag |= (flag_t) AcquireRequestFlag::kNoRpc;
-        }
-
-        kvblock_mem_handle_ = rdma_adpt_->acquire_perm(
-            g_kvblock_pool_gaddr, 0, g_kvblock_pool_size, 0ns, ac_flag);
-    }
-
     void init_directory_mem_handle()
     {
-        const auto &c = conf_.meta.ctor;
+        const auto &c = conf_.meta.d;
         DCHECK(!directory_mem_handle_.valid());
+        DCHECK_NE(table_meta_addr_, nullgaddr);
         directory_mem_handle_ = rdma_adpt_->acquire_perm(table_meta_addr_,
                                                          c.alloc_hint,
                                                          sizeof(MetaT),
-                                                         c.lease_time,
-                                                         c.ac_flag);
+                                                         c.ns,
+                                                         c.acquire_flag);
+        DCHECK(directory_mem_handle_.valid());
     }
 };
 
@@ -2188,9 +2131,12 @@ public:
     {
         maybe_start_del_trace();
 
+        DLOG_IF(INFO, config::kMonitorRdma)
+            << "[race] Started to Deleted key `" << key << "`. "
+            << pre_rdma_adaptor(rdma_adpt_);
         auto rc = rhh_.del(key, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
-            << "[race] Deleted key `" << key << "`. "
+            << "[race] Deleted key `" << key << "`. got " << rc
             << pre_rdma_adaptor(rdma_adpt_);
 
         rdma_adpt_->put_all_rdma_buffer();
@@ -2202,9 +2148,12 @@ public:
     {
         maybe_start_put_trace();
 
+        DLOG_IF(INFO, config::kMonitorRdma)
+            << "[race] Started to Put key `" << key << "."
+            << pre_rdma_adaptor(rdma_adpt_);
         auto rc = rhh_.put(key, value, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
-            << "[race] Put key `" << key << "`. "
+            << "[race] Put key `" << key << "`. got " << rc
             << pre_rdma_adaptor(rdma_adpt_);
 
         rdma_adpt_->put_all_rdma_buffer();
@@ -2216,9 +2165,12 @@ public:
     {
         maybe_start_get_trace();
 
+        DLOG_IF(INFO, config::kMonitorRdma)
+            << "[race] Started to Get key `" << key << "`. "
+            << pre_rdma_adaptor(rdma_adpt_);
         auto rc = rhh_.get(key, value, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
-            << "[race] Get key `" << key << "`. "
+            << "[race] Get key `" << key << "` got " << rc << ". "
             << pre_rdma_adaptor(rdma_adpt_);
         rdma_adpt_->put_all_rdma_buffer();
 
@@ -2229,6 +2181,7 @@ public:
     {
         maybe_start_expand_trace();
 
+        DLOG_IF(INFO, config::kMonitorRdma) << "[race] Started to Expand";
         auto rc = rhh_.expand(subtable_idx, dctx);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] expand subtable[" << subtable_idx << "] "

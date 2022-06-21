@@ -183,11 +183,13 @@ public:
             auto kvblock_len = sizeof(KVBlock);
             auto rdma_buf = rdma_adpt.get_rdma_buffer(kvblock_len);
             DCHECK_GE(rdma_buf.size, kvblock_len);
-            CHECK_EQ(rdma_adpt.rdma_read(DCHECK_NOTNULL(rdma_buf.buffer),
-                                         kvblock_remote_addr,
-                                         kvblock_len,
-                                         0 /* flag */,
-                                         kvblock_mem_handle),
+            CHECK_EQ(rdma_adpt.rdma_read(
+                         DCHECK_NOTNULL(rdma_buf.buffer),
+                         kvblock_remote_addr,
+                         kvblock_len,
+                         // NOTE: for performance reason ,we skip the protection
+                         (flag_t) RWFlag::kUseUniversalRkey /* flag */,
+                         kvblock_mem_handle),
                      kOk);
             CHECK_EQ(rdma_adpt.commit(), kOk);
             KVBlock &kv_block = *(KVBlock *) rdma_buf.buffer;

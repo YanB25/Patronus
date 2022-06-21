@@ -111,7 +111,6 @@ struct MemHandleDecision
         auto rel_invalid = (flag_t) LeaseModifyFlag::kUseMR;
         validate(ac_invalid, rel_invalid);
 
-        acquire_flag |= (flag_t) AcquireRequestFlag::kNoBindPR;
         return *this;
     }
     MemHandleDecision &use_mr()

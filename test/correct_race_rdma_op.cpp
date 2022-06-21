@@ -132,13 +132,15 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     auto meta_gaddr = p->get_object<GlobalAddress>("race:meta_gaddr", 1ms);
     LOG(INFO) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
-    RaceHashingHandleConfig handle_conf;
-    handle_conf.kvblock_expect_size = kKVBlockExpectSize;
+    // RaceHashingHandleConfig handle_conf;
+    // handle_conf.kvblock_expect_size = kKVBlockExpectSize;
+    auto handle_conf = RaceHashingConfigFactory::get_mw_protected(
+        "rdma test", kKVBlockExpectSize, 1 /* batch size */);
     auto handle_rdma_ctx =
         patronus::RdmaAdaptor::new_instance(kServerNodeId,
                                             dir_id,
                                             p,
-                                            false /* bypass_prot */,
+                                            handle_conf.bypass_prot,
                                             false /* two sided */,
                                             ctx);
 

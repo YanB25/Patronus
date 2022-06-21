@@ -88,10 +88,16 @@ public:
                                  std::chrono::nanoseconds ns,
                                  flag_t flag) override
     {
+        bool no_rpc = flag & (flag_t) AcquireRequestFlag::kNoRpc;
+        if (unlikely(no_rpc))
+        {
+            return alloc_handle(
+                gaddr, size, patronus::AcquireRequestStatus::kSuccess);
+        }
+
         std::ignore = ns;
         bool with_alloc = flag & (flag_t) AcquireRequestFlag::kWithAllocation;
         bool only_alloc = flag & (flag_t) AcquireRequestFlag::kOnlyAllocation;
-        CHECK(!only_alloc) << "use alloc API instead";
         bool alloc_semantics = with_alloc || only_alloc;
         if (alloc_semantics)
         {
