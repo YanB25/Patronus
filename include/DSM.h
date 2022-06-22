@@ -515,12 +515,24 @@ public:
         ::free(ret);
         return value;
     }
-    template <typename T>
-    void barrier(const std::string &key, const T &sleep_time)
+    template <typename Duration>
+    void keeper_barrier(const std::string &key, Duration sleep_time)
     {
         VLOG(1) << "[DSM] Entering Barrier " << key;
         keeper->barrier(key, sleep_time);
         VLOG(1) << "[DSM] Leaving Barrier " << key;
+    }
+    template <typename Duration>
+    void keeper_partial_barrier(const std::string &key,
+                                size_t expect_nr,
+                                bool is_master,
+                                Duration sleep_time)
+    {
+        VLOG(1) << "[DSM] Entering Barrier " << key << " (expect " << expect_nr
+                << ", is_master: " << is_master << ")";
+        keeper->partial_barrier(key, expect_nr, is_master, sleep_time);
+        VLOG(1) << "[DSM] Leaving Barrier " << key << " (expect " << expect_nr
+                << ", is_master: " << is_master << ")";
     }
 
     // ClockManager &clock_manager()
@@ -679,11 +691,6 @@ public:
     bool is_register()
     {
         return thread_id_ != -1;
-    }
-    template <typename T>
-    void keeper_barrier(const std::string &ss, const T &sleep_time)
-    {
-        keeper->barrier(ss, sleep_time);
     }
     /**
      * @brief The per-thread temporary buffer for client.

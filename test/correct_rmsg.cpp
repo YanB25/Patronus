@@ -250,11 +250,11 @@ void client(std::shared_ptr<DSM> dsm)
 
     client_varsize_correct(dsm, tid % NR_DIRECTORY);
 
-    dsm->barrier("finished varsize_correct()", 10ms);
+    dsm->keeper_barrier("finished varsize_correct()", 10ms);
 
     client_multithread(dsm, kClientThreadNr);
 
-    dsm->barrier("finished", 10ms);
+    dsm->keeper_barrier("finished", 10ms);
     LOG(INFO) << "ALL TEST PASSED";
 }
 
@@ -264,13 +264,13 @@ void server(std::shared_ptr<DSM> dsm)
 
     server_varsize_correct(dsm);
 
-    dsm->barrier("finished varsize_correct()", 10ms);
+    dsm->keeper_barrier("finished varsize_correct()", 10ms);
 
     size_t expect_work =
         ::config::get_client_nids().size() * kClientThreadNr * kBurnCnt;
     server_multithread(dsm, expect_work, kServerThreadNr);
 
-    dsm->barrier("finished", 10ms);
+    dsm->keeper_barrier("finished", 10ms);
     LOG(INFO) << "ALL TEST PASSED";
 }
 

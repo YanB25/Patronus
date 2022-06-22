@@ -88,6 +88,9 @@ public:
         c.bypass_prot = true;
         c.read_kvblock.no_rpc();
         c.alloc_kvblock.only_alloc(hash::config::kAllocHintKVBlock);
+        LOG(WARNING) << "** RH disable memory deallocation here. TODO: please "
+                        "modify me. It is unfair comparison.";
+        c.alloc_kvblock.relinquish_flag |= (flag_t) LeaseModifyFlag::kNoRpc;
         c.meta.d.no_rpc();
         return c;
     }

@@ -790,11 +790,29 @@ void benchmark_client(Patronus::pointer p,
             col_lat_idx.push_back("lat_p9");
             col_lat_idx.push_back("lat_p99");
         }
-        lat_data[report_name].push_back(lat_m.min());
-        lat_data[report_name].push_back(lat_m.percentile(0.5));
-        lat_data[report_name].push_back(lat_m.percentile(0.9));
-        lat_data[report_name].push_back(lat_m.percentile(0.99));
+        if (likely(lat_data[report_name].empty()))
+        {
+            lat_data[report_name].push_back(lat_m.min());
+            lat_data[report_name].push_back(lat_m.percentile(0.5));
+            lat_data[report_name].push_back(lat_m.percentile(0.9));
+            lat_data[report_name].push_back(lat_m.percentile(0.99));
+        }
+        else
+        {
+            LOG(WARNING) << "** Recording latency for `" << report_name
+                         << "` duplicated. Skip.";
+        }
     }
+
+    // finished one sub-conf. Sync the client
+    if (is_master)
+    {
+        static size_t client_sync_key{0};
+        client_sync_key++;
+        p->client_barrier("client_sync-" + std::to_string(client_sync_key),
+                          100ms);
+    }
+    bar.wait();
 }
 
 template <size_t kE, size_t kB, size_t kS>
@@ -855,14 +873,14 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     for (size_t kvblock_expect_size : {4_KB})
     {
         rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
-            "unprot", kvblock_expect_size, 0 /* no batching */));
+            "unprot", kvblock_expect_size, 1 /* no batching */));
         rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected(
-            "patronus", kvblock_expect_size, 0 /* no batch */));
-        rhh_configs.push_back(
-            RaceHashingConfigFactory::get_mw_protected_with_timeout(
-                "patronus-lease", kvblock_expect_size));
-        rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
-            "mr", kvblock_expect_size, 0 /* no batch */));
+            "patronus", kvblock_expect_size, 1 /* no batch */));
+        // rhh_configs.push_back(
+        //     RaceHashingConfigFactory::get_mw_protected_with_timeout(
+        //         "patronus-lease", kvblock_expect_size));
+        // rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
+        //     "mr", kvblock_expect_size, 1 /* no batch */));
     }
 
     for (const auto &rhh_conf : rhh_configs)
@@ -871,7 +889,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         // for (size_t thread_nr : {8, 16})
         // for (size_t thread_nr : {1, 4, 8, 16})
         // for (size_t thread_nr : {8, 16})
-        for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+        // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+        for (size_t thread_nr : {1, 32})
         {
             for (size_t coro_nr : {1})
             {
@@ -907,43 +926,43 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 }
             }
         }
-        for (size_t thread_nr : {32})
-        {
-            // for (size_t coro_nr : {2, 4, 8, 16})
-            for (size_t coro_nr : {1})
-            {
-                LOG_IF(INFO, is_master)
-                    << "[bench] benching multiple threads for " << rhh_conf;
-                constexpr size_t capacity =
-                    RaceHashing<4, 16, 16>::max_capacity();
-                key++;
-                auto multithread_conf =
-                    BenchConfigFactory::get_multi_round_config(
-                        "multithread_basic",
-                        capacity,
-                        1_M,
-                        thread_nr,
-                        coro_nr,
-                        4 /* initial_subtable_nr */,
-                        rhh_conf.kvblock_expect_size);
-                if (is_client)
-                {
-                    for (const auto &bench_conf : multithread_conf)
-                    {
-                        bench_conf.validate();
-                        LOG_IF(INFO, is_master)
-                            << "[sub-conf] running conf: " << bench_conf;
-                        benchmark_client<4, 16, 16>(
-                            p, bar, is_master, bench_conf, rhh_conf, key);
-                    }
-                }
-                else
-                {
-                    benchmark_server<4, 16, 16>(
-                        p, bar, is_master, multithread_conf, key);
-                }
-            }
-        }
+        // for (size_t thread_nr : {32})
+        // {
+        //     // for (size_t coro_nr : {2, 4, 8, 16})
+        //     for (size_t coro_nr : {1})
+        //     {
+        //         LOG_IF(INFO, is_master)
+        //             << "[bench] benching multiple threads for " << rhh_conf;
+        //         constexpr size_t capacity =
+        //             RaceHashing<4, 16, 16>::max_capacity();
+        //         key++;
+        //         auto multithread_conf =
+        //             BenchConfigFactory::get_multi_round_config(
+        //                 "multithread_basic",
+        //                 capacity,
+        //                 1_M,
+        //                 thread_nr,
+        //                 coro_nr,
+        //                 4 /* initial_subtable_nr */,
+        //                 rhh_conf.kvblock_expect_size);
+        //         if (is_client)
+        //         {
+        //             for (const auto &bench_conf : multithread_conf)
+        //             {
+        //                 bench_conf.validate();
+        //                 LOG_IF(INFO, is_master)
+        //                     << "[sub-conf] running conf: " << bench_conf;
+        //                 benchmark_client<4, 16, 16>(
+        //                     p, bar, is_master, bench_conf, rhh_conf, key);
+        //             }
+        //         }
+        //         else
+        //         {
+        //             benchmark_server<4, 16, 16>(
+        //                 p, bar, is_master, multithread_conf, key);
+        //         }
+        //     }
+        // }
     }
 }
 

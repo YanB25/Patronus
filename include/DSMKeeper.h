@@ -98,13 +98,23 @@ public:
               uint32_t maxServer = MAX_MACHINE);
 
     virtual ~DSMKeeper();
-    template <typename T>
-    void barrier(const std::string &barrierKey, const T &sleep_time)
+    template <typename Duration>
+    void barrier(const std::string &barrierKey, Duration sleep_time)
     {
         auto nr = getServerNR();
+        auto nid = getMyNodeID();
+        bool is_master = (nid == 0);
+        return partial_barrier(barrierKey, nr, is_master, sleep_time);
+    }
+    template <typename Duration>
+    void partial_barrier(const std::string &barrierKey,
+                         size_t expect_nr,
+                         bool is_master,
+                         Duration sleep_time)
+    {
         std::string key = std::string("__barrier:") + barrierKey;
         auto nid = getMyNodeID();
-        if (nid == 0)
+        if (is_master)
         {
             memSet(key.c_str(), key.size(), "0", 1, sleep_time);
         }
@@ -115,11 +125,12 @@ public:
                 key.c_str(), key.size(), nullptr, sleep_time * (nid + 1));
             uint64_t v = std::stoull(ret);
             free(ret);
-            CHECK_LE(v, nr) << "[keeper] Got entered server_nr more than "
-                               "requested. Re-enter of barrier detected, which "
-                               " does not behave correctly.key : "
-                            << barrierKey << ", nr: " << nr;
-            if (v == nr)
+            CHECK_LE(v, expect_nr)
+                << "[keeper] Got entered server_nr more than "
+                   "requested. Re-enter of barrier detected, which "
+                   " does not behave correctly. key: "
+                << barrierKey << ", nr: " << expect_nr;
+            if (v == expect_nr)
             {
                 return;
             }

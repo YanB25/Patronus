@@ -1002,6 +1002,11 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
 {
     debug_validate_acquire_request_flag(req->flag);
 
+    req_ctx.acquire.buffer_mw = nullptr;
+    req_ctx.acquire.header_mw = nullptr;
+    req_ctx.acquire.buffer_mr = nullptr;
+    req_ctx.acquire.header_mr = nullptr;
+
     DCHECK_NE(req->type, RpcType::kAcquireNoLeaseReq) << "** Deprecated";
 
     auto dirID = req->dir_id;
@@ -2588,69 +2593,57 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
         unbind_buf = false;
     }
 
-    if (likely(unbind_pr || unbind_buf))
+    if (use_mr)
     {
-        if (use_mr)
+        if (unbind_pr)
+        {
+            auto *header_mr = DCHECK_NOTNULL(lease_ctx)->header_mr;
+            CHECK(destroyMemoryRegion(DCHECK_NOTNULL(header_mr)));
+        }
+        if (unbind_buf)
         {
             auto *buffer_mr = DCHECK_NOTNULL(lease_ctx)->buffer_mr;
-            auto *header_mr = DCHECK_NOTNULL(lease_ctx)->header_mr;
-            if (buffer_mr != nullptr && unbind_buf)
-            {
-                CHECK(destroyMemoryRegion(buffer_mr));
-            }
-            if (header_mr != nullptr && unbind_pr)
-            {
-                CHECK(destroyMemoryRegion(header_mr));
-            }
+            CHECK(destroyMemoryRegion(DCHECK_NOTNULL(buffer_mr)));
         }
-        else
+    }
+    else
+    {
+        auto dir_id = lease_ctx->dir_id;
+        DCHECK_EQ(dir_id, get_thread_id())
+            << "Currently we limit each server thread tid handles the same "
+               "dir_id";
+        auto *mr = dsm_->get_dir_mr(dir_id);
+        void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
+        if (unbind_pr)
         {
-            // should issue unbind MW here.
-            auto dir_id = lease_ctx->dir_id;
-            DCHECK_EQ(dir_id, get_thread_id())
-                << "Currently we limit each server thread tid handles the "
-                   "same "
-                   "dir_id";
-            auto *mr = dsm_->get_dir_mr(dir_id);
-            void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
+            ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
+                                     mr,
+                                     (uint64_t) bind_nulladdr,
+                                     1,
+                                     IBV_ACCESS_CUSTOM_REMOTE_NORW);
 
-            // NOTE: if size == 0, no matter access set to RO, RW or NORW
-            // and no matter allocated_mw_nr +2/-2/0, it generates corrupted
-            // mws. But if set size to 1 and allocated_mw_nr + 2, it works
-            // well.
-            if (unbind_buf)
-            {
-                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
-                                         mr,
-                                         (uint64_t) bind_nulladdr,
-                                         1,
-                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
-            }
-            else
-            {
-                if (unlikely(with_buf))
-                {
-                    ex_ctx.put_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw));
-                }
-            }
-            lease_ctx->buffer_mw = nullptr;
-            if (unbind_pr)
-            {
-                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
-                                         mr,
-                                         (uint64_t) bind_nulladdr,
-                                         1,
-                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
-            }
-            else
-            {
-                if (unlikely(with_pr))
-                {
-                    ex_ctx.put_mw(DCHECK_NOTNULL(lease_ctx->header_mw));
-                }
-            }
             lease_ctx->header_mw = nullptr;
         }
+        if (unbind_buf)
+        {
+            ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
+                                     mr,
+                                     (uint64_t) bind_nulladdr,
+                                     1,
+                                     IBV_ACCESS_CUSTOM_REMOTE_NORW);
+            lease_ctx->buffer_mw = nullptr;
+        }
+    }
+
+    if (lease_ctx->header_mw)
+    {
+        ex_ctx.put_mw(lease_ctx->header_mw);
+        lease_ctx->header_mw = nullptr;
+    }
+    if (lease_ctx->buffer_mw)
+    {
+        ex_ctx.put_mw(lease_ctx->buffer_mw);
+        lease_ctx->buffer_mw = nullptr;
     }
 
     req_ctx.relinquish.lease_ctx = lease_ctx;
@@ -2838,65 +2831,61 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         unbind_buf = false;
         unbind_pr = false;
     }
-    if (likely(unbind_buf || unbind_pr))
+
+    if (use_mr)
     {
-        if (use_mr)
+        if (unbind_pr)
+        {
+            auto *header_mr = DCHECK_NOTNULL(lease_ctx)->header_mr;
+            CHECK(destroyMemoryRegion(DCHECK_NOTNULL(header_mr)));
+            lease_ctx->header_mr = nullptr;
+        }
+        if (unbind_buf)
         {
             auto *buffer_mr = DCHECK_NOTNULL(lease_ctx)->buffer_mr;
-            auto *header_mr = DCHECK_NOTNULL(lease_ctx)->header_mr;
-            if (buffer_mr != nullptr && unbind_buf)
-            {
-                CHECK(destroyMemoryRegion(buffer_mr));
-            }
-            if (header_mr != nullptr && unbind_pr)
-            {
-                CHECK(destroyMemoryRegion(header_mr));
-            }
-        }
-        else
-        {
-            // should issue unbind MW here.
-            // static thread_local ibv_send_wr wrs[8];
-            auto dir_id = lease_ctx->dir_id;
-            auto *mr = dsm_->get_dir_mr(dir_id);
-            void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
-
-            // NOTE: if size == 0, no matter access set to RO, RW or NORW
-            // and no matter allocated_mw_nr +2/-2/0, it generates corrupted
-            // mws. But if set size to 1 and allocated_mw_nr + 2, it works
-            // well.
-            if (unbind_buf)
-            {
-                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
-                                         mr,
-                                         (uint64_t) bind_nulladdr,
-                                         1,
-                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
-            }
-            else
-            {
-                if (unlikely(with_buf))
-                {
-                    ex_ctx.put_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw));
-                }
-            }
-            if (unbind_pr)
-            {
-                ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
-                                         mr,
-                                         (uint64_t) bind_nulladdr,
-                                         1,
-                                         IBV_ACCESS_CUSTOM_REMOTE_NORW);
-            }
-            else
-            {
-                if (unlikely(with_pr))
-                {
-                    ex_ctx.put_mw(DCHECK_NOTNULL(lease_ctx->header_mw));
-                }
-            }
+            CHECK(destroyMemoryRegion(DCHECK_NOTNULL(buffer_mr)));
+            lease_ctx->buffer_mr = nullptr;
         }
     }
+    else
+    {
+        // should issue unbind MW here.
+        // static thread_local ibv_send_wr wrs[8];
+        auto dir_id = lease_ctx->dir_id;
+        auto *mr = dsm_->get_dir_mr(dir_id);
+        void *bind_nulladdr = dsm_->dsm_offset_to_addr(0);
+
+        if (unbind_pr)
+        {
+            ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->header_mw),
+                                     mr,
+                                     (uint64_t) bind_nulladdr,
+                                     1,
+                                     IBV_ACCESS_CUSTOM_REMOTE_NORW);
+            lease_ctx->header_mw = nullptr;
+        }
+        if (unbind_buf)
+        {
+            ex_ctx.prepare_unbind_mw(DCHECK_NOTNULL(lease_ctx->buffer_mw),
+                                     mr,
+                                     (uint64_t) bind_nulladdr,
+                                     1,
+                                     IBV_ACCESS_CUSTOM_REMOTE_NORW);
+            lease_ctx->buffer_mw = nullptr;
+        }
+    }
+
+    if (lease_ctx->header_mw)
+    {
+        ex_ctx.put_mw(lease_ctx->header_mw);
+        lease_ctx->header_mw = nullptr;
+    }
+    if (lease_ctx->buffer_mw)
+    {
+        ex_ctx.put_mw(lease_ctx->buffer_mw);
+        lease_ctx->buffer_mw = nullptr;
+    }
+
     bool with_conflict_detect = lease_ctx->with_conflict_detect;
     if (with_conflict_detect)
     {
@@ -2911,17 +2900,6 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         auto size = lease_ctx->buffer_size;
         auto hint = lease_ctx->hint;
         patronus_free(addr, size, hint);
-    }
-
-    // NOTE: don't call put_mw(...) here
-    // because ex_ctx manages the ownership of mw.
-    if (lease_ctx->header_mw)
-    {
-        lease_ctx->header_mw = nullptr;
-    }
-    if (lease_ctx->buffer_mw)
-    {
-        lease_ctx->buffer_mw = nullptr;
     }
 
     if (with_pr)

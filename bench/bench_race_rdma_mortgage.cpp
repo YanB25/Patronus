@@ -693,11 +693,61 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     auto capacity = RaceHashing<4, 16, 16>::max_capacity();
 
+    for (auto &rhh_conf : rhh_configs)
+    {
+        for (size_t thread_nr : {1, 32})
+        {
+            for (size_t coro_nr : {1})
+            // for (size_t coro_nr : {1})
+            {
+                // for (size_t io_nr : {8, 16, 32})
+                for (size_t io_nr : {8})
+                // for (size_t io_nr : {128})
+                // for (size_t io_nr : {0, 1, 8, 16, 32})
+                {
+                    LOG_IF(INFO, is_master)
+                        << "[bench] benching single thread for " << rhh_conf;
+                    key++;
+                    auto basic_conf = BenchConfigFactory::get_bootstrap_config(
+                        "mortgage",
+                        4 /* subtable nr */,
+                        capacity,
+                        100_K,
+                        // 10_K /* test_nr */,
+                        thread_nr /* thread nr */,
+                        coro_nr /* coro nr */,
+                        io_nr);
+                    if (is_client)
+                    {
+                        for (const auto &bench_conf : basic_conf)
+                        {
+                            bench_conf.validate();
+                            LOG_IF(INFO, is_master)
+                                << "[sub-conf] running conf: " << bench_conf;
+                            benchmark_client<4, 16, 16>(
+                                p, bar, is_master, bench_conf, rhh_conf, key);
+                        }
+                    }
+                    else
+                    {
+                        benchmark_server<4, 16, 16>(
+                            p,
+                            bar,
+                            is_master,
+                            basic_conf,
+                            rhh_conf.kvblock_expect_size,
+                            key);
+                    }
+                }
+            }
+        }
+    }
+
     // for (auto &rhh_conf : rhh_configs)
     // {
-    //     for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+    //     for (size_t thread_nr : {32})
     //     {
-    //         for (size_t coro_nr : {1})
+    //         for (size_t coro_nr : {2, 4, 8, 16})
     //         // for (size_t coro_nr : {1})
     //         {
     //             // for (size_t io_nr : {8, 16, 32})
@@ -745,57 +795,6 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     //         }
     //     }
     // }
-
-    for (auto &rhh_conf : rhh_configs)
-    {
-        for (size_t thread_nr : {32})
-        {
-            for (size_t coro_nr : {2, 4, 8, 16})
-            // for (size_t coro_nr : {1})
-            {
-                // for (size_t io_nr : {8, 16, 32})
-                for (size_t io_nr : {8})
-                // for (size_t io_nr : {128})
-                // for (size_t io_nr : {0, 1, 8, 16, 32})
-                {
-                    LOG_IF(INFO, is_master)
-                        << "[bench] benching single thread for " << rhh_conf;
-                    key++;
-                    auto basic_conf = BenchConfigFactory::get_bootstrap_config(
-                        "boot",
-                        4 /* subtable nr */,
-                        capacity,
-                        // 1_M,
-                        100_K,
-                        // 10_K /* test_nr */,
-                        thread_nr /* thread nr */,
-                        coro_nr /* coro nr */,
-                        io_nr);
-                    if (is_client)
-                    {
-                        for (const auto &bench_conf : basic_conf)
-                        {
-                            bench_conf.validate();
-                            LOG_IF(INFO, is_master)
-                                << "[sub-conf] running conf: " << bench_conf;
-                            benchmark_client<4, 16, 16>(
-                                p, bar, is_master, bench_conf, rhh_conf, key);
-                        }
-                    }
-                    else
-                    {
-                        benchmark_server<4, 16, 16>(
-                            p,
-                            bar,
-                            is_master,
-                            basic_conf,
-                            rhh_conf.kvblock_expect_size,
-                            key);
-                    }
-                }
-            }
-        }
-    }
 }
 
 int main(int argc, char *argv[])

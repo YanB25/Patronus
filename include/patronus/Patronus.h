@@ -346,12 +346,30 @@ public:
         return ret;
     }
 
-    template <typename T>
-    void keeper_barrier(const std::string &key, const T &sleep_time)
+    template <typename Duration>
+    void keeper_barrier(const std::string &key, Duration sleep_time)
     {
-        return dsm_->barrier(key, sleep_time);
+        return dsm_->keeper_barrier(key, sleep_time);
     }
 
+    template <typename Duration>
+    void client_barrier(const std::string &key, Duration sleep_time)
+    {
+        CHECK(is_client_) << "** Only client can enter client_barrier";
+        size_t expect_nr = ::config::get_client_nids().size();
+        bool is_master = get_node_id() == ::config::get_client_nids().front();
+        return dsm_->keeper_partial_barrier(
+            key, expect_nr, is_master, sleep_time);
+    }
+    template <typename Duration>
+    void server_barrier(const std::string &key, Duration sleep_time)
+    {
+        CHECK(is_server_) << "** Only server can enter server_barrier";
+        size_t expect_nr = ::config::get_server_nids().size();
+        bool is_master = get_node_id() == ::config::get_server_nids().front();
+        return dsm_->keeper_partial_barrier(
+            key, expect_nr, is_master, sleep_time);
+    }
     /**
      * @brief After all the node call this function, @should_exit() will
      * return true

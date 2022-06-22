@@ -90,6 +90,20 @@ void test_type_server(Patronus::pointer p)
     LOG(INFO) << "Put v: " << gaddr;
 }
 
+void test_client_partial_barrier(Patronus::pointer p)
+{
+    for (size_t i = 0; i < 100; ++i)
+    {
+        auto dsm = p->get_dsm();
+        bool is_master =
+            p->get_node_id() == ::config::get_client_nids().front();
+        dsm->keeper_partial_barrier("partial_test(" + std::to_string(i) + ")",
+                                    ::config::get_client_nids().size(),
+                                    is_master,
+                                    1ms);
+    }
+}
+
 void client(Patronus::pointer p)
 {
     LOG(INFO) << "[bench] begin basic test";
@@ -100,6 +114,8 @@ void client(Patronus::pointer p)
     test_complex_barrier(p);
 
     test_type_client(p);
+
+    test_client_partial_barrier(p);
 }
 
 void server(Patronus::pointer p)
@@ -141,6 +157,8 @@ int main(int argc, char *argv[])
         patronus->finished(kWaitKey);
         server(patronus);
     }
+
+    patronus->keeper_barrier("finished", 100ms);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
