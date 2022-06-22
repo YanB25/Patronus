@@ -93,6 +93,7 @@ public:
     {
         // LOG(INFO) << "[debug] !! debug_fp_conflict_m: " <<
         // debug_fp_conflict_m_;
+        // LOG(INFO) << "[debug] !! debug_fp_miss_m: " << debug_fp_miss_m_;
 
         maybe_trace_bootstrap("before ~kvblock_mem_handle");
         const auto &c = conf_.meta.d;
@@ -1600,6 +1601,7 @@ public:
         // TODO: maybe enable batching here. Patronus API?
         // debug_fp_conflict_m_.collect(slot_handles.size());
 
+        // bool has_real_match = false;
         for (auto slot_handle : slot_handles)
         {
             size_t actual_size = slot_handle.slot_view().actual_len_bytes();
@@ -1648,6 +1650,7 @@ public:
                 continue;
             }
             // okay, it is the real match
+            // has_real_match = true;
             rc = func(key, slot_handle, kvblock_handle, dctx);
             CHECK_NE(rc, kNotFound)
                 << "Make no sense to return kNotFound: already found for you.";
@@ -1656,9 +1659,13 @@ public:
                 return rc;
             }
         }
+
+        // if (!slot_handles.empty())
+        // {
+        //     debug_fp_miss_m_.collect(has_real_match);
+        // }
         return rc;
     }
-
     RetCode get(const Key &key, Value &value, HashContext *dctx = nullptr)
     {
         DCHECK(inited_);
@@ -1839,6 +1846,7 @@ public:
 
 private:
     // OnePassBucketMonitor<uint64_t> debug_fp_conflict_m_{0, 100, 1};
+    // OnePassMonitor debug_fp_miss_m_;
 
     void alloc_fake_handle()
     {

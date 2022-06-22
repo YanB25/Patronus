@@ -299,8 +299,15 @@ will see an unexpected cases:
 [-] rpc_extend experiments add another candidate: for a totally xx times lease, we need to acquire & relinquish n times. It would be even slower. Add that.
 [-] bench list and cqueue. get the throughput and latency numbers
 - refine the RACE hashing experiments. 
-    - Let the RW and RO tests runnable. 
+    - Let the RW, RO and RO tests runnable. 
+        - recyclic allocator
+        - modify how handle determines whether a kvblock matches. e.g., force one of them to match
+    - Get the basic result of RW, RO and WO, for regular eval and mortgage eval
+    - implement batch allocation of insert/updates
+    - implement one huge RO handle for get operation
+    - See if performance gets better
     - bench_race_rdma_mortgage supposes to use global kv block for the binding. Modify to make it do so.
+    - Try to run Lease eval. Make it works and see if performance gets better.
     [-] refine the config setting.
     [-] see if race hashing can be optimized. be like caching to_insert_node ?
 - implement wait_client_list in LeaseContext, so that we can use it to re-write the locks of cqueue
