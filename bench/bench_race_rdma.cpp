@@ -280,7 +280,7 @@ public:
 
         return pipeline({w_conf});
     }
-    static std::vector<BenchConfig> get_multi_round_config(
+    static std::vector<BenchConfig> get_read_only_config(
         const std::string &name,
         size_t fill_nr,
         size_t test_nr,
@@ -323,18 +323,45 @@ public:
         query_report_conf.should_report = true;
 
         return pipeline({insert_conf, query_warmup_conf, query_report_conf});
+    }
+    static std::vector<BenchConfig> get_write_only_config(
+        const std::string &name,
+        size_t fill_nr,
+        size_t test_nr,
+        size_t thread_nr,
+        size_t coro_nr,
+        size_t initial_subtable_nr,
+        size_t kvblock_expect_size)
+    {
+        auto kv_g_conf = KVGenConf{.max_key = kMaxKey,
+                                   .use_zip = true,
+                                   .zip_skewness = 0.99,
+                                   .kvblock_expect_size = kvblock_expect_size};
 
-        // auto mix_conf = BenchConfig::get_empty_conf(name + ".mix",
-        // kv_g_conf); mix_conf.thread_nr = thread_nr; mix_conf.coro_nr =
-        // coro_nr; mix_conf.get_prob = 0.8; mix_conf.delete_prob = 0.1;
-        // mix_conf.insert_prob = 0.1;
-        // mix_conf.auto_extend = false;
-        // mix_conf.test_nr = test_nr;
-        // mix_conf.should_report = true;
-        // mix_conf.initial_subtable_nr = initial_subtable_nr;
+        // fill the table with KVs
+        auto load_conf = BenchConfig::get_empty_conf(name + ".load", kv_g_conf);
+        load_conf.thread_nr = 1;
+        load_conf.coro_nr = 1;
+        load_conf.insert_prob = 1;
+        load_conf.auto_extend = false;
+        load_conf.test_nr = fill_nr;
+        load_conf.should_report = false;
+        load_conf.initial_subtable_nr = initial_subtable_nr;
+        load_conf.is_loading = true;
+        load_conf.limit_nid = 1;  // nid
 
-        // return pipeline(
-        //     {insert_conf, query_warmup_conf, query_report_conf, mix_conf});
+        auto wo_conf = BenchConfig::get_empty_conf(name + ".wo", kv_g_conf);
+        wo_conf.name = name + ".wo";
+        wo_conf.thread_nr = thread_nr;
+        wo_conf.coro_nr = coro_nr;
+        wo_conf.get_prob = 0;
+        wo_conf.insert_prob = 1;
+        wo_conf.auto_extend = false;
+        wo_conf.test_nr = test_nr;
+        wo_conf.should_report = true;
+        wo_conf.initial_subtable_nr = initial_subtable_nr;
+
+        return pipeline({load_conf, wo_conf});
     }
 
 private:
@@ -870,6 +897,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     // set the rhh we like to test
     std::vector<RaceHashingHandleConfig> rhh_configs;
+    // NOTE: if kvblock is small, RH can reach like 10 Mops for read operations.
+    // Therefore, Patronus is not comparable to it.
+    // for (size_t kvblock_expect_size : {64})
     for (size_t kvblock_expect_size : {4_KB})
     {
         rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
@@ -892,25 +922,24 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
         for (size_t thread_nr : {1, 32})
         {
-            for (size_t coro_nr : {1})
+            constexpr static size_t kCoroNr = 1;
+            LOG_IF(INFO, is_master)
+                << "[bench] benching multiple threads for " << rhh_conf;
+            constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
+
             {
-                LOG_IF(INFO, is_master)
-                    << "[bench] benching multiple threads for " << rhh_conf;
-                constexpr size_t capacity =
-                    RaceHashing<4, 16, 16>::max_capacity();
                 key++;
-                auto multithread_conf =
-                    BenchConfigFactory::get_multi_round_config(
-                        "multithread_basic",
-                        capacity,
-                        1_M,
-                        thread_nr,
-                        coro_nr,
-                        4 /* initial_subtable_nr */,
-                        rhh_conf.kvblock_expect_size);
+                auto ro_conf = BenchConfigFactory::get_read_only_config(
+                    "RO",
+                    capacity,
+                    1_M,
+                    thread_nr,
+                    kCoroNr,
+                    4 /* initial_subtable_nr */,
+                    rhh_conf.kvblock_expect_size);
                 if (is_client)
                 {
-                    for (const auto &bench_conf : multithread_conf)
+                    for (const auto &bench_conf : ro_conf)
                     {
                         bench_conf.validate();
                         LOG_IF(INFO, is_master)
@@ -922,10 +951,38 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 else
                 {
                     benchmark_server<4, 16, 16>(
-                        p, bar, is_master, multithread_conf, key);
+                        p, bar, is_master, ro_conf, key);
                 }
             }
+            // {
+            //     key++;
+            //     auto wo_conf = BenchConfigFactory::get_write_only_config(
+            //         "WO",
+            //         capacity,
+            //         1_M,
+            //         thread_nr,
+            //         kCoroNr,
+            //         4 /* initial_subtable_nr */,
+            //         rhh_conf.kvblock_expect_size);
+            //     if (is_client)
+            //     {
+            //         for (const auto &bench_conf : wo_conf)
+            //         {
+            //             bench_conf.validate();
+            //             LOG_IF(INFO, is_master)
+            //                 << "[sub-conf] running conf: " << bench_conf;
+            //             benchmark_client<4, 16, 16>(
+            //                 p, bar, is_master, bench_conf, rhh_conf, key);
+            //         }
+            //     }
+            //     else
+            //     {
+            //         benchmark_server<4, 16, 16>(
+            //             p, bar, is_master, wo_conf, key);
+            //     }
+            // }
         }
+
         // for (size_t thread_nr : {32})
         // {
         //     // for (size_t coro_nr : {2, 4, 8, 16})

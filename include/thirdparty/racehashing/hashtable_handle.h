@@ -91,6 +91,9 @@ public:
     }
     ~RaceHashingHandleImpl()
     {
+        // LOG(INFO) << "[debug] !! debug_fp_conflict_m: " <<
+        // debug_fp_conflict_m_;
+
         maybe_trace_bootstrap("before ~kvblock_mem_handle");
         const auto &c = conf_.meta.d;
         if (directory_mem_handle_.valid())
@@ -1595,6 +1598,8 @@ public:
     {
         std::map<SlotHandle, KVBlockHandle> slots_rdma_buffers;
         // TODO: maybe enable batching here. Patronus API?
+        // debug_fp_conflict_m_.collect(slot_handles.size());
+
         for (auto slot_handle : slot_handles)
         {
             size_t actual_size = slot_handle.slot_view().actual_len_bytes();
@@ -1833,6 +1838,8 @@ public:
     }
 
 private:
+    // OnePassBucketMonitor<uint64_t> debug_fp_conflict_m_{0, 100, 1};
+
     void alloc_fake_handle()
     {
         if (!fake_handle_.valid())
