@@ -2,6 +2,7 @@
 
 #include "Common.h"
 #include "Rdma.h"
+#include "util/Pre.h"
 
 bool createContext(RdmaContext *context,
                    uint8_t port,
@@ -14,7 +15,9 @@ bool createContext(RdmaContext *context,
     ibv_context *ctx = nullptr;
     ibv_pd *pd = nullptr;
     ibv_port_attr portAttr;
+    std::vector<const char *> device_names;
     ibv_exp_res_domain *res_doms[kMaxAppThread] = {};
+    bool found_device = false;
 
     // get device names in the system
     int devicesNum;
@@ -36,12 +39,22 @@ bool createContext(RdmaContext *context,
     for (int i = 0; i < devicesNum; ++i)
     {
         // printf("Device %d: %s\n", i, ibv_get_device_name(deviceList[i]));
-        if (ibv_get_device_name(deviceList[i])[3] == '5')
+        const char *device_name = ibv_get_device_name(deviceList[i]);
+        device_names.push_back(device_name);
+        if (device_name[3] == ::config::kSelectMlxVersion &&
+            device_name[5] == ::config::kSelectMlxNicIdx)
         {
             devIndex = i;
+            found_device = true;
             break;
         }
     }
+
+    CHECK(found_device) << "** Not mlx named `mlx"
+                        << ::config::kSelectMlxVersion << "_"
+                        << ::config::kSelectMlxNicIdx
+                        << "` found. Device list is "
+                        << util::pre_vec(device_names);
 
     if (devIndex >= devicesNum)
     {

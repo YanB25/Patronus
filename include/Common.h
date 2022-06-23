@@ -273,6 +273,12 @@ constexpr bool debug()
 
 namespace config
 {
+// for example, for "mlx5_0",
+// the kSelectMlVersion should be '5'
+// the kSelectMlxIdx should be '0'
+constexpr static char kSelectMlxVersion = '5';  // mlx5
+// If you have multiple devices
+constexpr static char kSelectMlxNicIdx = '0';
 constexpr static size_t kMachineNr = 4;
 static_assert(kMachineNr <= MAX_MACHINE);
 static const std::vector<size_t> __kServerNodeIds{0};

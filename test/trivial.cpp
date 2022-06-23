@@ -14,7 +14,8 @@ using namespace std::chrono_literals;
 
 constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
-constexpr uint32_t kMachineNr = 2;
+
+DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 void accept_duration(std::chrono::nanoseconds ns)
 {
@@ -36,7 +37,7 @@ int main(int argc, char *argv[])
     rdmaQueryDevice();
 
     DSMConfig config;
-    config.machineNR = kMachineNr;
+    config.machineNR = ::config::kMachineNr;
 
     accept_duration(10ns);
     accept_duration(10us);
