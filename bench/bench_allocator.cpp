@@ -17,7 +17,7 @@
 #include "util/DataFrameF.h"
 #include "util/Rand.h"
 
-using namespace define::literals;
+using namespace util::literals;
 using namespace patronus;
 
 constexpr static size_t kMwPoolTotalSize = 8192;

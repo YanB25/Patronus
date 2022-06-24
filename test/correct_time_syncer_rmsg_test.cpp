@@ -29,7 +29,7 @@ std::ostream &operator<<(std::ostream &os,
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-using namespace define::literals;
+using namespace util::literals;
 using namespace patronus;
 
 constexpr static size_t kDirId = 0;

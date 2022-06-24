@@ -11,6 +11,8 @@
 #include "patronus/Time.h"
 #include "patronus/Type.h"
 
+using namespace util::literals;
+
 namespace patronus::time
 {
 struct ClockInfo
@@ -47,7 +49,6 @@ inline std::ostream &operator<<(std::ostream &os,
        << ", self_epsilon: " << msg.self_epsilon << "}";
     return os;
 }
-using namespace define::literals;
 
 class TimeSyncer
 {
@@ -239,7 +240,7 @@ private:
 
     // for clock_info
     ClockInfo &clock_info_;
-    [[maybe_unused]] char *buffer_ { nullptr };
+    [[maybe_unused]] char *buffer_{nullptr};
     size_t buf_size_{0};
 
     std::atomic<bool> expose_finish_{false};

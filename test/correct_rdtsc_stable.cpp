@@ -39,9 +39,9 @@ void report_rate()
         threads.emplace_back([i, &rdtsc_per_ns, &ns_per_rdtsc]() {
             bindCore(i + 1);
             auto before_now = std::chrono::steady_clock::now();
-            auto before_rdtsc = rdtsc();
+            auto before_rdtsc = util::rdtsc();
             std::this_thread::sleep_for(1s);
-            auto after_rdtsc = rdtsc();
+            auto after_rdtsc = util::rdtsc();
             auto after_now = std::chrono::steady_clock::now();
 
             auto take_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -85,7 +85,7 @@ void check_stable_across_threads()
         bindCore(1);
         while (likely(!finished.load(std::memory_order_relaxed)))
         {
-            shared_rdtsc.store(rdtsc(), std::memory_order_relaxed);
+            shared_rdtsc.store(util::rdtsc(), std::memory_order_relaxed);
             if (unlikely(!started.load(std::memory_order_relaxed)))
             {
                 started = true;
@@ -102,7 +102,7 @@ void check_stable_across_threads()
             continue;
         }
         auto now = std::chrono::steady_clock::now();
-        auto my_rdtsc = rdtsc();
+        auto my_rdtsc = util::rdtsc();
         int64_t rdtsc_diff =
             my_rdtsc - shared_rdtsc.load(std::memory_order_relaxed);
         diff_rdtsc_m.collect(rdtsc_diff);

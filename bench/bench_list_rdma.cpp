@@ -20,7 +20,7 @@
 #include "util/TimeConv.h"
 
 using namespace patronus::list;
-using namespace define::literals;
+using namespace util::literals;
 using namespace patronus;
 using namespace hmdf;
 

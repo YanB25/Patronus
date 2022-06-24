@@ -9,9 +9,9 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-constexpr static size_t kTestTime = 1 * define::M;
+constexpr static size_t kTestTime = 1_M;
 constexpr static size_t kCoroNr = 16;
-constexpr static size_t kLargeStackSize = 16 * define::MB;
+constexpr static size_t kLargeStackSize = 16_MB;
 
 using coro2_t = boost::coroutines2::coroutine<void>;
 

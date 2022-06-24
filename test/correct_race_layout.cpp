@@ -11,7 +11,7 @@
 #include "util/Rand.h"
 
 using namespace patronus::hash;
-using namespace define::literals;
+using namespace util::literals;
 using namespace std::chrono_literals;
 
 // constexpr static size_t kTestTime = 1_M;

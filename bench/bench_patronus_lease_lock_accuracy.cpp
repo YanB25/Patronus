@@ -20,7 +20,7 @@
 #include "util/TimeConv.h"
 
 using namespace patronus::hash;
-using namespace define::literals;
+using namespace util::literals;
 using namespace patronus;
 using namespace hmdf;
 
@@ -405,7 +405,7 @@ void benchmark_client(Patronus::pointer p,
         auto rng =
             std::chrono::duration_cast<std::chrono::nanoseconds>(1us).count();
         OnePassBucketMonitor late_ns(min, max, rng);
-  
+
         uint64_t before_time = 0;
         for (auto time : tc.acquire_time_)
         {

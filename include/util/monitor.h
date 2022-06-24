@@ -128,7 +128,7 @@ public:
             throw std::runtime_error("Can not found dependent column: `" +
                                      depend_col + "`");
         }
-        auto pcolumn = future::make_unique<DependentColumn>(
+        auto pcolumn = std::make_unique<DependentColumn>(
             inner->name(), inner->name() + " (ops)", inner, [](double input) {
                 return input == 0 ? 0 : 1e9 / input;
             });
@@ -149,7 +149,7 @@ public:
             throw std::runtime_error("Can not found dependent column: `" +
                                      depend_col + "`");
         }
-        auto pcolumn = future::make_unique<DependentColumn>(
+        auto pcolumn = std::make_unique<DependentColumn>(
             inner->name(), inner->name() + " (ns)", inner, [](double input) {
                 return input == 0 ? 0 : 1e9 / input;
             });
@@ -204,7 +204,7 @@ private:
                      const std::string &print_name,
                      std::atomic<T> *val)
     {
-        auto pcolumn = future::make_unique<Column<T>>(name, print_name, val);
+        auto pcolumn = std::make_unique<Column<T>>(name, print_name, val);
         columns_.emplace_back(std::move(pcolumn));
         return *this;
     }

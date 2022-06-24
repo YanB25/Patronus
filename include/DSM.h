@@ -105,7 +105,7 @@ public:
         for (size_t i = 0; i < getClusterSize(); ++i)
         {
             auto ex = getExchangeMetaBootstrap(i);
-            uint64_t digest = djb2_digest((char *) &ex, sizeof(ex));
+            uint64_t digest = util::djb2_digest((char *) &ex, sizeof(ex));
             LOG(INFO) << "[boot-meta] node: " << i << " digest: " << std::hex
                       << digest;
         }

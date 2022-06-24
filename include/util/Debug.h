@@ -5,6 +5,18 @@
 #include <glog/logging.h>
 
 #ifdef NDEBUG
+constexpr bool debug()
+{
+    return false;
+}
+#else
+constexpr bool debug()
+{
+    return true;
+}
+#endif
+
+#ifdef NDEBUG
 template <typename T>
 class Debug
 {

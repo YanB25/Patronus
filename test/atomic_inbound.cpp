@@ -118,7 +118,7 @@ void send_skew_cas([[maybe_unused]] int node_id, int thread_id)
         }
 
         gaddr.offset = mehcached_zipf_next(&state) * sizeof(uint64_t);
-        // + 1 * define::MB;
+        // + 1_MB;
 
         dsm->cas(gaddr,
                  0,

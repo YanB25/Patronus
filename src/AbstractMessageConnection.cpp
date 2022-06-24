@@ -4,6 +4,8 @@
 
 #include "Common.h"
 
+#define ADD_ROUND(x, n) ((x) = ((x) + 1) % (n))
+
 AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
                                                      uint16_t sendPadding,
                                                      uint16_t recvPadding,

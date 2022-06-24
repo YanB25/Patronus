@@ -27,7 +27,7 @@ std::ostream &operator<<(std::ostream &os,
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"
 
-using namespace define::literals;
+using namespace util::literals;
 using namespace patronus;
 using namespace std::chrono_literals;
 
@@ -51,7 +51,7 @@ uint64_t get_current_ns()
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                now.time_since_epoch())
         .count();
-    // return rdtsc();
+    // return util::rdtsc();
 }
 
 void client(Patronus::pointer p)
@@ -192,10 +192,10 @@ int main(int argc, char *argv[])
     }
 
     auto now = std::chrono::steady_clock::now();
-    auto before_rdtsc = rdtsc();
+    auto before_rdtsc = util::rdtsc();
     std::this_thread::sleep_for(1s);
     auto then = std::chrono::steady_clock::now();
-    auto then_rdtsc = rdtsc();
+    auto then_rdtsc = util::rdtsc();
     auto diff_ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(then - now)
             .count();

@@ -38,7 +38,7 @@ public:
             cur.offset += size;
         }
 
-        // assert(res.addr + size <= 40 * define::GB);
+        // assert(res.addr + size <= 40_GB);
 
         return res;
     }

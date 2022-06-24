@@ -7,7 +7,7 @@
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 
-using namespace define::literals;
+using namespace util::literals;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 

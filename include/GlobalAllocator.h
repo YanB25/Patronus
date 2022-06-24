@@ -29,7 +29,7 @@ public:
     static std::unique_ptr<GlobalAllocator> newInstance(
         const GlobalAddress &start, size_t size)
     {
-        return future::make_unique<GlobalAllocator>(start, size);
+        return std::make_unique<GlobalAllocator>(start, size);
     }
 
     ~GlobalAllocator()

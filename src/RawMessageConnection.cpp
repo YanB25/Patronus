@@ -15,7 +15,7 @@ RawMessageConnection::RawMessageConnection(RdmaContext &ctx,
 std::shared_ptr<RawMessageConnection> RawMessageConnection::newInstance(
     RdmaContext &ctx, ibv_cq *cq, uint32_t messageNR)
 {
-    return future::make_shared<RawMessageConnection>(ctx, cq, messageNR);
+    return std::make_shared<RawMessageConnection>(ctx, cq, messageNR);
 }
 
 void RawMessageConnection::initSend()

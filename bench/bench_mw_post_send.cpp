@@ -184,12 +184,12 @@ int main(int argc, char *argv[])
     // 10000000 mws need 16 min, so we don't bench it.
     std::vector<size_t> window_nr_arr{1000, 10000};
     // std::vector<size_t> window_size_arr{
-    //     1, 2ull * define::MB, 512 * define::MB};
+    //     1, 2_MB, 512_MB};
     std::vector<bool> random_addr_arr{true, false};
     // for (auto window_nr : window_nr_arr)
     for (auto window_nr : {8192})
     {
-        for (auto window_size : {2 * define::MB})
+        for (auto window_size : {2_MB})
         // for (auto window_size : {64})
         {
             // for (int random_addr : {0, 1, 2})

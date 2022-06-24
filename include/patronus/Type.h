@@ -12,6 +12,7 @@
 #include "patronus/Time.h"
 #include "umsg/Config.h"
 #include "umsg/UnreliableConnection.h"
+#include "util/Coro.h"
 #include "util/Debug.h"
 
 namespace patronus

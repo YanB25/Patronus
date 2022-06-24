@@ -8,8 +8,8 @@
 #include "HugePageAlloc.h"
 #include "Rdma.h"
 #include "Timer.h"
-#include "Util.h"
 #include "umsg/UnreliableConnection.h"
+#include "util/Util.h"
 
 thread_local int DSM::thread_id_ = -1;
 thread_local int DSM::thread_name_id_ = -1;
@@ -21,7 +21,7 @@ thread_local uint64_t DSM::thread_tag_ = 0;
 
 std::shared_ptr<DSM> DSM::getInstance(const DSMConfig &conf)
 {
-    return future::make_unique<DSM>(conf);
+    return std::make_unique<DSM>(conf);
 }
 
 DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
@@ -39,8 +39,7 @@ DSM::DSM(const DSMConfig &conf) : conf(conf), cache(conf.cacheConfig)
               << Buffer((char *) baseAddr, baseAddrSize);
 
     // warmup
-    for (uint64_t i = baseAddr; i < baseAddr + baseAddrSize;
-         i += 2 * define::MB)
+    for (uint64_t i = baseAddr; i < baseAddr + baseAddrSize; i += 2_MB)
     {
         *(char *) i = 0;
     }
@@ -137,7 +136,7 @@ bool DSM::reinitializeDir(size_t dirID)
         auto ex = keeper->updateDirMetadata(*dirCon[dirID], remoteID);
         DVLOG(1) << "[DSM] update dir meta for " << remoteID
                  << ", hash: " << std::hex
-                 << djb2_digest((char *) &ex, sizeof(ex))
+                 << util::djb2_digest((char *) &ex, sizeof(ex))
                  << ", rkey: " << ex.dirTh[dirID].rKey;
         syncMetadataBootstrap(ex, remoteID);
         auto connect_dir_ex = getExchangeMetaBootstrap(remoteID);
@@ -174,7 +173,7 @@ bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
         DVLOG(1) << "[DSM] reconnecting ThreadConnection[" << i
                  << "]. node_id: " << node_id << ", dirID: " << dirID
                  << ", meta digest: " << std::hex
-                 << djb2_digest((char *) &cur_meta, sizeof(cur_meta))
+                 << util::djb2_digest((char *) &cur_meta, sizeof(cur_meta))
                  << ", rkey: " << cur_meta.dirTh[dirID].rKey;
 
         keeper->connectThread(*thCon[i], node_id, dirID, cur_meta);

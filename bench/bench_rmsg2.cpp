@@ -17,7 +17,7 @@
 #include "util/Rand.h"
 #include "util/TimeConv.h"
 
-using namespace define::literals;
+using namespace util::literals;
 using namespace patronus;
 using namespace std::chrono_literals;
 

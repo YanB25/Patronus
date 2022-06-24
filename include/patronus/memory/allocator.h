@@ -5,9 +5,9 @@
 #include "Common.h"
 #include "CoroContext.h"
 
+using namespace util::literals;
 namespace patronus::mem
 {
-using namespace define::literals;
 inline std::pair<void *, size_t> align_address(void *addr,
                                                size_t size,
                                                size_t align)

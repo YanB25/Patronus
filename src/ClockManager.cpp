@@ -84,10 +84,10 @@ void ClockManager::primary_sync_clock()
     // measure RTT
     for (size_t i = 1; i < dsm->getClusterSize(); ++i)
     {
-        auto begin_rdtsc = rdtsc();
+        auto begin_rdtsc = util::rdtsc();
         DLOG(INFO) << "[clock] SEND measuring RTT with node" << i;
         dsm->send(nullptr, 0, i, 0, true);
-        auto end_rdtsc = rdtsc();
+        auto end_rdtsc = util::rdtsc();
 
         node_rtt[i] = end_rdtsc - begin_rdtsc;
     }

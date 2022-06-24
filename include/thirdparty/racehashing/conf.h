@@ -3,7 +3,7 @@
 #define PATRONUS_RACEHASHING_CONF_H_
 
 #include "Common.h"
-using namespace define::literals;
+using namespace util::literals;
 
 namespace patronus::hash::config
 {

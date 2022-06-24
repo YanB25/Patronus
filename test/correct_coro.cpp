@@ -8,9 +8,9 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-using namespace define::literals;
+using namespace util::literals;
 
-constexpr static size_t kTestTime = 1 * define::M;
+constexpr static size_t kTestTime = 1_M;
 constexpr static size_t kCoroNr = 16;
 constexpr static size_t kLargeStackSize = 16_KB;
 

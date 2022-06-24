@@ -8,7 +8,7 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-using namespace define::literals;
+using namespace util::literals;
 
 constexpr static double kEpsilon = 0.0001;
 
@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
     for (double i = 0; i <= 1; i += 0.1)
     {
         auto pi = m.percentile(i);
-        if (abs(pi - i) >= 3 * kEpsilon)
+        if (std::abs(pi - i) >= 3 * kEpsilon)
         {
             CHECK(false) << "m.percentile(" << i << ") got " << pi
                          << ", expect to be " << i << ", larger than allowed "

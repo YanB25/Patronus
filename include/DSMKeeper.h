@@ -87,7 +87,7 @@ public:
         std::vector<RemoteConnection> &remoteCon,
         uint32_t maxServer = 12)
     {
-        return future::make_unique<DSMKeeper>(
+        return std::make_unique<DSMKeeper>(
             thCon, dirCon, umsg, remoteCon, maxServer);
     }
 

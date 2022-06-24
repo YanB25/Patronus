@@ -3,9 +3,12 @@
 #define __CONFIG_H__
 
 #include "Common.h"
+#include "util/Literals.h"
 
-constexpr static size_t kCacheSize = 1 * define::GB;
-constexpr static size_t kDSMCacheSize = 16 * define::GB;
+using namespace util::literals;
+
+constexpr static size_t kCacheSize = 1_GB;
+constexpr static size_t kDSMCacheSize = 16_GB;
 constexpr static size_t kDefaultMachineNr = 2;
 
 class CacheConfig

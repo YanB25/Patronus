@@ -13,8 +13,8 @@
 #include "util/monitor.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
-constexpr static size_t kBurnCnt = 2 * define::M;
-// constexpr static size_t kBurnCnt = 1 * define::M;
+constexpr static size_t kBurnCnt = 2_M;
+// constexpr static size_t kBurnCnt = 1_M;
 constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 

@@ -4,7 +4,7 @@
 
 namespace patronus::time
 {
-using namespace define::literals;
+using namespace util::literals;
 using namespace std::chrono_literals;
 
 TimeSyncer::TimeSyncer(DSM::pointer dsm,

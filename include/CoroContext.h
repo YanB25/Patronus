@@ -3,6 +3,7 @@
 #define SHERMEM_CORO_CONTEXT_H_
 
 #include "Common.h"
+#include "util/Coro.h"
 
 class CoroControlBlock
 {

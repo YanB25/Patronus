@@ -15,7 +15,7 @@
 #include "patronus/memory/patronus_wrapper_allocator.h"
 #include "util/TimeConv.h"
 
-using namespace define::literals;
+using namespace util::literals;
 namespace patronus::hash
 {
 class RdmaAdaptorKVBlockWrapperAllocator : public mem::IAllocator

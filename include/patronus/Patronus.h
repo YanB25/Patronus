@@ -25,11 +25,13 @@
 #include "util/PerformanceReporter.h"
 #include "util/RetCode.h"
 #include "util/Tracer.h"
+#include "util/Util.h"
+
+using namespace util::literals;
 
 namespace patronus
 {
 using TraceView = util::TraceView;
-using namespace define::literals;
 
 class Patronus;
 class ServerCoroBatchExecutionContext;
@@ -113,7 +115,7 @@ public:
     constexpr static size_t kMessageSize = ::config::patronus::kMessageSize;
 
     // TODO(patronus): try to tune this parameter up.
-    constexpr static size_t kMwPoolSizePerThread = 50 * define::K;
+    constexpr static size_t kMwPoolSizePerThread = 50_K;
     constexpr static uint64_t kDefaultHint = 0;
     constexpr static size_t kMaxSyncKey = 128;
 
@@ -1848,7 +1850,7 @@ RetCode Patronus::admin_request_impl(size_t node_id,
     if constexpr (debug())
     {
         msg->digest = 0;
-        msg->digest = djb2_digest(msg, sizeof(AdminRequest));
+        msg->digest = util::djb2_digest(msg, sizeof(AdminRequest));
     }
 
     dsm_->unreliable_send(rdma_buf, sizeof(AdminRequest), node_id, dir_id);
@@ -2099,7 +2101,7 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
     if constexpr (debug())
     {
         msg->digest = 0;
-        msg->digest = djb2_digest(msg, msg->msg_size());
+        msg->digest = util::djb2_digest(msg, msg->msg_size());
     }
 
     dsm_->unreliable_send(rdma_buf, msg->msg_size(), node_id, dir_id);

@@ -11,10 +11,9 @@
 #include "Pool.h"
 #include "allocator.h"
 
+using namespace util::literals;
 namespace patronus::mem
 {
-using namespace define::literals;
-
 struct SlabAllocatorConfig
 {
     std::vector<size_t> block_class;

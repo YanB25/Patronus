@@ -12,7 +12,7 @@
 #include "util/DataFrameF.h"
 #include "util/Rand.h"
 
-using namespace define::literals;
+using namespace util::literals;
 
 std::vector<std::string> col_idx;
 std::vector<size_t> col_x_thread_nr;

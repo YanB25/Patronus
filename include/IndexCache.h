@@ -48,7 +48,7 @@ private:
 inline IndexCache::IndexCache(int cache_size) : cache_size(cache_size)
 {
     skiplist = new CacheSkipList(cmp, &alloc, 21);
-    uint64_t memory_size = define::MB * cache_size;
+    uint64_t memory_size = 1_MB * cache_size;
 
     all_page_cnt = memory_size / sizeof(InternalPage);
     free_page_cnt.store(all_page_cnt);
@@ -182,7 +182,7 @@ inline const CacheEntry *IndexCache::search_from_cache(const Key &k,
             }
         }
 
-        compiler_barrier();
+        util::compiler_barrier();
         if (entry->ptr)
         {  // check if it is freed.
             // printf("Cache HIt\n");
@@ -224,7 +224,7 @@ inline void IndexCache::bench()
 
     for (int i = 0; i < loop; ++i)
     {
-        uint64_t r = rand() % (5 * define::MB);
+        uint64_t r = rand() % (5_MB);
         this->find_entry(r);
     }
 

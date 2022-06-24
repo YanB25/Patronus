@@ -44,8 +44,8 @@ int main()
         buffer += 12;
 
         buffer += 12;
-        bool res = dsm->cas_mask_sync(gaddr, 1, 0, (uint64_t *) buffer, 1);
-        __maybe_unused(res);
+        [[maybe_unused]] bool res =
+            dsm->cas_mask_sync(gaddr, 1, 0, (uint64_t *) buffer, 1);
 
         assert(res);
         printf("%ld\n", *(uint64_t *) buffer);

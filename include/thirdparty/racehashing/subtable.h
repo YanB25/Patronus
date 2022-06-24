@@ -7,8 +7,8 @@
 
 #include "./bucket_group.h"
 #include "./kv_block.h"
-#include "Util.h"
 #include "util/PerformanceReporter.h"
+#include "util/Util.h"
 
 namespace patronus::hash
 {

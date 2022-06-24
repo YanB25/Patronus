@@ -1,6 +1,5 @@
 #include "patronus/Patronus.h"
 
-#include "Util.h"
 #include "patronus/IBOut.h"
 #include "patronus/Time.h"
 #include "umsg/Config.h"
@@ -8,6 +7,7 @@
 #include "util/PerformanceReporter.h"
 #include "util/Pre.h"
 #include "util/Rand.h"
+#include "util/Util.h"
 
 namespace patronus
 {
@@ -232,7 +232,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     if constexpr (debug())
     {
         msg->digest = 0;
-        msg->digest = djb2_digest(msg, sizeof(AcquireRequest));
+        msg->digest = util::djb2_digest(msg, sizeof(AcquireRequest));
     }
 
     if (unlikely(enable_trace))
@@ -614,7 +614,7 @@ RetCode Patronus::lease_modify_impl(Lease &lease,
     if constexpr (debug())
     {
         msg->digest = 0;
-        msg->digest = djb2_digest(msg, sizeof(LeaseModifyRequest));
+        msg->digest = util::djb2_digest(msg, sizeof(LeaseModifyRequest));
     }
 
     dsm_->unreliable_send(
@@ -692,7 +692,7 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
                 DCHECK_EQ(digest,
-                          djb2_digest(msg, sizeof(LeaseModifyResponse)));
+                          util::djb2_digest(msg, sizeof(LeaseModifyResponse)));
             }
             handle_response_lease_relinquish(msg);
             break;
@@ -709,7 +709,7 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
                 DCHECK_EQ(digest,
-                          djb2_digest(msg, sizeof(LeaseModifyResponse)));
+                          util::djb2_digest(msg, sizeof(LeaseModifyResponse)));
             }
             handle_response_lease_extend(msg);
             break;
@@ -724,7 +724,7 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
             {
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
-                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AdminRequest)));
+                DCHECK_EQ(digest, util::djb2_digest(msg, sizeof(AdminRequest)));
             }
 
             auto admin_type = (AdminFlag) msg->flag;
@@ -746,7 +746,7 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
             {
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
-                DCHECK_EQ(digest, djb2_digest(msg, msg->msg_size()))
+                DCHECK_EQ(digest, util::djb2_digest(msg, msg->msg_size()))
                     << "** digest mismatch for message: " << *msg
                     << ". msg_size: " << msg->msg_size();
             }
@@ -763,7 +763,7 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
             {
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
-                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AdminResponse)))
+                DCHECK_EQ(digest, util::djb2_digest(msg, sizeof(AdminResponse)))
                     << "** digest mismatch for message " << *msg;
             }
 
@@ -819,7 +819,8 @@ void Patronus::prepare_handle_request_messages(
             {
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
-                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AcquireRequest)))
+                DCHECK_EQ(digest,
+                          util::djb2_digest(msg, sizeof(AcquireRequest)))
                     << "** digest mismatch for req " << *msg;
             }
             prepare_handle_request_acquire(msg, req_ctx, ctx);
@@ -837,7 +838,8 @@ void Patronus::prepare_handle_request_messages(
             {
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
-                DCHECK_EQ(digest, djb2_digest(msg, sizeof(LeaseModifyRequest)));
+                DCHECK_EQ(digest,
+                          util::djb2_digest(msg, sizeof(LeaseModifyRequest)));
             }
             prepare_handle_request_lease_modify(msg, req_ctx, ctx);
             break;
@@ -853,7 +855,7 @@ void Patronus::prepare_handle_request_messages(
             {
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
-                DCHECK_EQ(digest, djb2_digest(msg, msg->msg_size()));
+                DCHECK_EQ(digest, util::djb2_digest(msg, msg->msg_size()));
             }
             DCHECK(msg->validate());
             // do nothing
@@ -870,7 +872,7 @@ void Patronus::prepare_handle_request_messages(
             {
                 uint64_t digest = msg->digest.get();
                 msg->digest = 0;
-                DCHECK_EQ(digest, djb2_digest(msg, sizeof(AdminRequest)));
+                DCHECK_EQ(digest, util::djb2_digest(msg, sizeof(AdminRequest)));
             }
 
             if (admin_type == AdminFlag::kAdminReqExit)
@@ -1482,7 +1484,7 @@ void Patronus::finished(uint64_t key)
     if constexpr (debug())
     {
         msg->digest = 0;
-        msg->digest = djb2_digest(msg, sizeof(AdminRequest));
+        msg->digest = util::djb2_digest(msg, sizeof(AdminRequest));
     }
 
     for (size_t i = 0; i < dsm_->getClusterSize(); ++i)
@@ -1505,7 +1507,7 @@ void Patronus::handle_admin_barrier(AdminRequest *req,
     {
         uint64_t digest = req->digest.get();
         req->digest = 0;
-        DCHECK_EQ(digest, djb2_digest(req, sizeof(AdminRequest)));
+        DCHECK_EQ(digest, util::djb2_digest(req, sizeof(AdminRequest)));
     }
 
     auto from_node = req->cid.node_id;
@@ -2271,7 +2273,7 @@ void Patronus::post_handle_request_admin(AdminRequest *req, CoroContext *ctx)
     if constexpr (debug())
     {
         resp_msg.digest = 0;
-        resp_msg.digest = djb2_digest(&resp_msg, sizeof(AdminResponse));
+        resp_msg.digest = util::djb2_digest(&resp_msg, sizeof(AdminResponse));
     }
 
     dsm_->unreliable_send((const char *) resp_buf,
@@ -2338,7 +2340,8 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
     if constexpr (debug())
     {
         resp_msg.digest = 0;
-        resp_msg.digest = djb2_digest(&resp_msg, sizeof(LeaseModifyResponse));
+        resp_msg.digest =
+            util::djb2_digest(&resp_msg, sizeof(LeaseModifyResponse));
     }
 
     dsm_->unreliable_send((const char *) resp_buf,
@@ -2435,7 +2438,7 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
     if constexpr (debug())
     {
         resp_msg.digest = 0;
-        resp_msg.digest = djb2_digest(&resp_msg, resp_msg.msg_size());
+        resp_msg.digest = util::djb2_digest(&resp_msg, resp_msg.msg_size());
     }
     dsm_->unreliable_send((char *) resp_buf,
                           resp_msg.msg_size(),
@@ -2461,7 +2464,8 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
     if constexpr (debug())
     {
         resp_msg.digest = 0;
-        resp_msg.digest = djb2_digest(&resp_msg, sizeof(LeaseModifyResponse));
+        resp_msg.digest =
+            util::djb2_digest(&resp_msg, sizeof(LeaseModifyResponse));
     }
     dsm_->unreliable_send((char *) resp_buf,
                           sizeof(LeaseModifyResponse),
@@ -3466,7 +3470,7 @@ PatronusThreadResourceDesc Patronus::prepare_client_thread(
 
     auto *dsm_rdma_buffer = desc.dsm_desc.rdma_buffer;
 
-    size_t message_pool_size = 4 * define::MB;
+    size_t message_pool_size = 4_MB;
     CHECK_GT(desc.dsm_desc.rdma_buffer_size, message_pool_size);
     CHECK_GE(message_pool_size / kMessageSize, 65536)
         << "Consider to tune up message pool size? Less than 64436 "

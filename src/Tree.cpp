@@ -12,12 +12,29 @@
 #include "RdmaBuffer.h"
 #include "SimpleHT.h"
 #include "Timer.h"
+#include "util/Coro.h"
 
 bool enter_debug = false;
 
 #ifdef TEST_SINGLE_THREAD
 SimpleHT mapping;
 #endif
+
+#define LATENCY_WINDOWS 1000000
+
+// for store root pointer
+namespace define
+{
+constexpr uint64_t kRootPointerStoreOffest = define::kChunkSize / 2;
+static_assert(kRootPointerStoreOffest % sizeof(uint64_t) == 0, "XX");
+constexpr uint8_t kMaxHandOverTime = 8;
+// level of tree
+constexpr uint64_t kMaxLevelOfTree = 7;
+// number of locks
+constexpr uint64_t kNumOfLock = define::kLockChipMemSize / sizeof(uint64_t);
+
+constexpr int kIndexCacheSize = 1024;  // MB
+}  // namespace define
 
 HotBuffer hot_buf;
 uint64_t cache_miss[kMaxAppThread][8];

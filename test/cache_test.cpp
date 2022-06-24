@@ -7,7 +7,7 @@ int main()
     auto cache = new IndexCache(1);
 
     InternalPage *page = (InternalPage *) 11;
-    __maybe_unused(page);
+    std::ignore = page;
     assert(cache->add_entry(1, 100, page));
 
     assert(cache->add_entry(1, 43, page));

@@ -18,7 +18,7 @@ struct Object
     uint64_t upper;
 };
 
-constexpr static size_t kTestTime = 10 * define::M;
+constexpr static size_t kTestTime = 10_M;
 
 int main(int argc, char *argv[])
 {

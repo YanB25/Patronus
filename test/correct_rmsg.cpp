@@ -12,8 +12,8 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-constexpr static size_t kPingpoingCnt = 100 * define::K;
-constexpr static size_t kBurnCnt = 1 * define::M;
+constexpr static size_t kPingpoingCnt = 100_K;
+constexpr static size_t kBurnCnt = 1_M;
 
 constexpr static size_t kBenchMessageBufSize = 16;
 
@@ -227,7 +227,7 @@ void client_multithread(std::shared_ptr<DSM> dsm, size_t thread_nr)
                              << " recv continue msg. time: " << time;
                 }
 
-                if (time % (100 * define::K) == 0)
+                if (time % 100_K == 0)
                 {
                     LOG(WARNING) << "[bench] client tid " << tid
                                  << " finish 100K. time: " << time;

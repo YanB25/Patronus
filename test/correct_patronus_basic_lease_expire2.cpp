@@ -9,7 +9,7 @@
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"
 using namespace std::chrono_literals;
-using namespace define::literals;
+using namespace util::literals;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 

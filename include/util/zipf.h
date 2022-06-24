@@ -23,7 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-// #include "util.h"
+// #include "util/Util.h"
 
 struct zipf_gen_state
 {
@@ -54,7 +54,8 @@ static double mehcached_pow_approx(double a, double b)
 
     // calculate approximation with fraction of the exponent
     int e = (int) b;
-    union {
+    union
+    {
         double d;
         int x[2];
     } u = {a};

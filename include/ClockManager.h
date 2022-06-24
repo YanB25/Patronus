@@ -3,6 +3,8 @@
 #define __CLOCK_MANNAGER__
 #include <memory>
 
+#include "util/Util.h"
+
 class DSM;
 
 struct SyncTimeMessage
@@ -28,7 +30,7 @@ public:
     }
     uint64_t clock()
     {
-        return rdtsc() + offset_;
+        return util::rdtsc() + offset_;
     }
 
     void init_sync_clock();

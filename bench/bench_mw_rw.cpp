@@ -143,7 +143,7 @@ void client_burn(std::shared_ptr<DSM> dsm,
                  bool sequantial,
                  bool warmup)
 {
-    constexpr static size_t test_times = 100 * define::K;
+    constexpr static size_t test_times = 100_K;
     Timer timer;
 
     auto *buffer = dsm->get_rdma_buffer().buffer;
@@ -430,7 +430,7 @@ int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
-    constexpr static size_t kSize = 2 * define::GB;
+    constexpr static size_t kSize = 2_GB;
 
     rdmaQueryDevice();
 
@@ -486,7 +486,7 @@ int main(int argc, char *argv[])
                     // for (size_t thread_nr : {1, 8, 16, int(kMaxThread)})
                     for (size_t thread_nr : {1, 8, 16})
                     {
-                        for (size_t size : {2 * define::MB, kSize})
+                        for (size_t size : {2_MB, kSize})
                         {
                             for (size_t io_size : {8})
                             // for (size_t io_size : {8, 64, 256, 1024})

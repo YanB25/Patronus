@@ -2,6 +2,7 @@
 #ifndef PERFORMANCE_REPORTER_H_
 #define PERFORMANCE_REPORTER_H_
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <list>
@@ -17,7 +18,7 @@ public:
     void add(double n)
     {
         num_ += n;
-        absolute_num_ += abs(n);
+        absolute_num_ += std::abs(n);
         times_++;
         avg_ = 1.0 * num_ / times_;
         absolute_avg_ = 1.0 * absolute_num_ / times_;
@@ -56,7 +57,7 @@ public:
     {
         min_ = std::min(min_, n);
         max_ = std::max(max_, n);
-        abs_min_ = std::min(abs_min_, abs(n));
+        abs_min_ = std::min(abs_min_, (T) std::abs(n));
         avg_.add(n);
         data_nr_++;
     }

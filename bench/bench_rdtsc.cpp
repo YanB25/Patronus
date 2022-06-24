@@ -5,8 +5,9 @@
 #include "Timer.h"
 #include "gflags/gflags.h"
 #include "util/monitor.h"
+using util::rdtsc;
 
-constexpr static size_t kTestTime = 100 * define::M;
+constexpr static size_t kTestTime = 100_M;
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 int main(int argc, char *argv[])
@@ -21,9 +22,9 @@ int main(int argc, char *argv[])
         size_t magic = 0;
         for (size_t i = 0; i < kTestTime; ++i)
         {
-            auto before = rdtsc();
+            auto before = util::rdtsc();
             times.fetch_add(1, std::memory_order_relaxed);
-            auto after = rdtsc();
+            auto after = util::rdtsc();
             magic += (after - before);
         }
         LOG(INFO) << "[bench] ignore me. magic: " << magic;

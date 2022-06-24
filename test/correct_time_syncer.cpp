@@ -28,7 +28,7 @@ std::ostream &operator<<(std::ostream &os,
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"
 
-using namespace define::literals;
+using namespace util::literals;
 using namespace std::chrono_literals;
 using namespace patronus;
 

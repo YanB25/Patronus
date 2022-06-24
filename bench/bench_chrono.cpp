@@ -5,17 +5,19 @@
 #include "DSM.h"
 #include "Timer.h"
 #include "gflags/gflags.h"
+#include "util/Literals.h"
 #include "util/PerformanceReporter.h"
 #include "util/monitor.h"
 
-using namespace define::literals;
+using namespace util::literals;
+using util::rdtsc;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 std::map<std::chrono::time_point<std::chrono::steady_clock>, std::string>
     time_to_str;
 
-constexpr static size_t kTestTime = 100 * define::M;
+constexpr static size_t kTestTime = 100_M;
 
 std::ostream &operator<<(
     std::ostream &os,
@@ -217,9 +219,9 @@ double bench_rdtsc()
         size_t magic = 0;
         for (size_t i = 0; i < kTestTime; ++i)
         {
-            auto before = rdtsc();
+            auto before = util::rdtsc();
             times.fetch_add(1, std::memory_order_relaxed);
-            auto after = rdtsc();
+            auto after = util::rdtsc();
             auto diff = after - before;
             magic += diff;
         }
