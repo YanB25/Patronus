@@ -42,7 +42,7 @@ RaceHandleT::pointer gen_rhh(Patronus::pointer p,
     LOG(INFO) << "[bench] got meta of hashtable: " << meta_gaddr;
     // RaceHashingHandleConfig handle_conf;
     auto handle_conf = RaceHashingConfigFactory::get_mw_protected(
-        "test rdma", 64, 1 /* batch */);
+        "test rdma", 64, 1 /* batch */, false /* mock kvblock match */);
     auto handle_rdma_ctx =
         patronus::RdmaAdaptor::new_instance(server_nid,
                                             dir_id,

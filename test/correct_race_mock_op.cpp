@@ -64,8 +64,8 @@ TablePair<kDEntry, kBucketNr, kSlotNr> gen_mock_rdma_rh(size_t initial_subtable,
     for (size_t i = 0; i < thread_nr; ++i)
     {
         // RaceHashingHandleConfig handle_conf;
-        auto handle_conf =
-            RaceHashingConfigFactory::get_unprotected("mock", kvblock_size, 1);
+        auto handle_conf = RaceHashingConfigFactory::get_unprotected(
+            "mock", kvblock_size, 1, false /* mock kvblock match */);
         auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
         auto rhh = std::make_shared<RaceHashingHandleT>(0 /* node_id */,
                                                         rh->meta_gaddr(),

@@ -1645,7 +1645,14 @@ public:
         RetCode rc = kNotFound;
         for (const auto &[slot_handle, kvblock_handle] : slots_rdma_buffers)
         {
-            if (is_real_match(kvblock_handle.buffer_addr(), key, dctx) != kOk)
+            RetCode this_is_real_match =
+                is_real_match(kvblock_handle.buffer_addr(), key, dctx);
+            if (unlikely(conf_.force_kvblock_to_match))
+            {
+                this_is_real_match = RC::kOk;
+            }
+
+            if (this_is_real_match != kOk)
             {
                 continue;
             }

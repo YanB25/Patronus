@@ -135,7 +135,10 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     // RaceHashingHandleConfig handle_conf;
     // handle_conf.kvblock_expect_size = kKVBlockExpectSize;
     auto handle_conf = RaceHashingConfigFactory::get_mw_protected(
-        "rdma test", kKVBlockExpectSize, 1 /* batch size */);
+        "rdma test",
+        kKVBlockExpectSize,
+        1 /* batch size */,
+        false /* mock kvblock match */);
     auto handle_rdma_ctx =
         patronus::RdmaAdaptor::new_instance(kServerNodeId,
                                             dir_id,

@@ -41,7 +41,7 @@ void test_capacity(size_t initial_subtable)
 
     // RaceHashingHandleConfig handle_conf;
     auto handle_conf = RaceHashingConfigFactory::get_unprotected(
-        "test mock", 64, 1 /* batch */);
+        "test mock", 64, 1 /* batch */, false /* mock kvblock match */);
 
     auto handle_rdma_ctx = MockRdmaAdaptor::new_instance(server_rdma_ctx);
     RaceHashingT::Handle rhh(

@@ -684,11 +684,20 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     // for (size_t kvblock_size : {4_KB})
     {
         rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
-            "unprot", kvblock_size, 1 /* batch size */));
+            "unprot",
+            kvblock_size,
+            1 /* batch size */,
+            true /* mock kvblock match */));
         rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected(
-            "MW", kvblock_size, 1 /* batch size */));
+            "MW",
+            kvblock_size,
+            1 /* batch size */,
+            true /* mock kvblock match */));
         rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
-            "MR", kvblock_size, 1 /* batch size */));
+            "MR",
+            kvblock_size,
+            1 /* batch size */,
+            true /* mock kvblock match */));
     }
 
     auto capacity = RaceHashing<4, 16, 16>::max_capacity();
