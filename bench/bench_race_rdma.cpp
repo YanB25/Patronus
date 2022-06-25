@@ -917,9 +917,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         // for (size_t thread_nr : {16})
         // for (size_t thread_nr : {8, 16})
         // for (size_t thread_nr : {1, 4, 8, 16})
-        // for (size_t thread_nr : {8, 16})
+        for (size_t thread_nr : {1, 4, 16})
         // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-        for (size_t thread_nr : {1, 32})
+        // for (size_t thread_nr : {1, 32})
         {
             constexpr static size_t kCoroNr = 1;
             LOG_IF(INFO, is_master)
@@ -958,7 +958,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 auto wo_conf = BenchConfigFactory::get_write_only_config(
                     "WO",
                     capacity,
-                    1_M,
+                    // 1_M,
+                    100_K,
                     thread_nr,
                     kCoroNr,
                     4 /* initial_subtable_nr */,
