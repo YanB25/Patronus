@@ -377,8 +377,6 @@ void test_basic_client_worker(
 
     double insert_prob = bench_conf.insert_prob;
     double delete_prob = bench_conf.delete_prob;
-    HashContext dctx(tid);
-    dctx.op = "put";
 
     ChronoTimer timer;
     std::string key;
@@ -386,14 +384,21 @@ void test_basic_client_worker(
     key.resize(sizeof(uint64_t));
     value.resize(8);
     CHECK_NOTNULL(bench_conf.kv_g)->gen_value(&value[0], 8);
+    util::TraceManager tm(0);
     while (true)
     {
+        auto trace = tm.trace("test");
+        trace.set("tid", std::to_string(tid));
+        trace.set("k", key);
+        trace.set("v", value);
+
         bench_conf.kv_g->gen_key(&key[0], sizeof(uint64_t));
 
         if (true_with_prob(insert_prob))
         {
+            trace.set("op", "put");
             // insert
-            auto rc = rhh->put(key, value, &dctx);
+            auto rc = rhh->put(key, value, trace);
             ins_succ_nr += rc == kOk;
             ins_retry_nr += rc == kRetry;
             ins_nomem_nr += rc == kNoMem;
@@ -404,13 +409,10 @@ void test_basic_client_worker(
             DCHECK_NE(rc, kRdmaProtectionErr);
             tc.inserted_nr += rc == kOk;
 
-            auto *pv = dctx.get_private();
-            auto pv_rc = (RC)(uint64_t) pv;
-            if (unlikely(pv_rc == RC::kMockCrashed))
+            if (unlikely(rc == RC::kMockCrashed))
             {
                 LOG(INFO) << "[bench] MOCK crashed. inserted: " << ins_succ_nr;
                 extra["fault_at"] = std::to_string(ins_succ_nr);
-                dctx.set_private(nullptr);
             }
 
             if (unlikely(rc == kRetry))

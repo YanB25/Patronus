@@ -86,16 +86,16 @@ public:
                    uint32_t ld,
                    uint32_t suffix,
                    std::unordered_set<SlotHandle> &ret,
-                   HashContext *dctx)
+                   util::TraceView trace)
     {
         auto mbh = main_bucket_handle();
-        auto rc = mbh.locate(fp, ld, suffix, ret, dctx);
+        auto rc = mbh.locate(fp, ld, suffix, ret, trace);
         if (rc != kOk)
         {
             return rc;
         }
         auto obh = overflow_bucket_handle();
-        return obh.locate(fp, ld, suffix, ret, dctx);
+        return obh.locate(fp, ld, suffix, ret, trace);
     }
 
     GlobalAddress remote_addr() const
@@ -166,14 +166,14 @@ public:
                    uint32_t ld,
                    uint32_t suffix,
                    std::unordered_set<SlotHandle> &ret,
-                   HashContext *dctx)
+                   util::TraceView trace)
     {
-        auto rc = cb1_.locate(fp, ld, suffix, ret, dctx);
+        auto rc = cb1_.locate(fp, ld, suffix, ret, trace);
         if (rc != kOk)
         {
             return rc;
         }
-        return cb2_.locate(fp, ld, suffix, ret, dctx);
+        return cb2_.locate(fp, ld, suffix, ret, trace);
     }
 
     RetCode get_bucket_handle(std::vector<BucketHandle<kSlotNr>> &buckets) const

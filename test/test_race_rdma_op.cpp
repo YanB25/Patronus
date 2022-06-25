@@ -74,7 +74,7 @@ void client_worker(Patronus::pointer p,
     char key_buf[128];
     char value_buf[128];
 
-    HashContext dctx(0);
+    util::TraceManager tm(0);
 
     for (size_t i = 0; i < 16; ++i)
     {
@@ -84,10 +84,12 @@ void client_worker(Patronus::pointer p,
         value = std::string(value_buf, 8);
         LOG(INFO) << "Trying to push " << key << ", " << value;
 
-        dctx.key = key;
-        dctx.value = value;
-        dctx.op = "put";
-        auto rc = rhh.put(key, value, &dctx);
+        auto trace = tm.trace("");
+        trace.set("k", key);
+        trace.set("v", value);
+        trace.set("op", "put");
+
+        auto rc = rhh.put(key, value, trace);
         if (rc == kOk)
         {
             inserted.emplace(key, value);
@@ -117,11 +119,13 @@ void client_worker(Patronus::pointer p,
 
     for (const auto &[key, expect_value] : inserted)
     {
-        dctx.key = key;
-        dctx.value = expect_value;
-        dctx.op = "get";
+        auto trace = tm.trace("validate");
+        trace.set("k", key);
+        trace.set("v", expect_value);
+        trace.set("op", "get");
+
         std::string get_val;
-        CHECK_EQ(rhh.get(key, get_val, &dctx), kOk);
+        CHECK_EQ(rhh.get(key, get_val, trace), kOk);
         CHECK_EQ(get_val, expect_value);
     }
 
@@ -129,10 +133,12 @@ void client_worker(Patronus::pointer p,
 
     for (const auto &[key, expect_value] : inserted)
     {
-        dctx.key = key;
-        dctx.value = expect_value;
-        dctx.op = "del";
-        CHECK_EQ(rhh.del(key, &dctx), kOk);
+        auto trace = tm.trace("tear down");
+        trace.set("k", key);
+        trace.set("v", expect_value);
+        trace.set("op", "del");
+
+        CHECK_EQ(rhh.del(key, trace), kOk);
     }
 }
 

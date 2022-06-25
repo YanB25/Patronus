@@ -12,6 +12,7 @@
 #include "./mock_rdma_adaptor.h"
 #include "./slot.h"
 #include "Common.h"
+#include "util/Pre.h"
 #include "util/Rand.h"
 
 namespace patronus::hash
@@ -126,7 +127,7 @@ public:
                       IRdmaAdaptor &rdma_adpt,
                       RemoteMemHandle &subtable_mem_handle,
                       SlotHandle *ret_slot,
-                      HashContext *dctx)
+                      util::TraceView trace)
     {
         uint64_t expect_val = slot_handle.val();
         auto rdma_buf = rdma_adpt.get_rdma_buffer(8);
@@ -147,9 +148,9 @@ public:
             CHECK(expect_slot.empty())
                 << "[trace][handle] the succeess of insert should happen on an "
                    "empty slot";
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][handle] slot " << slot_handle << " update to "
-                << new_slot << *dctx;
+                << new_slot << util::pre_map(trace.kv());
             // set ret_slot here
             if (ret_slot)
             {
@@ -159,16 +160,16 @@ public:
             return kOk;
         }
         DVLOG(4) << "[race][handle] do_update FAILED: new_slot " << new_slot;
-        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug)
             << "[race][trace][handle] do_update FAILED: cas failed. slot "
-            << slot_handle << *dctx;
+            << slot_handle << util::pre_map(trace.kv());
         return kRetry;
     }
     RetCode should_migrate(size_t bit,
                            IRdmaAdaptor &rdma_adpt,
                            RemoteMemHandle &kvblock_mem_handle,
                            std::unordered_set<SlotMigrateHandle> &ret,
-                           HashContext *dctx)
+                           util::TraceView trace)
     {
         for (size_t i = 1; i < kSlotNr; ++i)
         {
@@ -196,26 +197,25 @@ public:
             auto hash = kv_block.hash;
             if (hash & (1 << bit))
             {
-                DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableExpandDebug)
                     << "[race][trace] should_migrate: slot " << h
                     << " should migrate for tested bit (base 0) " << bit;
                 ret.insert(SlotMigrateHandle(h, hash));
             }
         }
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][trace] Bucket::should_migrate: collected migrate "
                "entries (accumulated): "
-            << ret.size() << ". " << *dctx;
+            << ret.size() << ". " << util::pre_map(trace.kv());
         return kOk;
     }
     RetCode update_header_nodrain(uint32_t ld,
                                   uint32_t suffix,
                                   IRdmaAdaptor &rdma_adpt,
                                   RemoteMemHandle &mem_handle,
-                                  HashContext *dctx)
+                                  [[maybe_unused]] util::TraceView trace)
     {
         // header is at the first of the addr.
-        std::ignore = dctx;
         auto rdma_buf = rdma_adpt.get_rdma_buffer(sizeof(BucketHeader));
         DCHECK_GE(rdma_buf.size, sizeof(BucketHeader));
         auto &header = *(BucketHeader *) rdma_buf.buffer;
@@ -268,10 +268,10 @@ public:
                    uint32_t ld,
                    uint32_t suffix,
                    std::unordered_set<SlotHandle> &ret,
-                   HashContext *dctx) const
+                   util::TraceView trace) const
     {
         RetCode rc;
-        if ((rc = validate_staleness(ld, suffix, dctx)) != kOk)
+        if ((rc = validate_staleness(ld, suffix, trace)) != kOk)
         {
             return rc;
         }
@@ -281,10 +281,10 @@ public:
             auto view_handle = slot_handle(i);
             if (view_handle.match(fp))
             {
-                DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableLocateDebug)
                     << "[race][trace] locate: fp " << pre_fp(fp)
                     << " got matched FP " << pre_fp(fp) << ". view "
-                    << view_handle << ". " << *dctx;
+                    << view_handle << ". " << util::pre_map(trace.kv());
                 ret.insert(view_handle);
             }
         }
@@ -298,7 +298,7 @@ public:
 
     RetCode validate_staleness(uint32_t expect_ld,
                                uint32_t suffix,
-                               HashContext *dctx) const
+                               util::TraceView trace) const
     {
         auto &h = header();
         if (expect_ld == h.ld)
@@ -308,14 +308,15 @@ public:
 
             if (rounded_suffix != rounded_header_suffix)
             {
-                DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableDebug)
                     << "[race][trace] validate_staleness kStale: (short"
                        "period of RC): match "
                        "ld but suffix mismatch.expect_ld: "
                     << "expect (" << expect_ld << ", " << suffix
                     << ") suffix rounded to " << rounded_suffix << ". Got ("
                     << h.ld << ", " << h.suffix << ") suffix rounded to "
-                    << rounded_header_suffix << ". " << *dctx;
+                    << rounded_header_suffix << ". "
+                    << util::pre_map(trace.kv());
                 return kCacheStale;
             }
             // DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
@@ -332,7 +333,7 @@ public:
         if (rounded_suffix == rounded_header_suffix)
         {
             // stale but tolerant-able
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace] validate_staleness kOk (tolerable):"
                    "expect_ld: "
                 << expect_ld << ", expect_suffix: " << suffix
@@ -342,7 +343,7 @@ public:
                 << ". Rounded  bit: " << rounded_bit;
             return kOk;
         }
-        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug)
             << "[race][trace] validate_staleness kCacheStale: "
                "expect_ld: "
             << expect_ld << ", expect_suffix: " << suffix

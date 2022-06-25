@@ -380,65 +380,6 @@ inline std::ostream &operator<<(std::ostream &os, RetryReason r)
     }
     return os;
 }
-struct HashContext
-{
-    HashContext(size_t tid, bool enabled = true) : tid(tid), enabled_(enabled)
-    {
-    }
-    void set_private(void *p)
-    {
-        private_ = p;
-    }
-    void *get_private()
-    {
-        return private_;
-    }
-    void collect_retry(RetryReason r)
-    {
-        retry_reason_.collect(r);
-    }
-    const EnumReporter<RetryReason> &retry_reasion() const
-    {
-        return retry_reason_;
-    }
-
-    size_t tid;
-    std::string key;
-    std::string value;
-    std::string op;
-    bool enabled_;
-    void *private_{nullptr};
-    EnumReporter<RetryReason> retry_reason_;
-};
-
-static HashContext nulldctx(0, false);
-
-inline std::ostream &operator<<(std::ostream &os, const HashContext &dctx)
-{
-    if (dctx.enabled_)
-    {
-        os << "{dctx tid: " << dctx.tid << ", key: `" << dctx.key
-           << "`, value: `" << dctx.value << "`} by op: " << dctx.op;
-    }
-    return os;
-}
-
-class pre_dctx
-{
-public:
-    pre_dctx(HashContext *dctx) : dctx_(dctx)
-    {
-    }
-    HashContext *dctx_;
-};
-inline std::ostream &operator<<(std::ostream &os, const pre_dctx &pdctx)
-{
-    if (pdctx.dctx_)
-    {
-        os << *pdctx.dctx_;
-    }
-    return os;
-}
 
 inline uint64_t round_hash_to_bit(uint32_t h, size_t bit)
 {

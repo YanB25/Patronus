@@ -333,9 +333,9 @@ public:
         size_t initial_subtable_nr,
         size_t kvblock_expect_size)
     {
+        // use uniform in WO
         auto kv_g_conf = KVGenConf{.max_key = kMaxKey,
-                                   .use_zip = true,
-                                   .zip_skewness = 0.99,
+                                   .use_zip = false,
                                    .kvblock_expect_size = kvblock_expect_size};
 
         // fill the table with KVs
@@ -527,6 +527,9 @@ void test_basic_client_worker(
 
     ChronoTimer op_timer;
     bool should_report_latency = (tid == 0 && coro_id == 0);
+
+    util::TraceManager tm(0);
+
     while (ex.get_private_data().thread_remain_task > 0)
     {
         bench_conf.kv_g->gen_key(&key[0], sizeof(uint64_t));
@@ -549,7 +552,13 @@ void test_basic_client_worker(
         if (true_with_prob(insert_prob))
         {
             // insert
-            auto rc = rhh->put(key, value);
+            auto trace = tm.trace("put");
+            trace.set("tid", std::to_string(tid));
+            trace.set("coro_id", std::to_string(coro_id));
+            trace.set("k", key);
+            trace.set("v", value);
+            auto rc = rhh->put(key, value, trace);
+
             ins_succ_nr += rc == kOk;
             ins_retry_nr += rc == kRetry;
             ins_nomem_nr += rc == kNoMem;
@@ -557,6 +566,7 @@ void test_basic_client_worker(
             DCHECK(rc == kOk || rc == kRetry || rc == kNoMem ||
                    rc == kRdmaProtectionErr)
                 << "** unexpected rc:" << rc;
+            LOG_IF(INFO, trace.enabled()) << trace;
         }
         else if (true_with_prob(delete_prob))
         {

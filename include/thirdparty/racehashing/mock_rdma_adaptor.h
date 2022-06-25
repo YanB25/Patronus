@@ -16,7 +16,9 @@
 #include "patronus/memory/allocator.h"
 #include "patronus/memory/slab_allocator.h"
 #include "util/IRdmaAdaptor.h"
+#include "util/Pre.h"
 #include "util/Rand.h"
+#include "util/Tracer.h"
 
 namespace patronus::hash
 {
@@ -45,17 +47,17 @@ public:
     using pointer = std::shared_ptr<MockRdmaAdaptor>;
     using IAllocator = patronus::mem::IAllocator;
     MockRdmaAdaptor(std::weak_ptr<MockRdmaAdaptor> server_endpoint,
-                    HashContext *dctx = nullptr)
-        : server_ep_(server_endpoint), dctx_(dctx)
+                    util::TraceView trace = util::nulltrace)
+        : server_ep_(server_endpoint), trace_(trace)
     {
     }
     MockRdmaAdaptor(const MockRdmaAdaptor &) = delete;
     MockRdmaAdaptor &operator=(const MockRdmaAdaptor &) = delete;
 
     static pointer new_instance(std::weak_ptr<MockRdmaAdaptor> server_endpoint,
-                                HashContext *dctx = nullptr)
+                                util::TraceView trace = util::nulltrace)
     {
-        return std::make_shared<MockRdmaAdaptor>(server_endpoint, dctx);
+        return std::make_shared<MockRdmaAdaptor>(server_endpoint, trace);
     }
     GlobalAddress remote_alloc(size_t size, hint_t hint) override
     {
@@ -69,9 +71,9 @@ public:
     GlobalAddress do_remote_alloc(size_t size, hint_t hint)
     {
         auto ret = server_ep_.lock()->rpc_alloc(size, hint);
-        DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug)
             << "[rdma][trace] remote_alloc_acquire_perm: " << ret
-            << " for size " << size;
+            << " for size " << size << ". " << util::pre_map(trace_.kv());
         LOG_FIRST_N(WARNING, 1)
             << "[rdma] mock_rdma_adaptor: remote_alloc: this function is not "
                "checked for correctness: don't know the returned gaddr correct "
@@ -151,9 +153,10 @@ public:
 
         remote_allocated_buffers_.emplace(ret, size);
         auto remote_gaddr = to_exposed_gaddr(ret);
-        DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug)
             << "[rdma][trace] rpc_alloc: " << (void *) ret << "("
-            << remote_gaddr << ") for size " << size;
+            << remote_gaddr << ") for size " << size << ". "
+            << util::pre_map(trace_.kv());
         return remote_gaddr;
     }
     void rpc_free(GlobalAddress gaddr, size_t size, hint_t hint)
@@ -184,8 +187,9 @@ public:
     }
     void remote_free(GlobalAddress gaddr, size_t size, hint_t hint) override
     {
-        DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
-            << "[rdma][trace] remote_free: " << gaddr;
+        DLOG_IF(INFO, config::kEnableDebug)
+            << "[rdma][trace] remote_free: " << gaddr << ". "
+            << util::pre_map(trace_.kv());
         server_ep_.lock()->rpc_free(gaddr, size, hint);
     }
     void relinquish_perm(RemoteMemHandle &handle,
@@ -212,9 +216,9 @@ public:
         void *ret = malloc(size);
         DCHECK_GT(size, 0) << "Make no sense to alloc size with 0";
         allocated_buffers_.insert(ret);
-        DLOG_IF(INFO, config::kEnableMemoryDebug && dctx_ != nullptr)
+        DLOG_IF(INFO, config::kEnableMemoryDebug)
             << "[rdma][trace] get_rdma_buffer: " << (void *) ret << " for size "
-            << size;
+            << size << ". " << util::pre_map(trace_.kv());
         return Buffer((char *) ret, size);
     }
 
@@ -378,8 +382,9 @@ public:
         for (void *addr : allocated_buffers_)
         {
             free(addr);
-            DLOG_IF(INFO, config::kEnableDebug && dctx_ != nullptr)
-                << "[rdma][trace] gc: freeing " << (void *) addr;
+            DLOG_IF(INFO, config::kEnableDebug)
+                << "[rdma][trace] gc: freeing " << (void *) addr << ". "
+                << util::pre_map(trace_.kv());
         }
         allocated_buffers_.clear();
     }
@@ -454,7 +459,7 @@ private:
     std::weak_ptr<MockRdmaAdaptor> server_ep_;
     // server-side allocators to handle requests
     std::unordered_map<hint_t, IAllocator::pointer> allocators_;
-    HashContext *dctx_{nullptr};
+    util::TraceView trace_{util::nulltrace};
     std::vector<MockRdmaOp> ops_;
     std::unordered_set<void *> allocated_buffers_;
     std::unordered_map<void *, size_t> remote_allocated_buffers_;

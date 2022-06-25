@@ -119,7 +119,6 @@ void test_capacity(size_t initial_subtable)
     auto &rh = *rh_ptr;
     auto &rhh = *rhh_ptrs[0];
 
-    HashContext dctx(0);
     std::string key;
     std::string value;
     key.resize(8);
@@ -129,15 +128,18 @@ void test_capacity(size_t initial_subtable)
     size_t fail_nr = 0;
     bool first_fail = true;
 
+    util::TraceManager tm(0);
+
     for (size_t i = 0; i < rh.max_capacity(); ++i)
     {
         fast_pseudo_fill_buf(key.data(), key.size());
         fast_pseudo_fill_buf(value.data(), value.size());
-        dctx.key = key;
-        dctx.value = value;
+        auto trace = tm.trace("mock");
+        trace.set("k", key);
+        trace.set("v", value);
+        trace.set("op", "put");
 
-        dctx.op = "put";
-        auto rc = rhh.put(key, value, &dctx);
+        auto rc = rhh.put(key, value, trace);
         if (rc == kOk)
         {
             inserted.emplace(key, value);
@@ -173,23 +175,31 @@ void test_capacity(size_t initial_subtable)
     LOG(INFO) << "Checking integrity";
 
     LOG(INFO) << rh;
+
+    util::TraceManager validate_tm(0);
     for (const auto &[key, expect_value] : inserted)
     {
         std::string get_val;
-        dctx.key = key;
-        dctx.value = expect_value;
-        dctx.op = "get";
-        CHECK_EQ(rhh.get(key, get_val, &dctx), kOk)
+        auto trace = validate_tm.trace("get");
+        trace.set("key", key);
+        trace.set("value", expect_value);
+        CHECK_EQ(rhh.get(key, get_val, trace), kOk)
             << "** Failed to get back key `" << key << "`";
         CHECK_EQ(get_val, expect_value)
             << "** getting key `" << key << "` expect value `" << expect_value
             << "`";
-        CHECK_EQ(rhh.del(key, &dctx), kOk)
+        trace = validate_tm.trace("del");
+        trace.set("key", key);
+        CHECK_EQ(rhh.del(key, trace), kOk)
             << "** Failed to delete existing key `" << key << "`";
-        CHECK_EQ(rhh.del(key), kNotFound)
+        trace = validate_tm.trace("del again");
+        trace.set("key", key);
+        CHECK_EQ(rhh.del(key, trace), kNotFound)
             << "** delete an already-deleted-key `" << key
             << "` expects failure";
-        CHECK_EQ(rhh.get(key, get_val), kNotFound)
+        trace = validate_tm.trace("get after del");
+        trace.set("key", key);
+        CHECK_EQ(rhh.get(key, get_val, trace), kNotFound)
             << "** Getting an already-deleted-key `" << key
             << "` expects failure";
     }
@@ -221,19 +231,23 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
     std::map<std::string, std::string> inserted;
     std::set<std::string> keys;
 
-    HashContext dctx(tid);
+    // HashContext dctx(tid);
+    util::TraceManager tm(0);
 
     for (size_t i = 0; i < test_nr; ++i)
     {
         if (i % (test_nr / 10) == 0)
         {
-            LOG(INFO) << "Finished " << 1.0 * i / test_nr * 100 << "%. "
-                      << dctx;
+            LOG(INFO) << "Finished " << 1.0 * i / test_nr * 100 << "%. tid "
+                      << tid;
         }
         fast_pseudo_fill_buf(key_buf, kKeySize);
         fast_pseudo_fill_buf(val_buf, kValueSize);
         std::string key(key_buf, kKeySize);
         std::string value(val_buf, kValueSize);
+
+        auto trace = tm.trace("op");
+        trace.set("tid", std::to_string(tid));
 
         // so each thread will not modify others value
         char mark = 'a' + tid;
@@ -242,10 +256,10 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
         if (true_with_prob(0.5))
         {
             // insert
-            dctx.key = key;
-            dctx.value = value;
-            dctx.op = "p";
-            auto rc = rhh->put(key, value, &dctx);
+            trace.set("k", key);
+            trace.set("v", value);
+            trace.set("op", "put");
+            auto rc = rhh->put(key, value, trace);
             if (rc == kOk)
             {
                 keys.insert(key);
@@ -265,10 +279,10 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 continue;
             }
             key = random_choose(keys);
-            dctx.key = key;
-            dctx.value = value;
-            dctx.op = "d";
-            CHECK_EQ(rhh->del(key, &dctx), kOk)
+            trace.set("k", key);
+            trace.set("v", value);
+            trace.set("op", "del");
+            CHECK_EQ(rhh->del(key, trace), kOk)
                 << "tid " << tid << " deleting key `" << key
                 << "` expect to succeed. inserted.count(key): "
                 << inserted.count(key);
@@ -282,20 +296,22 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
             bool exist = keys.count(key) == 1;
             if (exist)
             {
-                dctx.key = key;
-                dctx.value = value;
-                dctx.op = "d";
-                CHECK_EQ(rhh->del(key, &dctx), kOk) << dctx;
+                trace.set("k", key);
+                trace.set("v", value);
+                trace.set("op", "del");
+                CHECK_EQ(rhh->del(key, trace), kOk)
+                    << util::pre_map(trace.kv());
                 inserted.erase(key);
                 keys.erase(key);
                 del_succ_nr++;
             }
             else
             {
-                dctx.key = key;
-                dctx.value = value;
-                dctx.op = "d";
-                CHECK_EQ(rhh->del(key, &dctx), kNotFound) << dctx;
+                trace.set("k", key);
+                trace.set("v", value);
+                trace.set("op", "del");
+                CHECK_EQ(rhh->del(key, trace), kNotFound)
+                    << util::pre_map(trace.kv());
                 del_fail_nr++;
             }
         }
@@ -308,14 +324,14 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
             }
             std::string got_value;
             key = random_choose(keys);
-            CHECK_EQ(key[0], mark) << dctx;
-            dctx.key = key;
-            dctx.value = value;
-            dctx.op = "g";
-            CHECK_EQ(rhh->get(key, got_value, &dctx), kOk)
+            CHECK_EQ(key[0], mark) << util::pre_map(trace.kv());
+            trace.set("k", key);
+            trace.set("v", value);
+            trace.set("op", "get");
+            CHECK_EQ(rhh->get(key, got_value, trace), kOk)
                 << "Tid: " << tid << " getting key `" << key
                 << "` expect to succeed";
-            CHECK_EQ(got_value, inserted[key]) << dctx;
+            CHECK_EQ(got_value, inserted[key]) << util::pre_map(trace.kv());
             get_succ_nr++;
         }
         else
@@ -330,20 +346,22 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
                 }
                 std::string got_value;
                 key = random_choose(keys);
-                dctx.key = key;
-                dctx.value = value;
-                dctx.op = "g";
-                CHECK_EQ(rhh->get(key, got_value, &dctx), kOk) << dctx;
-                CHECK_EQ(got_value, inserted[key]) << dctx;
+                trace.set("k", key);
+                trace.set("v", value);
+                trace.set("op", "get");
+                CHECK_EQ(rhh->get(key, got_value, trace), kOk)
+                    << util::pre_map(trace.kv());
+                CHECK_EQ(got_value, inserted[key]) << util::pre_map(trace.kv());
                 get_succ_nr++;
             }
             else
             {
                 std::string got_value;
-                dctx.key = key;
-                dctx.value = value;
-                dctx.op = "g";
-                CHECK_EQ(rhh->get(key, got_value, &dctx), kNotFound) << dctx;
+                trace.set("k", key);
+                trace.set("v", value);
+                trace.set("op", "get");
+                CHECK_EQ(rhh->get(key, got_value, trace), kNotFound)
+                    << util::pre_map(trace.kv());
                 get_fail_nr++;
             }
         }
@@ -353,14 +371,18 @@ void test_thread(typename RaceHashing<kA, kB, kC>::pointer rh,
 
     for (const auto &[k, v] : inserted)
     {
+        auto trace = tm.trace("validate");
+        trace.set("k", k);
+        trace.set("v", v);
+        trace.set("op", "get");
         std::string get_v;
-        dctx.key = k;
-        dctx.value = v;
-        CHECK_EQ(rhh->get(k, get_v, &dctx), kOk) << dctx;
-        CHECK_EQ(get_v, v) << dctx;
-        dctx.key = k;
-        dctx.value = v;
-        CHECK_EQ(rhh->del(k, &dctx), kOk) << dctx;
+        CHECK_EQ(rhh->get(k, get_v, trace), kOk) << util::pre_map(trace.kv());
+        CHECK_EQ(get_v, v) << util::pre_map(trace.kv());
+        auto trace2 = tm.trace("validate");
+        trace2.set("k", k);
+        trace2.set("v", v);
+        trace2.set("op", "get");
+        CHECK_EQ(rhh->del(k, trace2), kOk) << util::pre_map(trace.kv());
     }
 
     LOG(INFO) << "Tear down. tid: " << tid << ". Table: " << *rh;
@@ -407,8 +429,8 @@ void test_expand_once_single_thread()
     value.resize(kValueSize);
     size_t insert_nr = 0;
     std::map<std::string, std::string> inserted;
-    HashContext ctx(0);
-    ctx.tid = 0;
+
+    util::TraceManager tm(0);
     while (true)
     {
         fast_pseudo_fill_buf(key_buf, kKeySize);
@@ -416,10 +438,13 @@ void test_expand_once_single_thread()
         std::string key(key_buf, kKeySize);
         std::string value(val_buf, kValueSize);
 
-        ctx.key = key;
-        ctx.value = value;
-        ctx.op = "put";
-        auto rc = rhh.put(key, value, &ctx);
+        auto trace = tm.trace("expand_once");
+        trace.set("k", key);
+        trace.set("v", value);
+        trace.set("op", "put");
+        trace.set("tid", 0);
+
+        auto rc = rhh.put(key, value, trace);
         if (rc == kNoMem)
         {
             LOG(INFO) << "[bench] inserted: " << insert_nr << ". Table: " << rh;
@@ -436,17 +461,17 @@ void test_expand_once_single_thread()
         CHECK_EQ(got_v, v);
     }
     LOG(INFO) << "[bench] begin to expand";
-    ctx.op = "expand";
-    ctx.key = "";
-    ctx.value = "";
-    rhh.expand(0, &ctx);
+    auto trace2 = tm.trace("to expand");
+    trace2.set("op", "expand");
+    rhh.expand(0, trace2);
     for (const auto &[k, v] : inserted)
     {
-        ctx.key = k;
-        ctx.value = v;
-        ctx.op = "get";
+        auto trace3 = tm.trace("to expand validate");
+        trace3.set("k", k);
+        trace3.set("v", v);
+        trace3.set("op", "get");
         std::string got_v;
-        CHECK_EQ(rhh.get(k, got_v, &ctx), kOk)
+        CHECK_EQ(rhh.get(k, got_v, trace3), kOk)
             << "failed to get back key " << k;
         CHECK_EQ(got_v, v);
     }
@@ -525,21 +550,22 @@ void test_expand_multiple_single_thread()
     key.resize(kKeySize);
     value.resize(kValueSize);
     std::map<std::string, std::string> inserted;
-    HashContext ctx(0);
-    ctx.tid = 0;
+
     size_t inserted_nr = 0;
+    util::TraceManager tm(0);
     while (true)
     {
+        auto trace = tm.trace("expand multiple times");
+        trace.set("k", key);
+        trace.set("v", value);
+        trace.set("op", "put");
+
         fast_pseudo_fill_buf(key_buf, kKeySize);
         fast_pseudo_fill_buf(val_buf, kValueSize);
         std::string key(key_buf, kKeySize);
         std::string value(val_buf, kValueSize);
 
-        ctx.key = key;
-        ctx.value = value;
-        ctx.op = "put";
-
-        auto rc = rhh.put(key, value, &ctx);
+        auto rc = rhh.put(key, value, trace);
         if (rc == kNoMem)
         {
             LOG(INFO) << "[bench] nomem. out of directory entries. table: "
@@ -553,9 +579,10 @@ void test_expand_multiple_single_thread()
     }
     for (const auto &[k, v] : inserted)
     {
-        ctx.key = k;
-        ctx.value = v;
-        ctx.op = "get";
+        auto trace = tm.trace("expand multiple times: validate");
+        trace.set("k", k);
+        trace.set("v", v);
+        trace.set("op", "get");
 
         std::string got_v;
         auto rc = rhh.get(k, got_v);
@@ -564,10 +591,7 @@ void test_expand_multiple_single_thread()
             LOG(WARNING) << "Failed to find key `" << k
                          << "`. Start to debug.... Got rc: " << rc;
             // do it again with debug
-            ctx.key = k;
-            ctx.value = v;
-            ctx.op = "get";
-            rc = rhh.get(k, got_v, &ctx);
+            rc = rhh.get(k, got_v, trace);
             CHECK(false) << "Failed to get `" << k << "`. Expect value `" << v
                          << "`. Got: " << rc;
         }
@@ -578,14 +602,15 @@ void test_expand_multiple_single_thread()
 
     for (const auto &[k, v] : inserted)
     {
-        ctx.key = k;
-        ctx.value = v;
-        ctx.op = "get";
+        auto trace = tm.trace("expand multiple times: validate2");
+        trace.set("k", k);
+        trace.set("v", v);
+        trace.set("op", "get");
 
         std::string got_v;
         CHECK_EQ(rhh.get(k, got_v), kOk) << "failed to get back key " << k;
         CHECK_EQ(got_v, v);
-        CHECK_EQ(rhh.del(k, &ctx), kOk) << "failed to delete key " << k;
+        CHECK_EQ(rhh.del(k, trace), kOk) << "failed to delete key " << k;
     }
     LOG(INFO) << "[bench] tear downed. table: " << rh;
 
@@ -606,21 +631,23 @@ void test_burn_expand_single_thread()
     key.resize(kKeySize);
     value.resize(kValueSize);
     std::map<std::string, std::string> inserted;
-    HashContext ctx(0);
-    ctx.tid = 0;
     size_t inserted_nr = 0;
+
+    util::TraceManager tm(0);
     while (true)
     {
+        auto trace = tm.trace("burn expand");
+
         fast_pseudo_fill_buf(key_buf, kKeySize);
         fast_pseudo_fill_buf(val_buf, kValueSize);
         std::string key(key_buf, kKeySize);
         std::string value(val_buf, kValueSize);
 
-        ctx.key = key;
-        ctx.value = value;
-        ctx.op = "put";
+        trace.set("k", key);
+        trace.set("v", value);
+        trace.set("op", "put");
 
-        auto rc = rhh.put(key, value, &ctx);
+        auto rc = rhh.put(key, value, trace);
         if (rc == kNoMem)
         {
             LOG(INFO) << "[bench] nomem. out of directory entries. table: "
@@ -635,21 +662,18 @@ void test_burn_expand_single_thread()
     LOG(INFO) << rh;
     for (const auto &[k, v] : inserted)
     {
-        ctx.key = k;
-        ctx.value = v;
-        ctx.op = "get";
-
         std::string got_v;
         auto rc = rhh.get(k, got_v);
         if (rc != kOk)
         {
             LOG(WARNING) << "Failed to find key `" << k
                          << "`. Start to debug.... Got rc: " << rc;
-            // do it again with debug
-            ctx.key = k;
-            ctx.value = v;
-            ctx.op = "get";
-            rc = rhh.get(k, got_v, &ctx);
+
+            auto trace = tm.trace("burn expand: validate");
+            trace.set("k", key);
+            trace.set("v", value);
+            trace.set("op", "get");
+            rc = rhh.get(k, got_v, trace);
             CHECK(false) << "Failed to get `" << k << "`. Expect value `" << v
                          << "`. Got: " << rc;
         }
@@ -659,12 +683,14 @@ void test_burn_expand_single_thread()
     // check integrity
     for (const auto &[k, v] : inserted)
     {
-        ctx.key = k;
-        ctx.value = v;
-        ctx.op = "get";
+        auto trace = tm.trace("burn expand: validate2");
+        trace.set("k", k);
+        trace.set("v", v);
+        trace.set("op", "get");
 
         std::string got_v;
-        CHECK_EQ(rhh.get(k, got_v), kOk) << "failed to get back key " << k;
+        CHECK_EQ(rhh.get(k, got_v, trace), kOk)
+            << "failed to get back key " << k;
         CHECK_EQ(got_v, v);
     }
     LOG(INFO) << "[bench] pass integrity check. See whether we can fill the "
@@ -677,11 +703,12 @@ void test_burn_expand_single_thread()
         std::string key(key_buf, kKeySize);
         std::string value(val_buf, kValueSize);
 
-        ctx.key = key;
-        ctx.value = value;
-        ctx.op = "put";
+        auto trace = tm.trace("burn expand: fill");
+        trace.set("k", key);
+        trace.set("v", value);
+        trace.set("op", "put");
 
-        auto rc = rhh.put(key, value, &ctx);
+        auto rc = rhh.put(key, value, trace);
         CHECK(rc == kNoMem || rc == kOk);
         if (rc == kOk)
         {
@@ -697,11 +724,12 @@ void test_burn_expand_single_thread()
     // tear down
     for (const auto &[k, v] : inserted)
     {
-        ctx.key = k;
-        ctx.value = v;
-        ctx.op = "del";
+        auto trace = tm.trace("burn expand: tear down");
+        trace.set("k", k);
+        trace.set("v", v);
+        trace.set("op", "del");
 
-        CHECK_EQ(rhh.del(k, &ctx), kOk) << "failed to delete key " << k;
+        CHECK_EQ(rhh.del(k, trace), kOk) << "failed to delete key " << k;
     }
     LOG(INFO) << "[bench] tear downed. table: " << rh;
     LOG(INFO) << "[bench] inserted_nr: " << inserted_nr

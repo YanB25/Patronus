@@ -150,7 +150,7 @@ public:
             }
         }
     }
-    void init(HashContext *dctx = nullptr)
+    void init(util::TraceView trace = util::nulltrace)
     {
         if constexpr (::config::kEnableRdmaTrace)
         {
@@ -164,12 +164,12 @@ public:
         init_directory_mem_handle();
 
         maybe_trace_bootstrap("before update_dcache()");
-        auto ret = update_directory_cache(dctx);
+        auto ret = update_directory_cache(trace);
 
         while (unlikely(ret == kRdmaProtectionErr))
         {
             LOG(FATAL) << "[race] update_dcache got " << ret << ". Retry.";
-            ret = update_directory_cache(dctx);
+            ret = update_directory_cache(trace);
         }
         CHECK_EQ(ret, kOk);
 
@@ -209,7 +209,7 @@ public:
         rdma_adpt_->put_all_rdma_buffer();
     }
 
-    RetCode update_directory_cache(HashContext *dctx)
+    RetCode update_directory_cache(util::TraceView trace)
     {
         // TODO(race): this have performance problem because of additional
         // memcpy.
@@ -234,7 +234,9 @@ public:
 
         LOG_IF(INFO, config::kEnableDebug)
             << "[race][trace] update_directory_cache: update cache to "
-            << cached_meta_ << ". " << pre_dctx(dctx);
+            << cached_meta_ << ". " << util::pre_map(trace.kv());
+
+        trace.pin("update_diretory_cache");
         return kOk;
     }
 
@@ -252,7 +254,7 @@ public:
         return cached_meta_.gd;
     }
 
-    RetCode del(const Key &key, HashContext *dctx = nullptr)
+    RetCode del(const Key &key, util::TraceView trace = util::nulltrace)
     {
         DCHECK(inited_);
         auto hash = hash_impl(key.data(), key.size());
@@ -278,53 +280,53 @@ public:
         CHECK_EQ(rc, kOk);
 
         std::unordered_set<SlotHandle> slot_handles;
-        rc = cbs.locate(fp, cached_ld(subtable_idx), m, slot_handles, dctx);
+        rc = cbs.locate(fp, cached_ld(subtable_idx), m, slot_handles, trace);
         if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
-            auto ret = update_directory_cache(dctx);
+            auto ret = update_directory_cache(trace);
             if (ret == kRdmaProtectionErr)
             {
                 return ret;
             }
             CHECK_EQ(ret, kOk);
-            return del(key, dctx);
+            return del(key, trace);
         }
 
-        rc = remove_if_exists(subtable_idx, slot_handles, key, dctx);
+        rc = remove_if_exists(subtable_idx, slot_handles, key, trace);
         if (rc == kOk)
         {
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace] del: rm at subtable[" << subtable_idx << "]. "
-                << *dctx;
+                << util::pre_map(trace.kv());
         }
         else
         {
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace] del: not found at subtable[" << subtable_idx
-                << "]. " << *dctx;
+                << "]. " << util::pre_map(trace.kv());
         }
         return rc;
     }
     RetCode remove_if_exists(size_t subtable_idx,
                              const std::unordered_set<SlotHandle> &slot_handles,
                              const Key &key,
-                             HashContext *dctx)
+                             util::TraceView trace)
     {
         auto f = [this, subtable_idx](const Key &key,
                                       SlotHandle slot_handles,
                                       KVBlockHandle kvblock_handle,
-                                      HashContext *dctx) {
+                                      util::TraceView trace) {
             std::ignore = key;
             std::ignore = kvblock_handle;
-            return do_remove(subtable_idx, slot_handles, dctx);
+            return do_remove(subtable_idx, slot_handles, trace);
         };
-        return for_the_real_match_do(slot_handles, key, f, dctx);
+        return for_the_real_match_do(slot_handles, key, f, trace);
     }
 
     RetCode do_put_once(const Key &key,
                         uint64_t hash,
-                        HashContext *dctx = nullptr)
+                        util::TraceView trace = util::nulltrace)
     {
         DCHECK(inited_);
 
@@ -340,28 +342,31 @@ public:
                                 to_insert_block.gaddr_.value(),
                                 to_insert_block.tagged_len_,
                                 hash,
-                                dctx);
+                                trace.child("put_phase_one"));
         if (rc != kOk)
         {
             return rc;
         }
-        maybe_trace_pin("before phase_two_deduplicate");
-        rc = phase_two_deduplicate(key, hash, ld, 10 /* retry nr */, dctx);
+        rc = phase_two_deduplicate(key,
+                                   hash,
+                                   ld,
+                                   10 /* retry nr */,
+                                   trace.child("phase_two_deduplicate"));
         CHECK_NE(rc, kNoMem);
         CHECK_NE(rc, kRetry) << "** why dedup will require retry?";
         if constexpr (debug())
         {
-            LOG_IF(INFO, config::kEnableDebug && dctx != nullptr && rc == kOk)
+            LOG_IF(INFO, config::kEnableDebug && rc == kOk)
                 << "[race][trace] PUT succeed: hash: " << pre_hash(hash)
                 << ", h1: " << pre_hash(h1) << ", h2: " << pre_hash(h2)
                 << ", fp: " << pre_hash(fp) << ", m: " << pre_hash(m)
                 << ", put to subtable[" << rounded_m << "] by gd " << cached_gd
-                << ". cached_ld: " << ld << ". " << *dctx;
+                << ". cached_ld: " << ld << ". " << util::pre_map(trace.kv());
         }
         return rc;
     }
 
-    RetCode do_put_loop(const Key &key, uint64_t hash, HashContext *dctx)
+    RetCode do_put_loop(const Key &key, uint64_t hash, util::TraceView trace)
     {
         RetCode rc = kOk;
         size_t retry_nr{0};
@@ -380,8 +385,7 @@ public:
                     return rc;
                 }
 
-                maybe_trace_pin("before update dcache");
-                rc = update_directory_cache(dctx);
+                rc = update_directory_cache(trace);
                 CHECK_EQ(rc, kOk);
                 // retry
                 continue;
@@ -399,7 +403,7 @@ public:
                 auto rounded_m = round_to_bits(m, cached_gd);
                 auto ld = cached_ld(rounded_m);
                 auto overflow_subtable_idx = round_to_bits(rounded_m, ld);
-                rc = expand(overflow_subtable_idx, dctx);
+                rc = expand(overflow_subtable_idx, trace);
                 // got kNoMem AGAIN from expand, which means unable to
                 // expand dont retry more. exit here.
                 if (rc == kNoMem)
@@ -420,7 +424,7 @@ public:
 
             // insert here
             CHECK(rc == kOk || rc == kRetry) << "** Unexpected rc: " << rc;
-            rc = do_put_once(key, hash, dctx);
+            rc = do_put_once(key, hash, trace);
             if (rc == kOk)
             {
                 return rc;
@@ -431,7 +435,9 @@ public:
         }
     }
 
-    RetCode put(const Key &key, const Value &value, HashContext *dctx = nullptr)
+    RetCode put(const Key &key,
+                const Value &value,
+                util::TraceView trace = util::nulltrace)
     {
         // NOTE: the prepare_alloc_kv is optional (if already exist allocated
         // one)
@@ -450,11 +456,12 @@ public:
                          to_insert_block.kvblock_size_,
                          to_insert_block.handle_,
                          *rdma_adpt_,
-                         dctx)
+                         trace)
             .expect(RC::kOk);
 
         // Here we will loop until insertion succeeded (best-efford)
-        auto rc = do_put_loop(key, hash, dctx);
+        trace.pin("allocate");
+        auto rc = do_put_loop(key, hash, trace);
 
         if (rc == RC::kOk)
         {
@@ -477,8 +484,8 @@ public:
     }
     std::array<RemoteMemHandle, subtable_nr()> expand_lock_handles_{};
     std::chrono::time_point<std::chrono::steady_clock> lock_handle_last_extend_;
-    bool maybe_expand_try_extend_lock_lease(size_t subtable_idx,
-                                            HashContext *dctx)
+    bool maybe_expand_try_extend_lock_lease(
+        size_t subtable_idx, [[maybe_unused]] util::TraceView trace)
     {
         const auto &c = conf_.expand;
         if (unlikely(!c.use_patronus_lock))
@@ -498,14 +505,14 @@ public:
             lock_handle_last_extend_ = now;
             if (rc == kOk)
             {
-                DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableExpandDebug)
                     << "[race][expand] maybe_expand_try_extend_lock_lease: "
                        "extend SUCCEEDED. ";
                 return true;
             }
             else
             {
-                DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableExpandDebug)
                     << "[race][expand] maybe_expand_try_extend_lock_lease: "
                        "extend FAILED ";
                 return false;
@@ -513,7 +520,7 @@ public:
         }
         else
         {
-            DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableExpandDebug)
                 << "[race][expand] maybe_expand_try_extend_lock_lease: "
                    "extend SKIP. elapsed "
                 << ns << " ns, not close to expire time.";
@@ -699,10 +706,10 @@ public:
         SubTableHandleT &subtable_handle,
         uint32_t ld,
         uint32_t suffix,
-        HashContext *dctx)
+        util::TraceView trace)
     {
         auto rc = subtable_handle.update_bucket_header_nodrain(
-            ld, suffix, *rdma_adpt_, dctx);
+            ld, suffix, *rdma_adpt_, trace);
         if (rc != kOk)
         {
             return rc;
@@ -713,11 +720,11 @@ public:
         SubTableHandleT &subtable_handle,
         uint32_t ld,
         uint32_t suffix,
-        HashContext *dctx)
+        util::TraceView trace)
     {
         // just a wrapper, this parameters to the ctor is not used.
         auto rc = subtable_handle.init_and_update_bucket_header_drain(
-            ld, suffix, *rdma_adpt_, dctx);
+            ld, suffix, *rdma_adpt_, trace);
         if (rc != kOk)
         {
             return rc;
@@ -745,7 +752,7 @@ public:
     RetCode expand_migrate_subtable(SubTableHandleT &src_st_handle,
                                     SubTableHandleT &dst_st_handle,
                                     size_t bit,
-                                    HashContext *dctx)
+                                    util::TraceView trace)
     {
         std::unordered_set<SlotMigrateHandle> should_migrate;
         auto st_size = SubTableT::size_bytes();
@@ -779,15 +786,16 @@ public:
             BucketHandle<kSlotNr> b(remote_bucket_addr,
                                     (char *) bucket_buffer_addr);
             CHECK_EQ(b.should_migrate(
-                         bit, *rdma_adpt_, fake_handle_, should_migrate, dctx),
+                         bit, *rdma_adpt_, fake_handle_, should_migrate, trace),
                      kOk);
         }
 
         // TODO: rethink about how batching can boost performance
         auto capacity = SubTableT::max_capacity();
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] should migrate " << should_migrate.size()
-            << " entries. subtable capacity: " << capacity;
+            << " entries. subtable capacity: " << capacity << ". "
+            << util::pre_map(trace.kv());
         CHECK_LE(should_migrate.size(), capacity)
             << "Should migrate got " << should_migrate.size()
             << ", exceeded subtable capacity " << capacity;
@@ -803,7 +811,7 @@ public:
         {
             SlotHandle ret_slot(nullgaddr, SlotView(0));
             CHECK_EQ(dst_st_handle.put_slot(
-                         slot_handle, *rdma_adpt_, &ret_slot, dctx),
+                         slot_handle, *rdma_adpt_, &ret_slot, trace),
                      kOk);
             auto rc = src_st_handle.try_del_slot(slot_handle.slot_handle(),
                                                  *rdma_adpt_);
@@ -822,7 +830,7 @@ public:
     // lots of items to make it full. Therefore cascaded expansion is required.
     // The client can always find out cache stale and update their directory
     // cache.
-    RetCode expand(size_t subtable_idx, HashContext *dctx)
+    RetCode expand(size_t subtable_idx, util::TraceView trace)
     {
         if constexpr (::config::kEnableRdmaTrace)
         {
@@ -838,12 +846,11 @@ public:
         DCHECK(inited_);
         CHECK_LT(subtable_idx, kDEntryNr);
         // 0) try lock
-        maybe_trace_pin("before 0) expand_try_lock_subtable_drain");
         auto rc = expand_try_lock_subtable_drain(subtable_idx);
+        trace.pin("expand_try_lock_subtable_drain");
         if (rc != kOk)
         {
             // failed migration, don't trace me.
-            maybe_drop_trace();
             return rc;
         }
 
@@ -855,17 +862,13 @@ public:
         {
             LOG(WARNING) << "[rhh] MOCK: client crashed. ";
             conf_.expand.mock_crash_nr--;
-            if (dctx)
-            {
-                dctx->set_private((void *) RC::kMockCrashed);
-            }
-            return kRetry;
+
+            return kMockCrashed;
         }
 
         // 1) I think updating the directory cache is definitely necessary
         // while expanding.
-        maybe_trace_pin("before 1) update dcache");
-        auto ret = update_directory_cache(dctx);
+        auto ret = update_directory_cache(trace);
         if (ret == kRdmaProtectionErr)
         {
             return ret;
@@ -873,12 +876,13 @@ public:
         CHECK_EQ(ret, kOk);
         auto depth = cached_meta_.lds[subtable_idx];
         auto next_subtable_idx = subtable_idx | (1 << depth);
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] Expanding subtable[" << subtable_idx
             << "] to subtable[" << next_subtable_idx
-            << "]. meta: " << cached_meta_;
+            << "]. meta: " << cached_meta_
+            << ". trace: " << util::pre_map(trace.kv());
         auto subtable_remote_addr = cached_meta_.entries[subtable_idx];
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
 
         // okay, entered critical section
         auto next_depth = depth + 1;
@@ -909,14 +913,12 @@ public:
                 }
             }
             cached_meta_.expanding[subtable_idx] = 0;
-            maybe_drop_trace();
             return kNoMem;
         }
         rdma_adpt_->put_all_rdma_buffer();
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
 
         // 2) Expand the directory first
-        maybe_trace_pin("before 2) expand directory");
         if (next_depth >= expect_gd)
         {
             // insert all the entries into the directory
@@ -926,11 +928,11 @@ public:
                 if (cached_meta_.entries[i].is_null())
                 {
                     auto from_subtable_idx = i & (~(1 << depth));
-                    DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                    DLOG_IF(INFO, config::kEnableExpandDebug)
                         << "[race][expand] (2) Update gd and directory: "
                            "setting subtable["
                         << i << "] to subtale[" << from_subtable_idx << "]. "
-                        << *dctx;
+                        << util::pre_map(trace.kv());
                     auto subtable_remote_addr =
                         cached_meta_.entries[from_subtable_idx];
                     auto ld = cached_ld(from_subtable_idx);
@@ -959,7 +961,7 @@ public:
             }
             CHECK_EQ(rc, kOk);
 
-            DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableExpandDebug)
                 << "[race][expand] (2) Update gd and directory: setting gd to "
                 << next_depth;
             rc = expand_cas_gd_drain(expect_gd, next_depth);
@@ -969,9 +971,10 @@ public:
             }
             CHECK_EQ(rc, kOk);
         }
+        trace.pin("expand directory");
 
         CHECK_LT(next_subtable_idx, kDEntryNr);
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
 
         // do some debug checks
         auto cached_meta_next_subtable =
@@ -994,10 +997,9 @@ public:
                          << ", (1<<depth): " << (1 << depth);
         }
         rdma_adpt_->put_all_rdma_buffer();
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
 
         // 3) allocate subtable here
-        maybe_trace_pin("before 3) allocate subtable");
         auto alloc_size = SubTableT::size_bytes();
         if (subtable_mem_handles_[next_subtable_idx].valid())
         {
@@ -1012,18 +1014,18 @@ public:
         auto &next_subtable_handle = subtable_mem_handles_[next_subtable_idx];
         auto new_remote_subtable =
             subtable_mem_handles_[next_subtable_idx].gaddr();
-        LOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        LOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] (3) expanding subtable[" << subtable_idx
             << "] to next subtable[" << next_subtable_idx << "]. Allocated "
             << alloc_size << " at " << new_remote_subtable;
         rdma_adpt_->put_all_rdma_buffer();
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
+        trace.pin("allocate subtable");
 
         // 4) init subtable: setup the bucket header
-        maybe_trace_pin("before 4) init subtable");
         auto ld = next_depth;
         auto suffix = next_subtable_idx;
-        LOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        LOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] (4) set up header for subtable["
             << next_subtable_idx << "]. ld: " << ld
             << ", suffix: " << next_subtable_idx;
@@ -1032,22 +1034,22 @@ public:
         SubTableHandleT new_remote_st_handle(new_remote_subtable,
                                              next_subtable_handle);
         rc = expand_init_and_update_remote_bucket_header_drain(
-            new_remote_st_handle, ld, suffix, dctx);
+            new_remote_st_handle, ld, suffix, trace);
         CHECK_EQ(rc, kOk);
         cached_meta_.lds[next_subtable_idx] = ld;
 
         rdma_adpt_->put_all_rdma_buffer();
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
+        trace.pin("4) init subtable");
 
         // 5) insert the subtable into the directory AND lock the subtable.
-        maybe_trace_pin("before 5) allocate subtable");
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] (5) Lock subtable[" << next_subtable_idx
             << "] at directory. Insert subtable " << new_remote_subtable
             << " into directory. Update ld to " << ld << " for subtable["
             << subtable_idx << "] and subtable[" << next_subtable_idx << "]";
         rc = expand_try_lock_subtable_drain(next_subtable_idx);
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
         if (unlikely(rc == kRdmaProtectionErr))
         {
             return rc;
@@ -1056,7 +1058,7 @@ public:
         CHECK_EQ(expand_install_subtable_nodrain(next_subtable_idx,
                                                  new_remote_subtable),
                  kOk);
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
 
         rc = expand_update_ld_nodrain(subtable_idx, ld);
         if (unlikely(rc == kRdmaProtectionErr))
@@ -1082,11 +1084,11 @@ public:
         cached_meta_.lds[next_subtable_idx] = ld;
 
         rdma_adpt_->put_all_rdma_buffer();
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
+        trace.pin("5) allocate subtable");
 
         // 6) move data.
         // 6.1) update bucket suffix
-        maybe_trace_pin("before 6.1) update bucket suffix");
         DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] (6.1) update bucket header for subtable["
             << subtable_idx << "]. ld: " << ld << ", suffix: " << subtable_idx;
@@ -1097,12 +1099,14 @@ public:
         SubTableHandleT origin_subtable_handle(origin_subtable_remote_addr,
                                                org_st_mem_handle);
         CHECK_EQ(expand_update_remote_bucket_header_drain(
-                     origin_subtable_handle, ld, subtable_idx, dctx),
+                     origin_subtable_handle, ld, subtable_idx, trace),
                  kOk);
         cached_meta_.lds[subtable_idx] = ld;
 
         rdma_adpt_->put_all_rdma_buffer();
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
+        trace.pin("6.1) update bucket suffix");
+
         // Before 6.1) Iterate all the entries in @entries_, check for any
         // recursive updates to the entries.
         // For example, when
@@ -1110,11 +1114,10 @@ public:
         // 0b01, when expanding subtable 1 to 5, should also set 9 pointing to 1
         // (not changed) and 13 pointing to 5 (changed)
         // 6.2)
-        maybe_trace_pin("before 6.2) cascade update entries");
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] (6.1) recursively checks all the entries "
                "for further updates. "
-            << *dctx;
+            << util::pre_map(trace.kv());
         auto &dir_mem_handle = get_directory_mem_handle();
         CHECK_EQ(expand_cascade_update_entries_drain(
                      new_remote_subtable,
@@ -1123,17 +1126,19 @@ public:
                      round_to_bits(next_subtable_idx, ld),
                      *rdma_adpt_,
                      dir_mem_handle,
-                     dctx),
+                     trace),
                  kOk);
         rdma_adpt_->put_all_rdma_buffer();
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
+
+        trace.pin("6.2) cascade update entries");
 
         // 6.3) insert all items from the old bucket to the new
-        maybe_trace_pin("before 6.3) migrate slots");
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] (6.3) migrate slots from subtable["
             << subtable_idx << "] to subtable[" << next_subtable_idx
-            << "] with the " << ld << "-th bit == 1. " << *dctx;
+            << "] with the " << ld << "-th bit == 1. "
+            << util::pre_map(trace.kv());
         auto bits = ld;
         CHECK_GE(bits, 1) << "Test the " << bits
                           << "-th bits, which index from one.";
@@ -1141,20 +1146,22 @@ public:
         auto &dst_st_mem_handle = next_subtable_handle;
         SubTableHandleT org_st(origin_subtable_remote_addr, src_st_mem_handle);
         SubTableHandleT dst_st(new_remote_subtable, dst_st_mem_handle);
-        rc = expand_migrate_subtable(org_st, dst_st, bits - 1, dctx);
+        rc = expand_migrate_subtable(org_st, dst_st, bits - 1, trace);
         if (unlikely(rc == kRdmaProtectionErr))
         {
             return rc;
         }
         CHECK_EQ(rc, kOk);
         rdma_adpt_->put_all_rdma_buffer();
-        maybe_expand_try_extend_lock_lease(subtable_idx, dctx);
+        maybe_expand_try_extend_lock_lease(subtable_idx, trace);
+
+        trace.pin("6.3) migrate slots");
 
         // 7) unlock
-        maybe_trace_pin("before 7) unlock");
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand] (7) Unlock subtable[" << next_subtable_idx
-            << "] and subtable[" << subtable_idx << "]. " << *dctx;
+            << "] and subtable[" << subtable_idx << "]. "
+            << util::pre_map(trace.kv());
         rc = expand_unlock_subtable_nodrain(next_subtable_idx);
         CHECK_EQ(rc, kOk);
         rc = expand_unlock_subtable_nodrain(subtable_idx);
@@ -1167,14 +1174,15 @@ public:
         CHECK_EQ(rc, kOk);
         cached_meta_.expanding[next_subtable_idx] = 0;
         cached_meta_.expanding[subtable_idx] = 0;
+        trace.pin("7) unlock");
 
         if constexpr (debug())
         {
-            print_latest_meta_image(dctx);
+            print_latest_meta_image(trace);
         }
         return kOk;
     }
-    void print_latest_meta_image(HashContext *dctx)
+    void print_latest_meta_image(util::TraceView trace)
     {
         auto rdma_buf = rdma_adpt_->get_rdma_buffer(sizeof(MetaT));
         DCHECK_GE(rdma_buf.size, sizeof(MetaT));
@@ -1188,9 +1196,9 @@ public:
             .expect(RC::kOk);
         rdma_adpt_->commit().expect(RC::kOk);
         auto &meta = *(MetaT *) rdma_buf.buffer;
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][expand][result][debug] The latest remote meta: " << meta
-            << ". dctx: " << *dctx;
+            << ". trace: " << util::pre_map(trace.kv());
     }
     RetCode expand_cascade_update_entries_drain(
         GlobalAddress next_subtable_addr,
@@ -1199,7 +1207,7 @@ public:
         uint32_t suffix,
         IRdmaAdaptor &rdma_adpt,
         RemoteMemHandle &dir_mem_handle,
-        HashContext *dctx)
+        util::TraceView trace)
     {
         DCHECK_EQ(next_subtable_addr.nodeID, 0);
         DCHECK_EQ(origin_subtable_addr.nodeID, 0);
@@ -1207,7 +1215,7 @@ public:
         {
             auto subtable_addr = GlobalAddress(cached_meta_.entries[i]);
             auto rounded_i = round_to_bits(i, ld);
-            // DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+            // DLOG_IF(INFO, config::kEnableExpandDebug )
             //     << "[race][trace] expand_cascade_update_entries_drain: "
             //        "subtable["
             //     << i << "] at " << (void *) subtable_addr
@@ -1229,11 +1237,12 @@ public:
                                 dir_mem_handle)
                     .expect(RC::kOk);
                 cached_meta_.lds[i] = ld;
-                DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableExpandDebug)
                     << "[race][trace] expand_cascade_update_entries_drain: "
                        "UPDATE LD "
                        "subtable["
-                    << i << "] update LD to " << ld << ". " << *dctx;
+                    << i << "] update LD to " << ld << ". "
+                    << util::pre_map(trace.kv());
 
                 // if suffix match, further update entries
                 if (rounded_i == suffix)
@@ -1252,12 +1261,13 @@ public:
                                     0 /* flag */,
                                     dir_mem_handle)
                         .expect(RC::kOk);
-                    DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+                    DLOG_IF(INFO, config::kEnableExpandDebug)
                         << "[race][trace] expand_cascade_update_entries_drain: "
                            "UPDATE ENTRY "
                            "subtable["
                         << i << "] update entry from " << origin_subtable_addr
-                        << " to " << next_subtable_addr << ". " << *dctx;
+                        << " to " << next_subtable_addr << ". "
+                        << util::pre_map(trace.kv());
                 }
             }
         }
@@ -1273,7 +1283,7 @@ public:
                                   uint64_t hash,
                                   uint32_t cached_ld,
                                   ssize_t retry_nr,
-                                  HashContext *dctx)
+                                  util::TraceView trace)
     {
         if (unlikely(retry_nr <= 0))
         {
@@ -1302,7 +1312,7 @@ public:
         CHECK_EQ(rc, kOk);
 
         std::unordered_set<SlotHandle> slot_handles;
-        rc = cbs.locate(fp, cached_ld, m, slot_handles, dctx);
+        rc = cbs.locate(fp, cached_ld, m, slot_handles, trace);
         DLOG_IF(WARNING, slot_handles.size() >= 5)
             << "** Got a lots of real match. m: " << m
             << ", rounded_m: " << rounded_m << ", h1: " << pre_hash(h1)
@@ -1312,9 +1322,9 @@ public:
         if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
-            update_directory_cache(dctx).expect(RC::kOk);
+            update_directory_cache(trace).expect(RC::kOk);
             return phase_two_deduplicate(
-                key, hash, cached_ld, retry_nr - 1, dctx);
+                key, hash, cached_ld, retry_nr - 1, trace);
         }
 
         // duplicate existed. Do the deduplication
@@ -1322,7 +1332,7 @@ public:
         {
             std::unordered_set<SlotHandle> real_match_slot_handles;
             auto rc = get_real_match_slots(
-                slot_handles, key, real_match_slot_handles, dctx);
+                slot_handles, key, real_match_slot_handles, trace);
             CHECK(rc == kOk || rc == kNotFound) << "Unexpected rc: " << rc;
             if (real_match_slot_handles.size() <= 1)
             {
@@ -1334,17 +1344,18 @@ public:
             {
                 if (view.remote_addr() != chosen_slot.remote_addr())
                 {
-                    auto rc = do_remove(subtable_idx, view, dctx);
+                    auto rc = do_remove(subtable_idx, view, trace);
                     CHECK(rc == kOk || rc == kRetry);
                 }
             }
         }
+        trace.pin("Finished");
         return kOk;
     }
 
     RetCode do_remove(size_t subtable_idx,
                       SlotHandle slot_handle,
-                      HashContext *dctx)
+                      util::TraceView trace)
     {
         auto expect_slot = slot_handle.slot_view();
         uint64_t expect_val = expect_slot.val();
@@ -1369,17 +1380,17 @@ public:
         bool success = memcmp(rdma_buf.buffer, &expect_val, 8) == 0;
         if (success)
         {
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace] do_remove SUCC: clearing slot " << slot_handle
-                << ". kOk: " << *dctx;
+                << ". kOk: " << util::pre_map(trace.kv());
             do_free_kvblock(expect_slot.ptr());
             return kOk;
         }
         else
         {
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace] do_remove FAILED: clearing slot "
-                << slot_handle << ". kRetry: " << *dctx;
+                << slot_handle << ". kRetry. " << util::pre_map(trace.kv());
             return kRetry;
         }
     }
@@ -1394,25 +1405,25 @@ public:
         const std::unordered_set<SlotHandle> &slot_handles,
         const Key &key,
         std::unordered_set<SlotHandle> &real_matches,
-        HashContext *dctx)
+        util::TraceView trace)
     {
         auto f = [&real_matches](const Key &key,
                                  SlotHandle slot,
                                  KVBlockHandle kvblock_handle,
-                                 HashContext *dctx) {
+                                 util::TraceView trace) {
             std::ignore = key;
             std::ignore = kvblock_handle;
-            std::ignore = dctx;
+            std::ignore = trace;
             real_matches.insert(slot);
             return kOk;
         };
-        return for_the_real_match_do(slot_handles, key, f, dctx);
+        return for_the_real_match_do(slot_handles, key, f, trace);
     }
     RetCode put_phase_one(const Key &key,
                           GlobalAddress kv_block,
                           size_t len,
                           uint64_t hash,
-                          HashContext *dctx)
+                          util::TraceView trace)
     {
         RetCode rc = kOk;
         auto m = hash_m(hash);
@@ -1420,7 +1431,7 @@ public:
         auto [h1, h2] = hash_h1_h2(hash);
         auto rounded_m = round_to_bits(m, gd());
         auto ld = cached_ld(rounded_m);
-        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug)
             << "[race][trace] put_phase_one: got hash " << pre_hash(hash)
             << ", m: " << m << ", rounded to " << rounded_m
             << " (subtable) by gd(may stale): " << gd()
@@ -1432,18 +1443,17 @@ public:
                "bits should be zeros";
         SlotView new_slot(fp, len, kv_block);
 
-        maybe_trace_pin("before p1.get_two_combined_bucket_handle");
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
         rdma_adpt_->commit().expect(RC::kOk);
+        trace.pin("p1.get_two_combined_bucket_handle");
 
         DLOG_IF(INFO, config::kEnableMemoryDebug)
             << "[race][mem] allocated kv_block gaddr: " << kv_block
             << " with len: " << len
             << ". actual len: " << new_slot.actual_len_bytes();
 
-        maybe_trace_pin("before p1.locate");
         std::unordered_set<SlotHandle> slot_handles;
-        rc = cbs.locate(fp, ld, m, slot_handles, dctx);
+        rc = cbs.locate(fp, ld, m, slot_handles, trace);
         CHECK_NE(rc, kNotFound)
             << "Even not found should not response not found";
         if (rc != kOk)
@@ -1453,8 +1463,11 @@ public:
             return rc;
         }
 
-        maybe_trace_pin("before p1.update_if_exists");
-        rc = update_if_exists(rounded_m, slot_handles, key, new_slot, dctx);
+        rc = update_if_exists(rounded_m,
+                              slot_handles,
+                              key,
+                              new_slot,
+                              trace.child("update_if_exists"));
 
         if (rc == kOk)
         {
@@ -1463,9 +1476,13 @@ public:
         // also another way of "kOk", we succeeded but found nothing
         else if (rc == kNotFound)
         {
-            maybe_trace_pin("before p1.insert_if_exist_empty_slot");
             rc = insert_if_exist_empty_slot(
-                rounded_m, cbs, cached_ld(rounded_m), m, new_slot, dctx);
+                rounded_m,
+                cbs,
+                cached_ld(rounded_m),
+                m,
+                new_slot,
+                trace.child("insert_if_exist_empty_slot"));
             CHECK_NE(rc, kRetry)
                 << "** insert_if_exist_empty_slot should do the retry itself.";
             CHECK(rc == kOk || rc == kNoMem);
@@ -1473,10 +1490,7 @@ public:
         }
         else
         {
-            if (rc == kRetry && dctx)
-            {
-                dctx->collect_retry(RetryReason::kUpdateSlot);
-            }
+            CHECK_EQ(rc, kRetry);
             return rc;
         }
     }
@@ -1486,7 +1500,7 @@ public:
         uint32_t ld,
         uint32_t suffix,
         SlotView new_slot,
-        HashContext *dctx)
+        util::TraceView trace)
     {
         std::vector<BucketHandle<kSlotNr>> buckets;
         buckets.reserve(4);
@@ -1499,7 +1513,7 @@ public:
         for (auto &bucket : buckets)
         {
             RetCode rc;
-            if ((rc = bucket.validate_staleness(ld, suffix, dctx)) != kOk)
+            if ((rc = bucket.validate_staleness(ld, suffix, trace)) != kOk)
             {
                 DCHECK(rc == kCacheStale || rc == kRdmaProtectionErr)
                     << "** unexpected rc: " << rc;
@@ -1521,7 +1535,7 @@ public:
                                                *rdma_adpt_,
                                                st_mem_handle,
                                                nullptr,
-                                               dctx);
+                                               trace);
                     if (rc == kOk)
                     {
                         return kOk;
@@ -1582,7 +1596,7 @@ public:
                              size_t kvblock_size,
                              RemoteMemHandle &kvblock_handle,
                              IRdmaAdaptor &rdma_adpt,
-                             HashContext *dctx)
+                             util::TraceView trace)
     {
         auto rdma_buf = rdma_adpt.get_rdma_buffer(kvblock_size);
         DCHECK_GE(rdma_buf.size, kvblock_size);
@@ -1595,9 +1609,10 @@ public:
 
         CHECK(kvblock_handle.valid());
 
-        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug)
             << "[race][trace] prepare_write_kv: allocate kv_block: " << kv_gaddr
-            << ", allocated_size: " << kvblock_size << ". " << *dctx;
+            << ", allocated_size: " << kvblock_size << ". "
+            << util::pre_map(trace.kv());
 
         return rdma_adpt.rdma_write(kv_gaddr,
                                     (char *) rdma_buf.buffer,
@@ -1606,13 +1621,13 @@ public:
                                     kvblock_handle);
     }
     using ApplyF = std::function<RetCode(
-        const Key &, SlotHandle, KVBlockHandle, HashContext *)>;
+        const Key &, SlotHandle, KVBlockHandle, TraceView)>;
 
     RetCode for_the_real_match_do(
         const std::unordered_set<SlotHandle> &slot_handles,
         const Key &key,
         const ApplyF &func,
-        HashContext *dctx)
+        util::TraceView trace)
     {
         std::map<SlotHandle, KVBlockHandle> slots_rdma_buffers;
         // TODO: maybe enable batching here. Patronus API?
@@ -1663,7 +1678,7 @@ public:
         for (const auto &[slot_handle, kvblock_handle] : slots_rdma_buffers)
         {
             RetCode this_is_real_match =
-                is_real_match(kvblock_handle.buffer_addr(), key, dctx);
+                is_real_match(kvblock_handle.buffer_addr(), key, trace);
             if (unlikely(conf_.force_kvblock_to_match))
             {
                 this_is_real_match = RC::kOk;
@@ -1675,7 +1690,7 @@ public:
             }
             // okay, it is the real match
             // has_real_match = true;
-            rc = func(key, slot_handle, kvblock_handle, dctx);
+            rc = func(key, slot_handle, kvblock_handle, trace);
             CHECK_NE(rc, kNotFound)
                 << "Make no sense to return kNotFound: already found for you.";
             if (unlikely(rc == kRdmaProtectionErr))
@@ -1690,7 +1705,9 @@ public:
         // }
         return rc;
     }
-    RetCode get(const Key &key, Value &value, HashContext *dctx = nullptr)
+    RetCode get(const Key &key,
+                Value &value,
+                util::TraceView trace = util::nulltrace)
     {
         DCHECK(inited_);
         auto hash = hash_impl(key.data(), key.size());
@@ -1700,65 +1717,50 @@ public:
         auto rounded_m = round_to_bits(m, cached_gd);
         auto [h1, h2] = hash_h1_h2(hash);
 
-        maybe_trace_pin("before ctor subtable_handle");
-
         DVLOG(3) << "[race] GET key " << pre(key) << ", got hash "
                  << pre_hash(hash) << ", m: " << m << ", rounded to "
                  << rounded_m << " by cached_gd: " << cached_gd
                  << ". fp: " << pre_fp(fp);
         auto st = subtable_handle(rounded_m);
 
-        maybe_trace_pin("before get_two_combined_bucket_handle");
         // get the two combined buckets the same time
         // validate staleness at the same time
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
-        auto ret = rdma_adpt_->commit();
-        if (ret == kRdmaProtectionErr)
-        {
-            return ret;
-        }
-        CHECK_EQ(ret, kOk);
-
-        maybe_trace_pin("before locate");
+        rdma_adpt_->commit().expect(RC::kOk);
+        trace.pin("get_two_combined_bucket_handle");
 
         std::unordered_set<SlotHandle> slot_handles;
-        auto rc = cbs.locate(fp, cached_ld(rounded_m), m, slot_handles, dctx);
+        auto rc = cbs.locate(fp, cached_ld(rounded_m), m, slot_handles, trace);
         if (rc == kCacheStale && auto_update_dir_)
         {
-            maybe_trace_pin("before update_dcache");
             // update cache and retry
-            auto ret = update_directory_cache(dctx);
-            if (ret == kRdmaProtectionErr)
-            {
-                return ret;
-            }
-            CHECK_EQ(ret, kOk);
-            return get(key, value, dctx);
+            update_directory_cache(trace).expect(RC::kOk);
+            return get(key, value, trace);
         }
-        DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableDebug)
             << "[race][trace] GET from subtable[" << rounded_m << "] from hash "
             << pre_hash(hash) << " and gd " << cached_gd
-            << ". Possible match nr: " << slot_handles.size() << ". " << *dctx;
+            << ". Possible match nr: " << slot_handles.size() << ". "
+            << util::pre_map(trace.kv());
 
-        maybe_trace_pin("before get_from_slot_views");
-        return get_from_slot_views(slot_handles, key, value, dctx);
+        return get_from_slot_views(slot_handles, key, value, trace);
     }
     RetCode get_from_slot_views(
         const std::unordered_set<SlotHandle> &slot_handles,
         const Key &key,
         Value &value,
-        HashContext *dctx)
+        util::TraceView trace)
     {
         auto f = [&value](const Key &key,
                           SlotHandle slot_handle,
                           KVBlockHandle kvblock_handle,
-                          HashContext *dctx) {
+                          util::TraceView trace) {
             std::ignore = key;
             std::ignore = slot_handle;
 
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace] get_from_slot_views SUCC: slot_handle "
-                << slot_handle << ". " << *dctx;
+                << slot_handle << ". " << util::pre_map(trace.kv());
             value.resize(kvblock_handle.value_len());
             memcpy(value.data(),
                    (char *) kvblock_handle.buf() + kvblock_handle.key_len(),
@@ -1766,14 +1768,14 @@ public:
             return kOk;
         };
 
-        return for_the_real_match_do(slot_handles, key, f, dctx);
+        return for_the_real_match_do(slot_handles, key, f, trace);
     }
 
     RetCode update_if_exists(size_t subtable_idx,
                              const std::unordered_set<SlotHandle> &slot_handles,
                              const Key &key,
                              SlotView new_slot,
-                             HashContext *dctx)
+                             util::TraceView trace)
     {
         auto &st_mem_handle = get_subtable_mem_handle(subtable_idx);
         auto f =
@@ -1781,7 +1783,7 @@ public:
                 const Key &key,
                 SlotHandle slot_handle,
                 KVBlockHandle kvblock_handle,
-                HashContext *dctx) -> RetCode {
+                util::TraceView trace) -> RetCode {
             std::ignore = key;
 
             uint64_t expect_val = slot_handle.val();
@@ -1820,51 +1822,54 @@ public:
                              << kvblock_handle << ". New_slot " << new_slot;
                     do_free_kvblock(kvblock_remote_mem);
                 }
-                DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableDebug)
                     << "[race][subtable] slot " << slot_handle << " update to "
-                    << new_slot << *dctx;
+                    << new_slot << util::pre_map(trace.kv());
                 return kOk;
             }
             DVLOG(4) << "[race][subtable] do_update FAILED: new_slot "
                      << new_slot;
-            DLOG_IF(INFO, config::kEnableDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace][subtable] do_update FAILED: cas failed. slot "
-                << slot_handle << *dctx;
+                << slot_handle << util::pre_map(trace.kv());
             return kRetry;
         };
 
-        return for_the_real_match_do(slot_handles, key, f, dctx);
+        return for_the_real_match_do(slot_handles, key, f, trace);
     }
 
-    RetCode is_real_match(KVBlock *kvblock, const Key &key, HashContext *dctx)
+    RetCode is_real_match(KVBlock *kvblock,
+                          const Key &key,
+                          util::TraceView trace)
     {
-        std::ignore = dctx;
+        std::ignore = trace;
         if (kvblock->key_len != key.size())
         {
             // DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
             //          << pre(key) << " miss: key len mismatch";
-            DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableLocateDebug)
                 << "[race][stable] is_real_match FAILED: key len " << key.size()
                 << " mismatch with block->key_len: " << kvblock->key_len << ". "
-                << *dctx;
+                << util::pre_map(trace.kv());
             return kNotFound;
         }
         if (memcmp(key.data(), kvblock->buf, key.size()) != 0)
         {
             // DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
             //          << pre(key) << " miss: key content mismatch";
-            DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
+            DLOG_IF(INFO, config::kEnableLocateDebug)
                 << "[race][stable] is_real_match FAILED: key content mismatch. "
                    "expect: "
                 << key << ", got: "
                 << std::string((const char *) kvblock->buf, key.size())
-                << *dctx;
+                << util::pre_map(trace.kv());
             return kNotFound;
         }
         // DVLOG(4) << "[race][subtable] slot_real_match SUCCEED: key "
         //          << pre(key);
-        DLOG_IF(INFO, config::kEnableLocateDebug && dctx != nullptr)
-            << "[race][stable] is_real_match SUCC. " << *dctx;
+        DLOG_IF(INFO, config::kEnableLocateDebug)
+            << "[race][stable] is_real_match SUCC. "
+            << util::pre_map(trace.kv());
         return kOk;
     }
 
@@ -1911,26 +1916,26 @@ private:
     // for client private kvblock memory
     GlobalAddress kvblock_pool_gaddr_;
 
-    void maybe_trace_pin(const char *name)
-    {
-        if constexpr (::config::kEnableRdmaTrace)
-        {
-            if (unlikely(rdma_adpt_->trace_enabled()))
-            {
-                rdma_adpt_->trace_pin(name);
-            }
-        }
-    }
-    void maybe_drop_trace()
-    {
-        if constexpr (::config::kEnableRdmaTrace)
-        {
-            if (unlikely(rdma_adpt_->trace_enabled()))
-            {
-                rdma_adpt_->end_trace(nullptr /* give u nothing */);
-            }
-        }
-    }
+    // void maybe_trace_pin(const char *name)
+    // {
+    //     if constexpr (::config::kEnableRdmaTrace)
+    //     {
+    //         if (unlikely(rdma_adpt_->trace_enabled()))
+    //         {
+    //             rdma_adpt_->trace_pin(name);
+    //         }
+    //     }
+    // }
+    // void maybe_drop_trace()
+    // {
+    //     if constexpr (::config::kEnableRdmaTrace)
+    //     {
+    //         if (unlikely(rdma_adpt_->trace_enabled()))
+    //         {
+    //             rdma_adpt_->end_trace(nullptr /* give u nothing */);
+    //         }
+    //     }
+    // }
 
     std::vector<RemoteMemHandle> read_kvblock_handles_;
     RemoteMemHandle &begin_read_kvblock(GlobalAddress gaddr, size_t size)
@@ -2151,9 +2156,9 @@ public:
         return RaceHashingHandleT::max_capacity();
     }
 
-    void init(HashContext *dctx = nullptr)
+    void init(util::TraceView trace = util::nulltrace)
     {
-        rhh_.init(dctx);
+        rhh_.init(trace);
         rdma_adpt_->put_all_rdma_buffer();
     }
 
@@ -2162,18 +2167,18 @@ public:
         rhh_.hack_trigger_rdma_protection_error();
     }
 
-    RetCode update_directory_cache(HashContext *dctx)
+    RetCode update_directory_cache(util::TraceView trace)
     {
-        rhh_.update_directory_cache(dctx);
+        rhh_.update_directory_cache(trace);
     }
-    RetCode del(const Key &key, HashContext *dctx = nullptr)
+    RetCode del(const Key &key, util::TraceView trace = util::nulltrace)
     {
         maybe_start_del_trace();
 
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Started to Deleted key `" << key << "`. "
             << pre_rdma_adaptor(rdma_adpt_);
-        auto rc = rhh_.del(key, dctx);
+        auto rc = rhh_.del(key, trace);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Deleted key `" << key << "`. got " << rc
             << pre_rdma_adaptor(rdma_adpt_);
@@ -2183,14 +2188,16 @@ public:
         maybe_end_trace(rc);
         return rc;
     }
-    RetCode put(const Key &key, const Value &value, HashContext *dctx = nullptr)
+    RetCode put(const Key &key,
+                const Value &value,
+                util::TraceView trace = util::nulltrace)
     {
         maybe_start_put_trace();
 
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Started to Put key `" << key << "."
             << pre_rdma_adaptor(rdma_adpt_);
-        auto rc = rhh_.put(key, value, dctx);
+        auto rc = rhh_.put(key, value, trace);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Put key `" << key << "`. got " << rc
             << pre_rdma_adaptor(rdma_adpt_);
@@ -2200,14 +2207,16 @@ public:
         maybe_end_trace(rc);
         return rc;
     }
-    RetCode get(const Key &key, Value &value, HashContext *dctx = nullptr)
+    RetCode get(const Key &key,
+                Value &value,
+                util::TraceView trace = util::nulltrace)
     {
         maybe_start_get_trace();
 
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Started to Get key `" << key << "`. "
             << pre_rdma_adaptor(rdma_adpt_);
-        auto rc = rhh_.get(key, value, dctx);
+        auto rc = rhh_.get(key, value, trace);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] Get key `" << key << "` got " << rc << ". "
             << pre_rdma_adaptor(rdma_adpt_);
@@ -2216,12 +2225,12 @@ public:
         maybe_end_trace(rc);
         return rc;
     }
-    RetCode expand(size_t subtable_idx, HashContext *dctx)
+    RetCode expand(size_t subtable_idx, util::TraceView trace)
     {
         maybe_start_expand_trace();
 
         DLOG_IF(INFO, config::kMonitorRdma) << "[race] Started to Expand";
-        auto rc = rhh_.expand(subtable_idx, dctx);
+        auto rc = rhh_.expand(subtable_idx, trace);
         DLOG_IF(INFO, config::kMonitorRdma)
             << "[race] expand subtable[" << subtable_idx << "] "
             << pre_rdma_adaptor(rdma_adpt_);

@@ -7,6 +7,7 @@
 
 #include "Common.h"
 #include "Timer.h"
+#include "util/Pre.h"
 #include "util/Rand.h"
 
 namespace util
@@ -30,6 +31,9 @@ public:
     uint64_t pin(std::string_view name);
     TraceView child(std::string_view name);
     friend std::ostream &operator<<(std::ostream &os, const TraceView view);
+    void set(const std::string &key, const std::string &value);
+    std::string get(const std::string &key) const;
+    std::map<std::string, std::string> kv() const;
 
 private:
     TracerContext *impl_{nullptr};
@@ -77,12 +81,14 @@ public:
         timer_.clear();
         child_contexts_.clear();
         sum_ns_ = std::nullopt;
+        kv_.clear();
     }
     void init(const std::string &name)
     {
         name_ = name;
         timer_.init(name);
         child_contexts_.clear();
+        kv_.clear();
     }
     uint64_t pin(const std::string &name)
     {
@@ -128,6 +134,23 @@ public:
     const RetrieveTimer &timer() const
     {
         return timer_;
+    }
+    void set(const std::string &key, const std::string &value)
+    {
+        kv_[key] = value;
+    }
+    std::string get(const std::string &key) const
+    {
+        auto it = kv_.find(key);
+        if (it != kv_.end())
+        {
+            return it->second;
+        }
+        return "";
+    }
+    std::map<std::string, std::string> kv() const
+    {
+        return kv_;
     }
     std::vector<TraceRecord> get_flat_records(
         size_t depth_limit = std::numeric_limits<size_t>::max()) const
@@ -191,6 +214,7 @@ private:
     std::string name_;
     RetrieveTimer timer_;
     std::list<pointer> child_contexts_;
+    std::map<std::string, std::string> kv_;
 
     mutable std::optional<uint64_t> sum_ns_;
 };
@@ -230,6 +254,10 @@ public:
     }
     TraceView trace(const std::string &name)
     {
+        if (likely(trace_rate_ == 0))
+        {
+            return TraceView(nullptr);
+        }
         if (unlikely(release_nr_ >= limit_nr_))
         {
             return TraceView(nullptr);
@@ -263,7 +291,7 @@ inline std::ostream &operator<<(std::ostream &os, const TracerContext &ctx)
     {
         os << child->name() << ": " << *child;
     }
-    os << "}";
+    os << "}. meta: " << util::pre_map(ctx.kv());
     return os;
 }
 

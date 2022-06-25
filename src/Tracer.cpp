@@ -62,4 +62,29 @@ std::vector<TraceRecord> TraceView::get_flat_records(size_t depth_limit) const
     return {};
 }
 
+void TraceView::set(const std::string &key, const std::string &value)
+{
+    if (unlikely(impl_ != nullptr))
+    {
+        return impl_->set(key, value);
+    }
+}
+
+std::string TraceView::get(const std::string &key) const
+{
+    if (unlikely(impl_ != nullptr))
+    {
+        return impl_->get(key);
+    }
+    return {};
+}
+std::map<std::string, std::string> TraceView::kv() const
+{
+    if (unlikely(impl_ != nullptr))
+    {
+        return impl_->kv();
+    }
+    return {};
+}
+
 }  // namespace util

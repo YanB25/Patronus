@@ -235,19 +235,18 @@ void test_basic_client_worker(Patronus::pointer p,
     std::map<std::string, std::string> inserted;
     std::set<std::string> keys;
 
-    HashContext dctx(tid);
-
     double insert_prob = conf.insert_prob;
     double delete_exist_prob = conf.delete_exist_prob;
     double delete_unexist_prob = conf.delete_unexist_prob;
     double get_exist_prob = conf.get_exist_prob;
 
+    util::TraceManager tm(0);
     for (size_t i = 0; i < test_nr; ++i)
     {
         if (i % (test_nr / 10) == 0)
         {
-            LOG(INFO) << "Finished " << 1.0 * i / test_nr * 100 << "%. "
-                      << dctx;
+            LOG(INFO) << "Finished " << 1.0 * i / test_nr * 100
+                      << "%. tid: " << tid;
         }
         fast_pseudo_fill_buf(key_buf, kKeySize);
         fast_pseudo_fill_buf(val_buf, kValueSize);
@@ -258,13 +257,16 @@ void test_basic_client_worker(Patronus::pointer p,
         char mark = 'a' + worker_id;
         key[0] = mark;
 
+        auto trace = tm.trace("op");
+        trace.set("tid", std::to_string(tid));
+
         if (true_with_prob(insert_prob))
         {
             // insert
-            dctx.key = key;
-            dctx.value = value;
-            dctx.op = "p";
-            auto rc = rhh->put(key, value, &dctx);
+            trace.set("k", key);
+            trace.set("v", value);
+            trace.set("op", "put");
+            auto rc = rhh->put(key, value, trace);
             if (rc == kOk)
             {
                 keys.insert(key);
@@ -284,10 +286,10 @@ void test_basic_client_worker(Patronus::pointer p,
                 continue;
             }
             key = random_choose(keys);
-            dctx.key = key;
-            dctx.value = value;
-            dctx.op = "d";
-            auto rc = rhh->del(key, &dctx);
+            trace.set("k", key);
+            trace.set("v", value);
+            trace.set("op", "del");
+            auto rc = rhh->del(key, trace);
             CHECK_EQ(rc, kOk) << "tid " << tid << " deleting key `" << key
                               << "` expect to succeed.";
             inserted.erase(key);
@@ -298,24 +300,21 @@ void test_basic_client_worker(Patronus::pointer p,
         {
             // delete unexist
             bool exist = keys.count(key) == 1;
+            trace.set("k", key);
+            trace.set("v", value);
+            trace.set("op", "del");
             if (exist)
             {
-                dctx.key = key;
-                dctx.value = value;
-                dctx.op = "d";
-                auto rc = rhh->del(key, &dctx);
-                CHECK_EQ(rc, kOk) << dctx;
+                auto rc = rhh->del(key, trace);
+                CHECK_EQ(rc, kOk) << util::pre_map(trace.kv());
                 inserted.erase(key);
                 keys.erase(key);
                 del_succ_nr++;
             }
             else
             {
-                dctx.key = key;
-                dctx.value = value;
-                dctx.op = "d";
-                auto rc = rhh->del(key, &dctx);
-                CHECK_EQ(rc, kNotFound) << dctx;
+                auto rc = rhh->del(key, trace);
+                CHECK_EQ(rc, kNotFound) << util::pre_map(trace.kv());
                 del_fail_nr++;
             }
         }
@@ -328,14 +327,14 @@ void test_basic_client_worker(Patronus::pointer p,
             }
             std::string got_value;
             key = random_choose(keys);
-            CHECK_EQ(key[0], mark) << dctx;
-            dctx.key = key;
-            dctx.value = value;
-            dctx.op = "g";
-            auto rc = rhh->get(key, got_value, &dctx);
+            CHECK_EQ(key[0], mark) << util::pre_map(trace.kv());
+            trace.set("k", key);
+            trace.set("v", value);
+            trace.set("op", "get");
+            auto rc = rhh->get(key, got_value, trace);
             CHECK_EQ(rc, kOk) << "Tid: " << tid << " getting key `" << key
                               << "` expect to succeed";
-            CHECK_EQ(got_value, inserted[key]) << dctx;
+            CHECK_EQ(got_value, inserted[key]) << util::pre_map(trace.kv());
             get_succ_nr++;
         }
         else
@@ -350,22 +349,22 @@ void test_basic_client_worker(Patronus::pointer p,
                 }
                 std::string got_value;
                 key = random_choose(keys);
-                dctx.key = key;
-                dctx.value = value;
-                dctx.op = "g";
-                auto rc = rhh->get(key, got_value, &dctx);
-                CHECK_EQ(rc, kOk) << dctx;
-                CHECK_EQ(got_value, inserted[key]) << dctx;
+                trace.set("k", key);
+                trace.set("v", value);
+                trace.set("op", "get");
+                auto rc = rhh->get(key, got_value, trace);
+                CHECK_EQ(rc, kOk) << util::pre_map(trace.kv());
+                CHECK_EQ(got_value, inserted[key]) << util::pre_map(trace.kv());
                 get_succ_nr++;
             }
             else
             {
                 std::string got_value;
-                dctx.key = key;
-                dctx.value = value;
-                dctx.op = "g";
-                auto rc = rhh->get(key, got_value, &dctx);
-                CHECK_EQ(rc, kNotFound) << dctx;
+                trace.set("k", key);
+                trace.set("v", value);
+                trace.set("op", "get");
+                auto rc = rhh->get(key, got_value, trace);
+                CHECK_EQ(rc, kNotFound) << util::pre_map(trace.kv());
                 get_fail_nr++;
             }
         }
@@ -374,14 +373,19 @@ void test_basic_client_worker(Patronus::pointer p,
 
     for (const auto &[k, v] : inserted)
     {
+        auto trace = tm.trace("validate");
         std::string get_v;
-        dctx.key = k;
-        dctx.value = v;
-        CHECK_EQ(rhh->get(k, get_v, &dctx), kOk) << dctx;
-        CHECK_EQ(get_v, v) << dctx;
-        dctx.key = k;
-        dctx.value = v;
-        CHECK_EQ(rhh->del(k, &dctx), kOk) << dctx;
+        trace.set("k", k);
+        trace.set("v", v);
+        trace.set("op", "get");
+        CHECK_EQ(rhh->get(k, get_v, trace), kOk) << util::pre_map(trace.kv());
+        CHECK_EQ(get_v, v) << util::pre_map(trace.kv());
+
+        auto trace2 = tm.trace("tear down");
+        trace2.set("k", k);
+        trace2.set("v", v);
+        trace2.set("op", "del");
+        CHECK_EQ(rhh->del(k, trace2), kOk) << util::pre_map(trace2.kv());
     }
 
     // deliberately dctor here

@@ -161,7 +161,7 @@ public:
     RetCode put_slot(SlotMigrateHandle slot_handle,
                      IRdmaAdaptor &rdma_adpt,
                      SlotHandle *ret,
-                     HashContext *dctx)
+                     util::TraceView trace)
     {
         auto hash = slot_handle.hash();
         auto [h1, h2] = hash_h1_h2(hash);
@@ -190,7 +190,7 @@ public:
             constexpr auto kDataSlotNr = Bucket<kSlotNr>::kDataSlotNr;
             for (size_t i = 0; i < kDataSlotNr; ++i)
             {
-                DLOG_IF(INFO, config::kEnableMemoryDebug && dctx != nullptr)
+                DLOG_IF(INFO, config::kEnableMemoryDebug)
                     << "[race][trace] Subtable::put_slot: trying bucket "
                     << bucket.remote_addr();
                 auto idx = (poll_slot_idx + i) % kDataSlotNr + 1;
@@ -204,7 +204,7 @@ public:
                                                rdma_adpt,
                                                st_mem_handle_,
                                                ret,
-                                               dctx);
+                                               trace);
                     CHECK(rc == kOk || rc == kRetry) << "Unexpected rc " << rc;
                     if (rc == kOk)
                     {
@@ -215,12 +215,12 @@ public:
                 {
                     DLOG_IF(INFO,
                             config::kEnableExpandDebug &&
-                                config::kEnableMemoryDebug && dctx != nullptr)
+                                config::kEnableMemoryDebug)
                         << "[race][trace] Subtable::put_slot: failed to insert "
                            "to slot "
                         << bucket.slot_handle(idx)
                         << ": slot not empty. At slot_idx " << idx << ". "
-                        << *dctx;
+                        << trace;
                 }
             }
         }
@@ -293,7 +293,7 @@ public:
     RetCode update_bucket_header_nodrain(uint32_t ld,
                                          uint32_t suffix,
                                          IRdmaAdaptor &rdma_adpt,
-                                         HashContext *dctx)
+                                         util::TraceView trace)
     {
         for (size_t i = 0; i < kTotalBucketNr; ++i)
         {
@@ -301,7 +301,7 @@ public:
                 GlobalAddress(st_gaddr_ + i * Bucket<kSlotNr>::size_bytes());
             auto b = BucketHandle<kSlotNr>(bucket_gaddr, nullptr);
             auto rc = b.update_header_nodrain(
-                ld, suffix, rdma_adpt, st_mem_handle_, dctx);
+                ld, suffix, rdma_adpt, st_mem_handle_, trace);
             if (rc != kOk)
             {
                 return rc;
@@ -310,12 +310,13 @@ public:
         return kOk;
     }
 
-    RetCode init_and_update_bucket_header_drain(uint32_t ld,
-                                                uint32_t suffix,
-                                                IRdmaAdaptor &rdma_adpt,
-                                                HashContext *dctx)
+    RetCode init_and_update_bucket_header_drain(
+        uint32_t ld,
+        uint32_t suffix,
+        IRdmaAdaptor &rdma_adpt,
+        [[maybe_unused]] util::TraceView trace)
     {
-        DLOG_IF(INFO, config::kEnableExpandDebug && dctx != nullptr)
+        DLOG_IF(INFO, config::kEnableExpandDebug)
             << "[race][trace] init_and_update_bucket_header_nodrain: ld: " << ld
             << ", suffix: " << suffix;
         auto st_size = size_bytes();
