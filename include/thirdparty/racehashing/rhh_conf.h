@@ -34,6 +34,8 @@ struct RaceHashingHandleConfig
         mutable ssize_t mock_crash_nr{0};
     } expand;
 
+    std::optional<MemHandleDecision> kvblock_region;
+
     // the hints
     uint64_t subtable_hint{hash::config::kAllocHintDirSubtable};
     // for some slow benchmark, we want test_nr *= test_nr_scale_factor.
@@ -55,7 +57,16 @@ inline std::ostream &operator<<(std::ostream &os,
        << ", read_kvblock: " << conf.read_kvblock
        << ", alloc_kvblock: " << conf.alloc_kvblock
        << ", meta: {eager_bind_subtable: " << conf.meta.eager_bind_subtable
-       << ", d: " << conf.meta.d << "}, ";
+       << ", d: " << conf.meta.d << "}, kvblock_region: ";
+    if (conf.kvblock_region.has_value())
+    {
+        os << conf.kvblock_region.value() << ". ";
+    }
+    else
+    {
+        os << " none. ";
+    }
+
     {
         const auto &c = conf.expand;
         auto ns = util::time::to_ns(c.lock_time_ns);
@@ -113,6 +124,23 @@ public:
             .use_mw()
             .wo_expire();
         c.meta.d.use_mw().wo_expire().no_bind_pr();
+        return c;
+    }
+    static RaceHashingHandleConfig get_mw_protected_debug(
+        const std::string &name,
+        size_t kvblock_expect_size,
+        size_t batch_size,
+        bool force_kvblock_to_match)
+    {
+        CHECK_EQ(batch_size, 1) << "TODO: ";
+        auto c = get_basic(name, kvblock_expect_size, force_kvblock_to_match);
+        c.read_kvblock.use_mw().wo_expire().no_bind_pr();
+        c.alloc_kvblock.with_alloc(hash::config::kAllocHintKVBlock)
+            .use_mw()
+            .wo_expire();
+        c.meta.d.use_mw().wo_expire().no_bind_pr();
+        c.kvblock_region =
+            MemHandleDecision().use_mw().wo_expire().no_bind_pr();
         return c;
     }
     static RaceHashingHandleConfig get_mw_protected_expand_fault_tolerance(

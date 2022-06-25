@@ -116,6 +116,12 @@ public:
             auto rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
             rdma_adpt_->relinquish_perm(fake_handle_, 0, rel_flag);
         }
+        if (kvblock_region_handle_.valid())
+        {
+            const auto &c = conf_.kvblock_region.value();
+            rdma_adpt_->relinquish_perm(
+                kvblock_region_handle_, c.alloc_hint, c.relinquish_flag);
+        }
 
         end_read_kvblock();
         consume_kv_block();
@@ -225,11 +231,7 @@ public:
         CHECK_EQ(rc, kOk);
 
         rdma_adpt_->commit().expect(RC::kOk);
-        // if (rc == kRdmaProtectionErr)
-        // {
-        //     return rc;
-        // }
-        // CHECK_EQ(rc, kOk);
+
         memcpy(&cached_meta_, rdma_buf.buffer, meta_size());
 
         LOG_IF(INFO, config::kEnableDebug)
@@ -1945,7 +1947,36 @@ private:
     // }
 
     std::vector<RemoteMemHandle> read_kvblock_handles_;
+    RemoteMemHandle kvblock_region_handle_;
     RemoteMemHandle &begin_read_kvblock(GlobalAddress gaddr, size_t size)
+    {
+        if (conf_.kvblock_region.has_value())
+        {
+            return begin_read_kvblock_region(gaddr, size);
+        }
+        else
+        {
+            return begin_read_kvblock_individual(gaddr, size);
+        }
+    }
+    RemoteMemHandle &begin_read_kvblock_region(
+        [[maybe_unused]] GlobalAddress gaddr, [[maybe_unused]] size_t size)
+    {
+        if (unlikely(!kvblock_region_handle_.valid()))
+        {
+            const auto &c = conf_.kvblock_region.value();
+            kvblock_region_handle_ =
+                rdma_adpt_->acquire_perm(cached_meta_.kvblock_pool_gaddr,
+                                         c.alloc_hint,
+                                         cached_meta_.kvblock_pool_size,
+                                         c.ns,
+                                         c.acquire_flag);
+            DCHECK(kvblock_region_handle_.valid());
+        }
+        return kvblock_region_handle_;
+    }
+    RemoteMemHandle &begin_read_kvblock_individual(GlobalAddress gaddr,
+                                                   size_t size)
     {
         const auto &c = conf_.read_kvblock;
         read_kvblock_handles_.emplace_back(rdma_adpt_->acquire_perm(
@@ -1953,6 +1984,20 @@ private:
         return read_kvblock_handles_.back();
     }
     void end_read_kvblock()
+    {
+        if (conf_.kvblock_region.has_value())
+        {
+            return end_read_kvblock_region();
+        }
+        else
+        {
+            return end_read_kvblock_individual();
+        }
+    }
+    void end_read_kvblock_region()
+    {
+    }
+    void end_read_kvblock_individual()
     {
         const auto &c = conf_.read_kvblock;
         for (auto &handle : read_kvblock_handles_)
