@@ -425,6 +425,7 @@ void init_allocator(Patronus::pointer p,
     mem::SlabAllocatorConfig kvblock_slab_config;
     kvblock_slab_config.block_class = {kvblock_expect_size};
     kvblock_slab_config.block_ratio = {1.0};
+    kvblock_slab_config.enable_recycle = true;
     auto kvblock_allocator =
         mem::SlabAllocator::new_instance(thread_kvblock_pool_addr,
                                          thread_kvblock_pool_size,
@@ -434,15 +435,6 @@ void init_allocator(Patronus::pointer p,
 
     LOG_FIRST_N(WARNING, 1)
         << "TODO: the performance for MR may be higher: MR over MR";
-
-    // a little bit tricky here: MR allocator should use the internal ones
-    // otherwise will fail to convert to the dsm offset.
-    mem::MRAllocatorConfig dir_st_mr_config;
-    dir_st_mr_config.allocator = p->get_allocator(Patronus::kDefaultHint);
-    dir_st_mr_config.rdma_context = p->get_dsm()->get_rdma_context(dir_id);
-    auto dir_st_mr_allocator = mem::MRAllocator::new_instance(dir_st_mr_config);
-    p->reg_allocator(hash::config::kAllocHintDirSubtableOverMR,
-                     dir_st_mr_allocator);
 
     // I believe sharing config is safe
     mem::MRAllocatorConfig kvblock_mr_config;
@@ -912,15 +904,12 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
             kvblock_expect_size,
             1 /* no batch */,
             true /* mock kvblock match */));
+
         // rhh_configs.push_back(
         //     RaceHashingConfigFactory::get_mw_protected_with_timeout(
         //         "patronus-lease", kvblock_expect_size));
         // rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
         //     "mr", kvblock_expect_size, 1 /* no batch */));
-    }
-    for (auto &rhh_config : rhh_configs)
-    {
-        rhh_config.force_kvblock_to_match = false;
     }
 
     for (const auto &rhh_conf : rhh_configs)
@@ -937,10 +926,37 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 << "[bench] benching multiple threads for " << rhh_conf;
             constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
 
+            // {
+            //     key++;
+            //     auto ro_conf = BenchConfigFactory::get_read_only_config(
+            //         "RO",
+            //         capacity,
+            //         1_M,
+            //         thread_nr,
+            //         kCoroNr,
+            //         4 /* initial_subtable_nr */,
+            //         rhh_conf.kvblock_expect_size);
+            //     if (is_client)
+            //     {
+            //         for (const auto &bench_conf : ro_conf)
+            //         {
+            //             bench_conf.validate();
+            //             LOG_IF(INFO, is_master)
+            //                 << "[sub-conf] running conf: " << bench_conf;
+            //             benchmark_client<4, 16, 16>(
+            //                 p, bar, is_master, bench_conf, rhh_conf, key);
+            //         }
+            //     }
+            //     else
+            //     {
+            //         benchmark_server<4, 16, 16>(
+            //             p, bar, is_master, ro_conf, key);
+            //     }
+            // }
             {
                 key++;
-                auto ro_conf = BenchConfigFactory::get_read_only_config(
-                    "RO",
+                auto wo_conf = BenchConfigFactory::get_write_only_config(
+                    "WO",
                     capacity,
                     1_M,
                     thread_nr,
@@ -949,7 +965,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                     rhh_conf.kvblock_expect_size);
                 if (is_client)
                 {
-                    for (const auto &bench_conf : ro_conf)
+                    for (const auto &bench_conf : wo_conf)
                     {
                         bench_conf.validate();
                         LOG_IF(INFO, is_master)
@@ -961,39 +977,9 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 else
                 {
                     benchmark_server<4, 16, 16>(
-                        p, bar, is_master, ro_conf, key);
+                        p, bar, is_master, wo_conf, key);
                 }
             }
-            // {
-            //     key++;
-            //     auto wo_conf =
-            // BenchConfigFactory::get_write_only_config(
-            //         "WO",
-            //         capacity,
-            //         1_M,
-            //         thread_nr,
-            //         kCoroNr,
-            //         4 /* initial_subtable_nr */,
-            //         rhh_conf.kvblock_expect_size);
-            //     if (is_client)
-            //     {
-            //         for (const auto &bench_conf : wo_conf)
-            //         {
-            //             bench_conf.validate();
-            //             LOG_IF(INFO, is_master)
-            //                 << "[sub-conf] running conf: " <<
-            // bench_conf;
-            //             benchmark_client<4, 16, 16>(
-            //                 p, bar, is_master, bench_conf, rhh_conf,
-            // key);
-            //         }
-            //     }
-            //     else
-            //     {
-            //         benchmark_server<4, 16, 16>(
-            //             p, bar, is_master, wo_conf, key);
-            //     }
-            // }
         }
 
         //     for (size_t thread_nr : {32})

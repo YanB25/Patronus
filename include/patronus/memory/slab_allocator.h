@@ -18,6 +18,10 @@ struct SlabAllocatorConfig
 {
     std::vector<size_t> block_class;
     std::vector<double> block_ratio;
+    // If enable_recycle is true, the allocator will simulate infinite memory
+    // capacity by re-allocate out the same piece of memory multiple times.
+    // Be aware: this may cause correctness problem for users
+    bool enable_recycle{false};
 };
 
 class Pool
@@ -222,6 +226,7 @@ public:
         return std::make_shared<SlabAllocator>(addr, len, config);
     }
     SlabAllocator(void *addr, size_t len, SlabAllocatorConfig config)
+        : config_(config)
     {
         auto [aligned_addr, aligned_len] = align_address(addr, len, 4_KB);
         pool_start_addr_ = aligned_addr;
@@ -280,6 +285,10 @@ public:
             return nullptr;
         }
         auto *ret = it->second->get();
+        if (unlikely(config_.enable_recycle))
+        {
+            it->second->put(ret);
+        }
         if constexpr (::config::kMonitorSlabAllocator)
         {
             if (ret)
@@ -327,6 +336,11 @@ public:
     }
     void free(void *addr, [[maybe_unused]] CoroContext *ctx = nullptr) override
     {
+        if (unlikely(config_.enable_recycle))
+        {
+            return;
+        }
+
         CHECK_GE(addr, pool_start_addr_);
         auto it = end_addr_to_class_.upper_bound(addr);
         if (it == end_addr_to_class_.end())
@@ -386,6 +400,7 @@ public:
 
 private:
     void *pool_start_addr_{nullptr};
+    SlabAllocatorConfig config_;
 
     std::map<size_t, std::unique_ptr<Pool>> blocks_;
     std::map<void *, size_t> end_addr_to_class_;

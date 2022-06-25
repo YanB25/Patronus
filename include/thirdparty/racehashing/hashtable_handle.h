@@ -322,7 +322,9 @@ public:
         return for_the_real_match_do(slot_handles, key, f, dctx);
     }
 
-    RetCode do_put(const Key &key, uint64_t hash, HashContext *dctx = nullptr)
+    RetCode do_put_once(const Key &key,
+                        uint64_t hash,
+                        HashContext *dctx = nullptr)
     {
         DCHECK(inited_);
 
@@ -339,30 +341,6 @@ public:
                                 to_insert_block.tagged_len_,
                                 hash,
                                 dctx);
-        if (rc == kCacheStale && auto_update_dir_)
-        {
-            maybe_trace_pin("before update dcache");
-            auto ret = update_directory_cache(dctx);
-            if (ret == kRdmaProtectionErr)
-            {
-                return ret;
-            }
-            CHECK_EQ(ret, kOk);
-            // okay, but we let outer to retry
-            return RC::kRetry;
-        }
-        if (rc == kNoMem && auto_expand_)
-        {
-            auto overflow_subtable_idx = round_to_bits(rounded_m, ld);
-            auto rc = expand(overflow_subtable_idx, dctx);
-            if (rc == kNoMem || rc == kRetry)
-            {
-                return rc;
-            }
-            CHECK_EQ(rc, kOk);
-            // okay, but we let outer to retry
-            return RC::kRetry;
-        }
         if (rc != kOk)
         {
             return rc;
@@ -383,15 +361,87 @@ public:
         return rc;
     }
 
+    RetCode do_put_loop(const Key &key, uint64_t hash, HashContext *dctx)
+    {
+        RetCode rc = kOk;
+        size_t retry_nr{0};
+
+        while (true)
+        {
+            retry_nr++;
+            CHECK_LT(retry_nr, 102400) << "** Failed to many times";
+            rdma_adpt_->put_all_rdma_buffer();
+
+            if (rc == RC::kCacheStale)
+            {
+                // not my deal to handle this
+                if (!auto_update_dir_)
+                {
+                    return rc;
+                }
+
+                maybe_trace_pin("before update dcache");
+                rc = update_directory_cache(dctx);
+                CHECK_EQ(rc, kOk);
+                // retry
+                continue;
+            }
+            if (rc == kNoMem)
+            {
+                // not my deal to handle this
+                if (!auto_expand_)
+                {
+                    return rc;
+                }
+
+                auto m = hash_m(hash);
+                auto cached_gd = gd();
+                auto rounded_m = round_to_bits(m, cached_gd);
+                auto ld = cached_ld(rounded_m);
+                auto overflow_subtable_idx = round_to_bits(rounded_m, ld);
+                rc = expand(overflow_subtable_idx, dctx);
+                // got kNoMem AGAIN from expand, which means unable to
+                // expand dont retry more. exit here.
+                if (rc == kNoMem)
+                {
+                    return rc;
+                }
+                // special case, just ignore me.
+                if (unlikely(rc == RC::kMockCrashed))
+                {
+                    return rc;
+                }
+                // otherwise, keep the retry-ing.
+                CHECK(rc == kRetry || rc == kOk || rc == kCacheStale)
+                    << "** rc can be only retry or ok or cache-stale. got: "
+                    << rc;
+                continue;
+            }
+
+            // insert here
+            CHECK(rc == kOk || rc == kRetry) << "** Unexpected rc: " << rc;
+            rc = do_put_once(key, hash, dctx);
+            if (rc == kOk)
+            {
+                return rc;
+            }
+
+            CHECK(rc == kNoMem || rc == kRetry || rc == kCacheStale)
+                << "** Only allow kNoMem, kRetry, kCacheStale. got: " << rc;
+        }
+    }
+
     RetCode put(const Key &key, const Value &value, HashContext *dctx = nullptr)
     {
+        // NOTE: the prepare_alloc_kv is optional (if already exist allocated
+        // one)
         if (unlikely(!to_insert_block.gaddr_.has_value()))
         {
             // need allocation
             prepare_alloc_kv(key, value).expect(RC::kOk);
         }
         DCHECK(to_insert_block.gaddr_.has_value());
-        // each enter needs an individual write
+        // NOTE: the prepare_write_kv is doing once for each put request
         auto hash = hash_impl(key.data(), key.size());
         prepare_write_kv(key,
                          value,
@@ -403,24 +453,23 @@ public:
                          dctx)
             .expect(RC::kOk);
 
-        size_t retry_nr{0};
-        while (true)
-        {
-            retry_nr++;
-            CHECK_LT(retry_nr, 102400) << "** Failed to many times";
+        // Here we will loop until insertion succeeded (best-efford)
+        auto rc = do_put_loop(key, hash, dctx);
 
-            auto rc = do_put(key, hash, dctx);
-            if (rc == kRetry)
-            {
-                continue;
-            }
-            if (rc == kOk)
-            {
-                consume_kv_block();
-                return RC::kOk;
-            }
+        if (rc == RC::kOk)
+        {
+            consume_kv_block();
             return rc;
         }
+        // retry soo many times but still failed by do_put_loop
+        // will not retry anymore.
+        if (rc == RC::kRetry || rc == RC::kNoMem || rc == RC::kMockCrashed)
+        {
+            return rc;
+        }
+
+        CHECK(false) << "** Unexpected and unhandled rc here. rc: " << rc;
+        return RC::kInvalid;
     }
     constexpr static size_t subtable_nr()
     {
@@ -1228,7 +1277,10 @@ public:
     {
         if (unlikely(retry_nr <= 0))
         {
-            return kCacheStale;
+            LOG(FATAL) << "** This is wierd. Tried many times for "
+                          "deduplication, but always found cache stale.";
+            // return kCacheStale;
+            return kOk;
         }
         auto m = hash_m(hash);
         auto rounded_m = round_to_bits(m, gd());
@@ -1260,16 +1312,12 @@ public:
         if (rc == kCacheStale && auto_update_dir_)
         {
             // update cache and retry
-            auto ret = update_directory_cache(dctx);
-            if (ret == kRdmaProtectionErr)
-            {
-                return ret;
-            }
-            CHECK_EQ(ret, kOk);
+            update_directory_cache(dctx).expect(RC::kOk);
             return phase_two_deduplicate(
                 key, hash, cached_ld, retry_nr - 1, dctx);
         }
 
+        // duplicate existed. Do the deduplication
         if (slot_handles.size() >= 2)
         {
             std::unordered_set<SlotHandle> real_match_slot_handles;
@@ -1386,13 +1434,7 @@ public:
 
         maybe_trace_pin("before p1.get_two_combined_bucket_handle");
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
-        rc = rdma_adpt_->commit();
-
-        if (unlikely(rc == kRdmaProtectionErr))
-        {
-            return rc;
-        }
-        CHECK_EQ(rc, kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
 
         DLOG_IF(INFO, config::kEnableMemoryDebug)
             << "[race][mem] allocated kv_block gaddr: " << kv_block
@@ -1406,14 +1448,9 @@ public:
             << "Even not found should not response not found";
         if (rc != kOk)
         {
-            // TODO: here will cause
-            // calling end_insert_kvblock() & free_insert_kvblock()
-            // possible memory leak, because free_insert_kvblock() maybe is what
-            // we want but will not crash the program, so ignore this problem
-            // Also possible optimization:
-            // Do not keep allocating/freeing kvblock when keep getting dcache
-            // stale.
-            goto handle_err;
+            CHECK_EQ(rc, kCacheStale)
+                << "** cbs.locate only allow kCacheStale err";
+            return rc;
         }
 
         maybe_trace_pin("before p1.update_if_exists");
@@ -1421,47 +1458,27 @@ public:
 
         if (rc == kOk)
         {
-            consume_kv_block();
             return rc;
         }
-        else if (rc == kRetry || rc == kRdmaProtectionErr)
+        // also another way of "kOk", we succeeded but found nothing
+        else if (rc == kNotFound)
         {
-            // can not re-execute update_if_exists
-            // because the @slot_handles needs to be re-read
-            // just tell the client and let it retries
-            goto handle_err;
-        }
-        else
-        {
-            DCHECK_EQ(rc, kNotFound);
             maybe_trace_pin("before p1.insert_if_exist_empty_slot");
             rc = insert_if_exist_empty_slot(
                 rounded_m, cbs, cached_ld(rounded_m), m, new_slot, dctx);
+            CHECK_NE(rc, kRetry)
+                << "** insert_if_exist_empty_slot should do the retry itself.";
+            CHECK(rc == kOk || rc == kNoMem);
+            return rc;
         }
-        if (rc == kOk)
+        else
         {
-            consume_kv_block();
-            return RC::kOk;
-        }
-
-    handle_err:
-        DCHECK_NE(rc, kOk);
-        maybe_trace_pin("before p1.remote_free_kvblock");
-
-        if (rc == kCacheStale && auto_update_dir_)
-        {
-            // update cache and retry
-            maybe_trace_pin("before p1.update_dcache");
-            auto ret = update_directory_cache(dctx);
-            if (ret == kRdmaProtectionErr)
+            if (rc == kRetry && dctx)
             {
-                return ret;
+                dctx->collect_retry(RetryReason::kUpdateSlot);
             }
-            CHECK_EQ(ret, kOk);
-            // okey, but let outer to retry
-            return RC::kRetry;
+            return rc;
         }
-        return rc;
     }
     RetCode insert_if_exist_empty_slot(
         size_t subtable_idx,

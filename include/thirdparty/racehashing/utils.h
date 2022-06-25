@@ -13,6 +13,7 @@
 #include "Common.h"
 #include "city.h"
 #include "util/Debug.h"
+#include "util/PerformanceReporter.h"
 #include "util/RetCode.h"
 
 namespace patronus::hash
@@ -25,7 +26,8 @@ inline uint64_t round_up_to_next_power_of_2(uint64_t x)
     return pow(2, ceil(log(x) / log(2)));
 }
 
-union UTaggedPtr {
+union UTaggedPtr
+{
     uint64_t val;
     struct
     {
@@ -356,6 +358,28 @@ inline void hash_table_free([[maybe_unused]] void *addr)
     LOG_FIRST_N(WARNING, 1) << "Not actually freeing. Implement rcu here.";
 }
 
+enum class RetryReason
+{
+    kUpdateSlot,
+    kInsertSlot,
+    kCacheStale,
+};
+inline std::ostream &operator<<(std::ostream &os, RetryReason r)
+{
+    switch (r)
+    {
+    case RetryReason::kUpdateSlot:
+        os << "kUpdateSlot";
+        break;
+    case RetryReason::kInsertSlot:
+        os << "kInsertSlot";
+        break;
+    case RetryReason::kCacheStale:
+        os << "kCacheStale";
+        break;
+    }
+    return os;
+}
 struct HashContext
 {
     HashContext(size_t tid, bool enabled = true) : tid(tid), enabled_(enabled)
@@ -369,12 +393,22 @@ struct HashContext
     {
         return private_;
     }
+    void collect_retry(RetryReason r)
+    {
+        retry_reason_.collect(r);
+    }
+    const EnumReporter<RetryReason> &retry_reasion() const
+    {
+        return retry_reason_;
+    }
+
     size_t tid;
     std::string key;
     std::string value;
     std::string op;
     bool enabled_;
     void *private_{nullptr};
+    EnumReporter<RetryReason> retry_reason_;
 };
 
 static HashContext nulldctx(0, false);

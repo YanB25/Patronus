@@ -495,4 +495,49 @@ private:
     size_t size_{0};
 };
 
+// Accept any T that is an enum.
+template <typename T, std::enable_if_t<std::is_enum_v<T>, bool> = true>
+class EnumReporter
+{
+public:
+    EnumReporter()
+    {
+        collected_.reserve(32);
+    }
+
+    void collect(const T &t)
+    {
+        size_t value = (size_t) t;
+        if (unlikely(collected_.size() <= value))
+        {
+            collected_.resize(value + 1);
+        }
+        collected_[value]++;
+    }
+    const std::vector<size_t> collected() const
+    {
+        return collected_;
+    }
+
+    template <typename U>
+    friend std::ostream &operator<<(std::ostream &os, const EnumReporter<U> &b);
+
+private:
+    std::vector<size_t> collected_;
+};
+
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os, const EnumReporter<T> &b)
+{
+    os << "{EnumReporter " << std::endl;
+    for (size_t e = 0; e < b.collected_.size(); ++b)
+    {
+        T t_e = (T) e;
+        size_t times = b.collected_[e];
+        os << t_e << ": " << times << std::endl;
+    }
+    os << "}";
+    return os;
+}
+
 #endif
