@@ -36,8 +36,7 @@ TraceView TraceView::child(std::string_view name)
 {
     if (unlikely(impl_ != nullptr))
     {
-        pin(name);
-        return TraceView{impl_->child_context(std::string(name))};
+        return TraceView{impl_->child(std::string(name))};
     }
     return TraceView(nullptr);
 }
@@ -53,14 +52,15 @@ bool TraceView::enabled() const
 {
     return impl_ != nullptr;
 }
-std::vector<TraceRecord> TraceView::get_flat_records(size_t depth_limit) const
-{
-    if (unlikely(impl_ != nullptr))
-    {
-        return impl_->get_flat_records(depth_limit);
-    }
-    return {};
-}
+// std::vector<TraceRecord> TraceView::get_flat_records(size_t depth_limit)
+// const
+// {
+//     if (unlikely(impl_ != nullptr))
+//     {
+//         return impl_->get_flat_records(depth_limit);
+//     }
+//     return {};
+// }
 
 void TraceView::set(const std::string &key, const std::string &value)
 {
