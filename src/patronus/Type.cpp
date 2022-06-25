@@ -363,19 +363,23 @@ void debug_validate_lease_modify_flag(flag_t flag)
         bool reserved = flag & (flag_t) LeaseModifyFlag::kReserved;
         bool wait_success = flag & (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
         bool no_rpc = flag & (flag_t) LeaseModifyFlag::kNoRpc;
+        bool srv_do_nothing = flag & (flag_t) LeaseModifyFlag::kServerDoNothing;
         if (only_dealloc)
         {
             DCHECK(!with_dealloc) << "with_dealloc conflict with only_dealloc";
+            CHECK(!srv_do_nothing);
         }
         if (with_dealloc)
         {
             DCHECK(!only_dealloc) << "only_dealloc conflict with with_dealloc";
+            CHECK(!srv_do_nothing);
         }
         if (wait_success)
         {
             DCHECK(!no_unbind_any)
                 << "wait_success conflict with no_relinquish_unbind: If you do "
                    "not want to unbind, make no sense to wait for nothing.";
+            CHECK(!srv_do_nothing);
         }
         if (no_rpc)
         {
@@ -385,6 +389,12 @@ void debug_validate_lease_modify_flag(flag_t flag)
             DCHECK(!with_dealloc);
             DCHECK(!only_dealloc);
             DCHECK(!wait_success);
+        }
+        if (srv_do_nothing)
+        {
+            CHECK(!force_unbind);
+            CHECK(!with_dealloc);
+            CHECK(!only_dealloc);
         }
         DCHECK(!(no_unbind_any && no_unbind_pr))
             << "Only one of no_unbind_any and no_unbind_pr should be set";

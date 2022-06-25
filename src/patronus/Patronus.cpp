@@ -1308,6 +1308,13 @@ void Patronus::prepare_handle_request_lease_relinquish(
 {
     DCHECK_EQ(req->type, RpcType::kRelinquishReq);
 
+    bool srv_do_nothing =
+        req->flag & (flag_t) LeaseModifyFlag::kServerDoNothing;
+    if (srv_do_nothing)
+    {
+        return;
+    }
+
     bool only_dealloc = req->flag & (flag_t) LeaseModifyFlag::kOnlyDeallocation;
     if (only_dealloc)
     {

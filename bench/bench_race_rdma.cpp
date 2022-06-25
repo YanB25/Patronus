@@ -112,6 +112,10 @@ struct BenchConfig
                    "allocator detected.";
         }
     }
+    bool should_report_latency() const
+    {
+        return thread_nr == kMaxAppThread && coro_nr == 1;
+    }
     std::string conf_name() const
     {
         return name;
@@ -289,40 +293,14 @@ public:
         size_t initial_subtable_nr,
         size_t kvblock_expect_size)
     {
-        auto kv_g_conf = KVGenConf{.max_key = kMaxKey,
-                                   .use_zip = true,
-                                   .zip_skewness = 0.99,
-                                   .kvblock_expect_size = kvblock_expect_size};
-
-        // fill the table with KVs
-        auto insert_conf =
-            BenchConfig::get_empty_conf(name + ".load", kv_g_conf);
-        insert_conf.thread_nr = 1;
-        insert_conf.coro_nr = 1;
-        insert_conf.insert_prob = 1;
-        insert_conf.auto_extend = false;
-        insert_conf.test_nr = fill_nr;
-        insert_conf.should_report = false;
-        insert_conf.initial_subtable_nr = initial_subtable_nr;
-        insert_conf.is_loading = true;
-        insert_conf.limit_nid = 1;  // nid
-
-        auto query_warmup_conf =
-            BenchConfig::get_empty_conf(name + ".query.warmup", kv_g_conf);
-        query_warmup_conf.name = name + ".query.warmup";
-        query_warmup_conf.thread_nr = thread_nr;
-        query_warmup_conf.coro_nr = coro_nr;
-        query_warmup_conf.get_prob = 1;
-        query_warmup_conf.auto_extend = false;
-        query_warmup_conf.test_nr = test_nr;
-        query_warmup_conf.should_report = false;
-        query_warmup_conf.initial_subtable_nr = initial_subtable_nr;
-
-        auto query_report_conf = query_warmup_conf.clone();
-        query_report_conf.name = name + ".query";
-        query_report_conf.should_report = true;
-
-        return pipeline({insert_conf, query_warmup_conf, query_report_conf});
+        return get_rw_config(name,
+                             fill_nr,
+                             test_nr,
+                             thread_nr,
+                             coro_nr,
+                             initial_subtable_nr,
+                             kvblock_expect_size,
+                             0.0);
     }
     static std::vector<BenchConfig> get_write_only_config(
         const std::string &name,
@@ -332,6 +310,24 @@ public:
         size_t coro_nr,
         size_t initial_subtable_nr,
         size_t kvblock_expect_size)
+    {
+        return get_rw_config(name,
+                             fill_nr,
+                             test_nr,
+                             thread_nr,
+                             coro_nr,
+                             initial_subtable_nr,
+                             kvblock_expect_size,
+                             1.0);
+    }
+    static std::vector<BenchConfig> get_rw_config(const std::string &name,
+                                                  size_t fill_nr,
+                                                  size_t test_nr,
+                                                  size_t thread_nr,
+                                                  size_t coro_nr,
+                                                  size_t initial_subtable_nr,
+                                                  size_t kvblock_expect_size,
+                                                  double write_ratio)
     {
         // use uniform in WO
         auto kv_g_conf = KVGenConf{.max_key = kMaxKey,
@@ -350,12 +346,12 @@ public:
         load_conf.is_loading = true;
         load_conf.limit_nid = 1;  // nid
 
-        auto wo_conf = BenchConfig::get_empty_conf(name + ".wo", kv_g_conf);
-        wo_conf.name = name + ".wo";
+        auto wo_conf = BenchConfig::get_empty_conf(name + ".run", kv_g_conf);
+        wo_conf.name = name + ".run";
         wo_conf.thread_nr = thread_nr;
         wo_conf.coro_nr = coro_nr;
-        wo_conf.get_prob = 0;
-        wo_conf.insert_prob = 1;
+        wo_conf.get_prob = 1 - write_ratio;
+        wo_conf.insert_prob = write_ratio;
         wo_conf.auto_extend = false;
         wo_conf.test_nr = test_nr;
         wo_conf.should_report = true;
@@ -813,24 +809,27 @@ void benchmark_client(Patronus::pointer p,
 
         col_rdma_protection_err.push_back(prv.rdma_protection_nr);
 
-        if (col_lat_idx.empty())
+        if (bench_conf.should_report_latency())
         {
-            col_lat_idx.push_back("lat_min");
-            col_lat_idx.push_back("lat_p5");
-            col_lat_idx.push_back("lat_p9");
-            col_lat_idx.push_back("lat_p99");
-        }
-        if (likely(lat_data[report_name].empty()))
-        {
-            lat_data[report_name].push_back(lat_m.min());
-            lat_data[report_name].push_back(lat_m.percentile(0.5));
-            lat_data[report_name].push_back(lat_m.percentile(0.9));
-            lat_data[report_name].push_back(lat_m.percentile(0.99));
-        }
-        else
-        {
-            LOG(WARNING) << "** Recording latency for `" << report_name
-                         << "` duplicated. Skip.";
+            if (col_lat_idx.empty())
+            {
+                col_lat_idx.push_back("lat_min");
+                col_lat_idx.push_back("lat_p5");
+                col_lat_idx.push_back("lat_p9");
+                col_lat_idx.push_back("lat_p99");
+            }
+            if (likely(lat_data[report_name].empty()))
+            {
+                lat_data[report_name].push_back(lat_m.min());
+                lat_data[report_name].push_back(lat_m.percentile(0.5));
+                lat_data[report_name].push_back(lat_m.percentile(0.9));
+                lat_data[report_name].push_back(lat_m.percentile(0.99));
+            }
+            else
+            {
+                LOG(WARNING) << "** Recording latency for `" << report_name
+                             << "` duplicated. Skip.";
+            }
         }
     }
 
@@ -964,17 +963,46 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
             //             p, bar, is_master, ro_conf, key);
             //     }
             // }
+            // {
+            //     key++;
+            //     auto wo_conf = BenchConfigFactory::get_write_only_config(
+            //         "WO",
+            //         capacity,
+            //         // 1_M,
+            //         100_K,
+            //         thread_nr,
+            //         kCoroNr,
+            //         4 /* initial_subtable_nr */,
+            //         rhh_conf.kvblock_expect_size);
+            //     if (is_client)
+            //     {
+            //         for (const auto &bench_conf : wo_conf)
+            //         {
+            //             bench_conf.validate();
+            //             LOG_IF(INFO, is_master)
+            //                 << "[sub-conf] running conf: " << bench_conf;
+            //             benchmark_client<4, 16, 16>(
+            //                 p, bar, is_master, bench_conf, rhh_conf, key);
+            //         }
+            //     }
+            //     else
+            //     {
+            //         benchmark_server<4, 16, 16>(
+            //             p, bar, is_master, wo_conf, key);
+            //     }
+            // }
             {
                 key++;
-                auto wo_conf = BenchConfigFactory::get_write_only_config(
-                    "WO",
+                auto wo_conf = BenchConfigFactory::get_rw_config(
+                    "RW",
                     capacity,
                     // 1_M,
                     100_K,
                     thread_nr,
                     kCoroNr,
                     4 /* initial_subtable_nr */,
-                    rhh_conf.kvblock_expect_size);
+                    rhh_conf.kvblock_expect_size,
+                    0.5);
                 if (is_client)
                 {
                     for (const auto &bench_conf : wo_conf)
