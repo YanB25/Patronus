@@ -529,6 +529,7 @@ void test_basic_client_worker(
     bool should_report_latency = (tid == 0 && coro_id == 0);
 
     util::TraceManager tm(0);
+    // util::TraceManager tm(0.001);
 
     while (ex.get_private_data().thread_remain_task > 0)
     {

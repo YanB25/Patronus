@@ -382,6 +382,7 @@ public:
                 // not my deal to handle this
                 if (!auto_update_dir_)
                 {
+                    trace.pin("kCacheStale");
                     return rc;
                 }
 
@@ -395,6 +396,7 @@ public:
                 // not my deal to handle this
                 if (!auto_expand_)
                 {
+                    trace.pin("kNoMem");
                     return rc;
                 }
 
@@ -408,11 +410,13 @@ public:
                 // expand dont retry more. exit here.
                 if (rc == kNoMem)
                 {
+                    trace.pin("kNoMem");
                     return rc;
                 }
                 // special case, just ignore me.
                 if (unlikely(rc == RC::kMockCrashed))
                 {
+                    trace.pin("kMockCrashed");
                     return rc;
                 }
                 // otherwise, keep the retry-ing.
@@ -427,6 +431,7 @@ public:
             rc = do_put_once(key, hash, trace);
             if (rc == kOk)
             {
+                trace.pin("OK");
                 return rc;
             }
 
@@ -1825,6 +1830,7 @@ public:
                 DLOG_IF(INFO, config::kEnableDebug)
                     << "[race][subtable] slot " << slot_handle << " update to "
                     << new_slot << util::pre_map(trace.kv());
+                trace.pin("OK");
                 return kOk;
             }
             DVLOG(4) << "[race][subtable] do_update FAILED: new_slot "
@@ -1832,6 +1838,7 @@ public:
             DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace][subtable] do_update FAILED: cas failed. slot "
                 << slot_handle << util::pre_map(trace.kv());
+            trace.pin("Retry");
             return kRetry;
         };
 
