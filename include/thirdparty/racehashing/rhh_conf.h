@@ -129,7 +129,10 @@ public:
         c.meta.d.use_mw().wo_expire().no_bind_pr();
         return c;
     }
-    static RaceHashingHandleConfig get_mw_protected_debug(
+    // like get_mw_protected, but
+    // read does not need to acquire handle each time, because
+    // we bind a tenant-wide handle over the huge region
+    static RaceHashingHandleConfig get_mw_protected_tenant(
         const std::string &name,
         size_t kvblock_expect_size,
         size_t alloc_batch,
@@ -190,6 +193,24 @@ public:
         c.read_kvblock.use_mr();
         c.alloc_kvblock.use_mr();
         c.meta.d.use_mr();
+
+        c.test_nr_scale_factor = 1.0 / 10;
+        return c;
+    }
+    static RaceHashingHandleConfig get_mr_protected_tenant(
+        const std::string &name,
+        size_t kvblock_expect_size,
+        size_t alloc_batch,
+        bool force_kvblock_to_match)
+    {
+        auto c = get_mw_protected_tenant(
+            name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
+        c.read_kvblock.use_mr();
+        c.alloc_kvblock.use_mr();
+        c.meta.d.use_mr();
+
+        CHECK(c.kvblock_region.has_value());
+        c.kvblock_region.value().use_mr();
 
         c.test_nr_scale_factor = 1.0 / 10;
         return c;

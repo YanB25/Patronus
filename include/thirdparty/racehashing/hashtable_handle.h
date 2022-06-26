@@ -84,8 +84,7 @@ public:
           conf_(conf),
           auto_expand_(auto_expand),
           auto_update_dir_(auto_expand),
-          rdma_adpt_(rdma_adpt),
-          bootstrap_timer_("ctor()")
+          rdma_adpt_(rdma_adpt)
     {
         read_kvblock_handles_.reserve(kOngoingHandleSize);
     }
@@ -95,14 +94,12 @@ public:
         // debug_fp_conflict_m_;
         // LOG(INFO) << "[debug] !! debug_fp_miss_m: " << debug_fp_miss_m_;
 
-        maybe_trace_bootstrap("before ~kvblock_mem_handle");
         const auto &c = conf_.meta.d;
         if (directory_mem_handle_.valid())
         {
             rdma_adpt_->relinquish_perm(
                 directory_mem_handle_, c.alloc_hint, c.relinquish_flag);
         }
-        maybe_trace_bootstrap("before ~subtable_mem_handles");
         for (auto &handle : subtable_mem_handles_)
         {
             if (handle.valid())
@@ -123,10 +120,12 @@ public:
         }
 
         end_read_kvblock();
-        consume_kv_block();
-
-        maybe_trace_bootstrap("~finished()");
-        maybe_trace_end_bootstrap();
+        if (to_insert_block.handle_.valid())
+        {
+            const auto &c = conf_.alloc_kvblock;
+            rdma_adpt_->relinquish_perm(
+                to_insert_block.handle_, c.alloc_hint, c.relinquish_flag);
+        }
     }
     constexpr static size_t meta_size()
     {
@@ -138,58 +137,24 @@ public:
            << ", end_insert: " << end_insert_nr_
            << ", free_insert: " << free_insert_nr_;
     }
-    void maybe_trace_bootstrap(const std::string &name)
-    {
-        if constexpr (::config::kEnableRdmaTrace)
-        {
-            bootstrap_timer_.pin(name);
-        }
-    }
-    void maybe_trace_end_bootstrap()
-    {
-        if constexpr (::config::kEnableRdmaTrace)
-        {
-            if (unlikely(enable_boostrap_trace_))
-            {
-                LOG(INFO) << bootstrap_timer_;
-            }
-        }
-    }
     void init(util::TraceView trace = util::nulltrace)
     {
-        if constexpr (::config::kEnableRdmaTrace)
-        {
-            if (unlikely(true_with_prob(::config::kRdmaTraceRateBootstrap)))
-            {
-                enable_boostrap_trace_ = true;
-            }
-        }
-
-        maybe_trace_bootstrap("init() before init_dir_mem_handle()");
         init_directory_mem_handle();
+        trace.pin("init directory mem handle");
 
-        maybe_trace_bootstrap("before update_dcache()");
-        auto ret = update_directory_cache(trace);
-
-        while (unlikely(ret == kRdmaProtectionErr))
-        {
-            LOG(FATAL) << "[race] update_dcache got " << ret << ". Retry.";
-            ret = update_directory_cache(trace);
-        }
-        CHECK_EQ(ret, kOk);
+        update_directory_cache(trace).expect(RC::kOk);
 
         // init_kvblock_mem_handle AFTER getting the directory cache
         // because we need to know where server places the kvblock pool
-        maybe_trace_bootstrap("before init_kvblock_mem_handle()");
 
         if (conf_.meta.eager_bind_subtable)
         {
-            maybe_trace_bootstrap("before eager_init_subtable_mem_handle()");
             eager_init_subtable_mem_handle();
+            trace.pin("eager init subtable mem handle");
         }
 
         inited_ = true;
-        maybe_trace_bootstrap("init() finished");
+        trace.pin("Finished");
     }
     void eager_init_subtable_mem_handle()
     {
@@ -257,6 +222,10 @@ public:
 
     RetCode del(const Key &key, util::TraceView trace = util::nulltrace)
     {
+        if (unlikely(!inited_))
+        {
+            init(trace.child("init"));
+        }
         DCHECK(inited_);
         auto hash = hash_impl(key.data(), key.size());
         auto m = hash_m(hash);
@@ -465,6 +434,12 @@ public:
                 const Value &value,
                 util::TraceView trace = util::nulltrace)
     {
+        if (unlikely(!inited_))
+        {
+            init(trace.child("init"));
+        }
+        DCHECK(inited_);
+
         // NOTE: the prepare_alloc_kv is optional (if already exist allocated
         // one)
         if (unlikely(!has_to_insert_block()))
@@ -1735,6 +1710,10 @@ public:
                 Value &value,
                 util::TraceView trace = util::nulltrace)
     {
+        if (unlikely(!inited_))
+        {
+            init(trace.child("init"));
+        }
         DCHECK(inited_);
         auto hash = hash_impl(key.data(), key.size());
         auto m = hash_m(hash);
@@ -1945,32 +1924,8 @@ private:
 
     bool inited_{false};
 
-    ContTimer<::config::kEnableRdmaTrace> bootstrap_timer_;
-    bool enable_boostrap_trace_{false};
-
     // for client private kvblock memory
     GlobalAddress kvblock_pool_gaddr_;
-
-    // void maybe_trace_pin(const char *name)
-    // {
-    //     if constexpr (::config::kEnableRdmaTrace)
-    //     {
-    //         if (unlikely(rdma_adpt_->trace_enabled()))
-    //         {
-    //             rdma_adpt_->trace_pin(name);
-    //         }
-    //     }
-    // }
-    // void maybe_drop_trace()
-    // {
-    //     if constexpr (::config::kEnableRdmaTrace)
-    //     {
-    //         if (unlikely(rdma_adpt_->trace_enabled()))
-    //         {
-    //             rdma_adpt_->end_trace(nullptr /* give u nothing */);
-    //         }
-    //     }
-    // }
 
     std::vector<RemoteMemHandle> read_kvblock_handles_;
     RemoteMemHandle kvblock_region_handle_;
