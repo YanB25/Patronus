@@ -113,8 +113,7 @@ public:
         }
         if (fake_handle_.valid())
         {
-            auto rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
-            rdma_adpt_->relinquish_perm(fake_handle_, 0, rel_flag);
+            relinquish_fake_handle(fake_handle_);
         }
         if (kvblock_region_handle_.valid())
         {
@@ -801,7 +800,7 @@ public:
 
         if (unlikely(!fake_handle_.valid()))
         {
-            alloc_fake_handle();
+            fake_handle_ = alloc_fake_handle();
         }
 
         for (size_t i = 0; i < SubTableHandleT::kTotalBucketNr; ++i)
@@ -1906,13 +1905,20 @@ private:
     // OnePassBucketMonitor<uint64_t> debug_fp_conflict_m_{0, 100, 1};
     // OnePassMonitor debug_fp_miss_m_;
 
-    void alloc_fake_handle()
+    RemoteMemHandle alloc_fake_handle()
     {
-        if (!fake_handle_.valid())
+        auto ac_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+        auto ret = rdma_adpt_->acquire_perm(
+            nullgaddr, 0, std::numeric_limits<size_t>::max(), 1ns, ac_flag);
+        DCHECK(ret.valid());
+        return ret;
+    }
+    void relinquish_fake_handle(RemoteMemHandle &handle)
+    {
+        if (handle.valid())
         {
-            auto ac_flag = (flag_t) AcquireRequestFlag::kNoRpc;
-            fake_handle_ = rdma_adpt_->acquire_perm(
-                nullgaddr, 0, std::numeric_limits<size_t>::max(), 1ns, ac_flag);
+            auto rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
+            rdma_adpt_->relinquish_perm(handle, 0, rel_flag);
         }
     }
 
@@ -2081,14 +2087,11 @@ private:
     }
     void do_free_kvblock([[maybe_unused]] GlobalAddress gaddr)
     {
-        // auto size = conf_.kvblock_expect_size;
-        // const auto &c = conf_.free_kvblock;
-        // if (c.do_nothing)
-        // {
-        //     return;
-        // }
-        // rdma_adpt_->remote_free(gaddr, size, c.alloc_hint);
-        LOG_FIRST_N(WARNING, 1) << "** Not actually doing remote freeing.";
+        // TODO: this trigger one RPC call for freeing a KV block
+        auto rel_flag = (flag_t) LeaseModifyFlag::kServerDoNothing;
+        auto place_holder_handle = alloc_fake_handle();
+        rdma_adpt_->relinquish_perm(place_holder_handle, 0, rel_flag);
+        relinquish_fake_handle(place_holder_handle);
     }
 
     size_t cached_gd() const
