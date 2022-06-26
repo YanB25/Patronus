@@ -13,7 +13,7 @@
 #include "util/monitor.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
-constexpr static size_t kBurnCnt = 100_M;
+constexpr static size_t kBurnCnt = 20_M;
 // constexpr static size_t kBurnCnt = 1_M;
 constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
@@ -70,10 +70,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
 
             size_t sent = 0;
 
-            std::vector<char> __buffer;
-            __buffer.resize(config::umsg::kUserMessageSize *
-                            config::umsg::kRecvLimit);
-            char *buffer = __buffer.data();
+            DSM::umsg_ptr_t recv_ptrs[1024];
 
             int64_t token = kTokenNr;
             for (size_t t = 0; t < kBurnCnt; ++t)
@@ -91,13 +88,12 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                             << " at " << kMessageEachToken << ", wait for ack.";
                     do
                     {
-                        size_t recv_nr = dsm->unreliable_try_recv(
-                            buffer, config::umsg::kRecvLimit);
+                        size_t recv_nr =
+                            dsm->unreliable_try_recv_no_cpy(recv_ptrs, 1024);
                         // handle possbile recv token
                         for (size_t r = 0; r < recv_nr; ++r)
                         {
-                            void *msg_addr =
-                                buffer + config::umsg::kUserMessageSize * r;
+                            void *msg_addr = (void *) recv_ptrs[r];
                             auto *recv_msg = (RespMsg *) msg_addr;
                             std::ignore = recv_msg;
                             VLOG(3) << "[wait] tid " << tid
@@ -109,6 +105,10 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                         {
                             // VLOG(1) << "[wait] tid " << tid
                             //         << " blocked. finished " << t;
+                        }
+                        if (recv_nr)
+                        {
+                            dsm->return_buf_no_cpy(recv_ptrs, recv_nr);
                         }
                     } while (token <= 0);
                     VLOG(1) << "[wait] tid " << tid
@@ -162,67 +162,58 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
               << ", with thread " << thread_nr
               << ". ops/thread: " << (ops / thread_nr);
 }
-
 void server_burn_do(
     DSM::pointer dsm,
     std::atomic<bool> &finished,
     std::array<Perthread<std::atomic<size_t>>, MAX_MACHINE> &gots)
 {
-    std::ignore = gots;
     auto tid = dsm->get_thread_id();
 
-    std::vector<char> __buffer;
-    __buffer.resize(config::umsg::kUserMessageSize * config::umsg::kRecvLimit);
-    char *buffer = __buffer.data();
+    // std::vector<char> __buffer;
+    // __buffer.resize(config::umsg::kUserMessageSize *
+    // config::umsg::kRecvLimit); char *buffer = __buffer.data();
+    DSM::umsg_ptr_t recv_ptrs[1024];
 
+    auto *rdma_buf = dsm->get_rdma_buffer().buffer;
+    memset(rdma_buf, 0, sizeof(RespMsg));
     size_t work_nr{0};
     LOG(INFO) << "[bench] server tid " << tid << " started.";
 
-    auto rdma_buf = dsm->get_rdma_buffer();
-    auto rdma_buf_nr = rdma_buf.size / sizeof(RespMsg);
-    size_t rdma_buf_id = 0;
-    memset(rdma_buf.buffer, 0, sizeof(RespMsg));
+    ssize_t sent[MAX_MACHINE][kMaxAppThread]{};
 
     while (!finished.load(std::memory_order_relaxed))
     {
-        auto get = dsm->unreliable_try_recv(buffer, config::umsg::kRecvLimit);
-        if (get > 0)
+        auto get = dsm->unreliable_try_recv_no_cpy(recv_ptrs, 1024);
+
+        for (size_t m = 0; m < get; ++m)
         {
-            for (size_t m = 0; m < get; ++m)
+            work_nr++;
+            // auto &msg =
+            //     *(ReqMsg *) (buffer + config::umsg::kUserMessageSize * m);
+            auto &msg = *(ReqMsg *) recv_ptrs[m];
+            auto from_tid = msg.tid;
+            DCHECK_LT(from_tid, kMaxAppThread);
+            auto from_nid = msg.nid;
+            DCHECK_LT(from_nid, MAX_MACHINE);
+            gots[from_nid][from_tid].fetch_add(1, std::memory_order_relaxed);
+            sent[from_nid][from_tid]++;
+            VLOG(1) << "[debug] server tid " << tid
+                    << " got message client: tid: " << from_tid
+                    << ", nid: " << from_nid << " at " << work_nr << "-th";
+
+            if (sent[from_nid][from_tid] >= kMessageEachToken)
             {
-                auto *resp_rdma_buf =
-                    (rdma_buf.buffer + sizeof(RespMsg) * rdma_buf_id);
-                rdma_buf_id = (rdma_buf_id + 1) % rdma_buf_nr;
-
-                work_nr++;
-                auto &msg =
-                    *(ReqMsg *) (buffer + config::umsg::kUserMessageSize * m);
-                auto from_tid = msg.tid;
-                DCHECK_LT(from_tid, kMaxAppThread);
-                auto from_nid = msg.nid;
-                DCHECK_LT(from_nid, MAX_MACHINE);
-                // VLOG(1) << "[debug] server tid " << tid
-                //         << " got message client: tid: " << from_tid
-                //         << ", nid: " << from_nid << " at " << work_nr <<
-                //         "-th";
-
-                auto *resp_msg = (RespMsg *) resp_rdma_buf;
-                resp_msg->tid = from_tid;
-                resp_msg->nid = from_nid;
-                bool succ = dsm->unreliable_prepare_send((char *) resp_rdma_buf,
-                                                         sizeof(RespMsg),
-                                                         from_nid,
-                                                         from_tid);
-                if (unlikely(!succ))
-                {
-                    dsm->unreliable_commit_send();
-                }
-                // dsm->unreliable_send((char *) resp_rdma_buf,
-                //                      sizeof(RespMsg),
-                //                      from_nid,
-                //                      from_tid);
+                sent[from_nid][from_tid] -= kMessageEachToken;
+                VLOG(1) << "[wait] server tid " << tid
+                        << " let go client: tid: " << from_tid
+                        << ", nid: " << from_nid << " at " << work_nr << "-th";
+                dsm->unreliable_send(
+                    (char *) rdma_buf, sizeof(RespMsg), from_nid, from_tid);
             }
-            dsm->unreliable_commit_send();
+        }
+        if (get)
+        {
+            dsm->return_buf_no_cpy(recv_ptrs, get);
         }
     }
     LOG(INFO) << "[bench] server " << tid << " exiting.";

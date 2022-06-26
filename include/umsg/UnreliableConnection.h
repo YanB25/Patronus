@@ -62,6 +62,10 @@ public:
     {
         return recv_->recv(i_ep_id, ibuf, limit);
     }
+    void return_buf_no_cpy(size_t th_id, ptr_t *ptr_buf, size_t size)
+    {
+        return recv_->return_buf_no_cpy(th_id, ptr_buf, size);
+    }
 
 private:
     RdmaContext &context()

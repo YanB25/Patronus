@@ -609,9 +609,11 @@ public:
     using umsg_ptr_t = UnreliableConnection<kMaxAppThread>::ptr_t;
     size_t unreliable_try_recv_no_cpy(umsg_ptr_t *ptr_buf, size_t limit = 1)
     {
-        CHECK(false) << "[DSM] using no-copy is not safe. Not "
-                        "finish the code for reuse protection.";
         return umsg_->try_recv_no_cpy(get_thread_id(), ptr_buf, limit);
+    }
+    void return_buf_no_cpy(umsg_ptr_t *ptr_buf, size_t size)
+    {
+        return umsg_->return_buf_no_cpy(get_thread_id(), ptr_buf, size);
     }
     void unreliable_recv(char *ibuf, size_t limit = 1)
     {

@@ -1684,7 +1684,10 @@ void Patronus::registerClientThread()
 
 size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
 {
-    static thread_local char buf[config::umsg::kMaxRecvBuffer];
+    static thread_local std::vector<char> __buffer(
+        config::umsg::kMaxRecvBuffer);
+    char *buf = __buffer.data();
+
     auto nr = dsm_->unreliable_try_recv(
         buf, std::min(limit, config::umsg::kRecvLimit));
     size_t msg_nr = nr;
@@ -1934,8 +1937,7 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
 
     constexpr static size_t kServerBufferNr =
         kMaxCoroNr * MAX_MACHINE * kClientThreadPerServerThread;
-    std::vector<char> __buffer;
-    __buffer.resize(config::umsg::kMaxRecvBuffer * kServerBufferNr);
+    std::vector<char> __buffer(config::umsg::kMaxRecvBuffer * kServerBufferNr);
 
     server_coro_ctx_.buffer_pool = std::make_unique<
         ThreadUnsafeBufferPool<::config::umsg::kMaxRecvBuffer>>(
@@ -3477,11 +3479,11 @@ PatronusThreadResourceDesc Patronus::prepare_client_thread(
 
     auto *dsm_rdma_buffer = desc.dsm_desc.rdma_buffer;
 
-    size_t message_pool_size = 4_MB;
+    size_t message_pool_size = 16_MB;
     CHECK_GT(desc.dsm_desc.rdma_buffer_size, message_pool_size);
-    CHECK_GE(message_pool_size / kMessageSize, 65536)
-        << "Consider to tune up message pool size? Less than 64436 "
-           "possible messages";
+    // CHECK_GE(message_pool_size / kMessageSize, 65536)
+    //     << "Consider to tune up message pool size? Less than 64436 "
+    //        "possible messages";
 
     desc.rdma_message_buffer_pool =
         std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(

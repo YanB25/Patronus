@@ -7,6 +7,7 @@
 #include "Timer.h"
 #include "gflags/gflags.h"
 #include "umsg/Config.h"
+#include "util/Hexdump.hpp"
 #include "util/Rand.h"
 #include "util/monitor.h"
 
@@ -59,7 +60,8 @@ void client_varsize_correct(std::shared_ptr<DSM> dsm, size_t dir_id)
     LOG(WARNING) << "[bench] testing varsize for dir_id = " << dir_id;
     auto tid = dsm->get_thread_id();
     auto *buf = dsm->get_rdma_buffer().buffer;
-    char recv_buf[1024];
+    // char recv_buf[1024];
+    DSM::umsg_ptr_t ptr_buf[1024];
     auto server_nid = ::config::get_server_nids().front();
 
     auto &bench_msg = *(BenchMessage *) buf;
@@ -76,23 +78,23 @@ void client_varsize_correct(std::shared_ptr<DSM> dsm, size_t dir_id)
 
         dsm->unreliable_send(buf, sizeof(BenchMessage), server_nid, dir_id);
 
-        dsm->unreliable_recv(recv_buf);
-        auto &recv_msg = *(BenchMessage *) recv_buf;
-        if (memcmp(recv_msg.buf, bench_msg.buf, bench_msg.size) != 0)
+        size_t get = 0;
+        while (true)
         {
-            LOG(ERROR) << "Mismatch result at " << i << "-th test. size "
-                       << size;
-            for (size_t b = 0; b < size; ++b)
+            get = dsm->unreliable_try_recv_no_cpy(ptr_buf, 1);
+            if (get)
             {
-                LOG_IF(ERROR, recv_buf[b] != buf[b])
-                    << "mismatch at " << b << "-th byte. expect " << std::hex
-                    << (uint64_t) buf[b] << ", got " << (uint64_t) recv_buf[b];
+                break;
             }
         }
-        CHECK_EQ(memcmp(recv_buf, buf, size), 0)
-            << "Pingpoing content mismatch for " << i << "-th test. size "
-            << size << ", recv_buf " << *(uint64_t *) recv_buf << ", buf "
-            << *(uint64_t *) buf;
+        CHECK_EQ(get, 1);
+        auto &recv_msg = *(BenchMessage *) ptr_buf[0];
+        CHECK_EQ(memcmp(&recv_msg, &bench_msg, sizeof(BenchMessage)), 0)
+            << "RecvMessage: " << std::endl
+            << util::Hexdump(&recv_msg, sizeof(BenchMessage)) << std::endl
+            << ", bench_msg: " << std::endl
+            << util::Hexdump(&bench_msg, sizeof(BenchMessage));
+        dsm->return_buf_no_cpy(ptr_buf, get);
     }
     LOG(INFO) << "[bench] client finished varsize_correct()";
 }
@@ -100,19 +102,30 @@ void server_varsize_correct(std::shared_ptr<DSM> dsm)
 {
     auto tid = dsm->get_thread_id();
     LOG(INFO) << "[bench] started server_varsize_correct(). tid: " << tid;
-    char recv_buf[1024];
+    // char recv_buf[1024];
+    DSM::umsg_ptr_t recv_ptr[1024];
     auto *buf = dsm->get_rdma_buffer().buffer;
     for (size_t i = 0; i < kPingpoingCnt * ::config::get_client_nids().size();
          ++i)
     {
-        dsm->unreliable_recv(recv_buf);
+        size_t get = 0;
+        while (true)
+        {
+            get = dsm->unreliable_try_recv_no_cpy(recv_ptr, 1);
+            if (get)
+            {
+                break;
+            }
+        }
+        CHECK_EQ(get, 1);
         DVLOG(1) << "[bench] server received " << i << "-th message";
-        auto &msg = *(BenchMessage *) recv_buf;
+        auto &msg = *(BenchMessage *) recv_ptr[0];
         check_valid(msg);
         auto from_tid = msg.from_tid;
         auto from_nid = msg.from_node;
-        memcpy(buf, recv_buf, sizeof(BenchMessage));
+        memcpy(buf, &msg, sizeof(BenchMessage));
         dsm->unreliable_send(buf, sizeof(BenchMessage), from_nid, from_tid);
+        dsm->return_buf_no_cpy(recv_ptr, 1);
     }
     LOG(INFO) << "[bench] server finished varsize_correct()";
 }
@@ -124,22 +137,23 @@ void server_multithread_do(DSM::pointer dsm,
     auto tid = dsm->get_thread_id();
 
     // char buffer[102400];
-    std::vector<char> __buffer;
-    __buffer.resize(config::umsg::kUserMessageSize * config::umsg::kRecvLimit);
-    char *buffer = __buffer.data();
+    // std::vector<char> __buffer;
+    // __buffer.resize(config::umsg::kUserMessageSize *
+    // config::umsg::kRecvLimit); char *buffer = __buffer.data();
+    DSM::umsg_ptr_t recv_ptrs[64];
 
     auto *rdma_buf = dsm->get_rdma_buffer().buffer;
 
     ssize_t recv_msg_nrs[kMaxAppThread][MAX_MACHINE]{};
     while (finished_nr < total_nr)
     {
-        size_t get = dsm->unreliable_try_recv(buffer, 64);
+        // size_t get = dsm->unreliable_try_recv(buffer, 64);
+        auto get = dsm->unreliable_try_recv_no_cpy(recv_ptrs, 64);
         finished_nr.fetch_add(get);
+
         for (size_t i = 0; i < get; ++i)
         {
-            auto *recv_msg =
-                (BenchMessage *) ((char *) buffer +
-                                  config::umsg::kUserMessageSize * i);
+            auto *recv_msg = (BenchMessage *) (recv_ptrs[i]);
             check_valid(*recv_msg);
             auto from_tid = recv_msg->from_tid;
             auto from_nid = recv_msg->from_node;
@@ -157,6 +171,10 @@ void server_multithread_do(DSM::pointer dsm,
                                      from_nid,
                                      from_tid);
             }
+        }
+        if (get)
+        {
+            dsm->return_buf_no_cpy(recv_ptrs, get);
         }
     }
 }

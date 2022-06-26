@@ -16,7 +16,6 @@ public:
     ThreadUnsafeBufferPool(void *pool, size_t size)
         : pool_addr_(pool), pool_length_(size)
     {
-        CHECK_EQ(size % kBufferSize, 0);
         buffer_nr_ = size / kBufferSize;
         for (size_t i = 0; i < buffer_nr_; ++i)
         {
@@ -145,6 +144,7 @@ class ThreadUnsafePool
 public:
     ThreadUnsafePool()
     {
+        buffer_ = new T[kSize];
         for (size_t i = 0; i < kSize; ++i)
         {
             debug_validity_check(&buffer_[i]);
@@ -157,6 +157,7 @@ public:
     }
     ~ThreadUnsafePool()
     {
+        delete[] buffer_;
         if (pool_.size() != kSize)
         {
             LOG(WARNING) << "** Possible memory leak for ThreadUnsafePool at "
@@ -245,7 +246,7 @@ public:
 
 private:
     std::queue<T *> pool_;
-    T buffer_[kSize];
+    T *buffer_;
 
     size_t on_going_{0};
 

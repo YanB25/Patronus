@@ -10,6 +10,7 @@
 #include "city.h"
 #include "umsg/Config.h"
 #include "umsg/UnreliableConnection.h"
+#include "util/Pre.h"
 
 template <size_t kEndpointNr>
 class UnreliableRecvMessageConnection
@@ -20,9 +21,13 @@ class UnreliableRecvMessageConnection
 
     constexpr static size_t kPostRecvBufferAdvanceBatch =
         config::umsg::kPostRecvBufferAdvanceBatch;
+    constexpr static size_t kPostRecvBufferBatchNr =
+        config::umsg::kPostRecvBufferBatchNr;
     constexpr static size_t kPostRecvBufferBatch =
         config::umsg::kPostRecvBufferBatch;
     constexpr static size_t kRecvLimit = config::umsg::kRecvLimit;
+
+    static_assert(kPostRecvBufferAdvanceBatch < kPostRecvBufferBatchNr);
 
     // see recvs[...][...]
     constexpr static size_t kMessageNr = kEndpointNr * kRecvBuffer;
@@ -36,10 +41,13 @@ public:
     {
         memset(recvs, 0, sizeof(recvs));
         memset(recv_sgl, 0, sizeof(recv_sgl));
+        LOG(INFO) << "[debug] kMessageNr: " << kMessageNr
+                  << ", kPostMessageSize: " << kPostMessageSize
+                  << ", kMessageBufferSize: " << kMessageBufferSize;
         msg_pool_ = CHECK_NOTNULL(hugePageAlloc(kMessageBufferSize));
         CHECK_EQ((uint64_t) msg_pool_ % 64, 0) << "should be aligned";
-        recv_mr_ = CHECK_NOTNULL(createMemoryRegion(
-            (uint64_t) msg_pool_, kMessageNr * kPostMessageSize, &ctx));
+        recv_mr_ = CHECK_NOTNULL(
+            createMemoryRegion((uint64_t) msg_pool_, kMessageBufferSize, &ctx));
         lkey_ = recv_mr_->lkey;
     }
 
@@ -60,6 +68,17 @@ public:
     size_t try_recv_no_cpy(size_t i_ep_id,
                            ptr_t *ptr_buf,
                            size_t msg_limit = 1);
+    void return_buf_no_cpy(size_t th_id, ptr_t *ptr_buf, size_t size)
+    {
+        if constexpr (::config::umsg::kEnableNoCpySafeCheck)
+        {
+            for (size_t i = 0; i < size; ++i)
+            {
+                auto buf_id = buffer_addr_to_buf_id((void *) ptr_buf[i]);
+                mark_buffer_not_used(th_id, buf_id);
+            }
+        }
+    }
     void recv(size_t i_ep_id, char *ibuf, size_t msg_limit = 1);
     void init();
 
@@ -67,6 +86,56 @@ private:
     void handle_wc(char *ibuf, const ibv_wc &wc);
     void handle_wc_no_cpy(ptr_t *ret_ptr, const ibv_wc &wc);
     void fills(ibv_sge &sge, ibv_recv_wr &wr, size_t ep_id, size_t batch_id);
+    size_t buffer_addr_to_buf_id(void *buf_addr)
+    {
+        DCHECK_GE((uint64_t) buf_addr, (uint64_t) msg_pool_ + 40);
+        uint64_t offset_buf = (char *) buf_addr - (char *) msg_pool_ - 40;
+        DCHECK_EQ((uint64_t) offset_buf % kPostMessageSize, 0);
+        auto internal = offset_buf / kPostMessageSize;
+        auto buf_id = internal % kRecvBuffer;
+        return buf_id;
+    }
+
+    size_t buf_id_to_batch_id(size_t buf_id) const
+    {
+        auto ret = buf_id / kPostRecvBufferBatch;
+        DCHECK_LT(ret, kPostRecvBufferBatchNr);
+        return ret;
+    }
+    size_t buf_id_to_slot_id(size_t buf_id) const
+    {
+        auto ret = buf_id % kPostRecvBufferBatch;
+        return ret;
+    }
+    void mark_buffer_in_used(size_t th_id, size_t buf_id)
+    {
+        auto batch_id = buf_id_to_batch_id(buf_id);
+        DCHECK_LT(th_id, batch_buffer_in_used_.size());
+        DCHECK_LT(batch_id, batch_buffer_in_used_[th_id].size());
+        batch_buffer_in_used_[th_id][batch_id]++;
+        DCHECK_GE(batch_buffer_in_used_[th_id][batch_id], 0);
+        DCHECK_LE(batch_buffer_in_used_[th_id][batch_id], kPostRecvBufferBatch);
+    }
+    void mark_buffer_not_used(size_t th_id, size_t buf_id)
+    {
+        auto batch_id = buf_id_to_batch_id(buf_id);
+        DCHECK_LT(th_id, batch_buffer_in_used_.size());
+        DCHECK_LT(batch_id, batch_buffer_in_used_[th_id].size());
+        batch_buffer_in_used_[th_id][batch_id]--;
+        DCHECK_GE(batch_buffer_in_used_[th_id][batch_id], 0);
+        DCHECK_LE(batch_buffer_in_used_[th_id][batch_id], kPostRecvBufferBatch);
+    }
+    void validate_buf_batch_is_safe(size_t th_id, size_t buf_id)
+    {
+        auto batch_id = buf_id_to_batch_id(buf_id);
+        DCHECK_LT(th_id, batch_buffer_in_used_.size());
+        DCHECK_LT(batch_id, batch_buffer_in_used_[th_id].size());
+        auto cnt = batch_buffer_in_used_[th_id][batch_id];
+        CHECK_EQ(cnt, 0) << "Detected recv buffer batch in-use. th_id: "
+                         << th_id << ", buf_id: " << buf_id
+                         << ", batch_id: " << batch_id << ". Detail: "
+                         << util::pre_iter(batch_buffer_in_used_[th_id]);
+    }
 
     bool inited_{false};
     void poll_cq();
@@ -93,6 +162,9 @@ private:
     ibv_sge recv_sgl[kEndpointNr][kRecvBuffer];
 
     AlignedArray<size_t, kEndpointNr> msg_recv_indexes_{};
+    // batch_buffer_in_used [kEndpointNr][kPostRecvBufferBatchNr]
+    AlignedArray<std::array<ssize_t, kPostRecvBufferBatchNr>, kEndpointNr>
+        batch_buffer_in_used_{};
 };
 template <size_t kEndpointNr>
 void UnreliableRecvMessageConnection<kEndpointNr>::fills(ibv_sge &sge,
@@ -297,19 +369,20 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
 
     if (unlikely((cur_idx + 1) % kPostRecvBufferBatch == 0))
     {
-        size_t post_buf_idx =
-            ((cur_idx + 1) % kRecvBuffer) +
-            (kPostRecvBufferAdvanceBatch - 1) * kPostRecvBufferBatch;
+        size_t next_buf_idx = (cur_idx + 1) % kRecvBuffer;
+        size_t next_batch_id = buf_id_to_batch_id(next_buf_idx);
+        // minus one, because we already reach "next".
+        // that's why it's called next_batch_id
+        size_t post_batch_id = next_batch_id + kPostRecvBufferAdvanceBatch - 1;
+        post_batch_id %= kPostRecvBufferBatchNr;
+        size_t post_idx = post_batch_id * kPostRecvBufferBatch;
         ibv_recv_wr *bad;
         DVLOG(3) << "[umsg] Posting another " << kPostRecvBufferBatch
                  << " recvs, th_id " << th_id << ". cur_idx " << cur_idx
-                 << " i.e. recvs[" << th_id << "]["
-                 << (post_buf_idx % kRecvBuffer) << "]";
+                 << " i.e. recvs[" << th_id << "][" << post_idx << "]";
 
-        PLOG_IF(
-            ERROR,
-            ibv_post_recv(
-                QPs_[th_id], &recvs[th_id][post_buf_idx % kRecvBuffer], &bad))
+        PLOG_IF(ERROR,
+                ibv_post_recv(QPs_[th_id], &recvs[th_id][post_idx], &bad))
             << "failed to post recv";
     }
 }
@@ -329,33 +402,36 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc_no_cpy(
     DCHECK_EQ(prefix, WRID_PREFIX_RELIABLE_RECV);
     auto th_id = wrid.u16_a;
     std::ignore = wrid.u16_b;
-    auto batch_id = wrid.u16_c;
+    auto buf_id = wrid.u16_c;
 
     DCHECK_LT(th_id, kEndpointNr);
-    DCHECK_LT(batch_id, kRecvBuffer);
+    DCHECK_LT(buf_id, kRecvBuffer);
 
     size_t cur_idx = msg_recv_indexes_[th_id]++;
     auto actual_size = wc.imm_data;
 
     if (likely(ret_ptr != nullptr))
     {
-        DCHECK_EQ(cur_idx % kRecvBuffer, batch_id)
+        DCHECK_EQ(cur_idx % kRecvBuffer, buf_id)
             << "I thought they are equal. in fact, I think the WRID "
                "information is ground truth";
 
-        char *buf =
-            (char *) msg_pool_ +
-            get_msg_pool_idx(th_id, cur_idx % kRecvBuffer) * kPostMessageSize;
+        char *buf = (char *) msg_pool_ +
+                    get_msg_pool_idx(th_id, buf_id) * kPostMessageSize;
         // add the header
         buf += 40;
         // memcpy(ibuf, buf, actual_size);
         (*ret_ptr) = (ptr_t) buf;
 
+        if constexpr (::config::umsg::kEnableNoCpySafeCheck)
+        {
+            mark_buffer_in_used(th_id, buf_id);
+        }
+
         DVLOG(3) << "[umsg] Recved msg size " << actual_size << " from ep_id "
-                 << th_id << ", batch_id: " << batch_id << ", cur_idx "
-                 << cur_idx << ", hash is " << std::hex
-                 << CityHash64(buf, actual_size) << " @" << (void *) buf
-                 << ". WRID: " << wrid;
+                 << th_id << ", buf_id: " << buf_id << ", cur_idx " << cur_idx
+                 << ", hash is " << std::hex << CityHash64(buf, actual_size)
+                 << " @" << (void *) buf << ". WRID: " << wrid;
     }
     else
     {
@@ -365,19 +441,28 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc_no_cpy(
 
     if (unlikely((cur_idx + 1) % kPostRecvBufferBatch == 0))
     {
-        size_t post_buf_idx =
-            ((cur_idx + 1) % kRecvBuffer) +
-            (kPostRecvBufferAdvanceBatch - 1) * kPostRecvBufferBatch;
+        size_t next_buf_idx = (cur_idx + 1) % kRecvBuffer;
+        size_t next_batch_id = buf_id_to_batch_id(next_buf_idx);
+        // minus one, because we already reach "next".
+        // that's why it's called next_batch_id
+        size_t post_batch_id = next_batch_id + kPostRecvBufferAdvanceBatch - 1;
+        post_batch_id %= kPostRecvBufferBatchNr;
+        size_t post_idx = post_batch_id * kPostRecvBufferBatch;
+
         ibv_recv_wr *bad;
         DVLOG(3) << "[umsg] Posting another " << kPostRecvBufferBatch
                  << " recvs, th_id " << th_id << ". cur_idx " << cur_idx
-                 << " i.e. recvs[" << th_id << "]["
-                 << (post_buf_idx % kRecvBuffer) << "]";
+                 << " i.e. recvs[" << th_id << "][" << post_idx << "]";
 
-        PLOG_IF(
-            ERROR,
-            ibv_post_recv(
-                QPs_[th_id], &recvs[th_id][post_buf_idx % kRecvBuffer], &bad))
+        DCHECK_EQ(post_idx % kPostRecvBufferBatch, 0);
+
+        if constexpr (::config::umsg::kEnableNoCpySafeCheck)
+        {
+            validate_buf_batch_is_safe(th_id, post_idx);
+        }
+
+        PLOG_IF(ERROR,
+                ibv_post_recv(QPs_[th_id], &recvs[th_id][post_idx], &bad))
             << "failed to post recv";
     }
 }

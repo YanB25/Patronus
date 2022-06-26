@@ -13,7 +13,7 @@
 #include "util/monitor.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
-constexpr static size_t kBurnCnt = 2_M;
+constexpr static size_t kBurnCnt = 20_M;
 // constexpr static size_t kBurnCnt = 1_M;
 constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
@@ -69,8 +69,11 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
             send_msg->nid = nid;
 
             size_t sent = 0;
-            char buffer[config::umsg::kUserMessageSize *
-                        config::umsg::kRecvLimit];
+            std::vector<char> __buffer;
+            __buffer.resize(config::umsg::kUserMessageSize *
+                            config::umsg::kRecvLimit);
+            char *buffer = __buffer.data();
+
             int64_t token = kTokenNr;
             for (size_t t = 0; t < kBurnCnt; ++t)
             {
@@ -165,7 +168,10 @@ void server_burn_do(
 {
     auto tid = dsm->get_thread_id();
 
-    char buffer[config::umsg::kUserMessageSize * config::umsg::kRecvLimit];
+    std::vector<char> __buffer;
+    __buffer.resize(config::umsg::kUserMessageSize * config::umsg::kRecvLimit);
+    char *buffer = __buffer.data();
+
     auto *rdma_buf = dsm->get_rdma_buffer().buffer;
     memset(rdma_buf, 0, sizeof(RespMsg));
     size_t work_nr{0};
