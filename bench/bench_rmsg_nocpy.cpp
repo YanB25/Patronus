@@ -70,7 +70,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
 
             size_t sent = 0;
 
-            DSM::umsg_ptr_t recv_ptrs[1024];
+            DSM::msg_desc_t recv_ptrs[1024];
 
             int64_t token = kTokenNr;
             for (size_t t = 0; t < kBurnCnt; ++t)
@@ -93,7 +93,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                         // handle possbile recv token
                         for (size_t r = 0; r < recv_nr; ++r)
                         {
-                            void *msg_addr = (void *) recv_ptrs[r];
+                            void *msg_addr = (void *) recv_ptrs[r].msg_addr;
                             auto *recv_msg = (RespMsg *) msg_addr;
                             std::ignore = recv_msg;
                             VLOG(3) << "[wait] tid " << tid
@@ -169,10 +169,7 @@ void server_burn_do(
 {
     auto tid = dsm->get_thread_id();
 
-    // std::vector<char> __buffer;
-    // __buffer.resize(config::umsg::kUserMessageSize *
-    // config::umsg::kRecvLimit); char *buffer = __buffer.data();
-    DSM::umsg_ptr_t recv_ptrs[1024];
+    DSM::msg_desc_t recv_ptrs[1024];
 
     auto *rdma_buf = dsm->get_rdma_buffer().buffer;
     memset(rdma_buf, 0, sizeof(RespMsg));
@@ -190,7 +187,7 @@ void server_burn_do(
             work_nr++;
             // auto &msg =
             //     *(ReqMsg *) (buffer + config::umsg::kUserMessageSize * m);
-            auto &msg = *(ReqMsg *) recv_ptrs[m];
+            auto &msg = *(ReqMsg *) recv_ptrs[m].msg_addr;
             auto from_tid = msg.tid;
             DCHECK_LT(from_tid, kMaxAppThread);
             auto from_nid = msg.nid;

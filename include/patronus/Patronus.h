@@ -119,7 +119,7 @@ public:
     constexpr static uint64_t kDefaultHint = 0;
     constexpr static size_t kMaxSyncKey = 128;
 
-    using umsg_ptr_t = UnreliableConnection<kMaxAppThread>::ptr_t;
+    using msg_desc_t = UnreliableConnection<kMaxAppThread>::msg_desc_t;
 
     static pointer ins(const PatronusConfig &conf)
     {

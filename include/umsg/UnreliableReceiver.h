@@ -64,18 +64,22 @@ public:
      * @return size_t The number of messages actually received.
      */
     size_t try_recv(size_t i_ep_id, char *ibuf, size_t msg_limit = 1);
-    using ptr_t = uint64_t;
+    struct msg_desc_t
+    {
+        const char *msg_addr;
+        size_t msg_size;
+        size_t batch_id;
+    };
     size_t try_recv_no_cpy(size_t i_ep_id,
-                           ptr_t *ptr_buf,
+                           msg_desc_t *ptr_buf,
                            size_t msg_limit = 1);
-    void return_buf_no_cpy(size_t th_id, ptr_t *ptr_buf, size_t size)
+    void return_buf_no_cpy(size_t th_id, msg_desc_t *msg_descs, size_t size)
     {
         if constexpr (::config::umsg::kEnableNoCpySafeCheck)
         {
             for (size_t i = 0; i < size; ++i)
             {
-                auto buf_id = buffer_addr_to_buf_id((void *) ptr_buf[i]);
-                mark_buffer_not_used(th_id, buf_id);
+                mark_buffer_not_used(th_id, msg_descs[i].batch_id);
             }
         }
     }
@@ -84,7 +88,7 @@ public:
 
 private:
     void handle_wc(char *ibuf, const ibv_wc &wc);
-    void handle_wc_no_cpy(ptr_t *ret_ptr, const ibv_wc &wc);
+    void handle_wc_no_cpy(msg_desc_t *, const ibv_wc &wc);
     void fills(ibv_sge &sge, ibv_recv_wr &wr, size_t ep_id, size_t batch_id);
     size_t buffer_addr_to_buf_id(void *buf_addr)
     {
@@ -107,18 +111,16 @@ private:
         auto ret = buf_id % kPostRecvBufferBatch;
         return ret;
     }
-    void mark_buffer_in_used(size_t th_id, size_t buf_id)
+    void mark_buffer_in_used(size_t th_id, size_t batch_id)
     {
-        auto batch_id = buf_id_to_batch_id(buf_id);
         DCHECK_LT(th_id, batch_buffer_in_used_.size());
         DCHECK_LT(batch_id, batch_buffer_in_used_[th_id].size());
         batch_buffer_in_used_[th_id][batch_id]++;
         DCHECK_GE(batch_buffer_in_used_[th_id][batch_id], 0);
         DCHECK_LE(batch_buffer_in_used_[th_id][batch_id], kPostRecvBufferBatch);
     }
-    void mark_buffer_not_used(size_t th_id, size_t buf_id)
+    void mark_buffer_not_used(size_t th_id, size_t batch_id)
     {
-        auto batch_id = buf_id_to_batch_id(buf_id);
         DCHECK_LT(th_id, batch_buffer_in_used_.size());
         DCHECK_LT(batch_id, batch_buffer_in_used_[th_id].size());
         batch_buffer_in_used_[th_id][batch_id]--;
@@ -267,7 +269,7 @@ size_t UnreliableRecvMessageConnection<kEndpointNr>::try_recv(size_t ep_id,
 
 template <size_t kEndpointNr>
 size_t UnreliableRecvMessageConnection<kEndpointNr>::try_recv_no_cpy(
-    size_t ep_id, ptr_t *ptr_buf, size_t msg_limit)
+    size_t ep_id, msg_desc_t *msg_desc, size_t msg_limit)
 {
     DCHECK(inited_);
     msg_limit = std::min(msg_limit, kRecvLimit);
@@ -283,7 +285,7 @@ size_t UnreliableRecvMessageConnection<kEndpointNr>::try_recv_no_cpy(
 
     for (size_t i = 0; i < actually_polled; ++i)
     {
-        handle_wc_no_cpy(&ptr_buf[i], wc[i]);
+        handle_wc_no_cpy(&msg_desc[i], wc[i]);
     }
     return actually_polled;
 }
@@ -389,7 +391,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
 
 template <size_t kEndpointNr>
 void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc_no_cpy(
-    ptr_t *ret_ptr, const ibv_wc &wc)
+    msg_desc_t *msg_desc, const ibv_wc &wc)
 {
     if (unlikely(wc.status != IBV_WC_SUCCESS))
     {
@@ -410,22 +412,25 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc_no_cpy(
     size_t cur_idx = msg_recv_indexes_[th_id]++;
     auto actual_size = wc.imm_data;
 
-    if (likely(ret_ptr != nullptr))
+    if (likely(msg_desc != nullptr))
     {
         DCHECK_EQ(cur_idx % kRecvBuffer, buf_id)
-            << "I thought they are equal. in fact, I think the WRID "
+            << "I thought they are equal. In fact, I think the WRID "
                "information is ground truth";
 
         char *buf = (char *) msg_pool_ +
                     get_msg_pool_idx(th_id, buf_id) * kPostMessageSize;
         // add the header
         buf += 40;
-        // memcpy(ibuf, buf, actual_size);
-        (*ret_ptr) = (ptr_t) buf;
+
+        msg_desc->msg_addr = buf;
+        msg_desc->msg_size = actual_size;
 
         if constexpr (::config::umsg::kEnableNoCpySafeCheck)
         {
-            mark_buffer_in_used(th_id, buf_id);
+            auto batch_id = buf_id_to_batch_id(buf_id);
+            msg_desc->batch_id = batch_id;
+            mark_buffer_in_used(th_id, batch_id);
         }
 
         DVLOG(3) << "[umsg] Recved msg size " << actual_size << " from ep_id "

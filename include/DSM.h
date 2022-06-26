@@ -606,14 +606,14 @@ public:
     {
         return umsg_->try_recv(get_thread_id(), ibuf, limit);
     }
-    using umsg_ptr_t = UnreliableConnection<kMaxAppThread>::ptr_t;
-    size_t unreliable_try_recv_no_cpy(umsg_ptr_t *ptr_buf, size_t limit = 1)
+    using msg_desc_t = UnreliableConnection<kMaxAppThread>::msg_desc_t;
+    size_t unreliable_try_recv_no_cpy(msg_desc_t *msg_descs, size_t limit = 1)
     {
-        return umsg_->try_recv_no_cpy(get_thread_id(), ptr_buf, limit);
+        return umsg_->try_recv_no_cpy(get_thread_id(), msg_descs, limit);
     }
-    void return_buf_no_cpy(umsg_ptr_t *ptr_buf, size_t size)
+    void return_buf_no_cpy(msg_desc_t *msg_descs, size_t size)
     {
-        return umsg_->return_buf_no_cpy(get_thread_id(), ptr_buf, size);
+        return umsg_->return_buf_no_cpy(get_thread_id(), msg_descs, size);
     }
     void unreliable_recv(char *ibuf, size_t limit = 1)
     {

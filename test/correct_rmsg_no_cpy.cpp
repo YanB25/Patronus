@@ -61,7 +61,7 @@ void client_varsize_correct(std::shared_ptr<DSM> dsm, size_t dir_id)
     auto tid = dsm->get_thread_id();
     auto *buf = dsm->get_rdma_buffer().buffer;
     // char recv_buf[1024];
-    DSM::umsg_ptr_t ptr_buf[1024];
+    DSM::msg_desc_t ptr_buf[1024];
     auto server_nid = ::config::get_server_nids().front();
 
     auto &bench_msg = *(BenchMessage *) buf;
@@ -88,7 +88,8 @@ void client_varsize_correct(std::shared_ptr<DSM> dsm, size_t dir_id)
             }
         }
         CHECK_EQ(get, 1);
-        auto &recv_msg = *(BenchMessage *) ptr_buf[0];
+        auto &recv_msg = *(BenchMessage *) ptr_buf[0].msg_addr;
+        CHECK_EQ(ptr_buf[0].msg_size, sizeof(BenchMessage));
         CHECK_EQ(memcmp(&recv_msg, &bench_msg, sizeof(BenchMessage)), 0)
             << "RecvMessage: " << std::endl
             << util::Hexdump(&recv_msg, sizeof(BenchMessage)) << std::endl
@@ -103,7 +104,7 @@ void server_varsize_correct(std::shared_ptr<DSM> dsm)
     auto tid = dsm->get_thread_id();
     LOG(INFO) << "[bench] started server_varsize_correct(). tid: " << tid;
     // char recv_buf[1024];
-    DSM::umsg_ptr_t recv_ptr[1024];
+    DSM::msg_desc_t recv_ptr[1024];
     auto *buf = dsm->get_rdma_buffer().buffer;
     for (size_t i = 0; i < kPingpoingCnt * ::config::get_client_nids().size();
          ++i)
@@ -119,7 +120,7 @@ void server_varsize_correct(std::shared_ptr<DSM> dsm)
         }
         CHECK_EQ(get, 1);
         DVLOG(1) << "[bench] server received " << i << "-th message";
-        auto &msg = *(BenchMessage *) recv_ptr[0];
+        auto &msg = *(BenchMessage *) recv_ptr[0].msg_addr;
         check_valid(msg);
         auto from_tid = msg.from_tid;
         auto from_nid = msg.from_node;
@@ -136,11 +137,7 @@ void server_multithread_do(DSM::pointer dsm,
 {
     auto tid = dsm->get_thread_id();
 
-    // char buffer[102400];
-    // std::vector<char> __buffer;
-    // __buffer.resize(config::umsg::kUserMessageSize *
-    // config::umsg::kRecvLimit); char *buffer = __buffer.data();
-    DSM::umsg_ptr_t recv_ptrs[64];
+    DSM::msg_desc_t recv_ptrs[64];
 
     auto *rdma_buf = dsm->get_rdma_buffer().buffer;
 
@@ -153,7 +150,7 @@ void server_multithread_do(DSM::pointer dsm,
 
         for (size_t i = 0; i < get; ++i)
         {
-            auto *recv_msg = (BenchMessage *) (recv_ptrs[i]);
+            auto *recv_msg = (BenchMessage *) (recv_ptrs[i].msg_addr);
             check_valid(*recv_msg);
             auto from_tid = recv_msg->from_tid;
             auto from_nid = recv_msg->from_node;
