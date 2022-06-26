@@ -333,7 +333,7 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     // the init here is okay, because
     // get, put and del only trigger cache-update on neccessity.
     // No duplicated cache-update exists.
-    prhh->init();
+    // prhh->init();
     return prhh;
 }
 
@@ -462,13 +462,15 @@ void test_basic_client_worker(
 
     auto rhh = gen_rdma_rhh<kE, kB, kS>(
         p, dir_id, rhh_conf, auto_expand, meta_gaddr, &ctx);
+    rhh->init();
     while (ex.get_private_data().thread_remain_task > 0)
     {
         bench_conf.kv_g->gen_key(&key[0], sizeof(uint64_t));
 
         if (bench_conf.is_loading)
         {
-            auto trace = tm.trace("load");
+            // auto trace = tm.trace("load");
+            auto trace = util::nulltrace;
             trace.set("tid", std::to_string(tid));
             trace.set("coro_id", std::to_string(coro_id));
             trace.set("k", key);
@@ -487,20 +489,24 @@ void test_basic_client_worker(
             {
                 op_timer.pin();
             }
+            auto trace = tm.trace("life");
 
             rhh = gen_rdma_rhh<kE, kB, kS>(
                 p, dir_id, rhh_conf, auto_expand, meta_gaddr, &ctx);
+            rhh->init(trace.child("init"));
             for (size_t i = 0; i < bench_conf.io_nr; ++i)
             {
                 if (true_with_prob(insert_prob))
                 {
                     // insert
-                    auto trace = tm.trace("put");
-                    trace.set("tid", std::to_string(tid));
-                    trace.set("coro_id", std::to_string(coro_id));
-                    trace.set("k", key);
-                    trace.set("v", value);
-                    auto rc = rhh->put(key, value, trace);
+                    // auto trace = tm.trace("put");
+                    // trace.set("tid", std::to_string(tid));
+                    // trace.set("coro_id", std::to_string(coro_id));
+                    // trace.set("k", key);
+                    // trace.set("v", value);
+
+                    auto rc = rhh->put(
+                        key, value, trace.child("put-" + std::to_string(i)));
 
                     ins_succ_nr += rc == kOk;
                     ins_retry_nr += rc == kRetry;
@@ -509,12 +515,12 @@ void test_basic_client_worker(
                     DCHECK(rc == kOk || rc == kRetry || rc == kNoMem ||
                            rc == kRdmaProtectionErr)
                         << "** unexpected rc:" << rc;
-                    LOG_IF(INFO, trace.enabled()) << trace;
                 }
                 else if (true_with_prob(delete_prob))
                 {
                     // delete
-                    auto rc = rhh->del(key);
+                    auto rc =
+                        rhh->del(key, trace.child("del-" + std::to_string(i)));
                     del_succ_nr += rc == kOk;
                     del_retry_nr += rc == kRetry;
                     del_not_found_nr += rc == kNotFound;
@@ -527,7 +533,9 @@ void test_basic_client_worker(
                 {
                     // get
                     std::string got_value;
-                    auto rc = rhh->get(key, got_value);
+                    auto rc = rhh->get(key,
+                                       got_value,
+                                       trace.child("get-" + std::to_string(i)));
                     get_succ_nr += rc == kOk;
                     get_not_found_nr += rc == kNotFound;
                     rdma_protection_nr += rc == kRdmaProtectionErr;
@@ -537,12 +545,17 @@ void test_basic_client_worker(
                 }
             }
 
+            rhh->deinit(trace.child("dtor"));
+            rhh.reset();
+
             if (should_report_latency)
             {
                 lat_m.collect(timer.pin());
             }
             executed_nr++;
             ex.get_private_data().thread_remain_task--;
+
+            LOG_IF(INFO, trace.enabled()) << trace;
         }
     }
     auto ns = timer.pin();
@@ -556,7 +569,7 @@ void test_basic_client_worker(
     comm.del_succ_nr += del_succ_nr;
     comm.rdma_protection_nr += rdma_protection_nr;
 
-    VLOG(1) << "[bench] insert: succ: " << ins_succ_nr
+    VLOG(1) << "[detail] insert: succ: " << ins_succ_nr
             << ", retry: " << ins_retry_nr << ", nomem: " << ins_nomem_nr
             << ", del: succ: " << del_succ_nr << ", retry: " << del_retry_nr
             << ", not found: " << del_not_found_nr
@@ -727,7 +740,7 @@ void benchmark_client(Patronus::pointer p,
     double ops = 1e9 * actual_test_nr / ns;
     double avg_ns = 1.0 * ns / actual_test_nr;
     LOG_IF(INFO, is_master)
-        << "[bench] total op: " << actual_test_nr << ", ns: " << ns
+        << "[detail] total op: " << actual_test_nr << ", ns: " << ns
         << ", ops: " << ops << ", avg " << avg_ns << " ns";
 
     if (is_master && server_should_leave)
@@ -830,7 +843,7 @@ void benchmark_server(Patronus::pointer p,
     {
         p->finished(key);
         rh = gen_rdma_rh<kE, kB, kS>(p, initial_subtable);
-        LOG(INFO) << "[bench] rh: " << pre_rh_explain(*rh);
+        LOG(INFO) << "[explain] rh: " << pre_rh_explain(*rh);
     }
     // wait for everybody to finish preparing
     bar.wait();
@@ -856,7 +869,10 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     // for (size_t kvblock_expect_size : {64})
     for (size_t kvblock_expect_size : {4_KB})
     {
-        for (size_t alloc_batch : {1})
+        // alloc_batch > 1 has great performance boost against no-batch
+        // but alloc_batch = {2, 4, 8, ...} has marginal performance impact
+        // for (size_t alloc_batch : {1, 4})
+        for (size_t alloc_batch : {4})
         {
             rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
                 "unprot",
@@ -869,39 +885,43 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                     kvblock_expect_size,
                     alloc_batch,
                     true /* mock kvblock match */));
-            // rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected_debug(
-            //     "debug",
+
+            // rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
+            //     "mr",
             //     kvblock_expect_size,
-            //     1 /* no batch */,
+            //     alloc_batch,
             //     true /* mock kvblock match */));
 
-            // rhh_configs.push_back(
-            //     RaceHashingConfigFactory::get_mw_protected_with_timeout(
-            //         "patronus-lease", kvblock_expect_size));
-            // rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
-            //     "mr", kvblock_expect_size, 1 /* no batch */));
+            rhh_configs.push_back(RaceHashingConfigFactory::get_rpc(
+                "rpc",
+                kvblock_expect_size,
+                alloc_batch,
+                true /* mock kvblock match */));
         }
     }
 
     for (const auto &rhh_conf : rhh_configs)
     {
         // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-        for (size_t thread_nr : {16})
+        for (size_t thread_nr : {1, 8, 16, 32})
         {
-            for (size_t io_nr : {1, 8, 16})
+            // for (size_t io_nr : {1, 8, 16})
+            for (size_t io_nr : {8})
             {
                 constexpr static size_t kCoroNr = 1;
                 LOG_IF(INFO, is_master)
-                    << "[bench] benching multiple threads for " << rhh_conf;
+                    << "[config] benching multiple threads for " << rhh_conf;
                 constexpr size_t capacity =
                     RaceHashing<4, 16, 16>::max_capacity();
 
                 {
+                    size_t test_nr =
+                        10_K * io_nr * std::min(thread_nr, (size_t) 4);
                     key++;
                     auto ro_conf = BenchConfigFactory::get_read_only_config(
                         "RO",
                         capacity,
-                        1_M,
+                        test_nr,
                         thread_nr,
                         kCoroNr,
                         io_nr,
@@ -925,12 +945,14 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                     }
                 }
                 {
+                    size_t test_nr =
+                        2_K * io_nr * std::min(thread_nr, (size_t) 4);
                     key++;
                     auto wo_conf = BenchConfigFactory::get_write_only_config(
                         "WO",
                         capacity,
                         // 1_M,
-                        100_K,
+                        test_nr,
                         thread_nr,
                         kCoroNr,
                         io_nr,
@@ -993,7 +1015,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
         //         // for (size_t coro_nr : {1})
         //         {
         //             LOG_IF(INFO, is_master)
-        //                 << "[bench] benching multiple threads for " <<
+        //                 << "[config] benching multiple threads for " <<
         //                 rhh_conf;
         //             constexpr size_t capacity =
         //                 RaceHashing<4, 16, 16>::max_capacity();
@@ -1058,7 +1080,7 @@ int main(int argc, char *argv[])
         patronus->registerServerThread();
     }
 
-    LOG(INFO) << "[bench] " << pre_patronus_explain(*patronus);
+    LOG(INFO) << "[explain] " << pre_patronus_explain(*patronus);
 
     if (is_client)
     {

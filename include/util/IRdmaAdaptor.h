@@ -92,7 +92,7 @@ struct MemHandleDecision
         validate(ac_invalid, rel_invalid);
 
         acquire_flag |= (flag_t) AcquireRequestFlag::kNoRpc;
-        relinquish_flag |= (flag_t) AcquireRequestFlag::kNoRpc;
+        relinquish_flag |= (flag_t) LeaseModifyFlag::kNoRpc;
         return *this;
     }
     MemHandleDecision &no_bind_any()

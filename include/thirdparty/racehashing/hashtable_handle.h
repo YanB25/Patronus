@@ -90,42 +90,7 @@ public:
     }
     ~RaceHashingHandleImpl()
     {
-        // LOG(INFO) << "[debug] !! debug_fp_conflict_m: " <<
-        // debug_fp_conflict_m_;
-        // LOG(INFO) << "[debug] !! debug_fp_miss_m: " << debug_fp_miss_m_;
-
-        const auto &c = conf_.meta.d;
-        if (directory_mem_handle_.valid())
-        {
-            rdma_adpt_->relinquish_perm(
-                directory_mem_handle_, c.alloc_hint, c.relinquish_flag);
-        }
-        for (auto &handle : subtable_mem_handles_)
-        {
-            if (handle.valid())
-            {
-                rdma_adpt_->relinquish_perm(
-                    handle, c.alloc_hint, c.relinquish_flag);
-            }
-        }
-        if (fake_handle_.valid())
-        {
-            relinquish_fake_handle(fake_handle_);
-        }
-        if (kvblock_region_handle_.valid())
-        {
-            const auto &c = conf_.kvblock_region.value();
-            rdma_adpt_->relinquish_perm(
-                kvblock_region_handle_, c.alloc_hint, c.relinquish_flag);
-        }
-
-        end_read_kvblock();
-        if (to_insert_block.handle_.valid())
-        {
-            const auto &c = conf_.alloc_kvblock;
-            rdma_adpt_->relinquish_perm(
-                to_insert_block.handle_, c.alloc_hint, c.relinquish_flag);
-        }
+        deinit();
     }
     constexpr static size_t meta_size()
     {
@@ -154,6 +119,52 @@ public:
         }
 
         inited_ = true;
+        trace.pin("Finished");
+    }
+    void deinit(util::TraceView trace = util::nulltrace)
+    {
+        // LOG(INFO) << "[debug] !! debug_fp_conflict_m: " <<
+        // debug_fp_conflict_m_;
+        // LOG(INFO) << "[debug] !! debug_fp_miss_m: " << debug_fp_miss_m_;
+
+        const auto &c = conf_.meta.d;
+        if (directory_mem_handle_.valid())
+        {
+            rdma_adpt_->relinquish_perm(
+                directory_mem_handle_, c.alloc_hint, c.relinquish_flag);
+        }
+        trace.pin("rel directory_mem_handle");
+        for (auto &handle : subtable_mem_handles_)
+        {
+            if (handle.valid())
+            {
+                rdma_adpt_->relinquish_perm(
+                    handle, c.alloc_hint, c.relinquish_flag);
+                trace.pin("rel subtable_handle");
+            }
+        }
+        if (fake_handle_.valid())
+        {
+            relinquish_fake_handle(fake_handle_);
+            trace.pin("rel fake handle");
+        }
+        if (kvblock_region_handle_.valid())
+        {
+            const auto &c = conf_.kvblock_region.value();
+            rdma_adpt_->relinquish_perm(
+                kvblock_region_handle_, c.alloc_hint, c.relinquish_flag);
+            trace.pin("rel kvblock handle");
+        }
+
+        end_read_kvblock();
+        trace.pin("end_read_kvblock");
+        if (to_insert_block.handle_.valid())
+        {
+            const auto &c = conf_.alloc_kvblock;
+            rdma_adpt_->relinquish_perm(
+                to_insert_block.handle_, c.alloc_hint, c.relinquish_flag);
+            trace.pin("rel to_insert_block");
+        }
         trace.pin("Finished");
     }
     void eager_init_subtable_mem_handle()
@@ -467,6 +478,7 @@ public:
         if (rc == RC::kOk)
         {
             consume_kv_block();
+            trace.pin("consume kv block");
             return rc;
         }
         // retry soo many times but still failed by do_put_loop
@@ -1438,6 +1450,7 @@ public:
             << " (subtable) by gd(may stale): " << gd()
             << ". fp: " << pre_fp(fp) << ", cached_ld: " << ld;
         auto st = subtable_handle(rounded_m);
+        trace.pin("subtable handle");
 
         DCHECK_EQ(kv_block.nodeID, 0)
             << "The gaddr we got here should have been transformed: the upper "
@@ -1446,7 +1459,7 @@ public:
 
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
         rdma_adpt_->commit().expect(RC::kOk);
-        trace.pin("p1.get_two_combined_bucket_handle");
+        trace.pin("fetched combined bucket");
 
         DLOG_IF(INFO, config::kEnableMemoryDebug)
             << "[race][mem] allocated kv_block gaddr: " << kv_block
@@ -1518,6 +1531,7 @@ public:
             {
                 DCHECK(rc == kCacheStale || rc == kRdmaProtectionErr)
                     << "** unexpected rc: " << rc;
+                trace.pin("CacheStale");
                 return rc;
             }
             auto poll_slot_idx = fast_pseudo_rand_int(1, kSlotNr - 1);
@@ -1539,6 +1553,7 @@ public:
                                                trace);
                     if (rc == kOk)
                     {
+                        trace.pin("OK");
                         return kOk;
                     }
                     DCHECK_EQ(rc, kRetry);
@@ -1652,6 +1667,7 @@ public:
 
             auto &kvblock_handle =
                 begin_read_kvblock(remote_kvblock_addr, actual_size);
+            trace.pin("begin read kvblock");
 
             CHECK_EQ(rdma_adpt_->rdma_read((char *) rdma_buffer.buffer,
                                            remote_kvblock_addr,
@@ -1665,15 +1681,11 @@ public:
                               (KVBlock *) rdma_buffer.buffer));
         }
 
-        auto ret = rdma_adpt_->commit();
-        // no matter what happened, should end_read_kvblock.
-        if (unlikely(ret == kRdmaProtectionErr))
-        {
-            end_read_kvblock();
-            return ret;
-        }
-        CHECK_EQ(ret, kOk);
+        rdma_adpt_->commit().expect(RC::kOk);
+        trace.pin("read kvblock");
+
         end_read_kvblock();
+        trace.pin("end read kvblock");
 
         RetCode rc = kNotFound;
         for (const auto &[slot_handle, kvblock_handle] : slots_rdma_buffers)
@@ -1727,12 +1739,13 @@ public:
                  << rounded_m << " by cached_gd: " << cached_gd
                  << ". fp: " << pre_fp(fp);
         auto st = subtable_handle(rounded_m);
+        trace.pin("get subtable");
 
         // get the two combined buckets the same time
         // validate staleness at the same time
         auto cbs = st.get_two_combined_bucket_handle(h1, h2, *rdma_adpt_);
         rdma_adpt_->commit().expect(RC::kOk);
-        trace.pin("get_two_combined_bucket_handle");
+        trace.pin("get combined bucket");
 
         std::unordered_set<SlotHandle> slot_handles;
         auto rc = cbs.locate(fp, cached_ld(rounded_m), m, slot_handles, trace);
@@ -1801,12 +1814,8 @@ public:
                                         0 /* flag */,
                                         st_mem_handle),
                      kOk);
-            auto ret = rdma_adpt.commit();
-            if (unlikely(ret == kRdmaProtectionErr))
-            {
-                return ret;
-            }
-            CHECK_EQ(ret, kOk);
+            rdma_adpt.commit().expect(RC::kOk);
+            trace.pin("CAS");
             bool success =
                 memcmp(rdma_buf.buffer, (char *) &expect_val, 8) == 0;
             expect_val = *(uint64_t *) rdma_buf.buffer;
@@ -1826,6 +1835,7 @@ public:
                                 "with kvblock_handle:"
                              << kvblock_handle << ". New_slot " << new_slot;
                     do_free_kvblock(kvblock_remote_mem);
+                    trace.pin("free block");
                 }
                 DLOG_IF(INFO, config::kEnableDebug)
                     << "[race][subtable] slot " << slot_handle << " update to "
@@ -2186,6 +2196,11 @@ public:
     void init(util::TraceView trace = util::nulltrace)
     {
         rhh_.init(trace);
+        rdma_adpt_->put_all_rdma_buffer();
+    }
+    void deinit(util::TraceView trace = util::nulltrace)
+    {
+        rhh_.deinit(trace);
         rdma_adpt_->put_all_rdma_buffer();
     }
 

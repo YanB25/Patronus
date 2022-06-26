@@ -44,6 +44,7 @@ struct RaceHashingHandleConfig
     std::string name;
     size_t kvblock_expect_size{64};
     bool bypass_prot{false};
+    bool use_rpc{false};
 
     // If this flag is on, we always assume FP matches => actually matches.
     // The actual content of kv blocks is ignored.
@@ -80,7 +81,8 @@ inline std::ostream &operator<<(std::ostream &os,
     }
     os << "subtable_hint: " << conf.subtable_hint
        << ", kvblock_expect_size: " << conf.kvblock_expect_size
-       << ", bypass_prot: " << conf.bypass_prot << "}";
+       << ", bypass_prot: " << conf.bypass_prot << ", use_rpc: " << conf.use_rpc
+       << "}";
     return os;
 }
 
@@ -149,6 +151,20 @@ public:
             MemHandleDecision().use_mw().wo_expire().no_bind_pr();
         return c;
     }
+
+    static RaceHashingHandleConfig get_rpc(const std::string &name,
+                                           size_t kvblock_expect_size,
+                                           size_t alloc_batch,
+                                           bool force_kvblock_to_match)
+    {
+        CHECK(false)
+            << "RPC: requires RPC to support read/write 4KB buffer. TODO:";
+        auto c = get_unprotected(
+            name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
+        c.use_rpc = true;
+        return c;
+    }
+
     static RaceHashingHandleConfig get_mw_protected_expand_fault_tolerance(
         const std::string &name,
         size_t kvblock_size,
