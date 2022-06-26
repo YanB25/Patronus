@@ -26,6 +26,7 @@ constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 constexpr static size_t kClientThreadNr = 32;
 constexpr static size_t kMaxCoroNr = 16;
 constexpr static uint64_t kMaxKey = 10_K;
+constexpr static size_t kMatchAllocBatch = 16;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -33,6 +34,7 @@ std::vector<std::string> col_idx;
 std::vector<std::string> col_x_kvdist;
 std::vector<size_t> col_x_thread_nr;
 std::vector<size_t> col_x_coro_nr;
+std::vector<size_t> col_x_alloc_batch;
 std::vector<double> col_x_put_rate;
 std::vector<double> col_x_del_rate;
 std::vector<double> col_x_get_rate;
@@ -419,7 +421,7 @@ void init_allocator(Patronus::pointer p,
         rh_buffer.buffer + tid * thread_kvblock_pool_size;
 
     mem::SlabAllocatorConfig kvblock_slab_config;
-    kvblock_slab_config.block_class = {kvblock_expect_size};
+    kvblock_slab_config.block_class = {kvblock_expect_size * kMatchAllocBatch};
     kvblock_slab_config.block_ratio = {1.0};
     kvblock_slab_config.enable_recycle = true;
     auto kvblock_allocator =
@@ -796,6 +798,7 @@ void benchmark_client(Patronus::pointer p,
         col_x_put_rate.push_back(bench_conf.insert_prob);
         col_x_del_rate.push_back(bench_conf.delete_prob);
         col_x_get_rate.push_back(bench_conf.get_prob);
+        col_x_alloc_batch.push_back(rhh_conf.alloc_batch);
         col_test_op_nr.push_back(actual_test_nr);
         col_ns.push_back(ns);
 
@@ -904,35 +907,38 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     // for (size_t kvblock_expect_size : {64})
     for (size_t kvblock_expect_size : {4_KB})
     {
-        rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
-            "unprot",
-            kvblock_expect_size,
-            1 /* no batching */,
-            true /* mock kvblock match */));
-        rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected(
-            "patronus",
-            kvblock_expect_size,
-            1 /* no batch */,
-            true /* mock kvblock match */));
-        rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected_debug(
-            "debug",
-            kvblock_expect_size,
-            1 /* no batch */,
-            true /* mock kvblock match */));
+        for (size_t alloc_batch : {1, 2, 4})
+        {
+            rhh_configs.push_back(RaceHashingConfigFactory::get_unprotected(
+                "unprot",
+                kvblock_expect_size,
+                alloc_batch,
+                true /* mock kvblock match */));
+            rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected(
+                "patronus",
+                kvblock_expect_size,
+                alloc_batch,
+                true /* mock kvblock match */));
+            // rhh_configs.push_back(RaceHashingConfigFactory::get_mw_protected_debug(
+            //     "debug",
+            //     kvblock_expect_size,
+            //     1 /* no batch */,
+            //     true /* mock kvblock match */));
 
-        // rhh_configs.push_back(
-        //     RaceHashingConfigFactory::get_mw_protected_with_timeout(
-        //         "patronus-lease", kvblock_expect_size));
-        // rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
-        //     "mr", kvblock_expect_size, 1 /* no batch */));
+            // rhh_configs.push_back(
+            //     RaceHashingConfigFactory::get_mw_protected_with_timeout(
+            //         "patronus-lease", kvblock_expect_size));
+            // rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
+            //     "mr", kvblock_expect_size, 1 /* no batch */));
+        }
     }
 
     for (const auto &rhh_conf : rhh_configs)
     {
-        // for (size_t thread_nr : {16})
+        for (size_t thread_nr : {16})
         // for (size_t thread_nr : {8, 16})
         // for (size_t thread_nr : {1, 4, 8, 16})
-        for (size_t thread_nr : {1, 4, 16})
+        // for (size_t thread_nr : {1, 4, 16})
         // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
         // for (size_t thread_nr : {1, 32})
         {
@@ -941,47 +947,19 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 << "[bench] benching multiple threads for " << rhh_conf;
             constexpr size_t capacity = RaceHashing<4, 16, 16>::max_capacity();
 
-            {
-                key++;
-                auto ro_conf = BenchConfigFactory::get_read_only_config(
-                    "RO",
-                    capacity,
-                    1_M,
-                    thread_nr,
-                    kCoroNr,
-                    4 /* initial_subtable_nr */,
-                    rhh_conf.kvblock_expect_size);
-                if (is_client)
-                {
-                    for (const auto &bench_conf : ro_conf)
-                    {
-                        bench_conf.validate();
-                        LOG_IF(INFO, is_master)
-                            << "[sub-conf] running conf: " << bench_conf;
-                        benchmark_client<4, 16, 16>(
-                            p, bar, is_master, bench_conf, rhh_conf, key);
-                    }
-                }
-                else
-                {
-                    benchmark_server<4, 16, 16>(
-                        p, bar, is_master, ro_conf, key);
-                }
-            }
             // {
             //     key++;
-            //     auto wo_conf = BenchConfigFactory::get_write_only_config(
-            //         "WO",
+            //     auto ro_conf = BenchConfigFactory::get_read_only_config(
+            //         "RO",
             //         capacity,
-            //         // 1_M,
-            //         100_K,
+            //         1_M,
             //         thread_nr,
             //         kCoroNr,
             //         4 /* initial_subtable_nr */,
             //         rhh_conf.kvblock_expect_size);
             //     if (is_client)
             //     {
-            //         for (const auto &bench_conf : wo_conf)
+            //         for (const auto &bench_conf : ro_conf)
             //         {
             //             bench_conf.validate();
             //             LOG_IF(INFO, is_master)
@@ -993,9 +971,37 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
             //     else
             //     {
             //         benchmark_server<4, 16, 16>(
-            //             p, bar, is_master, wo_conf, key);
+            //             p, bar, is_master, ro_conf, key);
             //     }
             // }
+            {
+                key++;
+                auto wo_conf = BenchConfigFactory::get_write_only_config(
+                    "WO",
+                    capacity,
+                    // 1_M,
+                    100_K,
+                    thread_nr,
+                    kCoroNr,
+                    4 /* initial_subtable_nr */,
+                    rhh_conf.kvblock_expect_size);
+                if (is_client)
+                {
+                    for (const auto &bench_conf : wo_conf)
+                    {
+                        bench_conf.validate();
+                        LOG_IF(INFO, is_master)
+                            << "[sub-conf] running conf: " << bench_conf;
+                        benchmark_client<4, 16, 16>(
+                            p, bar, is_master, bench_conf, rhh_conf, key);
+                    }
+                }
+                else
+                {
+                    benchmark_server<4, 16, 16>(
+                        p, bar, is_master, wo_conf, key);
+                }
+            }
             // {
             //     key++;
             //     auto wo_conf = BenchConfigFactory::get_rw_config(
@@ -1148,6 +1154,7 @@ int main(int argc, char *argv[])
         df.load_column<std::string>("x_kv_dist", std::move(col_x_kvdist));
         df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
         df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
+        df.load_column<size_t>("x_alloc_batch", std::move(col_x_alloc_batch));
         df.load_column<double>("x_put_rate", std::move(col_x_put_rate));
         df.load_column<double>("x_del_rate", std::move(col_x_del_rate));
         df.load_column<double>("x_get_rate", std::move(col_x_get_rate));

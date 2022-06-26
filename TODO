@@ -303,8 +303,9 @@ will see an unexpected cases:
         - recyclic allocator
         - modify how handle determines whether a kvblock matches. e.g., force one of them to match
     - Get the basic result of RW, RO and WO, for regular eval and mortgage eval
-    - implement batch allocation of insert/updates
+    [-] implement batch allocation of insert/updates
     [-] implement one huge RO handle for get operation
+    - Implement free: includes RPC but do nothing. In this case, performance is closer to the real case.
     - See if performance gets better
     - bench_race_rdma_mortgage supposes to use global kv block for the binding. Modify to make it do so.
     - Try to run Lease eval. Make it works and see if performance gets better.

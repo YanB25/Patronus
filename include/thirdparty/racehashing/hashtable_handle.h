@@ -325,6 +325,26 @@ public:
         };
         return for_the_real_match_do(slot_handles, key, f, trace);
     }
+    GlobalAddress to_insert_block_gaddr() const
+    {
+        DCHECK(!to_insert_block.gaddrs_.empty());
+        return to_insert_block.gaddrs_.front();
+    }
+    RemoteMemHandle &to_insert_block_handle()
+    {
+        DCHECK(to_insert_block.handle_.valid());
+        return to_insert_block.handle_;
+    }
+    size_t to_insert_block_kvblock_size()
+    {
+        DCHECK_GT(to_insert_block.cur_kvblock_size_, 0);
+        return to_insert_block.cur_kvblock_size_;
+    }
+    size_t to_insert_block_tagged_len()
+    {
+        DCHECK_GT(to_insert_block.cur_tagged_len_, 0);
+        return to_insert_block.cur_tagged_len_;
+    }
 
     RetCode do_put_once(const Key &key,
                         uint64_t hash,
@@ -339,10 +359,10 @@ public:
         auto rounded_m = round_to_bits(m, cached_gd);
         auto ld = cached_ld(rounded_m);
 
-        DCHECK(to_insert_block.gaddr_.has_value());
+        DCHECK(has_to_insert_block());
         auto rc = put_phase_one(key,
-                                to_insert_block.gaddr_.value(),
-                                to_insert_block.tagged_len_,
+                                to_insert_block_gaddr(),
+                                to_insert_block_tagged_len(),
                                 hash,
                                 trace.child("put_phase_one"));
         if (rc != kOk)
@@ -448,20 +468,20 @@ public:
     {
         // NOTE: the prepare_alloc_kv is optional (if already exist allocated
         // one)
-        if (unlikely(!to_insert_block.gaddr_.has_value()))
+        if (unlikely(!has_to_insert_block()))
         {
             // need allocation
             prepare_alloc_kv(key, value).expect(RC::kOk);
         }
-        DCHECK(to_insert_block.gaddr_.has_value());
+        DCHECK(has_to_insert_block());
         // NOTE: the prepare_write_kv is doing once for each put request
         auto hash = hash_impl(key.data(), key.size());
         prepare_write_kv(key,
                          value,
                          hash,
-                         to_insert_block.gaddr_.value(),
-                         to_insert_block.kvblock_size_,
-                         to_insert_block.handle_,
+                         to_insert_block_gaddr(),
+                         to_insert_block_kvblock_size(),
+                         to_insert_block_handle(),
                          *rdma_adpt_,
                          trace)
             .expect(RC::kOk);
@@ -1553,10 +1573,14 @@ public:
         }
         return kNoMem;
     }
+    bool has_to_insert_block() const
+    {
+        return !to_insert_block.gaddrs_.empty();
+    }
     RetCode prepare_alloc_kv(const Key &key, const Value &value)
     {
         auto rc = RC::kOk;
-        if (to_insert_block.gaddr_.has_value())
+        if (has_to_insert_block())
         {
             return rc;
         }
@@ -1572,22 +1596,18 @@ public:
             << conf_.kvblock_expect_size << ". tag_ptr_len: " << tag_ptr_len
             << ", convert back to " << kvblock_size << ". Possible overflow";
 
-        to_insert_block.kvblock_size_ = kvblock_size;
-        DCHECK_GE(
-            std::numeric_limits<decltype(to_insert_block.tagged_len_)>::max(),
-            tag_ptr_len);
-        to_insert_block.tagged_len_ = tag_ptr_len;
+        to_insert_block.cur_kvblock_size_ = kvblock_size;
+        DCHECK_GE(std::numeric_limits<decltype(
+                      to_insert_block.cur_tagged_len_)>::max(),
+                  tag_ptr_len);
+        to_insert_block.cur_tagged_len_ = tag_ptr_len;
         return begin_insert_kvblock(kvblock_size);
     }
     RetCode consume_kv_block()
     {
-        to_insert_block.tagged_len_ = 0;
-        to_insert_block.kvblock_size_ = 0;
-        if (to_insert_block.gaddr_.has_value())
-        {
-            to_insert_block.gaddr_ = std::nullopt;
-        }
-        if (to_insert_block.handle_.valid())
+        DCHECK(!to_insert_block.gaddrs_.empty());
+        to_insert_block.gaddrs_.pop();
+        if (to_insert_block.gaddrs_.empty())
         {
             const auto &c = conf_.alloc_kvblock;
             rdma_adpt_->relinquish_perm(
@@ -2008,46 +2028,38 @@ private:
         read_kvblock_handles_.clear();
     }
 
-    struct
+    struct ToInsertBlock
     {
         std::optional<GlobalAddress> gaddr_;
         RemoteMemHandle handle_;
         uint8_t tagged_len_;
         size_t kvblock_size_;
-    } to_insert_block;
-    RetCode begin_insert_kvblock(size_t alloc_size)
+    };
+    struct
     {
-        return begin_insert_kvblock_nobatch(alloc_size);
-    }
+        std::queue<GlobalAddress> gaddrs_;
+        RemoteMemHandle handle_;
+        uint8_t cur_tagged_len_;
+        size_t cur_kvblock_size_;
+
+    } to_insert_block;
 
     RemoteMemHandle insert_kvblock_batch_handle_;
     GlobalAddress insert_kvblock_batch_gaddr_;
     size_t alloc_idx_{0};
-    GlobalAddress begin_insert_kvblock_batch(size_t alloc_size,
-                                             size_t batch_size)
-    {
-        CHECK(false)
-            << "TODO: a little bit complicated. will finish later. alloc_size "
-            << alloc_size << ", batch: " << batch_size;
-    }
-    void end_insert_kvblock_batch(size_t batch_size)
-    {
-        CHECK(false)
-            << "TODO: a little bit complicated. will finish later. batch: "
-            << batch_size;
-    }
 
     // insert no batch
     size_t begin_insert_nr_{0};
     size_t end_insert_nr_{0};
     size_t free_insert_nr_{0};
-    RetCode begin_insert_kvblock_nobatch(size_t alloc_size)
+    RetCode begin_insert_kvblock(size_t alloc_size)
     {
         const auto &c = conf_.alloc_kvblock;
-        DCHECK(!to_insert_block.gaddr_.has_value());
+        DCHECK(!has_to_insert_block());
         DCHECK(!to_insert_block.handle_.valid());
+        size_t batch_alloc_size = alloc_size * conf_.alloc_batch;
         to_insert_block.handle_ = rdma_adpt_->acquire_perm(
-            nullgaddr, c.alloc_hint, alloc_size, c.ns, c.acquire_flag);
+            nullgaddr, c.alloc_hint, batch_alloc_size, c.ns, c.acquire_flag);
         begin_insert_nr_++;
         CHECK(to_insert_block.handle_.valid())
             << "** failed to remote_alloc_kvblock for size: " << alloc_size
@@ -2055,7 +2067,12 @@ private:
             << begin_insert_nr_ << ", ended: " << end_insert_nr_
             << ", free: " << free_insert_nr_;
 
-        to_insert_block.gaddr_ = to_insert_block.handle_.gaddr();
+        // to_insert_block.gaddr_ = to_insert_block.handle_.gaddr();
+        auto begin_gaddr = to_insert_block.handle_.gaddr();
+        for (size_t i = 0; i < conf_.alloc_batch; ++i)
+        {
+            to_insert_block.gaddrs_.push(begin_gaddr + i * alloc_size);
+        }
         return RC::kOk;
     }
     void free_insert_kvblock_batch(size_t batch_size)

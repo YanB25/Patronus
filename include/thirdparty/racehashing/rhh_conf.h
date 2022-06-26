@@ -19,6 +19,7 @@ struct RaceHashingHandleConfig
     // about how to manage reading kv_block
     MemHandleDecision read_kvblock;
     MemHandleDecision alloc_kvblock;
+    size_t alloc_batch{1};
     struct
     {
         MemHandleDecision d;
@@ -88,6 +89,7 @@ class RaceHashingConfigFactory
 public:
     static RaceHashingHandleConfig get_basic(const std::string &name,
                                              size_t kvblock_expect_size,
+                                             size_t alloc_batch,
                                              bool force_kvblock_to_match)
     {
         RaceHashingHandleConfig handle_conf;
@@ -95,15 +97,16 @@ public:
         handle_conf.subtable_hint = hash::config::kAllocHintDirSubtable;
         handle_conf.kvblock_expect_size = kvblock_expect_size;
         handle_conf.force_kvblock_to_match = force_kvblock_to_match;
+        handle_conf.alloc_batch = alloc_batch;
         return handle_conf;
     }
     static RaceHashingHandleConfig get_unprotected(const std::string name,
                                                    size_t kvblock_expect_size,
-                                                   size_t batch_size,
+                                                   size_t alloc_batch,
                                                    bool force_kvblock_to_match)
     {
-        CHECK_EQ(batch_size, 1) << "TODO: ";
-        auto c = get_basic(name, kvblock_expect_size, force_kvblock_to_match);
+        auto c = get_basic(
+            name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
         c.bypass_prot = true;
         c.read_kvblock.no_rpc();
         c.alloc_kvblock.only_alloc(hash::config::kAllocHintKVBlock);
@@ -114,11 +117,11 @@ public:
     }
     static RaceHashingHandleConfig get_mw_protected(const std::string &name,
                                                     size_t kvblock_expect_size,
-                                                    size_t batch_size,
+                                                    size_t alloc_batch,
                                                     bool force_kvblock_to_match)
     {
-        CHECK_EQ(batch_size, 1) << "TODO: ";
-        auto c = get_basic(name, kvblock_expect_size, force_kvblock_to_match);
+        auto c = get_basic(
+            name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
         c.read_kvblock.use_mw().wo_expire().no_bind_pr();
         c.alloc_kvblock.with_alloc(hash::config::kAllocHintKVBlock)
             .use_mw()
@@ -129,11 +132,11 @@ public:
     static RaceHashingHandleConfig get_mw_protected_debug(
         const std::string &name,
         size_t kvblock_expect_size,
-        size_t batch_size,
+        size_t alloc_batch,
         bool force_kvblock_to_match)
     {
-        CHECK_EQ(batch_size, 1) << "TODO: ";
-        auto c = get_basic(name, kvblock_expect_size, force_kvblock_to_match);
+        auto c = get_basic(
+            name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
         c.read_kvblock.use_mw().wo_expire().no_bind_pr();
         c.alloc_kvblock.with_alloc(hash::config::kAllocHintKVBlock)
             .use_mw()
@@ -149,8 +152,10 @@ public:
         ssize_t mock_crash_nr,
         std::chrono::nanoseconds lock_time_ns)
     {
-        auto c = get_mw_protected(
-            name, kvblock_size, 1, false /* force kvblock to match */);
+        auto c = get_mw_protected(name,
+                                  kvblock_size,
+                                  1 /* alloc batch */,
+                                  false /* force kvblock to match */);
         c.expand.use_patronus_lock = true;
         c.expand.patronus_lock_flag =
             (flag_t) AcquireRequestFlag::kWithConflictDetect;
@@ -163,9 +168,11 @@ public:
     static RaceHashingHandleConfig get_mw_protected_with_timeout(
         const std::string &name,
         size_t kvblock_expect_size,
+        size_t alloc_batch,
         bool force_kvblock_to_match)
     {
-        auto c = get_basic(name, kvblock_expect_size, force_kvblock_to_match);
+        auto c = get_basic(
+            name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
         c.read_kvblock.use_mw().with_expire(1ms).no_bind_pr();
         c.alloc_kvblock.with_alloc(hash::config::kAllocHintKVBlock)
             .use_mw()
@@ -175,11 +182,11 @@ public:
     }
     static RaceHashingHandleConfig get_mr_protected(const std::string &name,
                                                     size_t kvblock_expect_size,
-                                                    size_t batch_size,
+                                                    size_t alloc_batch,
                                                     bool force_kvblock_to_match)
     {
         auto c = get_mw_protected(
-            name, kvblock_expect_size, batch_size, force_kvblock_to_match);
+            name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
         c.read_kvblock.use_mr();
         c.alloc_kvblock.use_mr();
         c.meta.d.use_mr();
