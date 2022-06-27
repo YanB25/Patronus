@@ -886,16 +886,16 @@ void benchmark(Patronus::pointer patronus,
                 //     run_benchmark(
                 //         patronus, configs, bar, is_client, is_master, key);
                 // }
-                // {
-                //     auto configs = BenchConfigFactory::get_rlease_one_bind(
-                //         "w(buf) w/o(pr unbind gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_one_bind(
+                        "w(buf) w/o(pr unbind gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
                 // {
                 //     auto configs =
                 //         BenchConfigFactory::get_rlease_one_bind_one_unbind(
@@ -951,16 +951,16 @@ void benchmark(Patronus::pointer patronus,
                 //     run_benchmark(
                 //         patronus, configs, bar, is_client, is_master, key);
                 // }
-                // {
-                //     auto configs = BenchConfigFactory::get_rlease_full(
-                //         "w(buf pr unbind) w/o(gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_full(
+                        "w(buf pr unbind) w/o(gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
                 // {
                 //     auto configs =
                 //     BenchConfigFactory::get_rlease_full_over_mr(
@@ -973,17 +973,16 @@ void benchmark(Patronus::pointer patronus,
                 //     run_benchmark(
                 //         patronus, configs, bar, is_client, is_master, key);
                 // }
-                // {
-                //     auto configs =
-                //     BenchConfigFactory::get_rlease_full_autogc(
-                //         "w(buf pr unbind gc)",
-                //         thread_nr,
-                //         coro_nr,
-                //         block_size,
-                //         total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
+                {
+                    auto configs = BenchConfigFactory::get_rlease_full_autogc(
+                        "w(buf pr unbind gc)",
+                        thread_nr,
+                        coro_nr,
+                        block_size,
+                        total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
             }
         }
     }
