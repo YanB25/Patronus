@@ -446,8 +446,12 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         {
             if (conf.use_msg)
             {
-                auto ec = patronus->rpc_read(
-                    lease, rdma_buf.buffer, alloc_size, 0 /* offset */, &ctx);
+                auto ec = patronus->rpc_read(lease,
+                                             rdma_buf.buffer,
+                                             alloc_size,
+                                             0 /* offset */,
+                                             0 /* flag */,
+                                             &ctx);
                 CHECK_EQ(ec, kOk) << "rpc_read failed at " << i << "/"
                                   << conf.rw_nr << " try";
             }

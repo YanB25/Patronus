@@ -2395,8 +2395,8 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
 {
     std::ignore = ctx;
 
-    LOG(WARNING) << "TODO:";
-    auto resp_buf = get_rdma_message_buffer(4096);
+    auto resp_buf =
+        get_rdma_message_buffer(MemoryResponse::msg_expect_size(req->size));
     auto &resp_msg = *(MemoryResponse *) resp_buf.buffer;
     resp_msg.type = RpcType::kMemoryResp;
     resp_msg.cid = req->cid;
@@ -2407,7 +2407,8 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
     resp_msg.flag = req->flag;
 
     CHECK(resp_msg.validate())
-        << "** If request is valid, the response must be valid";
+        << "** If request is valid, the response must be valid. resp: "
+        << resp_msg;
 
     auto mf = (MemoryRequestFlag) req->flag;
     // remote_address is indexed to this buffer
@@ -3203,7 +3204,7 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
     if (use_two_sided)
     {
         debug_validate_rpc_rwcas_flag(flag);
-        return rpc_write(lease, ibuf, size, offset, ctx);
+        return rpc_write(lease, ibuf, size, offset, flag, ctx);
     }
 
     auto ec = handle_batch_op_flag(flag);
@@ -3252,7 +3253,7 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
     if (unlikely(use_two_sided))
     {
         debug_validate_rpc_rwcas_flag(flag);
-        return rpc_read(lease, obuf, size, offset, ctx);
+        return rpc_read(lease, obuf, size, offset, flag, ctx);
     }
 
     auto ec = handle_batch_op_flag(flag);

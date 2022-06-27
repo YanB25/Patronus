@@ -7,23 +7,30 @@
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
+struct Test
+{
+    uint64_t a;
+    char buffer[];
+};
+
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    DSMConfig config;
-    config.machineNR = ::config::kMachineNr;
+    // DSMConfig config;
+    // config.machineNR = ::config::kMachineNr;
 
-    // Do all the things here
-    auto dsm = DSM::getInstance(config);
-    // When you reach here, all the things have done
+    // // Do all the things here
+    // auto dsm = DSM::getInstance(config);
+    // // When you reach here, all the things have done
 
-    // You must call registerThread() before using DSM.
-    dsm->registerThread();
+    // // You must call registerThread() before using DSM.
+    // dsm->registerThread();
 
-    LOG(INFO) << "Connection build. node_id: " << dsm->get_node_id()
-              << ", thread_id: " << dsm->get_thread_id();
+    // LOG(INFO) << "Connection build. node_id: " << dsm->get_node_id()
+    //           << ", thread_id: " << dsm->get_thread_id();
+    LOG(INFO) << "** sizeof " << sizeof(Test);
     // LOG(INFO) << "Patronus: " << sizeof(patronus::Patronus)
     //           << ", DSM: " << sizeof(DSM)
     //           << ", umsg: " << sizeof(UnreliableConnection<32>)

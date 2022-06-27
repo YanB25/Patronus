@@ -275,7 +275,7 @@ size_t UnreliableRecvMessageConnection<kEndpointNr>::try_recv_no_cpy(
     size_t actually_polled = ibv_poll_cq(recv_cqs_[ep_id], msg_limit, wc);
     if (unlikely(actually_polled < 0))
     {
-        PLOG(ERROR) << "failed to ibv_poll_cq";
+        PLOG(FATAL) << "failed to ibv_poll_cq";
         return 0;
     }
 

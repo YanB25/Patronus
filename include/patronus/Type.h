@@ -260,7 +260,8 @@ enum class RWFlag : uint8_t
     kUseUniversalRkey = 1 << 3,
     kEnableTrace = 1 << 4,
     kUseTwoSided = 1 << 5,
-    kReserved = 1 << 6,
+    kUseTwoSidedAutoPacking = 1 << 6,
+    kReserved = 1 << 7,
 };
 
 struct RWFlagOut
@@ -287,22 +288,25 @@ struct MemoryRequest
     uint8_t flag;  // MemoryRequestFlag
     uint64_t remote_addr;
     Debug<uint64_t> digest;
-    uint8_t size;
-    char buffer[32];
+    uint16_t size;
+    char buffer[];
     size_t msg_size() const
     {
-        return sizeof(MemoryRequest);
+        return sizeof(MemoryRequest) + size;
     }
     bool validate() const
     {
-        return size <= buffer_capacity();
+        return msg_size() <= ::config::umsg::kUserMessageSize;
     }
     static constexpr size_t buffer_capacity()
     {
-        return 32;
+        return ::config::umsg::kUserMessageSize - sizeof(MemoryRequest);
+    }
+    static size_t msg_expect_size(size_t buffer_size)
+    {
+        return sizeof(MemoryRequest) + buffer_size;
     }
 } __attribute__((packed));
-static_assert(sizeof(MemoryRequest) <= config::umsg::kUserMessageSize);
 static_assert(sizeof(MemoryRequest::flag) >= sizeof(MemoryRequestFlag));
 static_assert(std::numeric_limits<decltype(MemoryRequest::size)>::max() >= 32);
 std::ostream &operator<<(std::ostream &os, const MemoryRequest &req);
@@ -314,23 +318,33 @@ struct MemoryResponse
     uint8_t flag;  // MemoryRequestFlag
     bool success;
     size_t size;
-    char buffer[32];
     Debug<uint64_t> digest;
+    char buffer[];
     size_t msg_size() const
     {
-        return sizeof(MemoryResponse);
+        return sizeof(MemoryResponse) + size;
     }
     bool validate()
     {
-        return size <= buffer_capacity();
+        return msg_size() <= ::config::umsg::kUserMessageSize;
     }
     static constexpr size_t buffer_capacity()
     {
-        return 32;
+        return ::config::umsg::kUserMessageSize - sizeof(MemoryResponse);
+    }
+    static size_t msg_expect_size(size_t buffer_size)
+    {
+        return sizeof(MemoryResponse) + buffer_size;
     }
 } __attribute__((packed));
 static_assert(sizeof(MemoryResponse) <= config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const MemoryResponse &resp);
+
+constexpr inline size_t MemoryMessagePayload()
+{
+    return std::min(MemoryRequest::buffer_capacity(),
+                    MemoryResponse::buffer_capacity());
+}
 
 }  // namespace patronus
 

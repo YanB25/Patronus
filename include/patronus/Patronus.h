@@ -232,6 +232,7 @@ public:
                                           char *obuf,
                                           size_t size,
                                           size_t offset,
+                                          flag_t flag,
                                           CoroContext *ctx,
                                           TraceView = util::nulltrace);
     [[nodiscard]] inline RetCode write(Lease &lease,
@@ -245,6 +246,7 @@ public:
                                            const char *ibuf,
                                            size_t size,
                                            size_t offset,
+                                           flag_t flag,
                                            CoroContext *ctx,
                                            TraceView = util::nulltrace);
     [[nodiscard]] inline RetCode cas(Lease &lease,
@@ -1570,7 +1572,7 @@ RetCode Patronus::write(Lease &lease,
     if (two_sided)
     {
         debug_validate_rpc_rwcas_flag(flag);
-        return rpc_write(lease, ibuf, size, offset, ctx, v);
+        return rpc_write(lease, ibuf, size, offset, flag, ctx, v);
     }
 
     auto ec = handle_rwcas_flag(lease, flag, ctx);
@@ -2018,17 +2020,17 @@ RetCode Patronus::rpc_read(Lease &lease,
                            char *obuf,
                            size_t size,
                            size_t offset,
+                           flag_t flag,
                            CoroContext *ctx,
                            TraceView trace)
 {
+    bool auto_pack = flag & (flag_t) RWFlag::kUseTwoSidedAutoPacking;
     for (size_t i = 0; i < size; i += MemoryResponse::buffer_capacity())
     {
         if (unlikely(i > 0))
         {
-            LOG_FIRST_N(WARNING, 1)
-                << "[patronus] rpc_read with size " << size
-                << " breaks into several sub-requests with allowed size "
-                << MemoryResponse::buffer_capacity();
+            CHECK(auto_pack)
+                << "** size overflow for " << size << " without auto-pack on.";
         }
 
         char *cur_obuf = obuf + i;
@@ -2057,9 +2059,11 @@ RetCode Patronus::rpc_write(Lease &lease,
                             const char *ibuf,
                             size_t size,
                             size_t offset,
+                            flag_t flag,
                             CoroContext *ctx,
                             TraceView trace)
 {
+    bool auto_pack = flag & (flag_t) RWFlag::kWithAutoExtend;
     for (size_t i = 0; i < size; i += MemoryRequest::buffer_capacity())
     {
         const char *cur_ibuf = ibuf + i;
@@ -2082,10 +2086,8 @@ RetCode Patronus::rpc_write(Lease &lease,
         }
         if (unlikely(i > 0))
         {
-            LOG_FIRST_N(WARNING, 1)
-                << "[patronus] rpc_write with size " << size
-                << " breaks into several sub-requests with allowed size "
-                << MemoryRequest::buffer_capacity();
+            CHECK(auto_pack)
+                << "** size overflow for " << size << " without auto_pack on.";
         }
     }
     return RC::kOk;
@@ -2100,8 +2102,8 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
                                  CoroContext *ctx,
                                  TraceView trace)
 {
-    LOG(WARNING) << "rwcas uses special size";
-    auto rdma_buf = get_rdma_message_buffer(4096);
+    auto rdma_buf =
+        get_rdma_message_buffer(MemoryRequest::msg_expect_size(size));
 
     auto *rpc_context = get_rpc_context();
     auto rpc_ctx_id = get_rpc_context_id(rpc_context);
@@ -2123,12 +2125,9 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
     rpc_context->ret_code = RC::kOk;
     rpc_context->buffer_addr = iobuf;
 
-    if (unlikely(!msg->validate()))
-    {
-        CHECK(false) << "** msg invalid. msg: " << msg
-                     << ". possible size too large. size: " << size;
-        return RC::kInvalid;
-    }
+    CHECK(msg->validate()) << "** msg invalid. msg: " << msg
+                           << ". possible size too large. size: " << size;
+
     if (rwcas == MemoryRequestFlag::kWrite)
     {
         memcpy(msg->buffer, iobuf, size);

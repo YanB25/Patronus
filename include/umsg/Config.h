@@ -37,14 +37,11 @@ static_assert(kPostRecvBufferBatchNr - kPostRecvBufferAdvanceBatch >= 2,
 static_assert(kOutStandingRecvBufferNr % kPostRecvBufferAdvanceBatch == 0,
               "If not dividable, should use divide and round up");
 
-// better be cahceline alinged. e.g. multiple of 64
-// 8: the batch size
-// 8 * 64: 8 element in a batch, each of which 64B
-// constexpr static size_t kUserMessageSize = 8 + 8 * 64;
-// constexpr static size_t kUserMessageSize = 4_KB;
-constexpr static size_t kUserMessageSize = 4_KB + 64;
-// constexpr static size_t kUserMessageSize = 64;
-constexpr static size_t kPostMessageSize = kUserMessageSize + 40;
+constexpr static size_t kPostMessageSize = 4096;
+constexpr static size_t kUserMessageSize = kPostMessageSize - 40;
+static_assert(kPostMessageSize <= 4096,
+              "UD can not exceed MTU, which is 4096 B");
+
 /**
  * @brief how much send # before a signal
  */

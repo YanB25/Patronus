@@ -343,6 +343,12 @@ std::ostream &operator<<(std::ostream &os, RWFlagOut flag)
     {
         os << "use-two-sided, ";
     }
+    bool use_two_sided_auto_pack =
+        flag.flag & (flag_t) RWFlag::kUseTwoSidedAutoPacking;
+    if (use_two_sided_auto_pack)
+    {
+        os << "use-two-sided-auto-pack, ";
+    }
     bool reserve = flag.flag & (flag_t) RWFlag::kReserved;
     DCHECK(!reserve);
     os << "}";

@@ -117,8 +117,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LT(sizeof(Object), rdma_buf.size);
         memset(rdma_buf.buffer, 0, rdma_buf.size);
-        auto ec = p->rpc_read(
-            lease, rdma_buf.buffer, sizeof(Object), 0 /* offset */, &ctx);
+        auto ec = p->rpc_read(lease,
+                              rdma_buf.buffer,
+                              sizeof(Object),
+                              0 /* offset */,
+                              0 /* flag */,
+                              &ctx);
         if (unlikely(ec != RC::kOk))
         {
             CHECK(false) << "[bench] client READ failed. lease " << lease
@@ -142,7 +146,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               rdma_buf.buffer,
                               sizeof(Object),
                               0 /* offset */,
-                              //   0 /* flag */,
+                              0 /* flag */,
                               &ctx);
             CHECK_EQ(ec, kOk);
         }
@@ -153,7 +157,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                              rdma_buf.buffer,
                              sizeof(Object),
                              0 /* offset */,
-                             //  0 /* flag */,
+                             0 /* flag */,
                              &ctx);
             Object &magic_object = *(Object *) rdma_buf.buffer;
             CHECK_EQ(magic_object.target, coro_magic + 1)
@@ -172,7 +176,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                               rdma_buf.buffer,
                               sizeof(Object),
                               0 /* offset */,
-                              //   0 /* flag */,
+                              0 /* flag */,
                               &ctx);
             CHECK_EQ(ec, kOk);
         }
@@ -210,7 +214,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             // FAA correct
 
             // 0) initial state is correct
-            p->rpc_read(lease, rdma_buf.buffer, sizeof(Object), 0, &ctx)
+            p->rpc_read(lease,
+                        rdma_buf.buffer,
+                        sizeof(Object),
+                        0 /* offset */,
+                        0 /* flag */,
+                        &ctx)
                 .expect(RC::kOk);
             Object &magic_object = *(Object *) rdma_buf.buffer;
             CHECK_EQ(magic_object.target, coro_magic)
@@ -227,7 +236,12 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
             int64_t got2 = *(int64_t *) rdma_buf.buffer;
             CHECK_EQ(got2, coro_magic + 1);
 
-            p->rpc_read(lease, rdma_buf.buffer, sizeof(Object), 0, &ctx)
+            p->rpc_read(lease,
+                        rdma_buf.buffer,
+                        sizeof(Object),
+                        0 /* offset */,
+                        0 /*flag */,
+                        &ctx)
                 .expect(RC::kOk);
             int64_t finally_got = *(int64_t *) rdma_buf.buffer;
             CHECK_EQ(finally_got, coro_magic);
