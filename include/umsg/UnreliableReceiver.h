@@ -41,9 +41,6 @@ public:
     {
         memset(recvs, 0, sizeof(recvs));
         memset(recv_sgl, 0, sizeof(recv_sgl));
-        LOG(INFO) << "[debug] kMessageNr: " << kMessageNr
-                  << ", kPostMessageSize: " << kPostMessageSize
-                  << ", kMessageBufferSize: " << kMessageBufferSize;
         msg_pool_ = CHECK_NOTNULL(hugePageAlloc(kMessageBufferSize));
         CHECK_EQ((uint64_t) msg_pool_ % 64, 0) << "should be aligned";
         recv_mr_ = CHECK_NOTNULL(
@@ -164,7 +161,6 @@ private:
     ibv_sge recv_sgl[kEndpointNr][kRecvBuffer];
 
     AlignedArray<size_t, kEndpointNr> msg_recv_indexes_{};
-    // batch_buffer_in_used [kEndpointNr][kPostRecvBufferBatchNr]
     AlignedArray<std::array<ssize_t, kPostRecvBufferBatchNr>, kEndpointNr>
         batch_buffer_in_used_{};
 };

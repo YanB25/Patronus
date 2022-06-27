@@ -123,7 +123,6 @@ void server_multithread_do(DSM::pointer dsm,
 {
     auto tid = dsm->get_thread_id();
 
-    // char buffer[102400];
     std::vector<char> __buffer;
     __buffer.resize(config::umsg::kUserMessageSize * config::umsg::kRecvLimit);
     char *buffer = __buffer.data();

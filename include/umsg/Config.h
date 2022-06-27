@@ -74,8 +74,6 @@ namespace recv
 constexpr static size_t kMaxRecvWr = kRecvBuffer;
 constexpr static size_t kMaxCQE = MAX_MACHINE * kMaxAppThread * (kMaxRecvWr) -1;
 static_assert(kMaxCQE <= 4194303, "In this device, the max CQE is 4194303");
-// constexpr static size_t kRecvMessagePoolSize =
-//     kMaxAppThread * MAX_MACHINE * kRecvBuffer * kPostMessageSize;
 }  // namespace recv
 
 }  // namespace config::umsg

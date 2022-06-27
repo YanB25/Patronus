@@ -660,11 +660,6 @@ size_t Patronus::handle_response_messages(msg_desc_t *msg_descs,
     size_t cur_idx = 0;
     for (size_t i = 0; i < msg_nr; ++i)
     {
-        // if (i + 1 < msg_nr)
-        // {
-        //     ro_prefetch(msg_descs[i + 1].msg_addr);
-        // }
-
         auto *base = (BaseMessage *) (msg_descs[i].msg_addr);
         auto response_type = base->type;
         auto coro_id = base->cid.coro_id;
@@ -812,10 +807,6 @@ void Patronus::prepare_handle_request_messages(
     for (size_t i = 0; i < msg_nr; ++i)
     {
         auto *base = (BaseMessage *) (msg_descs[i].msg_addr);
-        // if (i + 1 < msg_nr)
-        // {
-        //     ro_prefetch(msg_descs[i + 1].msg_addr);
-        // }
 
         auto request_type = base->type;
         auto req_id = ex_ctx.fetch_req_idx();
@@ -1363,11 +1354,6 @@ void Patronus::post_handle_request_messages(
 
     for (size_t i = 0; i < msg_nr; ++i)
     {
-        // if (i + 1 < msg_nr)
-        // {
-        //     ro_prefetch(msg_descs[i + 1].msg_addr);
-        // }
-
         auto *base = (BaseMessage *) (msg_descs[i].msg_addr);
         auto request_type = base->type;
         auto &req_ctx = ex_ctx.req_ctx(i);
@@ -1651,13 +1637,6 @@ void Patronus::registerServerThread()
         std::make_unique<ThreadUnsafeBufferPool<kSmallMessageSize>>(
             small_rdma_buf, small_message_pool_size);
 
-    // LOG(INFO) << "** large: size: " << large_message_pool_size
-    //           << ", msg_size: " << kMessageSize
-    //           << ", nr: " << large_message_pool_size / kMessageSize
-    //           << ". small: size: " << small_message_pool_size
-    //           << ", msg_size: " << kSmallMessageSize
-    //           << ", nr: " << small_message_pool_size / kSmallMessageSize;
-
     // TODO(patronus): still not determine the thread model of server side
     // what should be the number of pre-allocated mw?
     size_t alloc_mw_nr = kMwPoolSizePerThread / NR_DIRECTORY;
@@ -1729,10 +1708,7 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
 
     auto nr = dsm_->unreliable_try_recv_no_cpy(
         msg_descs, std::min(limit, config::umsg::kRecvLimit));
-    // if (nr)
-    // {
-    //     ro_prefetch(msg_descs[0].msg_addr);
-    // }
+
     size_t msg_nr = nr;
 
     size_t cur_idx = 0;
@@ -1820,10 +1796,6 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
         {
             nr = dsm_->unreliable_try_recv_no_cpy(
                 msg_descs, std::min(limit, config::umsg::kRecvLimit));
-            // if (nr)
-            // {
-            //     ro_prefetch(msg_descs[0].msg_addr);
-            // }
             got += nr;
             LOG_IF(WARNING, nr > 0)
                 << "[patronus] QP recovering: handling on-going rpc. Got "
@@ -2025,8 +1997,6 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
             task->active_coro_nr = 0;
             comm.task_queue.push(task);
             batch_m.collect(nr);
-
-            // ro_prefetch(msg_descs[0].msg_addr);
         }
 
         for (size_t i = 0; i < kMaxCoroNr; ++i)
@@ -3547,9 +3517,6 @@ PatronusThreadResourceDesc Patronus::prepare_client_thread(
 
     size_t message_pool_size = 16_MB;
     CHECK_GT(desc.dsm_desc.rdma_buffer_size, message_pool_size);
-    // CHECK_GE(message_pool_size / kMessageSize, 65536)
-    //     << "Consider to tune up message pool size? Less than 64436 "
-    //        "possible messages";
 
     char *large_message_buffer = dsm_rdma_buffer;
     size_t large_message_size = message_pool_size / 2;
