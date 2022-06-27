@@ -25,7 +25,7 @@ using namespace std::chrono_literals;
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-constexpr static size_t kTestTimePerThread = 100_K;
+constexpr static size_t kTestTimePerThread = 1_M;
 // constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
@@ -907,17 +907,17 @@ void benchmark(Patronus::pointer patronus,
                 //     run_benchmark(
                 //         patronus, configs, bar, is_client, is_master, key);
                 // }
-                // {
-                //     auto configs = BenchConfigFactory::
-                //         get_rlease_one_bind_one_unbind_reuse_mw_opt(
-                //             "+ reuse w(buf unbind) w/o(pr gc)",
-                //             thread_nr,
-                //             coro_nr,
-                //             block_size,
-                //             total_test_times);
-                //     run_benchmark(
-                //         patronus, configs, bar, is_client, is_master, key);
-                // }
+                {
+                    auto configs = BenchConfigFactory::
+                        get_rlease_one_bind_one_unbind_reuse_mw_opt(
+                            "+ reuse w(buf unbind) w/o(pr gc)",
+                            thread_nr,
+                            coro_nr,
+                            block_size,
+                            total_test_times);
+                    run_benchmark(
+                        patronus, configs, bar, is_client, is_master, key);
+                }
                 // {
                 //     auto configs = BenchConfigFactory::
                 //         get_rlease_one_bind_one_unbind_over_mr(

@@ -19,6 +19,10 @@ namespace patronus
 thread_local std::unique_ptr<ThreadUnsafeBufferPool<Patronus::kMessageSize>>
     Patronus::rdma_message_buffer_pool_;
 thread_local std::unique_ptr<
+    ThreadUnsafeBufferPool<Patronus::kSmallMessageSize>>
+    Patronus::rdma_small_message_buffer_pool_;
+
+thread_local std::unique_ptr<
     ThreadUnsafeBufferPool<Patronus::kClientRdmaBufferSize>>
     Patronus::rdma_client_buffer_;
 thread_local std::unique_ptr<ThreadUnsafeBufferPool<8>>
@@ -202,7 +206,8 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     DCHECK_LT(dir_id, NR_DIRECTORY);
     DCHECK_LT(tid, kMaxAppThread);
 
-    char *rdma_buf = get_rdma_message_buffer();
+    auto rdma_buf = get_rdma_message_buffer(sizeof(AcquireRequest));
+    DCHECK_GE(rdma_buf.size, sizeof(AcquireRequest));
     auto *rpc_context = get_rpc_context();
     uint16_t rpc_ctx_id = get_rpc_context_id(rpc_context);
 
@@ -210,7 +215,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     ret_lease.node_id_ = node_id;
     ret_lease.no_gc_ = no_gc;
 
-    auto *msg = (AcquireRequest *) rdma_buf;
+    auto *msg = (AcquireRequest *) rdma_buf.buffer;
     msg->type = type;
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = tid;
@@ -246,7 +251,8 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
              << ", at patronus_now: " << time_syncer_->patronus_now()
              << ". coro: " << pre_coro_ctx(ctx);
 
-    dsm_->unreliable_send(rdma_buf, sizeof(AcquireRequest), node_id, dir_id);
+    dsm_->unreliable_send(
+        rdma_buf.buffer, sizeof(AcquireRequest), node_id, dir_id);
 
     if (unlikely(ctx == nullptr))
     {
@@ -587,11 +593,12 @@ RetCode Patronus::lease_modify_impl(Lease &lease,
     auto dir_id = lease.dir_id();
     auto tid = get_thread_id();
 
-    char *rdma_buf = get_rdma_message_buffer();
+    auto rdma_buf = get_rdma_message_buffer(sizeof(LeaseModifyRequest));
+    DCHECK_GE(rdma_buf.size, sizeof(LeaseModifyRequest));
     auto *rpc_context = get_rpc_context();
     uint16_t rpc_ctx_id = get_rpc_context_id(rpc_context);
 
-    auto *msg = (LeaseModifyRequest *) rdma_buf;
+    auto *msg = (LeaseModifyRequest *) rdma_buf.buffer;
     msg->type = type;
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = tid;
@@ -618,7 +625,7 @@ RetCode Patronus::lease_modify_impl(Lease &lease,
     }
 
     dsm_->unreliable_send(
-        rdma_buf, sizeof(LeaseModifyRequest), target_node_id, dir_id);
+        rdma_buf.buffer, sizeof(LeaseModifyRequest), target_node_id, dir_id);
 
     if (unlikely(ctx == nullptr))
     {
@@ -646,14 +653,19 @@ RetCode Patronus::lease_modify_impl(Lease &lease,
     return ret;
 }
 
-size_t Patronus::handle_response_messages(const char *msg_buf,
+size_t Patronus::handle_response_messages(msg_desc_t *msg_descs,
                                           size_t msg_nr,
                                           coro_t *coro_buf)
 {
     size_t cur_idx = 0;
     for (size_t i = 0; i < msg_nr; ++i)
     {
-        auto *base = (BaseMessage *) (msg_buf + i * kMessageSize);
+        // if (i + 1 < msg_nr)
+        // {
+        //     ro_prefetch(msg_descs[i + 1].msg_addr);
+        // }
+
+        auto *base = (BaseMessage *) (msg_descs[i].msg_addr);
         auto response_type = base->type;
         auto coro_id = base->cid.coro_id;
 
@@ -785,7 +797,7 @@ size_t Patronus::handle_response_messages(const char *msg_buf,
 }
 
 void Patronus::prepare_handle_request_messages(
-    const char *msg_buf,
+    const msg_desc_t *msg_descs,
     size_t msg_nr,
     ServerCoroBatchExecutionContext &ex_ctx,
     CoroContext *ctx)
@@ -799,7 +811,12 @@ void Patronus::prepare_handle_request_messages(
 
     for (size_t i = 0; i < msg_nr; ++i)
     {
-        auto *base = (BaseMessage *) (msg_buf + i * kMessageSize);
+        auto *base = (BaseMessage *) (msg_descs[i].msg_addr);
+        // if (i + 1 < msg_nr)
+        // {
+        //     ro_prefetch(msg_descs[i + 1].msg_addr);
+        // }
+
         auto request_type = base->type;
         auto req_id = ex_ctx.fetch_req_idx();
         auto &req_ctx = ex_ctx.req_ctx(req_id);
@@ -1335,7 +1352,7 @@ void Patronus::prepare_handle_request_lease_relinquish(
 }
 
 void Patronus::post_handle_request_messages(
-    const char *msg_buf,
+    const msg_desc_t *msg_descs,
     size_t msg_nr,
     ServerCoroBatchExecutionContext &ex_ctx,
     CoroContext *ctx)
@@ -1346,7 +1363,12 @@ void Patronus::post_handle_request_messages(
 
     for (size_t i = 0; i < msg_nr; ++i)
     {
-        auto *base = (BaseMessage *) (msg_buf + i * kMessageSize);
+        // if (i + 1 < msg_nr)
+        // {
+        //     ro_prefetch(msg_descs[i + 1].msg_addr);
+        // }
+
+        auto *base = (BaseMessage *) (msg_descs[i].msg_addr);
         auto request_type = base->type;
         auto &req_ctx = ex_ctx.req_ctx(i);
         switch (request_type)
@@ -1478,8 +1500,9 @@ void Patronus::finished(uint64_t key)
     // does not require replies
     auto to_dir_id = admin_dir_id();
 
-    char *rdma_buf = get_rdma_message_buffer();
-    auto *msg = (AdminRequest *) rdma_buf;
+    auto rdma_buf = get_rdma_message_buffer(sizeof(AdminRequest));
+    DCHECK_GE(rdma_buf.size, sizeof(AdminRequest));
+    auto *msg = (AdminRequest *) rdma_buf.buffer;
     msg->type = RpcType::kAdmin;
     msg->flag = (flag_t) AdminFlag::kAdminReqExit;
     msg->cid.node_id = get_node_id();
@@ -1500,7 +1523,8 @@ void Patronus::finished(uint64_t key)
         {
             continue;
         }
-        dsm_->unreliable_send(rdma_buf, sizeof(AdminRequest), i, to_dir_id);
+        dsm_->unreliable_send(
+            rdma_buf.buffer, sizeof(AdminRequest), i, to_dir_id);
     }
 
     // TODO(patronus): this may have problem
@@ -1613,9 +1637,26 @@ void Patronus::registerServerThread()
     auto rdma_buffer = dsm_->get_rdma_buffer();
     auto *dsm_rdma_buffer = rdma_buffer.buffer;
     size_t message_pool_size = rdma_buffer.size;
+
+    auto *large_rdma_buf = dsm_rdma_buffer;
+    size_t large_message_pool_size = rdma_buffer.size / 2;
     rdma_message_buffer_pool_ =
         std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
-            dsm_rdma_buffer, message_pool_size);
+            large_rdma_buf, large_message_pool_size);
+
+    auto *small_rdma_buf = dsm_rdma_buffer + large_message_pool_size;
+    size_t small_message_pool_size =
+        message_pool_size - large_message_pool_size;
+    rdma_small_message_buffer_pool_ =
+        std::make_unique<ThreadUnsafeBufferPool<kSmallMessageSize>>(
+            small_rdma_buf, small_message_pool_size);
+
+    // LOG(INFO) << "** large: size: " << large_message_pool_size
+    //           << ", msg_size: " << kMessageSize
+    //           << ", nr: " << large_message_pool_size / kMessageSize
+    //           << ". small: size: " << small_message_pool_size
+    //           << ", msg_size: " << kSmallMessageSize
+    //           << ", nr: " << small_message_pool_size / kSmallMessageSize;
 
     // TODO(patronus): still not determine the thread model of server side
     // what should be the number of pre-allocated mw?
@@ -1684,17 +1725,20 @@ void Patronus::registerClientThread()
 
 size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
 {
-    static thread_local std::vector<char> __buffer(
-        config::umsg::kMaxRecvBuffer);
-    char *buf = __buffer.data();
+    thread_local msg_desc_t msg_descs[config::umsg::kRecvLimit];
 
-    auto nr = dsm_->unreliable_try_recv(
-        buf, std::min(limit, config::umsg::kRecvLimit));
+    auto nr = dsm_->unreliable_try_recv_no_cpy(
+        msg_descs, std::min(limit, config::umsg::kRecvLimit));
+    // if (nr)
+    // {
+    //     ro_prefetch(msg_descs[0].msg_addr);
+    // }
     size_t msg_nr = nr;
 
     size_t cur_idx = 0;
-    cur_idx = handle_response_messages(buf, nr, coro_buf);
+    cur_idx = handle_response_messages(msg_descs, nr, coro_buf);
     DCHECK_LT(cur_idx, limit);
+    dsm_->return_buf_no_cpy(msg_descs, nr);
 
     size_t remain_nr = limit - nr;
     // should be enough
@@ -1774,15 +1818,20 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
         size_t expect_rpc_nr = rpc_context_.ongoing_size();
         while (got < rpc_context_.ongoing_size())
         {
-            nr = dsm_->unreliable_try_recv(
-                buf, std::min(limit, config::umsg::kRecvLimit));
+            nr = dsm_->unreliable_try_recv_no_cpy(
+                msg_descs, std::min(limit, config::umsg::kRecvLimit));
+            // if (nr)
+            // {
+            //     ro_prefetch(msg_descs[0].msg_addr);
+            // }
             got += nr;
             LOG_IF(WARNING, nr > 0)
                 << "[patronus] QP recovering: handling on-going rpc. Got "
                    "another "
                 << nr << " responses, cur: " << got << ", expect another "
                 << expect_rpc_nr;
-            nr = handle_response_messages(buf, nr, coro_buf + cur_idx);
+            nr = handle_response_messages(msg_descs, nr, coro_buf + cur_idx);
+            dsm_->return_buf_no_cpy(msg_descs, nr);
             cur_idx += nr;
             CHECK_LT(cur_idx, limit);
         }
@@ -1935,18 +1984,21 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
         comm.finished[i] = true;
     }
 
+    constexpr static size_t kMsgDescSize =
+        ::config::umsg::kRecvLimit * sizeof(msg_desc_t);
     constexpr static size_t kServerBufferNr =
         kMaxCoroNr * MAX_MACHINE * kClientThreadPerServerThread;
-    std::vector<char> __buffer(config::umsg::kMaxRecvBuffer * kServerBufferNr);
+    std::vector<char> __buffer(kMsgDescSize * kServerBufferNr);
 
-    server_coro_ctx_.buffer_pool = std::make_unique<
-        ThreadUnsafeBufferPool<::config::umsg::kMaxRecvBuffer>>(
-        __buffer.data(), config::umsg::kMaxRecvBuffer * kServerBufferNr);
-    auto &buffer_pool = *server_coro_ctx_.buffer_pool;
+    server_coro_ctx_.msg_desc_pool =
+        std::make_unique<ThreadUnsafeBufferPool<kMsgDescSize>>(
+            __buffer.data(), kMsgDescSize * kServerBufferNr);
+    auto &msg_desc_pool = *server_coro_ctx_.msg_desc_pool;
 
     OnePassBucketMonitor batch_m(
         (uint64_t) 0, (uint64_t) config::umsg::kRecvLimit, (uint64_t) 1);
 
+    msg_desc_t *msg_descs = nullptr;
     while (likely(!should_exit(wait_key) || likely(!task_queue.empty())) ||
            likely(!ddl_manager_.empty()) ||
            likely(!std::all_of(std::begin(comm.finished),
@@ -1954,22 +2006,27 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
                                [](bool i) { return i; })))
     {
         // handle received messages
-        char *buffer = (char *) CHECK_NOTNULL(buffer_pool.get());
-        size_t nr = dsm_->unreliable_try_recv(buffer, config::umsg::kRecvLimit);
+        if (msg_descs == nullptr)
+        {
+            msg_descs = (msg_desc_t *) CHECK_NOTNULL(msg_desc_pool.get());
+        }
+        size_t nr = dsm_->unreliable_try_recv_no_cpy(msg_descs,
+                                                     config::umsg::kRecvLimit);
+
         if (likely(nr > 0))
         {
             DVLOG(4) << "[patronus] server recv messages " << nr;
             auto *task = DCHECK_NOTNULL(task_pool.get());
-            task->buf = DCHECK_NOTNULL(buffer);
+            // move ownership of msg_descs to task
+            task->msg_descs = DCHECK_NOTNULL(msg_descs);
+            msg_descs = nullptr;
             task->msg_nr = nr;
             task->fetched_nr = 0;
             task->active_coro_nr = 0;
             comm.task_queue.push(task);
             batch_m.collect(nr);
-        }
-        else
-        {
-            buffer_pool.put(buffer);
+
+            // ro_prefetch(msg_descs[0].msg_addr);
         }
 
         for (size_t i = 0; i < kMaxCoroNr; ++i)
@@ -2090,8 +2147,9 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
 
     auto dir_id = req->dir_id;
 
-    auto *resp_buf = get_rdma_message_buffer();
-    auto *resp_msg = (AcquireResponse *) resp_buf;
+    auto resp_buf = get_rdma_message_buffer(sizeof(AcquireResponse));
+    DCHECK_GE(resp_buf.size, sizeof(AcquireResponse));
+    auto *resp_msg = (AcquireResponse *) resp_buf.buffer;
     resp_msg->type = RpcType::kAcquireLeaseResp;
     resp_msg->cid = req->cid;
     resp_msg->cid.node_id = get_node_id();
@@ -2270,8 +2328,9 @@ void Patronus::post_handle_request_admin(AdminRequest *req, CoroContext *ctx)
     {
         return;
     }
-    auto *resp_buf = get_rdma_message_buffer();
-    auto &resp_msg = *(AdminResponse *) resp_buf;
+    auto resp_buf = get_rdma_message_buffer(sizeof(AdminResponse));
+    DCHECK_GE(resp_buf.size, sizeof(AdminResponse));
+    auto &resp_msg = *(AdminResponse *) resp_buf.buffer;
     resp_msg.type = RpcType::kAdminResp;
     resp_msg.cid = req->cid;
     resp_msg.cid.node_id = get_node_id();
@@ -2285,7 +2344,7 @@ void Patronus::post_handle_request_admin(AdminRequest *req, CoroContext *ctx)
         resp_msg.digest = util::djb2_digest(&resp_msg, sizeof(AdminResponse));
     }
 
-    dsm_->unreliable_send((const char *) resp_buf,
+    dsm_->unreliable_send((const char *) resp_buf.buffer,
                           sizeof(AdminResponse),
                           req->cid.node_id,
                           req->cid.thread_id);
@@ -2338,8 +2397,9 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
         }
     }
 
-    auto *resp_buf = get_rdma_message_buffer();
-    auto &resp_msg = *(LeaseModifyResponse *) resp_buf;
+    auto resp_buf = get_rdma_message_buffer(sizeof(LeaseModifyResponse));
+    DCHECK_GE(resp_buf.size, sizeof(LeaseModifyResponse));
+    auto &resp_msg = *(LeaseModifyResponse *) resp_buf.buffer;
     resp_msg.type = RpcType::kExtendResp;
     resp_msg.cid = req->cid;
     resp_msg.cid.node_id = get_node_id();
@@ -2353,7 +2413,7 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
             util::djb2_digest(&resp_msg, sizeof(LeaseModifyResponse));
     }
 
-    dsm_->unreliable_send((const char *) resp_buf,
+    dsm_->unreliable_send((const char *) resp_buf.buffer,
                           sizeof(LeaseModifyResponse),
                           req->cid.node_id,
                           req->cid.thread_id);
@@ -2365,8 +2425,9 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
 {
     std::ignore = ctx;
 
-    auto *resp_buf = get_rdma_message_buffer();
-    auto &resp_msg = *(MemoryResponse *) resp_buf;
+    LOG(WARNING) << "TODO:";
+    auto resp_buf = get_rdma_message_buffer(4096);
+    auto &resp_msg = *(MemoryResponse *) resp_buf.buffer;
     resp_msg.type = RpcType::kMemoryResp;
     resp_msg.cid = req->cid;
     resp_msg.cid.node_id = get_node_id();
@@ -2449,7 +2510,7 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
         resp_msg.digest = 0;
         resp_msg.digest = util::djb2_digest(&resp_msg, resp_msg.msg_size());
     }
-    dsm_->unreliable_send((char *) resp_buf,
+    dsm_->unreliable_send((char *) resp_buf.buffer,
                           resp_msg.msg_size(),
                           req->cid.node_id,
                           req->cid.thread_id);
@@ -2463,8 +2524,9 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
 {
     std::ignore = ctx;
 
-    auto *resp_buf = get_rdma_message_buffer();
-    auto &resp_msg = *(LeaseModifyResponse *) resp_buf;
+    auto resp_buf = get_rdma_message_buffer(sizeof(LeaseModifyResponse));
+    DCHECK_GE(resp_buf.size, sizeof(LeaseModifyResponse));
+    auto &resp_msg = *(LeaseModifyResponse *) resp_buf.buffer;
     resp_msg.type = RpcType::kRelinquishResp;
     resp_msg.cid = req->cid;
     resp_msg.cid.node_id = get_node_id();
@@ -2476,7 +2538,7 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
         resp_msg.digest =
             util::djb2_digest(&resp_msg, sizeof(LeaseModifyResponse));
     }
-    dsm_->unreliable_send((char *) resp_buf,
+    dsm_->unreliable_send((char *) resp_buf.buffer,
                           sizeof(LeaseModifyResponse),
                           req->cid.node_id,
                           req->cid.thread_id);
@@ -2937,7 +2999,7 @@ void Patronus::server_coro_worker(coro_t coro_id,
 
     auto &task_queue = comm.task_queue;
     auto &task_pool = server_coro_ctx_.task_pool;
-    auto &buffer_pool = *server_coro_ctx_.buffer_pool;
+    auto &msg_desc_pool = *server_coro_ctx_.msg_desc_pool;
 
     // uint64_t min = 0;
     // uint64_t max = config::umsg::kRecvLimit;
@@ -2949,9 +3011,9 @@ void Patronus::server_coro_worker(coro_t coro_id,
            likely(!ddl_manager_.empty()))
     {
         // try to fetch tasks from task_queue (if exists)
-        const char *msg_buf = nullptr;
         size_t acquire_task = 0;
         ServerCoroTask *task = nullptr;
+        msg_desc_t *start_msg_desc = nullptr;
         if (likely(!task_queue.empty()))
         {
             task = DCHECK_NOTNULL(task_queue.front());
@@ -2961,7 +3023,8 @@ void Patronus::server_coro_worker(coro_t coro_id,
             DCHECK_GE(remain_task_nr, 0);
             acquire_task = std::min(remain_task_nr,
                                     config::patronus::kHandleRequestBatchLimit);
-            msg_buf = task->buf + kMessageSize * task->fetched_nr;
+
+            start_msg_desc = &(task->msg_descs[task->fetched_nr]);
 
             task->fetched_nr += acquire_task;
             DCHECK_LE(task->fetched_nr, task->msg_nr);
@@ -2990,7 +3053,7 @@ void Patronus::server_coro_worker(coro_t coro_id,
         if (task)
         {
             prepare_handle_request_messages(
-                msg_buf, acquire_task, ex_ctx, &ctx);
+                DCHECK_NOTNULL(start_msg_desc), acquire_task, ex_ctx, &ctx);
         }
 
         // NOTE: worker coroutine poll tasks here
@@ -3013,14 +3076,17 @@ void Patronus::server_coro_worker(coro_t coro_id,
 
         if (task)
         {
-            post_handle_request_messages(msg_buf, acquire_task, ex_ctx, &ctx);
+            post_handle_request_messages(
+                DCHECK_NOTNULL(start_msg_desc), acquire_task, ex_ctx, &ctx);
             DCHECK_NOTNULL(task)->active_coro_nr--;
 
             if (task->active_coro_nr == 0 && (task->fetched_nr == task->msg_nr))
             {
                 DVLOG(4) << "[patronus] server handling callback of task @"
                          << (void *) task << ": " << *task << ". coro: " << ctx;
-                buffer_pool.put((void *) task->buf);
+
+                dsm_->return_buf_no_cpy(task->msg_descs, task->msg_nr);
+                msg_desc_pool.put(task->msg_descs);
                 task_pool.put(task);
             }
         }
@@ -3485,9 +3551,16 @@ PatronusThreadResourceDesc Patronus::prepare_client_thread(
     //     << "Consider to tune up message pool size? Less than 64436 "
     //        "possible messages";
 
+    char *large_message_buffer = dsm_rdma_buffer;
+    size_t large_message_size = message_pool_size / 2;
     desc.rdma_message_buffer_pool =
         std::make_unique<ThreadUnsafeBufferPool<kMessageSize>>(
-            dsm_rdma_buffer, message_pool_size);
+            large_message_buffer, large_message_size);
+    char *small_message_buffer = dsm_rdma_buffer + large_message_size;
+    size_t small_message_size = message_pool_size - large_message_size;
+    desc.rdma_small_message_buffer_pool =
+        std::make_unique<ThreadUnsafeBufferPool<kSmallMessageSize>>(
+            small_message_buffer, small_message_size);
 
     // the remaining buffer is given to client rdma buffers
     // 8B and non-8B
@@ -3527,6 +3600,8 @@ bool Patronus::apply_client_resource(PatronusThreadResourceDesc &&desc,
     auto succ = dsm_->applyResource(desc.dsm_desc, bind_core);
     CHECK(succ);
     rdma_message_buffer_pool_ = std::move(desc.rdma_message_buffer_pool);
+    rdma_small_message_buffer_pool_ =
+        std::move(desc.rdma_small_message_buffer_pool);
     client_rdma_buffer_ = desc.client_rdma_buffer;
     client_rdma_buffer_size_ = desc.client_rdma_buffer_size;
     rdma_client_buffer_8B_ = std::move(desc.rdma_client_buffer_8B);

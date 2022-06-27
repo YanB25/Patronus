@@ -18,7 +18,7 @@ namespace patronus
 class Patronus;
 struct ServerCoroTask
 {
-    const char *buf{nullptr};  // msg buffer
+    DSM::msg_desc_t *msg_descs;
     size_t msg_nr{0};
     size_t fetched_nr{0};
     ssize_t active_coro_nr{0};
@@ -26,8 +26,8 @@ struct ServerCoroTask
 
 inline std::ostream &operator<<(std::ostream &os, const ServerCoroTask &task)
 {
-    os << "{Task: buf: " << (void *) task.buf << ", msg_nr: " << task.msg_nr
-       << ", fetch_nr: " << task.fetched_nr
+    os << "{Task: msg_descs: " << (void *) task.msg_descs
+       << ", msg_nr: " << task.msg_nr << ", fetch_nr: " << task.fetched_nr
        << ", active_coro_nr: " << task.active_coro_nr << "}";
     return os;
 }
@@ -48,8 +48,9 @@ struct ServerCoroContext
         define::kMaxCoroNr *
             MAX_MACHINE * ::config::patronus::kClientThreadPerServerThread>
         task_pool;
-    std::unique_ptr<ThreadUnsafeBufferPool<::config::umsg::kMaxRecvBuffer>>
-        buffer_pool;
+    std::unique_ptr<ThreadUnsafeBufferPool<::config::umsg::kRecvLimit *
+                                           sizeof(DSM::msg_desc_t)>>
+        msg_desc_pool;
     CoroControlBlock::pointer cb;
 };
 

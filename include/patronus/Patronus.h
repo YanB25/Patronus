@@ -96,6 +96,8 @@ struct PatronusThreadResourceDesc
     ThreadResourceDesc dsm_desc;
     std::unique_ptr<ThreadUnsafeBufferPool<config::patronus::kMessageSize>>
         rdma_message_buffer_pool;
+    std::unique_ptr<ThreadUnsafeBufferPool<config::patronus::kSmallMessageSize>>
+        rdma_small_message_buffer_pool;
     char *client_rdma_buffer;
     size_t client_rdma_buffer_size;
     std::unique_ptr<
@@ -113,6 +115,8 @@ public:
 
     constexpr static size_t kMaxCoroNr = ::config::patronus::kMaxCoroNr;
     constexpr static size_t kMessageSize = ::config::patronus::kMessageSize;
+    constexpr static size_t kSmallMessageSize =
+        ::config::patronus::kSmallMessageSize;
 
     // TODO(patronus): try to tune this parameter up.
     constexpr static size_t kMwPoolSizePerThread = 50_K;
@@ -428,13 +432,13 @@ public:
         return dsm_->get_server_buffer();
     }
 
-    void prepare_handle_request_messages(const char *msg_buf,
+    void prepare_handle_request_messages(const msg_desc_t *msg_descs,
                                          size_t msg_nr,
                                          ServerCoroBatchExecutionContext &,
                                          CoroContext *ctx);
     void commit_handle_request_messages(ServerCoroBatchExecutionContext &,
                                         CoroContext *ctx);
-    void post_handle_request_messages(const char *msg_buf,
+    void post_handle_request_messages(const msg_desc_t *msg_descs,
                                       size_t msg_nr,
                                       ServerCoroBatchExecutionContext &ex_ctx,
                                       CoroContext *ctx);
@@ -706,10 +710,52 @@ private:
         CoroContext *ctx);
 
 public:
-    char *get_rdma_message_buffer()
+    Buffer get_rdma_message_buffer(size_t size)
     {
-        return (char *) rdma_message_buffer_pool_->get();
+        if (size <= kSmallMessageSize)
+        {
+            return get_small_rdma_message_buffer(size);
+        }
+        else
+        {
+            return get_large_rdma_message_buffer(size);
+        }
     }
+    Buffer get_small_rdma_message_buffer(size_t size)
+    {
+        DCHECK_GE(kSmallMessageSize, size);
+        return Buffer((char *) rdma_small_message_buffer_pool_->get(),
+                      kSmallMessageSize);
+    }
+    Buffer get_large_rdma_message_buffer(size_t size)
+    {
+        DCHECK_GE(kMessageSize, size);
+        return Buffer((char *) rdma_message_buffer_pool_->get(), kMessageSize);
+    }
+    void put_rdma_message_buffer(Buffer buffer)
+    {
+        if (buffer.size <= kSmallMessageSize)
+        {
+            put_small_rdma_message_buffer(buffer);
+        }
+        else
+        {
+            put_large_rdma_message_buffer(buffer);
+        }
+    }
+    void put_large_rdma_message_buffer(Buffer buffer)
+    {
+        DCHECK_GT(buffer.size, kSmallMessageSize);
+        DCHECK_LE(buffer.size, kMessageSize);
+        rdma_message_buffer_pool_->put(buffer.buffer);
+    }
+    void put_small_rdma_message_buffer(Buffer buffer)
+    {
+        DCHECK_GT(buffer.size, 0);
+        DCHECK_LE(buffer.size, kSmallMessageSize);
+        rdma_small_message_buffer_pool_->put(buffer.buffer);
+    }
+
     void debug_valid_rdma_buffer(const void *buf)
     {
         if constexpr (debug())
@@ -717,13 +763,6 @@ public:
             CHECK_GE((uint64_t) buf, (uint64_t) client_rdma_buffer_);
             CHECK_LT((uint64_t) buf,
                      (uint64_t) client_rdma_buffer_ + client_rdma_buffer_size_);
-        }
-    }
-    void put_rdma_message_buffer(char *buf)
-    {
-        if (buf != nullptr)
-        {
-            rdma_message_buffer_pool_->put(buf);
         }
     }
 
@@ -868,7 +907,7 @@ private:
         return Buffer(buf_addr, buf_size);
     }
     // for clients
-    size_t handle_response_messages(const char *msg_buf,
+    size_t handle_response_messages(msg_desc_t *msg_descs,
                                     size_t msg_nr,
                                     coro_t *o_coro_buf);
     size_t handle_rdma_finishes(
@@ -1030,6 +1069,9 @@ private:
     time::TimeSyncer::pointer time_syncer_;
     static thread_local std::unique_ptr<ThreadUnsafeBufferPool<kMessageSize>>
         rdma_message_buffer_pool_;
+    static thread_local std::unique_ptr<
+        ThreadUnsafeBufferPool<kSmallMessageSize>>
+        rdma_small_message_buffer_pool_;
     PatronusLockManager lock_manager_;
 
     // owned by client threads
@@ -1822,10 +1864,11 @@ RetCode Patronus::admin_request_impl(size_t node_id,
     DCHECK_LT(dir_id, NR_DIRECTORY);
 
     RetCode ret = RC::kOk;
-    char *rdma_buf = get_rdma_message_buffer();
+    auto rdma_buf = get_rdma_message_buffer(sizeof(AdminRequest));
+    DCHECK_GE(rdma_buf.size, sizeof(AdminRequest));
     RpcContext *rpc_context = nullptr;
 
-    auto *msg = (AdminRequest *) rdma_buf;
+    auto *msg = (AdminRequest *) rdma_buf.buffer;
     msg->type = RpcType::kAdminReq;
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = get_thread_id();
@@ -1853,7 +1896,8 @@ RetCode Patronus::admin_request_impl(size_t node_id,
         msg->digest = util::djb2_digest(msg, sizeof(AdminRequest));
     }
 
-    dsm_->unreliable_send(rdma_buf, sizeof(AdminRequest), node_id, dir_id);
+    dsm_->unreliable_send(
+        rdma_buf.buffer, sizeof(AdminRequest), node_id, dir_id);
 
     if (need_response)
     {
@@ -2056,11 +2100,13 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
                                  CoroContext *ctx,
                                  TraceView trace)
 {
-    char *rdma_buf = get_rdma_message_buffer();
+    LOG(WARNING) << "rwcas uses special size";
+    auto rdma_buf = get_rdma_message_buffer(4096);
+
     auto *rpc_context = get_rpc_context();
     auto rpc_ctx_id = get_rpc_context_id(rpc_context);
 
-    auto *msg = (MemoryRequest *) rdma_buf;
+    auto *msg = (MemoryRequest *) rdma_buf.buffer;
     msg->type = RpcType::kMemoryReq;
     msg->cid.node_id = get_node_id();
     msg->cid.thread_id = get_thread_id();
@@ -2104,7 +2150,7 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
         msg->digest = util::djb2_digest(msg, msg->msg_size());
     }
 
-    dsm_->unreliable_send(rdma_buf, msg->msg_size(), node_id, dir_id);
+    dsm_->unreliable_send(rdma_buf.buffer, msg->msg_size(), node_id, dir_id);
     trace.pin("send");
 
     DCHECK_NOTNULL(ctx)->yield_to_master();

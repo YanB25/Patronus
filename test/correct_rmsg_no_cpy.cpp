@@ -144,7 +144,6 @@ void server_multithread_do(DSM::pointer dsm,
     ssize_t recv_msg_nrs[kMaxAppThread][MAX_MACHINE]{};
     while (finished_nr < total_nr)
     {
-        // size_t get = dsm->unreliable_try_recv(buffer, 64);
         auto get = dsm->unreliable_try_recv_no_cpy(recv_ptrs, 64);
         finished_nr.fetch_add(get);
 

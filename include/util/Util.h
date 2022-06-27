@@ -91,4 +91,9 @@ inline std::string binary_to_csv_filename(
     return ret;
 }
 
+inline void ro_prefetch([[maybe_unused]] const void *addr)
+{
+    // __builtin_prefetch(addr, 0 /* for read */, 1);
+}
+
 #endif

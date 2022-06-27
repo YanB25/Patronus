@@ -10,6 +10,7 @@ namespace config::patronus
 {
 constexpr static size_t kMaxCoroNr = define::kMaxCoroNr;
 constexpr static size_t kMessageSize = ::config::umsg::kUserMessageSize;
+constexpr static size_t kSmallMessageSize = 64_B;
 constexpr static size_t kClientRdmaBufferSize = 8_KB;
 constexpr static size_t kHandleRequestBatchLimit = 32;
 

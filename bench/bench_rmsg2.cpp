@@ -223,8 +223,10 @@ void run_benchmark_server(Patronus::pointer patronus)
                                            config::umsg::kRecvLimit);
         for (size_t i = 0; i < nr; ++i)
         {
-            auto send_buffer = patronus->get_rdma_message_buffer();
-            auto *resp_msg = (RespMessage *) send_buffer;
+            auto send_buffer =
+                patronus->get_rdma_message_buffer(sizeof(RespMessage));
+            DCHECK_GE(send_buffer.size, sizeof(RespMessage));
+            auto *resp_msg = (RespMessage *) send_buffer.buffer;
             auto *req_msg = (ReqMessage *) (recv_buffer +
                                             i * config::umsg::kUserMessageSize);
             auto from_tid = req_msg->from_tid;

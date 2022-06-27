@@ -70,7 +70,7 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
 
             size_t sent = 0;
 
-            DSM::msg_desc_t recv_ptrs[1024];
+            DSM::msg_desc_t recv_ptrs[::config::umsg::kRecvLimit];
 
             int64_t token = kTokenNr;
             for (size_t t = 0; t < kBurnCnt; ++t)
@@ -88,8 +88,8 @@ void client_burn(std::shared_ptr<DSM> dsm, size_t thread_nr)
                             << " at " << kMessageEachToken << ", wait for ack.";
                     do
                     {
-                        size_t recv_nr =
-                            dsm->unreliable_try_recv_no_cpy(recv_ptrs, 1024);
+                        size_t recv_nr = dsm->unreliable_try_recv_no_cpy(
+                            recv_ptrs, ::config::umsg::kRecvLimit);
                         // handle possbile recv token
                         for (size_t r = 0; r < recv_nr; ++r)
                         {
@@ -169,7 +169,7 @@ void server_burn_do(
 {
     auto tid = dsm->get_thread_id();
 
-    DSM::msg_desc_t recv_ptrs[1024];
+    DSM::msg_desc_t recv_ptrs[::config::umsg::kRecvLimit];
 
     auto *rdma_buf = dsm->get_rdma_buffer().buffer;
     memset(rdma_buf, 0, sizeof(RespMsg));
@@ -180,13 +180,12 @@ void server_burn_do(
 
     while (!finished.load(std::memory_order_relaxed))
     {
-        auto get = dsm->unreliable_try_recv_no_cpy(recv_ptrs, 1024);
+        auto get = dsm->unreliable_try_recv_no_cpy(recv_ptrs,
+                                                   ::config::umsg::kRecvLimit);
 
         for (size_t m = 0; m < get; ++m)
         {
             work_nr++;
-            // auto &msg =
-            //     *(ReqMsg *) (buffer + config::umsg::kUserMessageSize * m);
             auto &msg = *(ReqMsg *) recv_ptrs[m].msg_addr;
             auto from_tid = msg.tid;
             DCHECK_LT(from_tid, kMaxAppThread);
