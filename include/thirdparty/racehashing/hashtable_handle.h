@@ -376,7 +376,6 @@ public:
         {
             retry_nr++;
             CHECK_LT(retry_nr, 102400) << "** Failed to many times";
-            rdma_adpt_->put_all_rdma_buffer();
 
             if (rc == RC::kCacheStale)
             {

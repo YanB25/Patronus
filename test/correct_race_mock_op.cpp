@@ -442,7 +442,7 @@ void test_expand_once_single_thread()
         trace.set("k", key);
         trace.set("v", value);
         trace.set("op", "put");
-        trace.set("tid", 0);
+        trace.set("tid", std::to_string(0));
 
         auto rc = rhh.put(key, value, trace);
         if (rc == kNoMem)
