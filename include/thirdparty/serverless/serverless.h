@@ -49,8 +49,9 @@ public:
 
     lambda_t add_lambda(Lambda lambda,
                         std::optional<Parameters> init_para,
-                        std::optional<lambda_t> dependent_lambda,
-                        std::optional<lambda_t> root_lambda)
+                        std::optional<lambda_t> recv_para_from,
+                        std::vector<lambda_t> depend_on,
+                        std::optional<lambda_t> reloop_to_lambda)
     {
         auto ret = lambda_nr_++;
         CHECK_LE(lambda_nr_, kMaxLambdaNr);
@@ -58,30 +59,54 @@ public:
         if (init_para.has_value())
         {
             // it is the root
-            inits_[ret] = init_para.value();
             is_root_[ret] = true;
             roots_.push_back(ret);
+            depend_nr_[ret] = 0;  // root does not depend on anyone
+            inits_[ret] = init_para.value();
+
             readys_[ret] = true;
-            CHECK(!dependent_lambda.has_value())
+            running_[ret] = false;
+            waiting_nr_[ret] = 0;
+            CHECK(depend_on.empty())
                 << "** providing init_para implies a root lambda, which can "
                    "not have dependent lambdas";
-            CHECK(!root_lambda.has_value())
+            CHECK(!reloop_to_lambda.has_value())
                 << "** providing init_para implies a root lambda, and only "
-                   "tail lambda can provide its root_lambda";
+                   "tail lambda can provide reloop to lambda";
+            CHECK(!recv_para_from.has_value());
         }
-        if (dependent_lambda.has_value())
+        else
         {
-            // it is the middle (, or possibly tail)
-            CHECK_LT(dependent_lambda.value(), lambda_nr_)
-                << "** invalid dependent lambda";
+            // must not be root
             is_root_[ret] = false;
             readys_[ret] = false;
-            let_go_[dependent_lambda.value()].push_back(ret);
-            depend_on_[ret] = dependent_lambda.value();
+            running_[ret] = false;
+
+            depend_nr_[ret] = depend_on.size();
+            waiting_nr_[ret] = depend_nr_[ret];
             CHECK(!init_para.has_value());
+            CHECK(!depend_on.empty());
+        }
+        if (recv_para_from.has_value())
+        {
+            recv_input_from_[ret] = recv_para_from.value();
+            auto it = std::find(
+                depend_on.cbegin(), depend_on.cend(), recv_para_from.value());
+            if (it == depend_on.cend())
+            {
+                LOG(FATAL) << "** recving parameter from lambda("
+                           << recv_para_from.value()
+                           << ", which is not in the dependency list: "
+                           << util::pre_vec(depend_on);
+            }
+        }
+        for (auto dl : depend_on)
+        {
+            CHECK_LT(dl, lambda_nr_) << "** invalid dependent lambda";
+            let_go_[dl].push_back(ret);
         }
 
-        root_lambda_[ret] = root_lambda;
+        reloop_to_lambda_[ret] = reloop_to_lambda;
         return ret;
     }
 
@@ -159,7 +184,7 @@ private:
             // for other possible runnables
             for (size_t i = 0; i < coro_nr; ++i)
             {
-                if (readys_[i] && !running_[i])
+                if (readys_[i] && !running_[i] && waiting_nr_[i] == 0)
                 {
                     mctx.yield_to_worker(i);
                 }
@@ -188,9 +213,9 @@ private:
         {
             Parameters empty_input;
             const Parameters *input_para{};
-            if (depend_on_[coro_id].has_value())
+            if (recv_input_from_[coro_id].has_value())
             {
-                auto d = depend_on_[coro_id].value();
+                auto d = recv_input_from_[coro_id].value();
                 input_para = &outputs_[d];
             }
             else
@@ -201,6 +226,7 @@ private:
             auto &lambda = lambdas_[coro_id];
 
             DCHECK(readys_[coro_id]);
+            DCHECK_EQ(waiting_nr_[coro_id], 0) << "** this lambda not ready.";
             DCHECK(!running_[coro_id]);
             running_[coro_id] = true;
             outputs_[coro_id].clear();
@@ -214,23 +240,29 @@ private:
                      << ", ctx: " << ctx;
             for (auto l : let_go_[coro_id])
             {
-                DCHECK(!readys_[l]);
-                readys_[l] = true;
-                DCHECK(depend_on_[l].has_value());
-                DCHECK_EQ(depend_on_[l].value(), coro_id);
+                DCHECK_GT(waiting_nr_[l], 0);
+                waiting_nr_[l]--;
+                DCHECK_GE(waiting_nr_[l], 0);
+                if (waiting_nr_[l] == 0)
+                {
+                    readys_[l] = true;
+                }
                 DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
-                         << ") solve dependency => " << l << ", ctx: " << ctx;
+                         << ") solve dependency => " << l << " to "
+                         << waiting_nr_[l] << ", ready: " << readys_[l]
+                         << ". ctx: " << ctx;
             }
-            readys_[coro_id] = false;
             running_[coro_id] = false;
+            readys_[coro_id] = false;
 
-            if (root_lambda_[coro_id].has_value())
+            if (reloop_to_lambda_[coro_id].has_value())
             {
                 // This lambda is the last in the chain
                 coro_ex_.get_private_data().thread_remain_task--;
-                auto root = root_lambda_[coro_id].value();
+                auto root = reloop_to_lambda_[coro_id].value();
                 reset(root);
                 readys_[root] = true;
+                DCHECK_EQ(waiting_nr_[root], 0);
                 DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
                          << ") reloop to root " << root << ", ctx: " << ctx;
             }
@@ -266,6 +298,7 @@ private:
         readys_[root] = false;
         inputs_[root].clear();
         outputs_[root].clear();
+        waiting_nr_[root] = depend_nr_[root];
         DCHECK(!running_[root]);
         for (auto child : let_go_[root])
         {
@@ -277,19 +310,25 @@ private:
     ssize_t work_nr_;
     std::atomic<ssize_t> &remain_work_nr_;
 
-    lambda_t lambda_nr_{0};
-    std::array<std::optional<lambda_t>, kMaxLambdaNr> depend_on_{};
+    // below fields are book-keeping information
+    std::array<bool, kMaxLambdaNr> is_root_{};
+    std::vector<lambda_t> roots_;
+    std::array<std::optional<lambda_t>, kMaxLambdaNr> reloop_to_lambda_{};
     std::array<std::vector<lambda_t>, kMaxLambdaNr> let_go_{};
-    std::array<std::optional<lambda_t>, kMaxLambdaNr> root_lambda_{};
+    std::array<size_t, kMaxLambdaNr> depend_nr_{};
+    std::array<Parameters, kMaxLambdaNr> inits_{};
+    std::array<std::optional<lambda_t>, kMaxLambdaNr> recv_input_from_{};
+
+    // below fields are runtime concerned for lambda
+    std::array<Parameters, kMaxLambdaNr> inputs_{};
+    std::array<Parameters, kMaxLambdaNr> outputs_{};
+
+    // below fields are runtime concerned for internal implementations
+    lambda_t lambda_nr_{0};
     std::array<Lambda, kMaxLambdaNr> lambdas_;
     std::array<bool, kMaxLambdaNr> readys_{};
     std::array<bool, kMaxLambdaNr> running_{};
-    std::array<bool, kMaxLambdaNr> is_root_{};
-    std::vector<lambda_t> roots_;
-
-    std::array<Parameters, kMaxLambdaNr> inputs_{};
-    std::array<Parameters, kMaxLambdaNr> outputs_{};
-    std::array<Parameters, kMaxLambdaNr> inits_{};
+    std::array<ssize_t, kMaxLambdaNr> waiting_nr_{};
 
     bool is_finished_{false};
 
