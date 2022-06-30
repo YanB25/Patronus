@@ -50,7 +50,7 @@ public:
     lambda_t add_lambda(Lambda lambda,
                         std::optional<Parameters> init_para,
                         std::optional<lambda_t> recv_para_from,
-                        std::vector<lambda_t> depend_on,
+                        const std::vector<lambda_t> &depend_on,
                         std::optional<lambda_t> reloop_to_lambda)
     {
         auto ret = lambda_nr_++;
@@ -90,15 +90,6 @@ public:
         if (recv_para_from.has_value())
         {
             recv_input_from_[ret] = recv_para_from.value();
-            auto it = std::find(
-                depend_on.cbegin(), depend_on.cend(), recv_para_from.value());
-            if (it == depend_on.cend())
-            {
-                LOG(FATAL) << "** recving parameter from lambda("
-                           << recv_para_from.value()
-                           << ", which is not in the dependency list: "
-                           << util::pre_vec(depend_on);
-            }
         }
         for (auto dl : depend_on)
         {
@@ -334,7 +325,7 @@ private:
 
     struct Prv
     {
-        size_t thread_remain_task;
+        ssize_t thread_remain_task;
     };
     CoroExecutionContextWith<kMaxLambdaNr, Prv> coro_ex_;
 };

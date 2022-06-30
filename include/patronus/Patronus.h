@@ -257,6 +257,13 @@ public:
                                      flag_t flag /* RWFlag */,
                                      CoroContext *ctx,
                                      TraceView = util::nulltrace);
+    [[nodiscard]] inline RetCode faa(Lease &lease,
+                                     char *iobuf,
+                                     size_t offset,
+                                     int64_t value,
+                                     flag_t flag /* RWFlag */,
+                                     CoroContext *ctx,
+                                     TraceView = util::nulltrace);
     [[nodiscard]] inline RetCode rpc_cas(Lease &lease,
                                          char *iobuf,
                                          size_t offset,
@@ -1601,6 +1608,46 @@ RetCode Patronus::write(Lease &lease,
     {
         lease.cache_insert(offset, size, ibuf);
     }
+
+    return ec;
+}
+
+RetCode Patronus::faa(Lease &lease,
+                      char *iobuf,
+                      size_t offset,
+                      int64_t value,
+                      flag_t flag /* RWFlag */,
+                      CoroContext *ctx,
+                      TraceView trace)
+{
+    bool two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (two_sided)
+    {
+        debug_validate_rpc_rwcas_flag(flag);
+        return rpc_faa(lease, iobuf, offset, value, ctx, trace);
+    }
+
+    auto ec = handle_rwcas_flag(lease, flag, ctx);
+    if (unlikely(ec != RC::kOk))
+    {
+        return ec;
+    }
+
+    auto node_id = lease.node_id_;
+    auto dir_id = lease.dir_id_;
+    uint32_t rkey = 0;
+    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
+    if (use_universal_rkey)
+    {
+        rkey = dsm_->get_rkey(node_id, dir_id);
+    }
+    else
+    {
+        rkey = lease.cur_rkey_;
+    }
+    // uint64_t remote_addr = lease.base_addr_ + offset;
+
+    CHECK(false) << "TODO: not implemented.";
 
     return ec;
 }
