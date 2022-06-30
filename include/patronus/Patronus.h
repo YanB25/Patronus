@@ -456,8 +456,7 @@ public:
                                           CoroContext *ctx);
     void post_handle_request_admin(AdminRequest *req, CoroContext *ctx);
 
-    [[nodiscard]] Buffer get_rdma_buffer_8B()
-    {
+    [[nodiscard]] Buffer get_rdma_buffer_8B() {
         CHECK(!self_managing_client_rdma_buffer_);
         auto *ret = (char *) rdma_client_buffer_8B_->get();
         if (likely(ret != nullptr))
@@ -465,8 +464,7 @@ public:
             return Buffer(ret, 8);
         }
         return Buffer(nullptr, 0);
-    }
-    void put_rdma_buffer_8B(Buffer buffer)
+    } void put_rdma_buffer_8B(Buffer buffer)
     {
         if (buffer.buffer)
         {
@@ -475,13 +473,11 @@ public:
         }
     }
 
-    [[nodiscard]] Buffer get_self_managed_rdma_buffer()
-    {
+    [[nodiscard]] Buffer get_self_managed_rdma_buffer() {
         CHECK(!self_managing_client_rdma_buffer_);
         self_managing_client_rdma_buffer_ = true;
         return Buffer(client_rdma_buffer_, client_rdma_buffer_size_);
-    }
-    void put_self_managed_rdma_buffer(Buffer buffer)
+    } void put_self_managed_rdma_buffer(Buffer buffer)
     {
         CHECK_EQ(buffer.buffer, client_rdma_buffer_);
         CHECK_EQ(buffer.size, client_rdma_buffer_size_);
@@ -489,8 +485,7 @@ public:
         self_managing_client_rdma_buffer_ = false;
     }
 
-    [[nodiscard]] Buffer get_rdma_buffer(size_t size)
-    {
+    [[nodiscard]] Buffer get_rdma_buffer(size_t size) {
         CHECK(!self_managing_client_rdma_buffer_);
         if (size <= 8)
         {
@@ -503,8 +498,7 @@ public:
             return Buffer(buf, kClientRdmaBufferSize);
         }
         return Buffer(nullptr, 0);
-    }
-    void put_rdma_buffer(Buffer buffer)
+    } void put_rdma_buffer(Buffer buffer)
     {
         if (buffer.buffer)
         {
@@ -562,15 +556,13 @@ public:
     {
         return conf_.reserved_buffer_size;
     }
-    [[nodiscard]] Buffer get_lease_buffer() const
-    {
+    [[nodiscard]] Buffer get_lease_buffer() const {
         auto server_buf = dsm_->get_server_buffer();
         auto *buf_addr = server_buf.buffer;
         auto buf_size = lease_buffer_size();
         DCHECK_GE(server_buf.size, buf_size);
         return Buffer(buf_addr, buf_size);
-    }
-    [[nodiscard]] Buffer get_alloc_buffer() const
+    }[[nodiscard]] Buffer get_alloc_buffer() const
     {
         auto server_buf = dsm_->get_server_buffer();
         auto *buf_addr = server_buf.buffer + lease_buffer_size();
@@ -578,8 +570,7 @@ public:
         DCHECK_GE(server_buf.size, lease_buffer_size() + alloc_buffer_size());
         return Buffer(buf_addr, buf_size);
     }
-    [[nodiscard]] Buffer get_user_reserved_buffer() const
-    {
+    [[nodiscard]] Buffer get_user_reserved_buffer() const {
         auto server_buffer = dsm_->get_server_buffer();
         auto *buf_addr =
             server_buffer.buffer + lease_buffer_size() + alloc_buffer_size();

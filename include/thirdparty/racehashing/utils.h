@@ -26,8 +26,7 @@ inline uint64_t round_up_to_next_power_of_2(uint64_t x)
     return pow(2, ceil(log(x) / log(2)));
 }
 
-union UTaggedPtr
-{
+union UTaggedPtr {
     uint64_t val;
     struct
     {
@@ -399,11 +398,11 @@ inline uint64_t round_to_bits(uint64_t hash, size_t bits)
     return hash & ((1ull << bits) - 1);
 }
 
-inline size_t len_to_ptr_len(size_t len)
+inline constexpr size_t len_to_ptr_len(size_t len)
 {
     return (len + (kLenUnit - 1)) / kLenUnit;
 }
-inline size_t ptr_len_to_len(size_t ptr_len)
+inline constexpr size_t ptr_len_to_len(size_t ptr_len)
 {
     return ptr_len * kLenUnit;
 }

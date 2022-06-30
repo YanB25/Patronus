@@ -151,14 +151,33 @@ public:
             MemHandleDecision().use_mw().wo_expire().no_bind_pr();
         return c;
     }
+    template <typename Duration>
+    static RaceHashingHandleConfig get_mw_protected_tenant_with_timeout(
+        const std::string &name,
+        size_t kvblock_expect_size,
+        size_t alloc_batch,
+        bool force_kvblock_to_match,
+        Duration timeout)
+    {
+        auto c = get_basic(
+            name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
+        c.bypass_prot = true;
+        c.read_kvblock.use_mw().with_expire(timeout).no_bind_pr();
+        c.alloc_kvblock.with_alloc(hash::config::kAllocHintKVBlock)
+            .use_mw()
+            // .wo_expire();
+            .with_expire(timeout);
+        c.meta.d.use_mw().with_expire(timeout).no_bind_pr();
+        c.kvblock_region =
+            MemHandleDecision().use_mw().with_expire(timeout).no_bind_pr();
+        return c;
+    }
 
     static RaceHashingHandleConfig get_rpc(const std::string &name,
                                            size_t kvblock_expect_size,
                                            size_t alloc_batch,
                                            bool force_kvblock_to_match)
     {
-        CHECK(false)
-            << "RPC: requires RPC to support read/write 4KB buffer. TODO:";
         auto c = get_unprotected(
             name, kvblock_expect_size, alloc_batch, force_kvblock_to_match);
         c.use_rpc = true;
@@ -228,7 +247,7 @@ public:
         CHECK(c.kvblock_region.has_value());
         c.kvblock_region.value().use_mr();
 
-        c.test_nr_scale_factor = 1.0 / 10;
+        c.test_nr_scale_factor = 1.0 / 100;
         return c;
     }
 };

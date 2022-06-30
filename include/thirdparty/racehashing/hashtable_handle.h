@@ -1565,6 +1565,22 @@ public:
     {
         return !to_insert_block.gaddrs_.empty();
     }
+
+    std::pair<size_t, size_t> get_expect_kvblock_tagged_size() const
+    {
+        size_t tag_ptr_len = conf_.kvblock_expect_size / kLenUnit;
+        size_t ret_kvblock_size = tag_ptr_len * kLenUnit;
+        DCHECK_GE(std::numeric_limits<decltype(
+                      to_insert_block.cur_tagged_len_)>::max(),
+                  tag_ptr_len);
+        return {ret_kvblock_size, tag_ptr_len};
+    }
+    std::pair<size_t, size_t> get_actual_kvblock_tagged_size(size_t size) const
+    {
+        size_t tag_ptr_len = len_to_ptr_len(size);
+        size_t kvblock_size = ptr_len_to_len(tag_ptr_len);
+        return {kvblock_size, tag_ptr_len};
+    }
     RetCode prepare_alloc_kv(const Key &key, const Value &value)
     {
         auto rc = RC::kOk;
@@ -1572,24 +1588,30 @@ public:
         {
             return rc;
         }
-        size_t kvblock_size = sizeof(KVBlock) + key.size() + value.size();
-        // scale kvblock_size here, because may be overflow by limited bits in
-        // tagged ptr
-        kvblock_size = std::max(kvblock_size, conf_.kvblock_expect_size);
-        size_t tag_ptr_len = len_to_ptr_len(kvblock_size);
-        kvblock_size = ptr_len_to_len(tag_ptr_len);
-        CHECK_EQ(kvblock_size, conf_.kvblock_expect_size)
-            << "** tagged pointer unable to successfully store "
-               "kvblock_expect_size: "
-            << conf_.kvblock_expect_size << ". tag_ptr_len: " << tag_ptr_len
-            << ", convert back to " << kvblock_size << ". Possible overflow";
 
-        to_insert_block.cur_kvblock_size_ = kvblock_size;
+        // a) In the RACE hashing implementation, the @kvblock_size is stored
+        // in the unit of @kLenUnit (actual_*)
+        size_t kvblock_size = sizeof(KVBlock) + key.size() + value.size();
+        auto [actual_kvblock_size, actual_ptr_len] =
+            get_actual_kvblock_tagged_size(kvblock_size);
+        // b) Furthermore, for evaluation purpose, we wish to promote
+        // kvblock_size to the max possible value while satisfying <=
+        // conf_.kvblock_expect_size (expect_*)
+        auto [expect_kvblock_size, expect_ptr_len] =
+            get_expect_kvblock_tagged_size();
+
+        // c) If actual kvblock_size is larger than expect kvblock_size, we
+        // respect the actual one. Otherwise, we use the expect ones.
+        size_t select_kvblock_size =
+            std::max(actual_kvblock_size, expect_kvblock_size);
+        size_t select_ptr_len = std::max(actual_ptr_len, expect_ptr_len);
+
+        to_insert_block.cur_kvblock_size_ = select_kvblock_size;
         DCHECK_GE(std::numeric_limits<decltype(
                       to_insert_block.cur_tagged_len_)>::max(),
-                  tag_ptr_len);
-        to_insert_block.cur_tagged_len_ = tag_ptr_len;
-        return begin_insert_kvblock(kvblock_size);
+                  select_ptr_len);
+        to_insert_block.cur_tagged_len_ = select_ptr_len;
+        return begin_insert_kvblock(select_kvblock_size);
     }
     RetCode consume_kv_block()
     {

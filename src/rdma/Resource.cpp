@@ -306,6 +306,8 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize, RdmaContext *ctx)
     if (!mr)
     {
         LOG(ERROR) << "Memory registration failed";
+        PLOG_IF(ERROR, ibv_exp_free_dm(dm))
+            << "Failed to recover: unable to free allocated dm.";
         return nullptr;
     }
 

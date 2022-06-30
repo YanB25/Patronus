@@ -2,8 +2,12 @@
 
 #include <glog/logging.h>
 
+#include <chrono>
+#include <thread>
+
 #include "Connection.h"
 #include "Timer.h"
+using namespace std::chrono_literals;
 
 /**
  * every DirectoryConnection has its own protection domain
@@ -48,8 +52,24 @@ DirectoryConnection::DirectoryConnection(
     {
         this->dmPool = (void *) define::kLockStartAddr;
         this->lockSize = define::kLockChipMemSize;
-        this->lockMR = createMemoryRegionOnChip(
-            (uint64_t) this->dmPool, this->lockSize, &ctx);
+        this->lockMR = nullptr;
+        size_t retry_nr = 0;
+        do
+        {
+            this->lockMR = createMemoryRegionOnChip(
+                (uint64_t) this->dmPool, this->lockSize, &ctx);
+            if (unlikely(this->lockMR == nullptr))
+            {
+                LOG(ERROR) << "Failed to create memory region on device memory "
+                              "for size "
+                           << this->lockSize << ". Sleep for a while.";
+                std::this_thread::sleep_for(1s);
+                retry_nr++;
+                CHECK_LE(retry_nr, 60)
+                    << "** Failed to create memory region on device memory. "
+                       "Retry limit exceeded.";
+            }
+        } while (this->lockMR == nullptr);
         this->lockLKey = lockMR->lkey;
         timer.pin("createMR OnChip");
     }

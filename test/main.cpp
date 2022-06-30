@@ -30,7 +30,8 @@ int main(int argc, char *argv[])
 
     // LOG(INFO) << "Connection build. node_id: " << dsm->get_node_id()
     //           << ", thread_id: " << dsm->get_thread_id();
-    LOG(INFO) << "** sizeof " << sizeof(Test);
+    size_t m = patronus::MemoryMessagePayload();
+    LOG(INFO) << "max size: " << m;
     // LOG(INFO) << "Patronus: " << sizeof(patronus::Patronus)
     //           << ", DSM: " << sizeof(DSM)
     //           << ", umsg: " << sizeof(UnreliableConnection<32>)

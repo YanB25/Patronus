@@ -52,7 +52,7 @@ std::vector<uint64_t> col_lat_min;
 std::vector<uint64_t> col_lat_p5;
 std::vector<uint64_t> col_lat_p9;
 std::vector<uint64_t> col_lat_p99;
-std::unordered_map<std::string, std::vector<uint64_t>> lat_data;
+std::map<std::string, std::vector<uint64_t>> lat_data;
 
 struct KVGenConf
 {
@@ -326,7 +326,7 @@ typename RaceHashing<kE, kB, kS>::Handle::pointer gen_rdma_rhh(
     DVLOG(1) << "Getting from race:meta_gaddr got " << meta_gaddr;
 
     auto handle_rdma_ctx = patronus::RdmaAdaptor::new_instance(
-        server_nid, dir_id, p, conf.bypass_prot, false /* two sided */, ctx);
+        server_nid, dir_id, p, conf.bypass_prot, conf.use_rpc, ctx);
 
     auto prhh = HandleT::new_instance(
         server_nid, meta_gaddr, conf, auto_expand, handle_rdma_ctx);
@@ -458,7 +458,7 @@ void test_basic_client_worker(
     bool should_report_latency = (tid == 0 && coro_id == 0);
 
     util::TraceManager tm(0);
-    // util::TraceManager tm(0.001);
+    // util::TraceManager tm(0.01);
 
     auto rhh = gen_rdma_rhh<kE, kB, kS>(
         p, dir_id, rhh_conf, auto_expand, meta_gaddr, &ctx);
@@ -778,17 +778,20 @@ void benchmark_client(Patronus::pointer p,
         {
             if (col_lat_idx.empty())
             {
-                col_lat_idx.push_back("lat_min");
-                col_lat_idx.push_back("lat_p5");
-                col_lat_idx.push_back("lat_p9");
-                col_lat_idx.push_back("lat_p99");
+                col_lat_idx.push_back("lat_min(avg)");
+                col_lat_idx.push_back("lat_p5(avg)");
+                col_lat_idx.push_back("lat_p9(avg)");
+                col_lat_idx.push_back("lat_p99(avg)");
             }
             if (likely(lat_data[report_name].empty()))
             {
-                lat_data[report_name].push_back(lat_m.min());
-                lat_data[report_name].push_back(lat_m.percentile(0.5));
-                lat_data[report_name].push_back(lat_m.percentile(0.9));
-                lat_data[report_name].push_back(lat_m.percentile(0.99));
+                lat_data[report_name].push_back(lat_m.min() / bench_conf.io_nr);
+                lat_data[report_name].push_back(lat_m.percentile(0.5) /
+                                                bench_conf.io_nr);
+                lat_data[report_name].push_back(lat_m.percentile(0.9) /
+                                                bench_conf.io_nr);
+                lat_data[report_name].push_back(lat_m.percentile(0.99) /
+                                                bench_conf.io_nr);
             }
             else
             {
@@ -867,7 +870,7 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     // NOTE: if kvblock is small, RH can reach like 10 Mops for read operations.
     // Therefore, Patronus is not comparable to it.
     // for (size_t kvblock_expect_size : {64})
-    for (size_t kvblock_expect_size : {4_KB})
+    for (size_t kvblock_expect_size : {4_K})
     {
         // alloc_batch > 1 has great performance boost against no-batch
         // but alloc_batch = {2, 4, 8, ...} has marginal performance impact
@@ -881,16 +884,25 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 true /* mock kvblock match */));
             rhh_configs.push_back(
                 RaceHashingConfigFactory::get_mw_protected_tenant(
-                    "patronus",
+                    "mw",
                     kvblock_expect_size,
                     alloc_batch,
                     true /* mock kvblock match */));
 
-            // rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
-            //     "mr",
-            //     kvblock_expect_size,
-            //     alloc_batch,
-            //     true /* mock kvblock match */));
+            // NOTE: lease does not help boost performance
+            // rhh_configs.push_back(
+            //     RaceHashingConfigFactory::get_mw_protected_tenant_with_timeout(
+            //         "lease",
+            //         kvblock_expect_size,
+            //         alloc_batch,
+            //         true /* mock kvblock match */,
+            //         100us));
+
+            rhh_configs.push_back(RaceHashingConfigFactory::get_mr_protected(
+                "mr",
+                kvblock_expect_size,
+                alloc_batch,
+                true /* mock kvblock match */));
 
             rhh_configs.push_back(RaceHashingConfigFactory::get_rpc(
                 "rpc",
@@ -902,10 +914,8 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
 
     for (const auto &rhh_conf : rhh_configs)
     {
-        // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-        for (size_t thread_nr : {1, 8, 16, 32})
+        for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
         {
-            // for (size_t io_nr : {1, 8, 16})
             for (size_t io_nr : {8})
             {
                 constexpr static size_t kCoroNr = 1;
@@ -914,79 +924,51 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 constexpr size_t capacity =
                     RaceHashing<4, 16, 16>::max_capacity();
 
-                {
-                    size_t test_nr =
-                        10_K * io_nr * std::min(thread_nr, (size_t) 4);
-                    key++;
-                    auto ro_conf = BenchConfigFactory::get_read_only_config(
-                        "RO",
-                        capacity,
-                        test_nr,
-                        thread_nr,
-                        kCoroNr,
-                        io_nr,
-                        4 /* initial_subtable_nr */,
-                        rhh_conf.kvblock_expect_size);
-                    if (is_client)
-                    {
-                        for (const auto &bench_conf : ro_conf)
-                        {
-                            bench_conf.validate();
-                            LOG_IF(INFO, is_master)
-                                << "[sub-conf] running conf: " << bench_conf;
-                            benchmark_client<4, 16, 16>(
-                                p, bar, is_master, bench_conf, rhh_conf, key);
-                        }
-                    }
-                    else
-                    {
-                        benchmark_server<4, 16, 16>(
-                            p, bar, is_master, ro_conf, key);
-                    }
-                }
-                {
-                    size_t test_nr =
-                        2_K * io_nr * std::min(thread_nr, (size_t) 4);
-                    key++;
-                    auto wo_conf = BenchConfigFactory::get_write_only_config(
-                        "WO",
-                        capacity,
-                        // 1_M,
-                        test_nr,
-                        thread_nr,
-                        kCoroNr,
-                        io_nr,
-                        4 /* initial_subtable_nr */,
-                        rhh_conf.kvblock_expect_size);
-                    if (is_client)
-                    {
-                        for (const auto &bench_conf : wo_conf)
-                        {
-                            bench_conf.validate();
-                            LOG_IF(INFO, is_master)
-                                << "[sub-conf] running conf: " << bench_conf;
-                            benchmark_client<4, 16, 16>(
-                                p, bar, is_master, bench_conf, rhh_conf, key);
-                        }
-                    }
-                    else
-                    {
-                        benchmark_server<4, 16, 16>(
-                            p, bar, is_master, wo_conf, key);
-                    }
-                }
                 // {
+                //     size_t test_nr =
+                //         30_K * io_nr * std::min(thread_nr, (size_t) 4);
                 //     key++;
-                //     auto wo_conf = BenchConfigFactory::get_rw_config(
-                //         "RW",
+                //     auto ro_conf = BenchConfigFactory::get_read_only_config(
+                //         "RO",
                 //         capacity,
-                //         // 1_M,
-                //         100_K,
+                //         test_nr,
                 //         thread_nr,
                 //         kCoroNr,
+                //         io_nr,
                 //         4 /* initial_subtable_nr */,
-                //         rhh_conf.kvblock_expect_size,
-                //         0.5);
+                //         rhh_conf.kvblock_expect_size);
+                //     if (is_client)
+                //     {
+                //         for (const auto &bench_conf : ro_conf)
+                //         {
+                //             bench_conf.validate();
+                //             LOG_IF(INFO, is_master)
+                //                 << "[sub-conf] running conf: " << bench_conf;
+                //             benchmark_client<4, 16, 16>(
+                //                 p, bar, is_master, bench_conf, rhh_conf,
+                //                 key);
+                //         }
+                //     }
+                //     else
+                //     {
+                //         benchmark_server<4, 16, 16>(
+                //             p, bar, is_master, ro_conf, key);
+                //     }
+                // }
+                // {
+                //     size_t test_nr =
+                //         20_K * io_nr * std::min(thread_nr, (size_t) 4);
+                //     key++;
+                //     auto wo_conf = BenchConfigFactory::get_write_only_config(
+                //         "WO",
+                //         capacity,
+                //         // 1_M,
+                //         test_nr,
+                //         thread_nr,
+                //         kCoroNr,
+                //         io_nr,
+                //         4 /* initial_subtable_nr */,
+                //         rhh_conf.kvblock_expect_size);
                 //     if (is_client)
                 //     {
                 //         for (const auto &bench_conf : wo_conf)
@@ -1005,48 +987,142 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
                 //             p, bar, is_master, wo_conf, key);
                 //     }
                 // }
+                {
+                    size_t test_nr =
+                        30_K * io_nr * std::min(thread_nr, (size_t) 4);
+                    key++;
+                    auto wo_conf = BenchConfigFactory::get_rw_config(
+                        "RW",
+                        capacity,
+                        test_nr,
+                        thread_nr,
+                        kCoroNr,
+                        io_nr,
+                        4 /* initial_subtable_nr */,
+                        rhh_conf.kvblock_expect_size,
+                        0.5);
+                    if (is_client)
+                    {
+                        for (const auto &bench_conf : wo_conf)
+                        {
+                            bench_conf.validate();
+                            LOG_IF(INFO, is_master)
+                                << "[sub-conf] running conf: " << bench_conf;
+                            benchmark_client<4, 16, 16>(
+                                p, bar, is_master, bench_conf, rhh_conf, key);
+                        }
+                    }
+                    else
+                    {
+                        benchmark_server<4, 16, 16>(
+                            p, bar, is_master, wo_conf, key);
+                    }
+                }
             }
         }
 
-        //     for (size_t thread_nr : {32})
-        //     {
-        //         // for (size_t coro_nr : {2, 4, 8, 16})
-        //         for (size_t coro_nr : {2, 16})
-        //         // for (size_t coro_nr : {1})
-        //         {
-        //             LOG_IF(INFO, is_master)
-        //                 << "[config] benching multiple threads for " <<
-        //                 rhh_conf;
-        //             constexpr size_t capacity =
-        //                 RaceHashing<4, 16, 16>::max_capacity();
-        //             key++;
-        //             auto ro_conf = BenchConfigFactory::get_read_only_config(
-        //                 "RO",
-        //                 capacity,
-        //                 1_M,
-        //                 thread_nr,
-        //                 coro_nr,
-        //                 4 /* initial_subtable_nr */,
-        //                 rhh_conf.kvblock_expect_size);
-        //             if (is_client)
-        //             {
-        //                 for (const auto &bench_conf : ro_conf)
-        //                 {
-        //                     bench_conf.validate();
-        //                     LOG_IF(INFO, is_master)
-        //                         << "[sub-conf] running conf: " << bench_conf;
-        //                     benchmark_client<4, 16, 16>(
-        //                         p, bar, is_master, bench_conf, rhh_conf,
-        //                         key);
-        //                 }
-        //             }
-        //             else
-        //             {
-        //                 benchmark_server<4, 16, 16>(
-        //                     p, bar, is_master, ro_conf, key);
-        //             }
-        //         }
-        //     }
+        for (size_t coro_nr : {2, 4, 8, 16})
+        {
+            for (size_t io_nr : {8})
+            {
+                constexpr static size_t kThreadNr = 32;
+                LOG_IF(INFO, is_master)
+                    << "[config] benching multiple threads for " << rhh_conf;
+                constexpr size_t capacity =
+                    RaceHashing<4, 16, 16>::max_capacity();
+
+                // {
+                //     size_t test_nr = 30_K * io_nr * 4;
+                //     key++;
+                //     auto ro_conf = BenchConfigFactory::get_read_only_config(
+                //         "RO",
+                //         capacity,
+                //         test_nr,
+                //         kThreadNr,
+                //         coro_nr,
+                //         io_nr,
+                //         4 /* initial_subtable_nr */,
+                //         rhh_conf.kvblock_expect_size);
+                //     if (is_client)
+                //     {
+                //         for (const auto &bench_conf : ro_conf)
+                //         {
+                //             bench_conf.validate();
+                //             LOG_IF(INFO, is_master)
+                //                 << "[sub-conf] running conf: " << bench_conf;
+                //             benchmark_client<4, 16, 16>(
+                //                 p, bar, is_master, bench_conf, rhh_conf,
+                //                 key);
+                //         }
+                //     }
+                //     else
+                //     {
+                //         benchmark_server<4, 16, 16>(
+                //             p, bar, is_master, ro_conf, key);
+                //     }
+                // }
+                // {
+                //     size_t test_nr = 20_K * io_nr * 4;
+                //     key++;
+                //     auto wo_conf = BenchConfigFactory::get_write_only_config(
+                //         "WO",
+                //         capacity,
+                //         test_nr,
+                //         kThreadNr,
+                //         coro_nr,
+                //         io_nr,
+                //         4 /* initial_subtable_nr */,
+                //         rhh_conf.kvblock_expect_size);
+                //     if (is_client)
+                //     {
+                //         for (const auto &bench_conf : wo_conf)
+                //         {
+                //             bench_conf.validate();
+                //             LOG_IF(INFO, is_master)
+                //                 << "[sub-conf] running conf: " << bench_conf;
+                //             benchmark_client<4, 16, 16>(
+                //                 p, bar, is_master, bench_conf, rhh_conf,
+                //                 key);
+                //         }
+                //     }
+                //     else
+                //     {
+                //         benchmark_server<4, 16, 16>(
+                //             p, bar, is_master, wo_conf, key);
+                //     }
+                // }
+                {
+                    size_t test_nr = 30_K * io_nr * 4;
+                    key++;
+                    auto wo_conf = BenchConfigFactory::get_rw_config(
+                        "RW",
+                        capacity,
+                        test_nr,
+                        kThreadNr,
+                        coro_nr,
+                        io_nr,
+                        4 /* initial_subtable_nr */,
+                        rhh_conf.kvblock_expect_size,
+                        0.5);
+                    if (is_client)
+                    {
+                        for (const auto &bench_conf : wo_conf)
+                        {
+                            bench_conf.validate();
+                            LOG_IF(INFO, is_master)
+                                << "[sub-conf] running conf: " << bench_conf;
+                            benchmark_client<4, 16, 16>(
+                                p, bar, is_master, bench_conf, rhh_conf, key);
+                        }
+                    }
+                    else
+                    {
+                        benchmark_server<4, 16, 16>(
+                            p, bar, is_master, wo_conf, key);
+                    }
+                }
+            }
+        }
     }
 }
 

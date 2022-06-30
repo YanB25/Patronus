@@ -59,8 +59,7 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status);
 
 struct ClientID
 {
-    union
-    {
+    union {
         struct
         {
             uint16_t node_id;
@@ -131,7 +130,7 @@ struct AcquireRequest
     uint16_t flag;  // should be AcquireRequestFlag
     Debug<uint64_t> digest;
 } __attribute__((packed));
-static_assert(sizeof(AcquireRequest) < config::umsg::kUserMessageSize);
+static_assert(sizeof(AcquireRequest) < ::config::umsg::kUserMessageSize);
 static_assert(NR_DIRECTORY <
               std::numeric_limits<decltype(AcquireRequest::dir_id)>::max());
 static_assert(sizeof(AcquireRequest::flag) >= sizeof(AcquireRequestFlag));
@@ -153,7 +152,7 @@ struct AcquireResponse
     uint32_t post_qp_id;
     AcquireRequestStatus status;
 } __attribute__((packed));
-static_assert(sizeof(AcquireResponse) < config::umsg::kUserMessageSize);
+static_assert(sizeof(AcquireResponse) < ::config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const AcquireResponse &resp);
 
 enum class AdminFlag : uint8_t
@@ -176,7 +175,7 @@ struct AdminRequest
     uint64_t data;  // used by p->barrier()
     bool need_response;
 } __attribute__((packed));
-static_assert(sizeof(AdminRequest) < config::umsg::kUserMessageSize);
+static_assert(sizeof(AdminRequest) < ::config::umsg::kUserMessageSize);
 static_assert(sizeof(AdminRequest::flag) >= sizeof(AdminFlag));
 std::ostream &operator<<(std::ostream &os, const AdminRequest &resp);
 
@@ -188,7 +187,7 @@ struct AdminResponse
     bool success;
     Debug<uint64_t> digest;
 } __attribute__((packed));
-static_assert(sizeof(AdminResponse) < config::umsg::kUserMessageSize);
+static_assert(sizeof(AdminResponse) < ::config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const AdminResponse &resp);
 
 enum class LeaseModifyFlag : uint16_t
@@ -229,7 +228,7 @@ struct LeaseModifyRequest
     uint32_t size; /* when only_dealloc is ON */
     Debug<uint64_t> digest;
 } __attribute__((packed));
-static_assert(sizeof(LeaseModifyRequest) < config::umsg::kUserMessageSize);
+static_assert(sizeof(LeaseModifyRequest) < ::config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const LeaseModifyRequest &req);
 static_assert(sizeof(LeaseModifyRequest::flag) >= sizeof(LeaseModifyFlag));
 
@@ -241,7 +240,7 @@ struct LeaseModifyResponse
     Debug<uint64_t> digest;
 
 } __attribute__((packed));
-static_assert(sizeof(LeaseModifyResponse) < config::umsg::kUserMessageSize);
+static_assert(sizeof(LeaseModifyResponse) < ::config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const LeaseModifyResponse &req);
 
 struct BatchBaseMessage
@@ -337,7 +336,7 @@ struct MemoryResponse
         return sizeof(MemoryResponse) + buffer_size;
     }
 } __attribute__((packed));
-static_assert(sizeof(MemoryResponse) <= config::umsg::kUserMessageSize);
+static_assert(sizeof(MemoryResponse) <= ::config::umsg::kUserMessageSize);
 std::ostream &operator<<(std::ostream &os, const MemoryResponse &resp);
 
 constexpr inline size_t MemoryMessagePayload()

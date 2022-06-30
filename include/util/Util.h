@@ -13,8 +13,7 @@
 
 struct Data
 {
-    union
-    {
+    union {
         struct
         {
             uint32_t lower;
