@@ -2,3 +2,4 @@ REMOTE_DIR=/home/yanbin/workspace
 WORK_DIR=${REMOTE_DIR}
 BIN_DIR=${REMOTE_DIR}/bin
 RESULT_DIR=${REMOTE_DIR}/result
+ARTIFACTS_DIR=${REMOTE_DIR}/artifacts/

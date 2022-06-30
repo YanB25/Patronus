@@ -34,6 +34,7 @@ public:
     {
         return Request{};
     }
+    virtual ~RequstGen() = default;
 };
 
 using CoroFunc = std::function<RequstGen *(int, DSM *, int)>;

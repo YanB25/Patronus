@@ -10,7 +10,20 @@ option(SANITIZE "Turn on sanitization" OFF)
 
 # Compiler options
 set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare -Wno-address-of-packed-member")
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -W -Werror")
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -Wextra -Werror")
+
+# turn on these later
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wcast-align -Wcast-qual -Wctor-dtor-privacy -Wdisabled-optimization -Wformat=2 -Winit-self -Wmissing-declarations -Wmissing-include-dirs -Woverloaded-virtual -Wredundant-decls -Wshadow -Wsign-promo -Wstrict-overflow=5 -Wswitch-default -Wundef -Werror -Wno-unused  -Wno-format-nonliteral")
+
+# for Magick++
+add_definitions(-DMAGICKCORE_QUANTUM_DEPTH=16)
+add_definitions(-DMAGICKCORE_HDRI_ENABLE=0)
+find_package(ImageMagick COMPONENTS Magick++)
+
+# use SYSTEM GLAD to disable warning from libraries
+include_directories(SYSTEM GLAD ${ImageMagick_INCLUDE_DIRS})
+message(STATUS ${ImageMagick_INCLUDE_DIRS})
+link_libraries(${ImageMagick_LIBRARIES})
 
 # enable profiling
 # set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pg ")

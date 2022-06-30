@@ -82,7 +82,9 @@
     "editor.wordWrapColumn": 160,
     "C_Cpp.default.includePath": [
         "${workspaceFolder}/thirdparty/DataFrame/include",
-        "${workspaceFolder}/include"
+        "${workspaceFolder}/include",
+        "/usr/include/ImageMagick-6",
+        "/usr/include/x86_64-linux-gnu/ImageMagick-6",
     ],
     "editor.formatOnSave": true,
     "cmake.configureOnOpen": true,
