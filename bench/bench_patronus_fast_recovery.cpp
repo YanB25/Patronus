@@ -271,7 +271,7 @@ void test_basic_client_worker(
             CHECK_EQ(ec, kOk) << "** unexpected read failure at " << executed_nr
                               << "-th op. tid: " << tid
                               << ", dir_id: " << dir_id << ". lease: " << lease;
-            p->put_rdma_buffer(rdma_buf);
+            p->put_rdma_buffer(std::move(rdma_buf));
 
             succ_nr++;
             auto rel_flag = (flag_t) 0;

@@ -122,6 +122,10 @@ public:
     {
         cache_.insert(addr, len, ibuf);
     }
+    size_t buffer_size() const
+    {
+        return buffer_size_;
+    }
 
 private:
     void set_finish()

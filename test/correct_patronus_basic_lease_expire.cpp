@@ -128,7 +128,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
 
-        p->put_rdma_buffer(rdma_buf);
+        p->put_rdma_buffer(std::move(rdma_buf));
     }
 
     // LOG(INFO) << "[bench] remain_ddl: " << remain_ddl_m;

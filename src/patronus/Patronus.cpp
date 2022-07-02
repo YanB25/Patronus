@@ -293,7 +293,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     }
 
     put_rpc_context(rpc_context);
-    put_rdma_message_buffer(rdma_buf);
+    put_rdma_message_buffer(std::move(rdma_buf));
 
     if (no_gc)
     {
@@ -648,7 +648,7 @@ RetCode Patronus::lease_modify_impl(Lease &lease,
     put_rpc_context(rpc_context);
     // TODO(patronus): this may have bug if the buffer is re-used when NIC is
     // DMA-ing
-    put_rdma_message_buffer(rdma_buf);
+    put_rdma_message_buffer(std::move(rdma_buf));
 
     return ret;
 }
@@ -1515,7 +1515,7 @@ void Patronus::finished(uint64_t key)
 
     // TODO(patronus): this may have problem
     // if the buffer is reused when NIC is DMA-ing
-    put_rdma_message_buffer(rdma_buf);
+    put_rdma_message_buffer(std::move(rdma_buf));
 }
 void Patronus::handle_admin_barrier(AdminRequest *req,
                                     [[maybe_unused]] CoroContext *ctx)
@@ -2286,7 +2286,7 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
                           req->cid.node_id,
                           req->cid.thread_id);
 
-    put_rdma_message_buffer(resp_buf);
+    put_rdma_message_buffer(std::move(resp_buf));
     DCHECK_EQ(alloc_pr, bind_pr)
         << "currently stick to thisconstrain " << pre_coro_ctx(ctx);
 }
@@ -2318,7 +2318,7 @@ void Patronus::post_handle_request_admin(AdminRequest *req, CoroContext *ctx)
                           sizeof(AdminResponse),
                           req->cid.node_id,
                           req->cid.thread_id);
-    put_rdma_message_buffer(resp_buf);
+    put_rdma_message_buffer(std::move(resp_buf));
 }
 
 void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
@@ -2387,7 +2387,7 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
                           sizeof(LeaseModifyResponse),
                           req->cid.node_id,
                           req->cid.thread_id);
-    put_rdma_message_buffer(resp_buf);
+    put_rdma_message_buffer(std::move(resp_buf));
 }
 
 void Patronus::post_handle_request_memory_access(MemoryRequest *req,
@@ -2486,7 +2486,7 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
                           req->cid.node_id,
                           req->cid.thread_id);
 
-    put_rdma_message_buffer(resp_buf);
+    put_rdma_message_buffer(std::move(resp_buf));
 }
 
 void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
@@ -2513,7 +2513,7 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
                           sizeof(LeaseModifyResponse),
                           req->cid.node_id,
                           req->cid.thread_id);
-    put_rdma_message_buffer(resp_buf);
+    put_rdma_message_buffer(std::move(resp_buf));
 
     if (req_ctx.relinquish.do_nothing)
     {

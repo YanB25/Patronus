@@ -124,7 +124,7 @@ void client_worker(Patronus::pointer p,
             << ". Acquire takes: " << elaps_ns << ", history: " << latency_m;
         auto rel_flag = (flag_t) LeaseModifyFlag::kWaitUntilSuccess;
         p->relinquish(lease, 0, rel_flag, &ctx);
-        p->put_rdma_buffer(rdma_buf);
+        p->put_rdma_buffer(std::move(rdma_buf));
     }
     auto ns = timer.pin();
     ex.worker_finished(coro_id);

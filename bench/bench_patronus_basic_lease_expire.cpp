@@ -186,7 +186,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
     client_comm.finish_cur_task[coro_id] = true;
     client_comm.finish_all_task[coro_id] = true;
 
-    p->put_rdma_buffer(rdma_buf);
+    p->put_rdma_buffer(std::move(rdma_buf));
 
     LOG(WARNING) << "worker coro " << (int) coro_id
                  << " finished ALL THE TASK. yield to master.";

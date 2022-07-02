@@ -572,7 +572,7 @@ public:
             .expect(RC::kOk);
         return rdma_buf;
     }
-    void post_commit_read_meta(Buffer rdma_buf)
+    void post_commit_read_meta(const Buffer &rdma_buf)
     {
         memcpy(&meta.cache_, rdma_buf.buffer, meta_size());
         meta.inited_ = true;

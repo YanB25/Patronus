@@ -118,8 +118,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         auto rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
         p->relinquish(lease, 0, rel_flag, &ctx);
 
-        p->put_rdma_buffer(rdma_buf);
-        p->put_rdma_buffer(rdma_buf2);
+        p->put_rdma_buffer(std::move(rdma_buf));
+        p->put_rdma_buffer(std::move(rdma_buf2));
 
         DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
         client_comm.still_has_work[coro_id] = true;

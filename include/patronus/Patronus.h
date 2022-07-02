@@ -463,7 +463,8 @@ public:
                                           CoroContext *ctx);
     void post_handle_request_admin(AdminRequest *req, CoroContext *ctx);
 
-    [[nodiscard]] Buffer get_rdma_buffer_8B() {
+    [[nodiscard]] Buffer get_rdma_buffer_8B()
+    {
         CHECK(!self_managing_client_rdma_buffer_);
         auto *ret = (char *) rdma_client_buffer_8B_->get();
         if (likely(ret != nullptr))
@@ -471,7 +472,8 @@ public:
             return Buffer(ret, 8);
         }
         return Buffer(nullptr, 0);
-    } void put_rdma_buffer_8B(Buffer buffer)
+    }
+    void put_rdma_buffer_8B(Buffer &&buffer)
     {
         if (buffer.buffer)
         {
@@ -480,11 +482,13 @@ public:
         }
     }
 
-    [[nodiscard]] Buffer get_self_managed_rdma_buffer() {
+    [[nodiscard]] Buffer get_self_managed_rdma_buffer()
+    {
         CHECK(!self_managing_client_rdma_buffer_);
         self_managing_client_rdma_buffer_ = true;
         return Buffer(client_rdma_buffer_, client_rdma_buffer_size_);
-    } void put_self_managed_rdma_buffer(Buffer buffer)
+    }
+    void put_self_managed_rdma_buffer(Buffer buffer)
     {
         CHECK_EQ(buffer.buffer, client_rdma_buffer_);
         CHECK_EQ(buffer.size, client_rdma_buffer_size_);
@@ -492,7 +496,8 @@ public:
         self_managing_client_rdma_buffer_ = false;
     }
 
-    [[nodiscard]] Buffer get_rdma_buffer(size_t size) {
+    [[nodiscard]] Buffer get_rdma_buffer(size_t size)
+    {
         CHECK(!self_managing_client_rdma_buffer_);
         if (size <= 8)
         {
@@ -505,13 +510,15 @@ public:
             return Buffer(buf, kClientRdmaBufferSize);
         }
         return Buffer(nullptr, 0);
-    } void put_rdma_buffer(Buffer buffer)
+    }
+
+    void put_rdma_buffer(Buffer &&buffer)
     {
         if (buffer.buffer)
         {
             if (buffer.size <= 8)
             {
-                put_rdma_buffer_8B(buffer);
+                put_rdma_buffer_8B(std::move(buffer));
             }
             else
             {
@@ -563,13 +570,15 @@ public:
     {
         return conf_.reserved_buffer_size;
     }
-    [[nodiscard]] Buffer get_lease_buffer() const {
+    [[nodiscard]] Buffer get_lease_buffer() const
+    {
         auto server_buf = dsm_->get_server_buffer();
         auto *buf_addr = server_buf.buffer;
         auto buf_size = lease_buffer_size();
         DCHECK_GE(server_buf.size, buf_size);
         return Buffer(buf_addr, buf_size);
-    }[[nodiscard]] Buffer get_alloc_buffer() const
+    }
+    [[nodiscard]] Buffer get_alloc_buffer() const
     {
         auto server_buf = dsm_->get_server_buffer();
         auto *buf_addr = server_buf.buffer + lease_buffer_size();
@@ -577,7 +586,8 @@ public:
         DCHECK_GE(server_buf.size, lease_buffer_size() + alloc_buffer_size());
         return Buffer(buf_addr, buf_size);
     }
-    [[nodiscard]] Buffer get_user_reserved_buffer() const {
+    [[nodiscard]] Buffer get_user_reserved_buffer() const
+    {
         auto server_buffer = dsm_->get_server_buffer();
         auto *buf_addr =
             server_buffer.buffer + lease_buffer_size() + alloc_buffer_size();
@@ -732,15 +742,15 @@ public:
         DCHECK_GE(kMessageSize, size);
         return Buffer((char *) rdma_message_buffer_pool_->get(), kMessageSize);
     }
-    void put_rdma_message_buffer(Buffer buffer)
+    void put_rdma_message_buffer(Buffer &&buffer)
     {
         if (buffer.size <= kSmallMessageSize)
         {
-            put_small_rdma_message_buffer(buffer);
+            put_small_rdma_message_buffer(std::move(buffer));
         }
         else
         {
-            put_large_rdma_message_buffer(buffer);
+            put_large_rdma_message_buffer(std::move(buffer));
         }
     }
     void put_large_rdma_message_buffer(Buffer buffer)
@@ -1347,7 +1357,7 @@ RetCode Patronus::extend_impl(Lease &lease,
         lease.aba_unit_nr_to_ddl_.u32_2 += extend_unit_nr;
         lease.update_ddl_term();
     }
-    put_rdma_buffer(rdma_buffer);
+    put_rdma_buffer(std::move(rdma_buffer));
     DVLOG(4) << "[patronus][extend-impl] Done extend. coro: "
              << (ctx ? *ctx : nullctx) << ". cas_ec: " << cas_ec
              << ". Now lease: " << lease;
@@ -1953,7 +1963,7 @@ RetCode Patronus::admin_request_impl(size_t node_id,
 
     // TODO(patronus): this may have problem if message not inlined and buffer
     // is re-used and NIC is DMA-ing
-    put_rdma_message_buffer(rdma_buf);
+    put_rdma_message_buffer(std::move(rdma_buf));
     return ret;
 }
 RetCode Patronus::signal_modify_qp_flag(size_t node_id,
@@ -2196,7 +2206,7 @@ RetCode Patronus::rpc_rwcas_impl(char *iobuf,
 
     auto ret = rpc_context->ret_code;
     put_rpc_context(rpc_context);
-    put_rdma_message_buffer(rdma_buf);
+    put_rdma_message_buffer(std::move(rdma_buf));
 
     trace.pin("ret");
     return ret;

@@ -6,6 +6,7 @@
 #include <functional>
 #include <optional>
 
+#include "./parameters.h"
 #include "Common.h"
 #include "CoroContext.h"
 #include "GlobalAddress.h"
@@ -15,31 +16,25 @@
 
 namespace serverless
 {
-struct Parameter
-{
-    GlobalAddress gaddr;
-    size_t size;
-    void *prv;
-};
-inline std::ostream &operator<<(std::ostream &os, const Parameter &p)
-{
-    os << "{gaddr: " << p.gaddr << ", size: " << p.size << ", prv: " << p.prv
-       << "}";
-    return os;
-}
 class CoroLauncher
 {
     constexpr static size_t kMaxLambdaNr = define::kMaxCoroNr;
 
 public:
     using lambda_t = uint64_t;
-    using Parameters = std::map<std::string, Parameter>;
-    using Lambda = std::function<RetCode(
-        const Parameters &input, Parameters &output, CoroContext *)>;
+    using Lambda =
+        std::function<RetCode(Parameters &parameters, CoroContext *)>;
+    using ParameterMap = std::map<std::string, Parameter>;
     CoroLauncher(patronus::Patronus::pointer p,
+                 size_t server_nid,
+                 size_t dir_id,
+                 const Config &config,
                  ssize_t work_nr,
                  std::atomic<ssize_t> &remain_work_nr)
         : patronus_(p),
+          server_nid_(server_nid),
+          dir_id_(dir_id),
+          config_(config),
           tid_(p->get_thread_id()),
           work_nr_(work_nr),
           remain_work_nr_(remain_work_nr)
@@ -48,7 +43,7 @@ public:
     }
 
     lambda_t add_lambda(Lambda lambda,
-                        std::optional<Parameters> init_para,
+                        std::optional<ParameterMap> init_para,
                         std::optional<lambda_t> recv_para_from,
                         const std::vector<lambda_t> &depend_on,
                         std::optional<lambda_t> reloop_to_lambda)
@@ -202,17 +197,7 @@ private:
 
         while (coro_ex_.get_private_data().thread_remain_task > 0)
         {
-            Parameters empty_input;
-            const Parameters *input_para{};
-            if (recv_input_from_[coro_id].has_value())
-            {
-                auto d = recv_input_from_[coro_id].value();
-                input_para = &outputs_[d];
-            }
-            else
-            {
-                input_para = &inits_[coro_id];
-            }
+            auto parameters = parameters_[coro_id];
 
             auto &lambda = lambdas_[coro_id];
 
@@ -220,14 +205,12 @@ private:
             DCHECK_EQ(waiting_nr_[coro_id], 0) << "** this lambda not ready.";
             DCHECK(!running_[coro_id]);
             running_[coro_id] = true;
-            outputs_[coro_id].clear();
             DVLOG(4) << "[launcher] Entering lambda(" << coro_id
-                     << ") with input: " << util::pre_map(*input_para)
-                     << ", ctx: " << ctx;
-            auto rc = lambda(*input_para, outputs_[coro_id], &ctx);
+                     << ") with param: " << *parameters << ", ctx: " << ctx;
+            auto rc = lambda(*parameters, &ctx);
             CHECK_EQ(rc, RC::kOk) << "** Not prepared to handle any error";
             DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
-                     << ") with output: " << util::pre_map(outputs_[coro_id])
+                     << ") with updated params: " << *parameters
                      << ", ctx: " << ctx;
             for (auto l : let_go_[coro_id])
             {
@@ -254,6 +237,10 @@ private:
                 reset(root);
                 readys_[root] = true;
                 DCHECK_EQ(waiting_nr_[root], 0);
+
+                // update parameters
+                parameters_[coro_id]->clear(&ctx);
+                parameters_[coro_id]->install_params(inits_[coro_id]);
                 DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
                          << ") reloop to root " << root << ", ctx: " << ctx;
             }
@@ -287,9 +274,8 @@ private:
     void reset(lambda_t root)
     {
         readys_[root] = false;
-        inputs_[root].clear();
-        outputs_[root].clear();
         waiting_nr_[root] = depend_nr_[root];
+
         DCHECK(!running_[root]);
         for (auto child : let_go_[root])
         {
@@ -297,6 +283,9 @@ private:
         }
     }
     patronus::Patronus::pointer patronus_;
+    size_t server_nid_{0};
+    size_t dir_id_{0};
+    Config config_;
     size_t tid_{0};
     ssize_t work_nr_;
     std::atomic<ssize_t> &remain_work_nr_;
@@ -307,12 +296,11 @@ private:
     std::array<std::optional<lambda_t>, kMaxLambdaNr> reloop_to_lambda_{};
     std::array<std::vector<lambda_t>, kMaxLambdaNr> let_go_{};
     std::array<size_t, kMaxLambdaNr> depend_nr_{};
-    std::array<Parameters, kMaxLambdaNr> inits_{};
+    std::array<ParameterMap, kMaxLambdaNr> inits_{};
     std::array<std::optional<lambda_t>, kMaxLambdaNr> recv_input_from_{};
 
     // below fields are runtime concerned for lambda
-    std::array<Parameters, kMaxLambdaNr> inputs_{};
-    std::array<Parameters, kMaxLambdaNr> outputs_{};
+    std::array<Parameters::pointer, kMaxLambdaNr> parameters_{};
 
     // below fields are runtime concerned for internal implementations
     lambda_t lambda_nr_{0};
@@ -329,13 +317,6 @@ private:
     };
     CoroExecutionContextWith<kMaxLambdaNr, Prv> coro_ex_;
 };
-
-inline std::ostream &operator<<(std::ostream &os,
-                                const CoroLauncher::Parameters &ps)
-{
-    os << util::pre_map(ps);
-    return os;
-}
 
 }  // namespace serverless
 

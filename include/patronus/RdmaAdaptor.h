@@ -321,7 +321,7 @@ public:
             return Buffer(nullptr, 0);
         }
         DCHECK_GE(ret.size, size);
-        ongoing_rdma_bufs_.push_back(ret);
+        ongoing_rdma_bufs_.emplace_back(std::move(ret));
         CHECK_LT(ongoing_rdma_bufs_.size(), kMaxOngoingRdmaBuf)
             << rdma_trace_record_;
         if (unlikely(ongoing_rdma_bufs_.size() == kWarningOngoingRdmaBuf))
@@ -331,13 +331,15 @@ public:
                 << rdma_trace_record_;
         }
 
-        return ret;
+        // copy buffer here, but it does not violate "single owner" rule,
+        // because we only use .put_all_rdma_buffer to GC the resources.
+        return ongoing_rdma_bufs_.back().clone();
     }
     void put_all_rdma_buffer() override
     {
-        for (auto buf : ongoing_rdma_bufs_)
+        for (auto &&buf : ongoing_rdma_bufs_)
         {
-            patronus_->put_rdma_buffer(buf);
+            patronus_->put_rdma_buffer(std::move(buf));
         }
         ongoing_rdma_bufs_.clear();
         DCHECK_GE(ongoing_rdma_bufs_.capacity(), kMaxOngoingRdmaBuf);

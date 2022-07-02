@@ -137,7 +137,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
                  << " start to relinquish lease ";
         p->relinquish(lease, 0, 0, &ctx);
 
-        p->put_rdma_buffer(rdma_buf);
+        p->put_rdma_buffer(std::move(rdma_buf));
 
         DVLOG(2) << "[bench] client coro " << ctx << " finished current task.";
         client_comm.still_has_work[coro_id] = true;

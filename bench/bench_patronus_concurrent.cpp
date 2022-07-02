@@ -498,7 +498,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             << total_ns << " ns. coro: " << ctx;
     ctx.yield_to_master();
     CHECK(false) << "yield back to me.";
-    patronus->put_rdma_buffer(rdma_buf);
+    patronus->put_rdma_buffer(std::move(rdma_buf));
 }
 
 struct BenchResult

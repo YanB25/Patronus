@@ -27,6 +27,31 @@ struct Buffer
     Buffer(char *buffer, size_t size) : buffer(buffer), size(size)
     {
     }
+    Buffer(Buffer &&rhs)
+    {
+        (*this) = std::move(rhs);
+    }
+    Buffer(const Buffer &rhs) = delete;
+    Buffer &operator=(const Buffer &) = delete;
+    Buffer &operator=(Buffer &&rhs)
+    {
+        buffer = rhs.buffer;
+        size = rhs.size;
+        rhs.buffer = nullptr;
+        rhs.size = 0;
+        return *this;
+    }
+
+    /**
+     * Buffer holds resources, so ideally it is only movable.
+     * However, due to history reason, it is complex to remove all the copy of
+     * buffer.
+     * Therefore, allow .clone() call to do the copy. Use it with care!
+     */
+    Buffer clone() const
+    {
+        return Buffer(buffer, size);
+    }
 };
 inline std::ostream &operator<<(std::ostream &os, const Buffer &buf)
 {
@@ -35,7 +60,7 @@ inline std::ostream &operator<<(std::ostream &os, const Buffer &buf)
     return os;
 }
 
-inline void validate_buffer_not_overlapped(Buffer lhs, Buffer rhs)
+inline void validate_buffer_not_overlapped(const Buffer &lhs, const Buffer &rhs)
 {
     // https://stackoverflow.com/questions/325933/determine-whether-two-date-ranges-overlap
     auto start_1 = (uint64_t) lhs.buffer;

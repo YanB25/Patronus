@@ -173,7 +173,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             finished_nr.fetch_add(kBatch, std::memory_order_relaxed);
         }
     }
-    patronus->put_rdma_buffer(rdma_buffer);
+    patronus->put_rdma_buffer(std::move(rdma_buffer));
 
     ctx.yield_to_master();
     CHECK(false) << "yield back to me.";
@@ -239,7 +239,7 @@ void run_benchmark_server(Patronus::pointer patronus)
                                  sizeof(RespMessage),
                                  from_nid,
                                  from_tid);
-            patronus->put_rdma_message_buffer(send_buffer);
+            patronus->put_rdma_message_buffer(std::move(send_buffer));
         }
     }
 }

@@ -141,7 +141,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         // make sure this will take no harm.
         p->relinquish(lease, 0, 0, &ctx);
-        p->put_rdma_buffer(rdma_buf);
+        p->put_rdma_buffer(std::move(rdma_buf));
     }
 
     LOG(INFO) << "[bench] read_loop_succ_nr: " << read_loop_nr_m

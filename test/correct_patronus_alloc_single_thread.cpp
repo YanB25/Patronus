@@ -67,7 +67,7 @@ void client_worker(Patronus::pointer p,
 
         allocated_gaddrs.push_back(gaddr);
 
-        p->put_rdma_buffer(rdma_buf);
+        p->put_rdma_buffer(std::move(rdma_buf));
     }
 
     auto rdma_buf = p->get_rdma_buffer(kAllocBufferSize);
@@ -105,7 +105,7 @@ void client_worker(Patronus::pointer p,
         auto rel_flag = (flag_t) 0;
         p->relinquish(lease, 0 /* hint */, rel_flag, &ctx);
     }
-    p->put_rdma_buffer(rdma_buf);
+    p->put_rdma_buffer(std::move(rdma_buf));
 
     for (auto gaddr : allocated_gaddrs)
     {

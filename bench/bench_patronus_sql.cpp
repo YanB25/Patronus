@@ -475,10 +475,9 @@ void benchmark_client(Patronus::pointer p,
                                      coro_id = i,
                                      &conf,
                                      &ex,
-                                     self_managed_rdma_buffer,
+                                     buffer = self_managed_rdma_buffer.buffer,
                                      coro_buffer_size](CoroYield &yield) {
-                auto *coro_buffer = self_managed_rdma_buffer.buffer +
-                                    coro_buffer_size * coro_id;
+                auto *coro_buffer = buffer + coro_buffer_size * coro_id;
                 test_basic_client_worker(p,
                                          coro_id,
                                          yield,
@@ -496,7 +495,7 @@ void benchmark_client(Patronus::pointer p,
 
         master();
 
-        p->put_self_managed_rdma_buffer(self_managed_rdma_buffer);
+        p->put_self_managed_rdma_buffer(std::move(self_managed_rdma_buffer));
     }
     bar.wait();
     auto ns = timer.pin();

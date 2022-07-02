@@ -2,6 +2,7 @@
 #ifndef UTIL_UTIL_H_
 #define UTIL_UTIL_H_
 #include <cmath>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -88,6 +89,10 @@ inline std::string binary_to_csv_filename(
     }
     ret += "csv";
     return ret;
+}
+inline std::filesystem::path artifacts_directory()
+{
+    return "../artifacts/";
 }
 
 inline void ro_prefetch([[maybe_unused]] const void *addr)
