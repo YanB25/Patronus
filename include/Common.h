@@ -100,6 +100,7 @@ constexpr static bool kMonitorControlPath = false;
 constexpr static bool kMonitorReconnection = false;
 constexpr static bool kMonitorFailureRecovery = false;
 constexpr static bool kMonitorAddressConversion = false;
+constexpr static bool kMonitorLeaseContext = false;
 
 constexpr static bool kReportTraceViewRoute = false;
 

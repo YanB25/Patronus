@@ -72,17 +72,23 @@ class Parameters
     using AcquireRequestFlag = patronus::AcquireRequestFlag;
     using LeaseModifyFlag = patronus::LeaseModifyFlag;
     using TraceView = util::TraceView;
-    using ParameterMap = std::map<std::string, Parameter>;
     using Lease = patronus::Lease;
 
 public:
     using pointer = std::shared_ptr<Parameters>;
+    using ParameterMap = std::map<std::string, Parameter>;
     Parameters(patronus::Patronus::pointer p,
                size_t server_nid,
                size_t dir_id,
-               const Config &config)
-        : p_(p), server_nid_(server_nid), dir_id_(dir_id), config_(config)
+               const Config &config,
+               double trace_rate = 0)
+        : p_(p),
+          server_nid_(server_nid),
+          dir_id_(dir_id),
+          config_(config),
+          tm_(trace_rate)
     {
+        trace_ = tm_.trace("serverless");
     }
     static pointer new_instance(patronus::Patronus::pointer p,
                                 size_t server_nid,
@@ -92,7 +98,12 @@ public:
         return std::make_shared<Parameters>(p, server_nid, dir_id, config);
     }
 
-    void *&prv()
+    using void_ptr_t = void *;
+    void_ptr_t &prv()
+    {
+        return prv_;
+    }
+    const void_ptr_t &prv() const
     {
         return prv_;
     }
@@ -102,9 +113,12 @@ public:
                                           TraceView trace = util::nulltrace);
     Buffer get_buffer(size_t size)
     {
-        return p_->get_rdma_buffer(size);
+        auto ret = p_->get_rdma_buffer(size);
+        DCHECK_NE(size, 0);
+        DCHECK_GE(ret.size, 0) << "** Possible run out of buffer. got: " << ret;
+        return ret;
     }
-    void put_rdma_buffer(Buffer &rdma_buf)
+    void put_rdma_buffer(Buffer &&rdma_buf)
     {
         p_->put_rdma_buffer(std::move(rdma_buf));
     }
@@ -208,8 +222,15 @@ public:
             }
         }
         contexts_.clear();
-    }
+        prv_ = nullptr;
+        trace_ = tm_.trace("serverless");
 
+        LOG_IF(INFO, trace_.enabled()) << trace_;
+    }
+    TraceView trace() const
+    {
+        return trace_;
+    }
     friend std::ostream &operator<<(std::ostream &os, const Parameters &p);
 
 private:
@@ -366,6 +387,8 @@ private:
                                   c.ns,
                                   c.acquire_flag,
                                   ctx);
+        DCHECK(ret.success());
+        acquire_nr_++;
         trace.pin("acquire");
         return ret;
     }
@@ -375,6 +398,7 @@ private:
     {
         const auto &c = config_.param;
         p_->relinquish(lease, c.alloc_hint, c.relinquish_flag, ctx);
+        relinquish_nr_++;
         trace.pin("relinquish");
     }
     [[nodiscard]] Lease do_alloc_lease(size_t size,
@@ -391,6 +415,7 @@ private:
                                   c.acquire_flag,
                                   ctx);
         trace.pin("alloc");
+        acquire_nr_++;
         return ret;
     }
 
@@ -399,8 +424,13 @@ private:
     size_t dir_id_{};
     Config config_;
     std::map<std::string, ParameterContext> contexts_;
+    util::TraceManager tm_;
+    util::TraceView trace_{util::nulltrace};
 
     void *prv_{nullptr};
+
+    ssize_t acquire_nr_{0};
+    ssize_t relinquish_nr_{0};
 };
 
 const Buffer &Parameters::get_param(const std::string &name,
@@ -472,9 +502,8 @@ void Parameters::do_set_param(ParameterContext &c,
 
 inline std::ostream &operator<<(std::ostream &os, const Parameters &p)
 {
-    // os << "{Parameters " << util::pre_map(p.contexts_) << "}";
-    std::ignore = p;
-    os << "{Parameters TODO: }";
+    os << "{Parameters " << util::pre_map(p.contexts_) << ", prv: " << p.prv()
+       << "}";
     return os;
 }
 
@@ -507,6 +536,7 @@ void Parameters::alloc(const std::string &name,
     auto [it, inserted] = contexts_.try_emplace(name);
     CHECK(inserted) << "** Duplicated parameter detected for " << name;
     auto &c = it->second;
+    DCHECK(!c.lease.success());
     c.lease = do_alloc_lease(size, ctx, trace);
     c.size = size;
     c.gaddr = p_->get_gaddr(c.lease);

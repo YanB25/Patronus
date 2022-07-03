@@ -342,8 +342,6 @@ void bench_alloc_thread_coro(
 
     launcher.launch();
 
-    LOG(INFO) << "[debug] !! worker_do_nr: " << worker_do_nr_ << " from tid "
-              << tid;
     return;
 }
 

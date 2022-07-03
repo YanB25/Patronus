@@ -514,6 +514,7 @@ public:
 
     void put_rdma_buffer(Buffer &&buffer)
     {
+        DCHECK_NE(buffer.size, 0);
         if (buffer.buffer)
         {
             if (buffer.size <= 8)
@@ -832,6 +833,10 @@ private:
             return nullptr;
         }
         return ret;
+    }
+    size_t remain_lease_nr() const
+    {
+        return lease_context_.size();
     }
     void put_lease_context(LeaseContext *ctx)
     {

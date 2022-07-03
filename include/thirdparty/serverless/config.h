@@ -10,14 +10,31 @@ namespace serverless
 {
 struct Config
 {
+    std::string name;
     bool use_step_lambda;
     MemHandleDecision alloc;
     MemHandleDecision param;
+
+    static Config get_basic(const std::string &name, bool use_step_lambda)
+    {
+        Config conf;
+        conf.name = name;
+        conf.use_step_lambda = use_step_lambda;
+        return conf;
+    }
+    static Config get_mw(const std::string &name, bool use_step_lambda)
+    {
+        auto conf = get_basic(name, use_step_lambda);
+        conf.alloc.use_mw().wo_expire().with_alloc(1).no_bind_pr();
+        conf.param.use_mw().wo_expire().no_bind_pr();
+        return conf;
+    }
 };
+
 inline std::ostream &operator<<(std::ostream &os, const Config &c)
 {
-    os << "{Config use_step: " << c.use_step_lambda << ", alloc: " << c.alloc
-       << ", param: " << c.param << "}";
+    os << "{Config name: " << c.name << ", use_step: " << c.use_step_lambda
+       << ", alloc: " << c.alloc << ", param: " << c.param << "}";
     return os;
 }
 }  // namespace serverless

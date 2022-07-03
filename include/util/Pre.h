@@ -107,7 +107,7 @@ struct pre_map
     {
         return limit_;
     }
-    const std::map<K, V> m_;
+    const std::map<K, V> &m_;
     size_t limit_;
 };
 

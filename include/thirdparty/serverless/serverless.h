@@ -22,8 +22,8 @@ class CoroLauncher
 
 public:
     using lambda_t = uint64_t;
-    using Lambda =
-        std::function<RetCode(Parameters &parameters, CoroContext *)>;
+    using Lambda = std::function<RetCode(
+        Parameters &parameters, CoroContext *, util::TraceView)>;
     using ParameterMap = std::map<std::string, Parameter>;
     CoroLauncher(patronus::Patronus::pointer p,
                  size_t server_nid,
@@ -59,6 +59,10 @@ public:
             depend_nr_[ret] = 0;  // root does not depend on anyone
             inits_[ret] = init_para.value();
 
+            parameters_[ret] = Parameters::new_instance(
+                patronus_, server_nid_, dir_id_, config_);
+            parameters_[ret]->install_params(inits_[ret]);
+
             readys_[ret] = true;
             running_[ret] = false;
             waiting_nr_[ret] = 0;
@@ -81,11 +85,20 @@ public:
             waiting_nr_[ret] = depend_nr_[ret];
             CHECK(!init_para.has_value());
             CHECK(!depend_on.empty());
+            CHECK(recv_para_from.has_value())
+                << "** For any lambda not a root, need to recv para from one "
+                   "upstream lambda";
         }
         if (recv_para_from.has_value())
         {
+            // the parameter object is shared across the chain
+            CHECK_NE(parameters_[recv_para_from.value()], nullptr);
+            parameters_[ret] = parameters_[recv_para_from.value()];
+
             recv_input_from_[ret] = recv_para_from.value();
         }
+        CHECK_NE(parameters_[ret], nullptr)
+            << "** Does not receive any parameter object";
         for (auto dl : depend_on)
         {
             CHECK_LT(dl, lambda_nr_) << "** invalid dependent lambda";
@@ -197,7 +210,7 @@ private:
 
         while (coro_ex_.get_private_data().thread_remain_task > 0)
         {
-            auto parameters = parameters_[coro_id];
+            auto parameters = DCHECK_NOTNULL(parameters_[coro_id]);
 
             auto &lambda = lambdas_[coro_id];
 
@@ -207,11 +220,48 @@ private:
             running_[coro_id] = true;
             DVLOG(4) << "[launcher] Entering lambda(" << coro_id
                      << ") with param: " << *parameters << ", ctx: " << ctx;
-            auto rc = lambda(*parameters, &ctx);
+            auto trace = parameters->trace();
+            auto rc = lambda(*parameters, &ctx, trace.child("lambda"));
             CHECK_EQ(rc, RC::kOk) << "** Not prepared to handle any error";
             DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
                      << ") with updated params: " << *parameters
                      << ", ctx: " << ctx;
+
+            running_[coro_id] = false;
+            readys_[coro_id] = false;
+
+            // do clean up immediately after this lambda
+            // BEFORE letting go its depending children
+            if (reloop_to_lambda_[coro_id].has_value())
+            {
+                auto root = reloop_to_lambda_[coro_id].value();
+                parameters_[coro_id]->clear(&ctx);
+                parameters_[coro_id]->install_params(inits_[root]);
+                trace.pin("paremeter clear");
+            }
+            else
+            {
+                // it is not the tail lambda
+                parameters_[coro_id]->next_lambda(&ctx);
+                trace.pin("next lambda");
+            }
+
+            // letting go depending children
+            if (reloop_to_lambda_[coro_id].has_value())
+            {
+                auto root = reloop_to_lambda_[coro_id].value();
+                // This lambda is the last in the chain
+                coro_ex_.get_private_data().thread_remain_task--;
+                reset(root);
+                readys_[root] = true;
+                DCHECK_EQ(waiting_nr_[root], 0);
+
+                // clear and reinstall parameters for a restart
+                DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
+                         << ") reloop to root " << root << ", ctx: " << ctx;
+                trace.pin("paremeter clear");
+            }
+
             for (auto l : let_go_[coro_id])
             {
                 DCHECK_GT(waiting_nr_[l], 0);
@@ -225,24 +275,6 @@ private:
                          << ") solve dependency => " << l << " to "
                          << waiting_nr_[l] << ", ready: " << readys_[l]
                          << ". ctx: " << ctx;
-            }
-            running_[coro_id] = false;
-            readys_[coro_id] = false;
-
-            if (reloop_to_lambda_[coro_id].has_value())
-            {
-                // This lambda is the last in the chain
-                coro_ex_.get_private_data().thread_remain_task--;
-                auto root = reloop_to_lambda_[coro_id].value();
-                reset(root);
-                readys_[root] = true;
-                DCHECK_EQ(waiting_nr_[root], 0);
-
-                // update parameters
-                parameters_[coro_id]->clear(&ctx);
-                parameters_[coro_id]->install_params(inits_[coro_id]);
-                DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
-                         << ") reloop to root " << root << ", ctx: " << ctx;
             }
 
             ctx.yield_to_master();

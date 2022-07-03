@@ -108,173 +108,153 @@ struct BenchResult
 
 using Parameters = serverless::Parameters;
 using lambda_t = serverless::CoroLauncher::lambda_t;
+using ParameterMap = serverless::Parameters::ParameterMap;
 struct Comm
 {
     uint64_t magic;
 };
 
 size_t worker_do_nr_{0};
-RetCode worker_do(Patronus::pointer patronus,
-                  Parameters &parameters,
+RetCode worker_do(Parameters &parameters,
                   bool root,
                   bool tail,
-                  CoroContext *ctx)
+                  CoroContext *ctx,
+                  util::TraceView trace = util::nulltrace)
 {
-    // worker_do_nr_++;
-    // auto tid = patronus->get_thread_id();
-    // auto dir_id = tid % kServerThreadNr;
-    // auto server_nid = ::config::get_server_nids().front();
-    std::ignore = patronus;
-    std::ignore = parameters;
-    std::ignore = root;
-    std::ignore = tail;
-    std::ignore = ctx;
+    worker_do_nr_++;
 
-    // Comm *comm;
-    // if (root)
-    // {
-    //     comm = new Comm;
-    // }
-    // else
-    // {
-    //     comm = (Comm *) r.prv();
-    // }
-
+    Comm *c = nullptr;
     if (root)
     {
-        // auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
-        // auto wlease = patronus->get_wlease(server_nid,
-        //                                    dir_id,
-        //                                    r.gaddr,
-        //                                    0 /* alloc hint */,
-        //                                    r.size,
-        //                                    0ns,
-        //                                    ac_flag,
-        //                                    ctx);
-        // CHECK(wlease.success());
-        // auto rdma_buf = patronus->get_rdma_buffer(sizeof(uint64_t));
-        // auto magic = fast_pseudo_rand_int();
-        // // LOG(INFO) << "[debug] !!! init magic to " << (void *) magic << "
-        // at "
-        // //           << r.gaddr;
-        // *(uint64_t *) rdma_buf.buffer = magic;
-        // patronus
-        //     ->write(wlease,
-        //             rdma_buf.buffer,
-        //             sizeof(uint64_t),
-        //             0 /* offset */,
-        //             0 /* flag */,
-        //             ctx)
-        //     .expect(RC::kOk);
-        // comm->magic = magic;
-
-        // patronus->put_rdma_buffer(rdma_buf);
-        // patronus->relinquish(wlease, 0 /* alloc hint */, 0 /* flag */, ctx);
-
-        // parameters.write("init", )
+        auto magic = fast_pseudo_rand_int();
+        auto buffer = parameters.get_buffer(sizeof(uint64_t));
+        memcpy(buffer.buffer, &magic, sizeof(uint64_t));
+        parameters.write("addr", std::move(buffer), ctx, trace).expect(RC::kOk);
+        trace.pin("init magic");
+        CHECK_EQ(parameters.prv(), nullptr)
+            << "** parameters at " << (void *) &parameters << " with prv "
+            << parameters.prv() << " not null";
+        c = new Comm();
+        c->magic = magic;
+        parameters.prv() = (void *) c;
+        CHECK_EQ(parameters.prv(), c);
+        CHECK_NE(parameters.prv(), nullptr);
+    }
+    else
+    {
+        c = (Comm *) parameters.prv();
+        CHECK_NE(parameters.prv(), nullptr);
     }
 
     // read, validate same
     {
-        // auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
-        // auto rlease = patronus->get_rlease(server_nid,
-        //                                    dir_id,
-        //                                    r.gaddr,
-        //                                    0 /* alloc hint */,
-        //                                    r.size,
-        //                                    0ns,
-        //                                    ac_flag,
-        //                                    ctx);
-        // CHECK(rlease.success());
-        // auto rdma_buf = patronus->get_rdma_buffer(sizeof(uint64_t));
-        // memset(rdma_buf.buffer, 0, sizeof(uint64_t));
-        // patronus
-        //     ->read(rlease,
-        //            rdma_buf.buffer,
-        //            sizeof(uint64_t),
-        //            0 /* offset */,
-        //            0 /* flag */,
-        //            ctx)
-        //     .expect(RC::kOk);
-        // std::atomic<uint64_t> *atomic_got =
-        //     (std::atomic<uint64_t> *) rdma_buf.buffer;
-        // uint64_t got = atomic_got->load();
-        // CHECK_EQ(got, comm->magic);
-        // patronus->put_rdma_buffer(rdma_buf);
-        // patronus->relinquish(rlease, 0 /* hint */, 0 /* flag */, ctx);
+        auto buffer_read = parameters.read("addr", ctx, trace);
+        uint64_t got = *(uint64_t *) buffer_read.buffer;
+        CHECK_EQ(got, c->magic);
+        parameters.put_rdma_buffer(std::move(buffer_read));
     }
 
     // write to magic + 1
     {
-        // auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
-        // auto wlease = patronus->get_wlease(server_nid,
-        //                                    dir_id,
-        //                                    r.gaddr,
-        //                                    0 /* hint */,
-        //                                    r.size,
-        //                                    0ns,
-        //                                    ac_flag,
-        //                                    ctx);
-        // CHECK(wlease.success());
-        // auto rdma_buf = patronus->get_rdma_buffer(sizeof(uint64_t));
-        // comm->magic = comm->magic + 1;
-        // *(uint64_t *) rdma_buf.buffer = comm->magic;
-        // patronus
-        //     ->write(wlease,
-        //             rdma_buf.buffer,
-        //             sizeof(uint64_t),
-        //             0 /* offset */,
-        //             0 /* flag */,
-        //             ctx)
-        //     .expect(RC::kOk);
-        // patronus->put_rdma_buffer(rdma_buf);
-        // patronus->relinquish(wlease, 0 /* hint */, 0 /* flag */, ctx);
-        // LOG(INFO) << "[debug] !!! updating magic to " << (void *)
-        // (comm->magic)
-        //           << " at " << r.gaddr;
+        auto buffer_write = parameters.get_buffer(sizeof(uint64_t));
+        c->magic = c->magic + 1;
+        memcpy(buffer_write.buffer, &(c->magic), sizeof(uint64_t));
+        parameters.write("addr", std::move(buffer_write), ctx, trace)
+            .expect(RC::kOk);
     }
 
     // debug: reread, make sure we really write it successfully
     {
-        // auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc;
-        // auto rlease = patronus->get_rlease(server_nid,
-        //                                    dir_id,
-        //                                    r.gaddr,
-        //                                    0 /* alloc hint */,
-        //                                    r.size,
-        //                                    0ns,
-        //                                    ac_flag,
-        //                                    ctx);
-        // CHECK(rlease.success());
-        // auto rdma_buf = patronus->get_rdma_buffer(sizeof(uint64_t));
-        // memset(rdma_buf.buffer, 0, sizeof(uint64_t));
-        // patronus
-        //     ->read(rlease,
-        //            rdma_buf.buffer,
-        //            sizeof(uint64_t),
-        //            0 /* offset */,
-        //            0 /* flag */,
-        //            ctx)
-        //     .expect(RC::kOk);
-        // std::atomic<uint64_t> *atomic_got =
-        //     (std::atomic<uint64_t> *) rdma_buf.buffer;
-        // uint64_t got = atomic_got->load();
-        // CHECK_EQ(got, comm->magic);
-        // patronus->put_rdma_buffer(rdma_buf);
-        // patronus->relinquish(rlease, 0 /* hint */, 0 /* flag */, ctx);
+        auto buffer_read = parameters.read("addr", ctx, trace);
+        auto got = *(uint64_t *) buffer_read.buffer;
+        CHECK_EQ(got, c->magic);
+        parameters.put_rdma_buffer(std::move(buffer_read));
     }
 
-    // tell the next lambda the magic
+    if (tail)
     {
-        // output["addr"] = input.find("addr")->second;
-        // output["addr"].prv = comm;
+        delete c;
+        // LOG(INFO) << "[debug] !! bench! setting prv to nullptr";
+        parameters.prv() = nullptr;
     }
 
-    // if (tail)
-    // {
-    //     delete (Comm *) r.prv;
-    // }
     return RC::kOk;
+}
+
+void register_lambda(Patronus::pointer patronus,
+                     serverless::CoroLauncher &launcher,
+                     size_t lambda_nr,
+                     size_t chain_nr)
+{
+    auto root = [](Parameters &parameters,
+                   CoroContext *ctx,
+                   TraceView trace) -> RetCode {
+        return worker_do(
+            parameters, true /* is root */, false /* is tail */, ctx, trace);
+    };
+    auto tail = [](Parameters &parameters,
+                   CoroContext *ctx,
+                   TraceView trace) -> RetCode {
+        return worker_do(
+            parameters, false /* is root */, true /* is tail */, ctx, trace);
+    };
+    auto middle = [](Parameters &parameters,
+                     CoroContext *ctx,
+                     TraceView trace) -> RetCode {
+        return worker_do(
+            parameters, false /* is root */, false /* is tail */, ctx, trace);
+    };
+
+    size_t lambda_nr_per_chain = lambda_nr / chain_nr;
+    for (size_t chain_id = 0; chain_id < chain_nr; ++chain_id)
+    {
+        auto tid = patronus->get_thread_id();
+        auto nid = patronus->get_node_id();
+        CHECK_LT(chain_id, kCoroCnt);
+        auto key = gen_coro_key(nid, tid, chain_id);
+        auto offset = bench_locator(key);
+
+        ParameterMap init_param;
+        init_param["addr"].gaddr = GlobalAddress(0, offset);
+        init_param["addr"].size = sizeof(uint64_t);
+
+        lambda_t last_id{};
+        lambda_t root_id{};
+        for (size_t i = 0; i < lambda_nr_per_chain; ++i)
+        {
+            if (i == 0)
+            {
+                last_id = launcher.add_lambda(root,
+                                              init_param,
+                                              {} /* recv para from */,
+                                              {} /* depend_on */,
+                                              {} /* reloop to lambda */);
+                root_id = last_id;
+            }
+            else
+            {
+                bool is_last = i + 1 == lambda_nr_per_chain;
+                if (is_last)
+                {
+                    auto id = launcher.add_lambda(tail,
+                                                  {} /* init param */,
+                                                  last_id /* recv para from*/,
+                                                  {last_id} /* depend_on */,
+                                                  root_id /* reloop to */);
+                    last_id = id;
+                }
+                else
+                {
+                    auto id = launcher.add_lambda(middle,
+                                                  {} /* init param */,
+                                                  last_id /* recv param from */,
+                                                  {last_id} /* depend on */,
+                                                  {} /* reloop to */);
+                    last_id = id;
+                }
+            }
+        }
+    }
 }
 
 void bench_alloc_thread_coro(
@@ -282,6 +262,7 @@ void bench_alloc_thread_coro(
     [[maybe_unused]] OnePassBucketMonitor<uint64_t> &lat_m,
     [[maybe_unused]] bool is_master,
     std::atomic<ssize_t> &work_nr,
+    const serverless::Config &serverless_config,
     const BenchConfig &conf)
 {
     auto test_times = conf.task_nr;
@@ -290,139 +271,15 @@ void bench_alloc_thread_coro(
     auto dir_id = tid % kServerThreadNr;
     // auto nid = patronus->get_node_id();
     auto server_nid = ::config::get_server_nids().front();
-    LOG(WARNING) << "TODO: use real config";
-    serverless::Config config;
 
     serverless::CoroLauncher launcher(
-        patronus, server_nid, dir_id, config, test_times, work_nr);
+        patronus, server_nid, dir_id, serverless_config, test_times, work_nr);
 
-    auto root = [patronus](Parameters &parameters,
-                           CoroContext *ctx) -> RetCode {
-        return worker_do(
-            patronus, parameters, true /* is root */, false /* is tail */, ctx);
-    };
-    auto tail = [patronus](Parameters &parameters,
-                           CoroContext *ctx) -> RetCode {
-        return worker_do(
-            patronus, parameters, false /* is root */, true /* is tail */, ctx);
-    };
-    auto middle = [patronus](Parameters &parameters,
-                             CoroContext *ctx) -> RetCode {
-        return worker_do(patronus,
-                         parameters,
-                         false /* is root */,
-                         false /* is tail */,
-                         ctx);
-    };
-
-    {
-        CHECK(false) << "TODO:";
-        // one chain
-        // Parameters init_para;
-        // auto &addr = init_para["addr"];
-        // auto key = gen_coro_key(nid, tid, 0);
-        // auto offset = bench_locator(key);
-        // addr.gaddr = GlobalAddress(0, offset);
-        // addr.size = sizeof(uint64_t);
-
-        // LOG(INFO) << "[debug] !! init_para: " << init_para;
-
-        // lambda_t last_id{};
-        // lambda_t root_id{};
-        // size_t expect_lambda_nr = kCoroCnt / 2;
-        // for (size_t i = 0; i < expect_lambda_nr; ++i)
-        // {
-        //     if (i == 0)
-        //     {
-        //         last_id = launcher.add_lambda(root,
-        //                                       init_para,
-        //                                       {} /* recv para from */,
-        //                                       {} /* depend_on */,
-        //                                       {} /* reloop to lambda */);
-        //         root_id = last_id;
-        //     }
-        //     else
-        //     {
-        //         bool is_last = i + 1 == expect_lambda_nr;
-        //         if (is_last)
-        //         {
-        //             auto id = launcher.add_lambda(tail,
-        //                                           {} /* init param */,
-        //                                           last_id /* recv para from
-        //                                           */, {last_id} /* depend_on
-        //                                           */, root_id /* reloop to
-        //                                           */);
-        //             last_id = id;
-        //         }
-        //         else
-        //         {
-        //             auto id = launcher.add_lambda(middle,
-        //                                           {} /* init param */,
-        //                                           last_id /* recv param from
-        //                                           */, {last_id} /* depend on
-        //                                           */,
-        //                                           {} /* reloop to */);
-        //             last_id = id;
-        //         }
-        //     }
-        // }
-    }
-
-    {
-        // another chain
-        CHECK(false) << "TODO:";
-
-        // Parameters init_para;
-        // auto &addr = init_para["addr"];
-        // auto key = gen_coro_key(nid, tid, 1);
-        // auto offset = bench_locator(key);
-        // addr.gaddr = GlobalAddress(0, offset);
-        // addr.size = sizeof(uint64_t);
-
-        // lambda_t last_id{};
-        // lambda_t root_id{};
-        // size_t expect_lambda_nr = kCoroCnt / 2;
-        // for (size_t i = 0; i < expect_lambda_nr; ++i)
-        // {
-        //     if (i == 0)
-        //     {
-        //         last_id = launcher.add_lambda(root,
-        //                                       init_para,
-        //                                       {} /* recv para from */,
-        //                                       {} /* depend_on */,
-        //                                       {} /* reloop to lambda */);
-        //         root_id = last_id;
-        //     }
-        //     else
-        //     {
-        //         bool is_last = i + 1 == expect_lambda_nr;
-        //         if (is_last)
-        //         {
-        //             auto id = launcher.add_lambda(tail,
-        //                                           {} /* init param */,
-        //                                           last_id /* recv para from
-        //                                           */, {last_id} /* depend_on
-        //                                           */, root_id /* reloop to
-        //                                           */);
-        //             last_id = id;
-        //         }
-        //         else
-        //         {
-        //             auto id = launcher.add_lambda(middle,
-        //                                           {} /* init param */,
-        //                                           last_id /* recv param from
-        //                                           */, {last_id} /* depend on
-        //                                           */,
-        //                                           {} /* reloop to */);
-        //             last_id = id;
-        //         }
-        //     }
-        // }
-    }
+    register_lambda(patronus, launcher, kCoroCnt, 1);
 
     launcher.launch();
 
-    LOG(INFO) << "[debug] !! worker_do_nr: " << worker_do_nr_ << " from tid "
+    LOG(INFO) << "[detail] worker_do_nr: " << worker_do_nr_ << " from tid "
               << tid;
     return;
 }
@@ -432,6 +289,7 @@ void bench_template(const std::string &name,
                     boost::barrier &bar,
                     std::atomic<ssize_t> &work_nr,
                     bool is_master,
+                    const serverless::Config &serverless_config,
                     const BenchConfig &conf)
 
 {
@@ -459,7 +317,8 @@ void bench_template(const std::string &name,
 
     if (tid < thread_nr)
     {
-        bench_alloc_thread_coro(patronus, lat_m, is_master, work_nr, conf);
+        bench_alloc_thread_coro(
+            patronus, lat_m, is_master, work_nr, serverless_config, conf);
     }
 
     bar.wait();
@@ -488,6 +347,7 @@ void run_benchmark_server(Patronus::pointer patronus,
 std::atomic<ssize_t> shared_task_nr;
 
 void run_benchmark_client(Patronus::pointer patronus,
+                          const serverless::Config &serverless_config,
                           const BenchConfig &conf,
                           boost::barrier &bar,
                           bool is_master,
@@ -499,7 +359,13 @@ void run_benchmark_client(Patronus::pointer patronus,
     }
     bar.wait();
 
-    bench_template(conf.name, patronus, bar, shared_task_nr, is_master, conf);
+    bench_template(conf.name,
+                   patronus,
+                   bar,
+                   shared_task_nr,
+                   is_master,
+                   serverless_config,
+                   conf);
     bar.wait();
     if (is_master)
     {
@@ -508,6 +374,7 @@ void run_benchmark_client(Patronus::pointer patronus,
 }
 
 void run_benchmark(Patronus::pointer patronus,
+                   const serverless::Config &serverless_config,
                    const std::vector<BenchConfig> &configs,
                    boost::barrier &bar,
                    bool is_client,
@@ -520,7 +387,8 @@ void run_benchmark(Patronus::pointer patronus,
 
         if (is_client)
         {
-            run_benchmark_client(patronus, conf, bar, is_master, key);
+            run_benchmark_client(
+                patronus, serverless_config, conf, bar, is_master, key);
         }
         else
         {
@@ -542,20 +410,32 @@ void benchmark(Patronus::pointer patronus,
 
     size_t key = 0;
 
-    // for (size_t thread_nr : {32})
+    std::vector<serverless::Config> serverless_configs;
+    serverless_configs.emplace_back(
+        serverless::Config::get_mw("mw[step]", true));
+    serverless_configs.emplace_back(
+        serverless::Config::get_mw("mw[nested]", false));
+
     for (size_t thread_nr : {1})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
-        // for (size_t coro_nr : {2, 4, 8, 16, 32})
-        // for (size_t coro_nr : {1, 32})
+
         for (size_t coro_nr : {32})
         {
             auto total_test_times = kTestTimePerThread * 4;
+            for (const auto &serverless_config : serverless_configs)
             {
                 auto configs = BenchConfigFactory::get_basic(
-                    "two-chain", thread_nr, coro_nr, total_test_times);
-                run_benchmark(
-                    patronus, configs, bar, is_client, is_master, key);
+                    "chains", thread_nr, coro_nr, total_test_times);
+                LOG_IF(INFO, is_master)
+                    << "[config] serverless_config: " << serverless_config;
+                run_benchmark(patronus,
+                              serverless_config,
+                              configs,
+                              bar,
+                              is_client,
+                              is_master,
+                              key);
             }
         }
     }

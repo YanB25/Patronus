@@ -2148,6 +2148,9 @@ void Patronus::post_handle_request_acquire(AcquireRequest *req,
         LeaseIdT lease_id = std::numeric_limits<LeaseIdT>::max();
         if (likely(alloc_lease_ctx))
         {
+            LOG_IF(INFO, ::config::kMonitorLeaseContext)
+                << "[lease-ctx] getting from acquire request. Remain: "
+                << remain_lease_nr() << ". " << pre_coro_ctx(ctx);
             auto *lease_ctx = get_lease_context();
             lease_ctx->client_cid = req->cid;
             lease_ctx->buffer_mw = buffer_mw;
@@ -2334,6 +2337,11 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
     if (likely(!dbg_ext_do_nothing))
     {
         auto lease_id = req->lease_id;
+
+        LOG_IF(INFO, ::config::kMonitorLeaseContext)
+            << "[lease-ctx] getting from lease extend. Remain: "
+            << remain_lease_nr() << ". " << pre_coro_ctx(ctx);
+
         auto *lease_ctx = get_lease_context(lease_id);
         if (unlikely(lease_ctx == nullptr))
         {
@@ -2517,6 +2525,7 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
 
     if (req_ctx.relinquish.do_nothing)
     {
+        LOG(INFO) << "!! do nothing. exits. req: " << *req;
         return;
     }
 
@@ -2549,6 +2558,10 @@ void Patronus::post_handle_request_lease_relinquish(LeaseModifyRequest *req,
     {
         put_protection_region(DCHECK_NOTNULL(protection_region));
     }
+
+    LOG_IF(INFO, ::config::kMonitorLeaseContext)
+        << "[lease-ctx] putting by lease relinquish. Remain: "
+        << remain_lease_nr() << ". " << pre_coro_ctx(ctx);
 
     put_lease_context(lease_ctx);
 }
@@ -2589,14 +2602,32 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
         return;
     }
     DCHECK(lease_ctx->valid);
-    if (unlikely(!lease_ctx->client_cid.is_same(cid)))
+
+    if (unlikely(lease_ctx->client_cid.node_id != cid.node_id ||
+                 lease_ctx->client_cid.thread_id != cid.thread_id))
     {
-        DVLOG(4) << "[patronus][gc_lease] skip relinquish. cid mismatch: "
-                    "expect: "
-                 << lease_ctx->client_cid << ", got: " << cid
-                 << ". lease_ctx at " << (void *) lease_ctx;
-        return;
+        LOG(FATAL)
+            << "** Only failed when lease auto-expiration is enabled, AND "
+               "client calls relinquish to an expired lease. Comment out me in "
+               "this "
+               "false negative. lease_ctx->client_cid: "
+            << lease_ctx->client_cid << ", cid: " << cid;
     }
+    if constexpr (debug())
+    {
+        if (unlikely(!lease_ctx->client_cid.is_same(cid)))
+        {
+            LOG_FIRST_N(WARNING, 1)
+                << "** [patronus][gc_lease] cid mismatch detected. expect: "
+                << lease_ctx->client_cid << ", got: " << cid
+                << ". lease_ctx at " << (void *) lease_ctx
+                << ". It may be a false positive if a lease is not "
+                   "relinquished "
+                   "from "
+                   "the original coroutine. Only log once.";
+        }
+    }
+
     req_ctx.relinquish.do_nothing = false;
 
     bool with_pr = lease_ctx->with_pr;
@@ -2952,6 +2983,10 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     {
         put_protection_region(protection_region);
     }
+
+    LOG_IF(INFO, ::config::kMonitorLeaseContext)
+        << "[lease-ctx] putting by task lease gc. Remain: " << remain_lease_nr()
+        << ". " << pre_coro_ctx(ctx);
 
     put_lease_context(lease_ctx);
 }

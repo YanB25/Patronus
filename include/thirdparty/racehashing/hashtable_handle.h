@@ -123,10 +123,6 @@ public:
     }
     void deinit(util::TraceView trace = util::nulltrace)
     {
-        // LOG(INFO) << "[debug] !! debug_fp_conflict_m: " <<
-        // debug_fp_conflict_m_;
-        // LOG(INFO) << "[debug] !! debug_fp_miss_m: " << debug_fp_miss_m_;
-
         const auto &c = conf_.meta.d;
         if (directory_mem_handle_.valid())
         {

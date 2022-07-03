@@ -34,7 +34,7 @@ constexpr static size_t kTestTimePerThread = 5_K;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
-constexpr static size_t kCoroCnt = 32;  // max
+[[maybe_unused]] constexpr static size_t kCoroCnt = 32;  // max
 
 struct BenchConfig
 {
@@ -92,6 +92,7 @@ struct BenchResult
 };
 
 using Parameters = serverless::Parameters;
+using ParameterMap = serverless::Parameters::ParameterMap;
 using lambda_t = serverless::CoroLauncher::lambda_t;
 
 struct Meta
@@ -112,80 +113,66 @@ void register_lambdas(serverless::CoroLauncher &launcher,
                       Patronus::pointer patronus,
                       GlobalAddress meta_gaddr)
 {
-    auto extract_meta_data = [patronus](const Parameters &input,
-                                        Parameters &output,
-                                        CoroContext *ctx) -> RetCode {
-        auto server_nid = ::config::get_server_nids().front();
-        auto tid = patronus->get_thread_id();
-        auto dir_id = tid % kServerThreadNr;
-        const auto &meta_param = input.find("meta")->second;
-        auto ac_flag = (flag_t) AcquireRequestFlag::kNoGc |
-                       (flag_t) AcquireRequestFlag::kNoBindPR;
-        auto rlease = patronus->get_rlease(server_nid,
-                                           dir_id,
-                                           meta_param.gaddr,
-                                           0 /* alloc */,
-                                           meta_param.size,
-                                           0ns,
-                                           ac_flag,
-                                           ctx);
-        CHECK(rlease.success());
+    std::ignore = launcher;
+    std::ignore = patronus;
+    std::ignore = meta_gaddr;
+    // std::ignore = patronus;
+    // auto extract_meta_data = [](Parameters &parameters,
+    //                             CoroContext *ctx,
+    //                             util::TraceView trace) -> RetCode {
+    // };
 
-        output["meta"] = input.find("meta")->second;
-        output["meta"].prv =
-            (void *) patronus->get_rdma_buffer(sizeof(Meta)).buffer;
-    };
+    // auto transfer_meta = [](Parameters &parameters,
+    //                         CoroContext *ctx,
+    //                         util::TraceView trace) -> RetCode {
 
-    auto transfer_meta = [patronus](const Parameters &input,
-                                    Parameters &output,
-                                    CoroContext *ctx) -> RetCode {
+    // };
+    // auto handler = [patronus](Parameters &input,
+    //                           CoroContext *ctx,
+    //                           util::TraceView trace) -> RetCode {
 
-    };
-    auto handler = [patronus](const Parameters &input,
-                              Parameters &output,
-                              CoroContext *ctx) -> RetCode {
+    // };
+    // auto thumbnail = [patronus](Parameters &input,
+    //                             CoroContext *ctx,
+    //                             util::TraceView trace) -> RetCode {
 
-    };
-    auto thumbnail = [patronus](const Parameters &input,
-                                Parameters &output,
-                                CoroContext *ctx) -> RetCode {
+    // };
+    // auto response_meta = [patronus](Parameters &input,
+    //                                 CoroContext *ctx,
+    //                                 util::TraceView trace) -> RetCode {
 
-    };
-    auto response_meta = [patronus](const Parameters &input,
-                                    Parameters &output,
-                                    CoroContext *ctx) -> RetCode {
+    // };
 
-    };
-
-    Parameters init_param;
-    init_param["meta"].gaddr = meta_gaddr;
-    init_param["meta"].size = sizeof(Meta);
-    auto extract_meta_id = launcher.add_lambda(extract_meta_data,
-                                               init_param,
-                                               {} /* recv from */,
-                                               {} /* depend on */,
-                                               {} /* reloop to */);
-    auto transfer_meta_id = launcher.add_lambda(transfer_meta,
-                                                {} /* init param */,
-                                                extract_meta_id,
-                                                {extract_meta_id},
-                                                {} /* reloop */);
-    auto handler_id = launcher.add_lambda(handler,
-                                          {} /* init param */,
-                                          transfer_meta_id,
-                                          {transfer_meta_id},
-                                          {} /* reloop */);
-    auto thumbnail_id = launcher.add_lambda(thumbnail,
-                                            {} /* init param */,
-                                            handler_id,
-                                            {handler_id},
-                                            {} /* reloop */);
-    auto response_meta_id = launcher.add_lambda(response_meta,
-                                                {} /* init param */,
-                                                thumbnail_id,
-                                                {thumbnail_id},
-                                                extract_meta_id);
-    launcher.launch();
+    // ParameterMap init_param;
+    // init_param["meta"].gaddr = meta_gaddr;
+    // init_param["meta"].size = sizeof(Meta);
+    // auto extract_meta_id = launcher.add_lambda(extract_meta_data,
+    //                                            init_param,
+    //                                            {} /* recv from */,
+    //                                            {} /* depend on */,
+    //                                            {} /* reloop to */);
+    // auto transfer_meta_id = launcher.add_lambda(transfer_meta,
+    //                                             {} /* init param */,
+    //                                             extract_meta_id,
+    //                                             {extract_meta_id},
+    //                                             {} /* reloop */);
+    // auto handler_id = launcher.add_lambda(handler,
+    //                                       {} /* init param */,
+    //                                       transfer_meta_id,
+    //                                       {transfer_meta_id},
+    //                                       {} /* reloop */);
+    // auto thumbnail_id = launcher.add_lambda(thumbnail,
+    //                                         {} /* init param */,
+    //                                         handler_id,
+    //                                         {handler_id},
+    //                                         {} /* reloop */);
+    // auto response_meta_id = launcher.add_lambda(response_meta,
+    //                                             {} /* init param */,
+    //                                             thumbnail_id,
+    //                                             {thumbnail_id},
+    //                                             extract_meta_id);
+    // launcher.launch();
+    CHECK(false) << "TODO:";
 }
 
 void bench_alloc_thread_coro(
@@ -197,15 +184,21 @@ void bench_alloc_thread_coro(
 {
     auto test_times = conf.task_nr;
 
+    auto server_nid = ::config::get_server_nids().front();
     auto tid = patronus->get_thread_id();
+    auto dir_id = tid % kServerThreadNr;
+    serverless::Config config;
+    LOG(WARNING) << "TODO: make the config real";
 
-    serverless::CoroLauncher launcher(patronus, test_times, work_nr);
-    register_lambdas(launcher, patronus, kCoroCnt, 4);
+    serverless::CoroLauncher launcher(
+        patronus, server_nid, dir_id, config, test_times, work_nr);
+    // register_lambdas(launcher, patronus, kCoroCnt, 4);
+    CHECK(false) << "register lambdas";
 
     launcher.launch();
 
-    LOG(INFO) << "[debug] !! worker_do_nr: " << worker_do_nr_ << " from tid "
-              << tid;
+    // LOG(INFO) << "[debug] !! worker_do_nr: " << worker_do_nr_ << " from tid "
+    //           << tid;
     return;
 }
 

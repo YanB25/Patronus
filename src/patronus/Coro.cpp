@@ -82,7 +82,6 @@ void ServerCoroBatchExecutionContext::put_mw(ibv_mw *mw)
 {
     if (mw)
     {
-        // LOG(INFO) << "[debug] !! put_mw manually called once";
         patronus_->put_mw(dir_id_, mw);
     }
 }
@@ -180,8 +179,6 @@ bool ServerCoroBatchExecutionContext::commit_wo_mw_reuse_optimization(
             {
                 (*task.o_status) = AcquireRequestStatus::kMagicMwErr;
             }
-            // DLOG(INFO) << "[debug] !! Task " << task
-            //            << " got magic mw err.";
         }
     }
 
@@ -334,8 +331,6 @@ bool ServerCoroBatchExecutionContext::commit_with_mw_reuse_optimization(
                 {
                     (*task.o_status) = AcquireRequestStatus::kMagicMwErr;
                 }
-                // DLOG(INFO) << "[debug] !! Task " << task
-                //            << " got magic mw err.";
             }
         }
     }
