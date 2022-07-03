@@ -93,9 +93,11 @@ public:
     static pointer new_instance(patronus::Patronus::pointer p,
                                 size_t server_nid,
                                 size_t dir_id,
-                                const Config &config)
+                                const Config &config,
+                                double trace_rate = 0)
     {
-        return std::make_shared<Parameters>(p, server_nid, dir_id, config);
+        return std::make_shared<Parameters>(
+            p, server_nid, dir_id, config, trace_rate);
     }
 
     using void_ptr_t = void *;
@@ -218,14 +220,16 @@ public:
                 DCHECK_NE(p.lease.ec(),
                           patronus::AcquireRequestStatus::kReserved);
                 do_relinquish_lease(p.lease, ctx, trace);
+                trace.pin("relinquish");
                 DCHECK(!p.lease.success());
             }
         }
         contexts_.clear();
         prv_ = nullptr;
-        trace_ = tm_.trace("serverless");
+        trace.pin("done clear");
 
         LOG_IF(INFO, trace_.enabled()) << trace_;
+        trace_ = tm_.trace("serverless");
     }
     TraceView trace() const
     {

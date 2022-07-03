@@ -272,8 +272,13 @@ void bench_alloc_thread_coro(
     // auto nid = patronus->get_node_id();
     auto server_nid = ::config::get_server_nids().front();
 
-    serverless::CoroLauncher launcher(
-        patronus, server_nid, dir_id, serverless_config, test_times, work_nr);
+    serverless::CoroLauncher launcher(patronus,
+                                      server_nid,
+                                      dir_id,
+                                      serverless_config,
+                                      test_times,
+                                      work_nr,
+                                      0);
 
     register_lambda(patronus, launcher, kCoroCnt, 1);
 

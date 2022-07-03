@@ -30,14 +30,16 @@ public:
                  size_t dir_id,
                  const Config &config,
                  ssize_t work_nr,
-                 std::atomic<ssize_t> &remain_work_nr)
+                 std::atomic<ssize_t> &remain_work_nr,
+                 double trace_rate = 0)
         : patronus_(p),
           server_nid_(server_nid),
           dir_id_(dir_id),
           config_(config),
           tid_(p->get_thread_id()),
           work_nr_(work_nr),
-          remain_work_nr_(remain_work_nr)
+          remain_work_nr_(remain_work_nr),
+          trace_rate_(trace_rate)
     {
         coro_ex_.get_private_data().thread_remain_task = work_nr;
     }
@@ -60,7 +62,7 @@ public:
             inits_[ret] = init_para.value();
 
             parameters_[ret] = Parameters::new_instance(
-                patronus_, server_nid_, dir_id_, config_);
+                patronus_, server_nid_, dir_id_, config_, trace_rate_);
             parameters_[ret]->install_params(inits_[ret]);
 
             readys_[ret] = true;
@@ -235,9 +237,8 @@ private:
             if (reloop_to_lambda_[coro_id].has_value())
             {
                 auto root = reloop_to_lambda_[coro_id].value();
-                parameters_[coro_id]->clear(&ctx);
+                parameters_[coro_id]->clear(&ctx, trace.child("clear"));
                 parameters_[coro_id]->install_params(inits_[root]);
-                trace.pin("paremeter clear");
             }
             else
             {
@@ -259,7 +260,6 @@ private:
                 // clear and reinstall parameters for a restart
                 DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
                          << ") reloop to root " << root << ", ctx: " << ctx;
-                trace.pin("paremeter clear");
             }
 
             for (auto l : let_go_[coro_id])
@@ -321,6 +321,7 @@ private:
     size_t tid_{0};
     ssize_t work_nr_;
     std::atomic<ssize_t> &remain_work_nr_;
+    double trace_rate_{0};
 
     // below fields are book-keeping information
     std::array<bool, kMaxLambdaNr> is_root_{};
