@@ -95,91 +95,173 @@ using Parameters = serverless::Parameters;
 using ParameterMap = serverless::Parameters::ParameterMap;
 using lambda_t = serverless::CoroLauncher::lambda_t;
 
-struct Meta
+// struct Meta
+// {
+//     GlobalAddress image_blob_gaddr;
+//     size_t image_blob_size;
+//     uint64_t checksum;
+//     // size_t
+// };
+struct ImageData
 {
-    GlobalAddress image_blob_gaddr;
-    size_t image_blob_size;
-    uint64_t checksum;
-    // size_t
+    size_t size;
+    char buffer[];
 };
 
-struct ImageProcessingPrv
+struct ImageMeta
 {
-    void *meta_buffer;
-    void *image_blob;
+    size_t columns;
+    size_t rows;
+    size_t scaled_columns;
+    size_t scaled_rows;
+    size_t file_size;
 };
 
 void register_lambdas(serverless::CoroLauncher &launcher,
-                      Patronus::pointer patronus,
-                      GlobalAddress meta_gaddr)
+                      GlobalAddress image_gaddr,
+                      size_t image_size)
 {
-    std::ignore = launcher;
-    std::ignore = patronus;
-    std::ignore = meta_gaddr;
-    // std::ignore = patronus;
-    // auto extract_meta_data = [](Parameters &parameters,
-    //                             CoroContext *ctx,
-    //                             util::TraceView trace) -> RetCode {
-    // };
+    auto extract_meta_data = [](Parameters &parameters,
+                                CoroContext *ctx,
+                                util::TraceView trace) -> RetCode {
+        auto img_buffer = parameters.read("img_data", ctx, trace);
+        const auto &img_data = *(ImageData *) img_buffer.buffer;
+        Magick::Blob blob(img_data.buffer, img_data.size);
+        Magick::Image image(blob);
 
-    // auto transfer_meta = [](Parameters &parameters,
-    //                         CoroContext *ctx,
-    //                         util::TraceView trace) -> RetCode {
+        auto img_meta_buffer = parameters.get_buffer(sizeof(ImageMeta));
+        auto &img_meta = *(ImageMeta *) img_meta_buffer.buffer;
+        img_meta.columns = image.columns();
+        img_meta.rows = image.rows();
+        img_meta.scaled_columns = 0;
+        img_meta.scaled_rows = 0;
+        img_meta.file_size = image.fileSize();
+        parameters.set_param("img_meta",
+                             std::move(img_meta_buffer),
+                             sizeof(ImageMeta),
+                             ctx,
+                             trace);
 
-    // };
-    // auto handler = [patronus](Parameters &input,
-    //                           CoroContext *ctx,
-    //                           util::TraceView trace) -> RetCode {
+        parameters.put_rdma_buffer(std::move(img_buffer));
+        trace.pin("done: extrace meta");
+        return RC::kOk;
+    };
 
-    // };
-    // auto thumbnail = [patronus](Parameters &input,
-    //                             CoroContext *ctx,
-    //                             util::TraceView trace) -> RetCode {
+    auto transfer_meta = [](Parameters &parameters,
+                            CoroContext *ctx,
+                            util::TraceView trace) -> RetCode {
+        const auto &img_meta_buffer =
+            parameters.get_param("img_meta", ctx, trace);
+        auto &img_meta = *(ImageMeta *) img_meta_buffer.buffer;
+        img_meta.scaled_columns = img_meta.columns / 10;
+        img_meta.scaled_rows = img_meta.rows / 10;
 
-    // };
-    // auto response_meta = [patronus](Parameters &input,
-    //                                 CoroContext *ctx,
-    //                                 util::TraceView trace) -> RetCode {
+        auto update_img_meta_buffer = parameters.get_buffer(sizeof(ImageMeta));
+        memcpy(update_img_meta_buffer.buffer,
+               img_meta_buffer.buffer,
+               sizeof(ImageMeta));
+        parameters.set_param("img_meta",
+                             std::move(update_img_meta_buffer),
+                             sizeof(ImageMeta),
+                             ctx,
+                             trace);
+        trace.pin("done: transfer meta");
+        return RC::kOk;
+    };
+    auto handler = [](Parameters &parameters,
+                      CoroContext *ctx,
+                      util::TraceView trace) -> RetCode {
+        const auto &img_meta_buffer =
+            parameters.get_param("img_meta", ctx, trace);
+        const auto &img_meta = *(ImageMeta *) img_meta_buffer.buffer;
+        DCHECK_GT(img_meta.file_size, 0);
+        parameters.alloc("thumbnail", img_meta.file_size, ctx, trace);
 
-    // };
+        trace.pin("done: handler");
+        return RC::kOk;
+    };
+    auto thumbnail = [](Parameters &parameters,
+                        CoroContext *ctx,
+                        util::TraceView trace) -> RetCode {
+        const auto &img_meta_buffer = parameters.read("img_meta", ctx, trace);
+        const auto &img_meta = *(ImageMeta *) img_meta_buffer.buffer;
 
-    // ParameterMap init_param;
-    // init_param["meta"].gaddr = meta_gaddr;
-    // init_param["meta"].size = sizeof(Meta);
-    // auto extract_meta_id = launcher.add_lambda(extract_meta_data,
-    //                                            init_param,
-    //                                            {} /* recv from */,
-    //                                            {} /* depend on */,
-    //                                            {} /* reloop to */);
-    // auto transfer_meta_id = launcher.add_lambda(transfer_meta,
-    //                                             {} /* init param */,
-    //                                             extract_meta_id,
-    //                                             {extract_meta_id},
-    //                                             {} /* reloop */);
-    // auto handler_id = launcher.add_lambda(handler,
-    //                                       {} /* init param */,
-    //                                       transfer_meta_id,
-    //                                       {transfer_meta_id},
-    //                                       {} /* reloop */);
-    // auto thumbnail_id = launcher.add_lambda(thumbnail,
-    //                                         {} /* init param */,
-    //                                         handler_id,
-    //                                         {handler_id},
-    //                                         {} /* reloop */);
-    // auto response_meta_id = launcher.add_lambda(response_meta,
-    //                                             {} /* init param */,
-    //                                             thumbnail_id,
-    //                                             {thumbnail_id},
-    //                                             extract_meta_id);
-    // launcher.launch();
-    CHECK(false) << "TODO:";
+        auto img_buffer = parameters.read("img_data", ctx, trace);
+        const auto &img_data = *(ImageData *) img_buffer.buffer;
+        Magick::Blob blob(img_data.buffer, img_data.size);
+        Magick::Image image(blob);
+
+        image.zoom({img_meta.scaled_columns, img_meta.scaled_rows});
+        image.write(&blob);
+        auto img_write_buffer = parameters.get_buffer(blob.length());
+        memcpy(img_write_buffer.buffer, blob.data(), blob.length());
+        parameters.write("thumbnail", std::move(img_write_buffer), ctx, trace)
+            .expect(RC::kOk);
+
+        parameters.put_rdma_buffer(std::move(img_buffer));
+
+        trace.pin("done: thumbnail");
+        return RC::kOk;
+    };
+    auto response_meta = [](Parameters &parameters,
+                            CoroContext *ctx,
+                            util::TraceView trace) -> RetCode {
+        const auto &img_meta_buffer =
+            parameters.get_param("img_meta", ctx, trace);
+        auto response_buffer = parameters.get_buffer(sizeof(ImageMeta));
+        memcpy(
+            response_buffer.buffer, img_meta_buffer.buffer, sizeof(ImageMeta));
+        parameters.set_param("response",
+                             std::move(response_buffer),
+                             sizeof(ImageMeta),
+                             ctx,
+                             trace);
+        trace.pin("done: response");
+        return RC::kOk;
+    };
+
+    ParameterMap init_param;
+    init_param["img_data"].gaddr = image_gaddr;
+    init_param["img_data"].size = image_size;
+
+    auto extract_meta_id = launcher.add_lambda(extract_meta_data,
+                                               init_param,
+                                               {} /* recv from */,
+                                               {} /* depend on */,
+                                               {} /* reloop to */);
+    auto transfer_meta_id = launcher.add_lambda(transfer_meta,
+                                                {} /* init param */,
+                                                extract_meta_id,
+                                                {extract_meta_id},
+                                                {} /* reloop */);
+    auto handler_id = launcher.add_lambda(handler,
+                                          {} /* init param */,
+                                          transfer_meta_id,
+                                          {transfer_meta_id},
+                                          {} /* reloop */);
+    auto thumbnail_id = launcher.add_lambda(thumbnail,
+                                            {} /* init param */,
+                                            handler_id,
+                                            {handler_id},
+                                            {} /* reloop */);
+    [[maybe_unused]] auto response_meta_id =
+        launcher.add_lambda(response_meta,
+                            {} /* init param */,
+                            thumbnail_id,
+                            {thumbnail_id},
+                            extract_meta_id);
+
+    launcher.launch();
 }
 
 void bench_alloc_thread_coro(
     Patronus::pointer patronus,
+    GlobalAddress img_gaddr,
+    size_t img_size,
     [[maybe_unused]] OnePassBucketMonitor<uint64_t> &lat_m,
     [[maybe_unused]] bool is_master,
     std::atomic<ssize_t> &work_nr,
+    const serverless::Config &serverless_config,
     const BenchConfig &conf)
 {
     auto test_times = conf.task_nr;
@@ -187,26 +269,25 @@ void bench_alloc_thread_coro(
     auto server_nid = ::config::get_server_nids().front();
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
-    serverless::Config config;
-    LOG(WARNING) << "TODO: make the config real";
 
     serverless::CoroLauncher launcher(
-        patronus, server_nid, dir_id, config, test_times, work_nr);
-    // register_lambdas(launcher, patronus, kCoroCnt, 4);
-    CHECK(false) << "register lambdas";
+        patronus, server_nid, dir_id, serverless_config, test_times, work_nr);
+
+    register_lambdas(launcher, img_gaddr, img_size);
 
     launcher.launch();
 
-    // LOG(INFO) << "[debug] !! worker_do_nr: " << worker_do_nr_ << " from tid "
-    //           << tid;
     return;
 }
 
 void bench_template(const std::string &name,
                     Patronus::pointer patronus,
+                    GlobalAddress img_gaddr,
+                    size_t img_size,
                     boost::barrier &bar,
                     std::atomic<ssize_t> &work_nr,
                     bool is_master,
+                    const serverless::Config &serverless_config,
                     const BenchConfig &conf)
 
 {
@@ -234,7 +315,14 @@ void bench_template(const std::string &name,
 
     if (tid < thread_nr)
     {
-        bench_alloc_thread_coro(patronus, lat_m, is_master, work_nr, conf);
+        bench_alloc_thread_coro(patronus,
+                                img_gaddr,
+                                img_size,
+                                lat_m,
+                                is_master,
+                                work_nr,
+                                serverless_config,
+                                conf);
     }
 
     bar.wait();
@@ -248,19 +336,15 @@ void init_meta(Patronus::pointer patronus)
     Magick::Blob blob;
     image.write(&blob);
 
-    auto *meta_addr = patronus->patronus_alloc(sizeof(Meta), 0 /* hint */);
+    uint64_t blob_size = blob.length();
     auto *blob_addr = patronus->patronus_alloc(blob.length(), 0 /* hint */);
-    memcpy(blob_addr, blob.data(), blob.length());
-    auto &meta = *(Meta *) meta_addr;
-    meta.image_blob_gaddr = patronus->to_exposed_gaddr(blob_addr);
-    meta.image_blob_size = blob.length();
-    meta.checksum = 0;
-    meta.checksum = util::djb2_digest(&meta, sizeof(Meta));
+    memcpy(blob_addr, blob.data(), blob_size);
+    auto blob_gaddr = patronus->to_exposed_gaddr(blob_addr);
 
-    auto meta_gaddr = patronus->to_exposed_gaddr(meta_addr);
-    patronus->put("serverless:meta_gaddr", meta_gaddr, 0ns);
-    LOG(INFO) << "Puting to serverless:meta_gaddr: " << meta_gaddr
-              << ", content: " << util::Hexdump(&meta, sizeof(meta));
+    patronus->put("serverless:img_gaddr", blob_gaddr, 0ns);
+    patronus->put("serverless:img_size", blob_size, 0ns);
+    LOG(INFO) << "Puting to serverless:meta_gaddr: " << blob_gaddr
+              << ", size: " << blob_size;
 }
 
 void run_benchmark_server(Patronus::pointer patronus,
@@ -288,7 +372,10 @@ void run_benchmark_server(Patronus::pointer patronus,
 }
 std::atomic<ssize_t> shared_task_nr;
 
+GlobalAddress g_img_gaddr;
+uint64_t g_img_size;
 void run_benchmark_client(Patronus::pointer patronus,
+                          const serverless::Config &serverless_config,
                           const BenchConfig &conf,
                           boost::barrier &bar,
                           bool is_master,
@@ -297,10 +384,22 @@ void run_benchmark_client(Patronus::pointer patronus,
     if (is_master)
     {
         shared_task_nr = conf.task_nr;
+        g_img_gaddr =
+            patronus->get_object<GlobalAddress>("serverless:img_gaddr", 100ms);
+        g_img_size =
+            patronus->get_object<uint64_t>("serverless:img_size", 100ms);
     }
     bar.wait();
 
-    bench_template(conf.name, patronus, bar, shared_task_nr, is_master, conf);
+    bench_template(conf.name,
+                   patronus,
+                   g_img_gaddr,
+                   g_img_size,
+                   bar,
+                   shared_task_nr,
+                   is_master,
+                   serverless_config,
+                   conf);
     bar.wait();
     if (is_master)
     {
@@ -309,6 +408,7 @@ void run_benchmark_client(Patronus::pointer patronus,
 }
 
 void run_benchmark(Patronus::pointer patronus,
+                   const serverless::Config &serverless_config,
                    const std::vector<BenchConfig> &configs,
                    boost::barrier &bar,
                    bool is_client,
@@ -321,7 +421,8 @@ void run_benchmark(Patronus::pointer patronus,
 
         if (is_client)
         {
-            run_benchmark_client(patronus, conf, bar, is_master, key);
+            run_benchmark_client(
+                patronus, serverless_config, conf, bar, is_master, key);
         }
         else
         {
@@ -340,8 +441,13 @@ void benchmark(Patronus::pointer patronus,
                bool is_master)
 {
     bar.wait();
-
     size_t key = 0;
+
+    std::vector<serverless::Config> serverless_configs;
+    serverless_configs.emplace_back(
+        serverless::Config::get_mw("mw[step]", true));
+    serverless_configs.emplace_back(
+        serverless::Config::get_mw("mw[nested]", false));
 
     // for (size_t thread_nr : {32})
     for (size_t thread_nr : {1})
@@ -352,11 +458,18 @@ void benchmark(Patronus::pointer patronus,
         for (size_t coro_nr : {32})
         {
             auto total_test_times = kTestTimePerThread * 4;
+            for (const auto &serverless_config : serverless_configs)
             {
                 auto configs = BenchConfigFactory::get_basic(
                     "diamond", thread_nr, coro_nr, total_test_times);
-                run_benchmark(
-                    patronus, configs, bar, is_client, is_master, key);
+                LOG_IF(INFO, is_master) << "[config] " << serverless_config;
+                run_benchmark(patronus,
+                              serverless_config,
+                              configs,
+                              bar,
+                              is_client,
+                              is_master,
+                              key);
             }
         }
     }

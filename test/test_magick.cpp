@@ -26,9 +26,14 @@ int main(int argc, char *argv[])
     img.write(&blob);
     trace.pin("dump to blob");
 
+    auto g = img.size();
     LOG(INFO) << "The image column: " << img.columns()
               << ", row: " << img.rows() << ", blob size: " << blob.length()
-              << ", at " << blob.data();
+              << ", at " << blob.data()
+              << ". multiple: " << img.columns() * img.rows()
+              << ", img.size(): (" << img.size().width() << ", "
+              << img.size().height()
+              << ") , img.file_size(): " << img.fileSize();
     Magick::Blob blob2 = blob;
     trace.pin("blob2 = blob");
     Magick::Image img2(blob2);
@@ -38,6 +43,7 @@ int main(int argc, char *argv[])
     // img2.write(artifacts_directory() / "view2.jpeg");
     auto img_zoom = img;
     trace.pin("cpy");
+    // img.thumbnail?
     img.zoom({size_t(img.columns() * 0.1), size_t(img.rows() * 0.1)});
     // img.chop({size_t(img.columns() * 0.01), size_t(img.rows() * 0.01)});
     // img.write(artifacts_directory() / ("view.thumbnail.5.jpeg"));
