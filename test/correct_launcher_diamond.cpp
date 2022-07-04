@@ -23,10 +23,14 @@ using namespace util::literals;
 using namespace patronus;
 using namespace std::chrono_literals;
 
-constexpr static size_t kClientThreadNr = kMaxAppThread;
+// constexpr static size_t kClientThreadNr = kMaxAppThread;
+constexpr static size_t kClientThreadNr = 1;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-constexpr static size_t kTestTimePerThread = 5_K;
+// constexpr static size_t kTestTimePerThread = 5_K;
+constexpr static size_t kTestTimePerThread = 100;
+
+constexpr static size_t kChainNr = 1;
 
 using namespace hmdf;
 
@@ -155,6 +159,7 @@ RetCode worker_do(Parameters &parameters,
         auto got_buffer = parameters.read("addr", ctx, trace);
         int64_t got = *(int64_t *) got_buffer.buffer;
         CHECK_EQ(got, c->magic + expect_faa_nr);
+        parameters.put_rdma_buffer(std::move(got_buffer));
     }
 
     if (tail)
@@ -256,7 +261,7 @@ void bench_alloc_thread_coro(
 
     serverless::CoroLauncher launcher(
         patronus, server_nid, dir_id, serverless_config, test_times, work_nr);
-    register_lambdas(launcher, patronus, kCoroCnt, 4);
+    register_lambdas(launcher, patronus, kCoroCnt, kChainNr);
 
     launcher.launch();
 
@@ -390,8 +395,8 @@ void benchmark(Patronus::pointer patronus,
     size_t key = 0;
 
     std::vector<serverless::Config> serverless_configs;
-    serverless_configs.emplace_back(
-        serverless::Config::get_mw("mw[step]", true));
+    // serverless_configs.emplace_back(
+    //     serverless::Config::get_mw("mw[step]", true));
     serverless_configs.emplace_back(
         serverless::Config::get_mw("mw[nested]", false));
 
@@ -407,6 +412,7 @@ void benchmark(Patronus::pointer patronus,
             auto total_test_times = kTestTimePerThread * 4;
             for (const auto &serverless_config : serverless_configs)
             {
+                LOG_IF(INFO, is_master) << "[config] " << serverless_config;
                 auto configs = BenchConfigFactory::get_basic(
                     "diamond", thread_nr, coro_nr, total_test_times);
                 run_benchmark(patronus,

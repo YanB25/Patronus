@@ -24,9 +24,14 @@ using namespace patronus;
 using namespace std::chrono_literals;
 
 constexpr static size_t kClientThreadNr = kMaxAppThread;
+// constexpr static size_t kClientThreadNr = 1;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
+constexpr static size_t kChainNr = 2;
+// constexpr static size_t kChainNr = 1;
+
 constexpr static size_t kTestTimePerThread = 1_K;
+// constexpr static size_t kTestTimePerThread = 100;
 
 using namespace hmdf;
 
@@ -280,7 +285,7 @@ void bench_alloc_thread_coro(
                                       work_nr,
                                       0);
 
-    register_lambda(patronus, launcher, kCoroCnt, 1);
+    register_lambda(patronus, launcher, kCoroCnt, kChainNr);
 
     launcher.launch();
 
@@ -417,9 +422,9 @@ void benchmark(Patronus::pointer patronus,
 
     std::vector<serverless::Config> serverless_configs;
     serverless_configs.emplace_back(
-        serverless::Config::get_mw("mw[step]", true));
-    serverless_configs.emplace_back(
         serverless::Config::get_mw("mw[nested]", false));
+    serverless_configs.emplace_back(
+        serverless::Config::get_mw("mw[step]", true));
 
     for (size_t thread_nr : {kMaxAppThread})
     {

@@ -101,6 +101,7 @@ constexpr static bool kMonitorReconnection = false;
 constexpr static bool kMonitorFailureRecovery = false;
 constexpr static bool kMonitorAddressConversion = false;
 constexpr static bool kMonitorLeaseContext = false;
+constexpr static bool kMonitorCoroSwitch = false;
 
 constexpr static bool kReportTraceViewRoute = false;
 
@@ -148,5 +149,19 @@ inline bool is_mw_magic_err(uint64_t id)
     }
     return false;
 }
+
+namespace config::verbose
+{
+constexpr static size_t kBenchReserve_1 = 1;
+constexpr static size_t kBenchReserve_2 = 2;
+constexpr static size_t kSystem = 3;
+constexpr static size_t kRdmaAdpt = 4;
+constexpr static size_t kPatronus = 5;
+constexpr static size_t kDSM = 6;
+constexpr static size_t kUmsg = 7;
+constexpr static size_t kRdmaOperation = 8;
+
+constexpr static size_t kVerbose = 20;
+}  // namespace config::verbose
 
 #endif /* __COMMON_H__ */

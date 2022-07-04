@@ -99,7 +99,8 @@ public:
 
     void yield_to_master(WRID wr_id = nullwrid) const
     {
-        DVLOG(4) << "[Coro] " << *this << " yielding to master for " << wr_id;
+        DLOG_IF(INFO, ::config::kMonitorCoroSwitch)
+            << "[Coro] " << *this << " yielding to master for " << wr_id;
         DCHECK(is_worker()) << *this;
 
         if constexpr (debug())
@@ -112,13 +113,15 @@ public:
 
         (*yield_)(*master_);
 
-        DVLOG(4) << "[Coro] " << *this
-                 << " yielded back from master, expecting " << wr_id;
+        DLOG_IF(INFO, ::config::kMonitorCoroSwitch)
+            << "[Coro] " << *this << " comming back from master, expecting "
+            << wr_id;
     }
     void yield_to_worker(coro_t wid, WRID wr_id = nullwrid)
     {
-        DVLOG(4) << "[Coro] " << *this << " yielding to worker " << (int) wid
-                 << " for " << wr_id;
+        DLOG_IF(INFO, ::config::kMonitorCoroSwitch)
+            << "[Coro] " << *this << " yielding to worker " << (int) wid
+            << " for " << wr_id;
         DCHECK(is_master()) << *this;
 
         if constexpr (debug())
@@ -131,8 +134,8 @@ public:
 
         (*yield_)(workers_[wid]);
 
-        DVLOG(4) << "[Coro] " << *this << " yielded back from worker "
-                 << (int) wid;
+        DLOG_IF(INFO, ::config::kMonitorCoroSwitch)
+            << "[Coro] " << *this << " yielding back from worker " << (int) wid;
     }
     friend std::ostream &operator<<(std::ostream &os, const CoroContext &ctx);
 

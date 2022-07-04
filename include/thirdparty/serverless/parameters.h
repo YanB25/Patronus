@@ -6,9 +6,11 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include "./config.h"
 #include "patronus/All.h"
+#include "patronus/Lease.h"
 #include "util/Tracer.h"
 
 namespace serverless
@@ -17,7 +19,7 @@ struct ParameterContext
 {
     GlobalAddress gaddr{nullgaddr};
     size_t size{};
-    patronus::Lease lease{};
+    std::unordered_map<uint64_t, patronus::Lease> leases;
     std::optional<Buffer> cached_data{};
     ParameterContext() = default;
     ParameterContext(GlobalAddress gaddr, size_t size)
@@ -32,7 +34,7 @@ inline std::ostream &operator<<(std::ostream &os, const ParameterContext &p)
     {
         os << "cached_data: " << p.cached_data.value() << ", ";
     }
-    os << "lease.valid: " << p.lease.success() << "}";
+    os << ", leases: " << util::pre_umap(p.leases) << "}";
     return os;
 }
 
@@ -195,10 +197,13 @@ public:
                         std::move(c.cached_data.value()));
                     c.cached_data = std::nullopt;
                 }
-                if (c.lease.success())
+                auto cid = DCHECK_NOTNULL(ctx)->coro_id();
+                auto &lease = c.leases[cid];
+                if (lease.success())
                 {
-                    do_relinquish_lease(c.lease, ctx, trace);
-                    DCHECK(!c.lease.success());
+                    // LOG(INFO) << "[debug] !! relinquishing " << lease;
+                    do_relinquish_lease(lease, ctx, trace);
+                    DCHECK(!lease.success());
                 }
             }
         }
@@ -215,13 +220,17 @@ public:
                 p_->put_rdma_buffer(std::move(p.cached_data.value()));
                 p.cached_data = std::nullopt;
             }
-            if (p.lease.success())
+            for (auto &[coro_id, lease] : p.leases)
             {
-                DCHECK_NE(p.lease.ec(),
-                          patronus::AcquireRequestStatus::kReserved);
-                do_relinquish_lease(p.lease, ctx, trace);
-                trace.pin("relinquish");
-                DCHECK(!p.lease.success());
+                std::ignore = coro_id;
+                if (lease.success())
+                {
+                    DCHECK_NE(lease.ec(),
+                              patronus::AcquireRequestStatus::kReserved);
+                    do_relinquish_lease(lease, ctx, trace);
+                    trace.pin("relinquish");
+                    DCHECK(!lease.success());
+                }
             }
         }
         contexts_.clear();
@@ -238,17 +247,19 @@ public:
     friend std::ostream &operator<<(std::ostream &os, const Parameters &p);
 
 private:
-    void prepare_wlease(ParameterContext &c,
-                        CoroContext *ctx,
-                        TraceView trace = util::nulltrace)
+    Lease &prepare_wlease(ParameterContext &c,
+                          CoroContext *ctx,
+                          TraceView trace = util::nulltrace)
     {
         DCHECK_NE(c.size, 0);
+        auto &lease = get_lease(c, ctx);
 
-        if (unlikely(!c.lease.success()))
+        if (unlikely(!lease.success()))
         {
-            c.lease = do_acquire_lease(c.gaddr, c.size, ctx, trace);
-            DCHECK(c.lease.success());
+            lease = do_acquire_lease(c.gaddr, c.size, ctx, trace);
+            DCHECK(lease.success());
         }
+        return lease;
     }
 
     void do_set_param(ParameterContext &,
@@ -266,18 +277,20 @@ private:
                                             CoroContext *ctx,
                                             TraceView trace = util::nulltrace)
     {
-        DCHECK(!param.lease.success());
+        auto &lease = get_lease(param, ctx);
+
+        DCHECK(!lease.success());
         DCHECK_EQ(param.size, 0);
         DCHECK(!param.cached_data.has_value());
 
-        param.lease = do_alloc_lease(actual_size, ctx);
-        DCHECK(param.lease.success());
-        param.gaddr = p_->get_gaddr(param.lease);
+        lease = do_alloc_lease(actual_size, ctx);
+        DCHECK(lease.success());
+        param.gaddr = p_->get_gaddr(lease);
         param.size = actual_size;
         param.cached_data = std::move(rdma_buf);
         trace.pin("allocate param");
 
-        return p_->write(param.lease,
+        return p_->write(lease,
                          param.cached_data.value().buffer,
                          actual_size,
                          0 /* offset */,
@@ -292,6 +305,8 @@ private:
                                              CoroContext *ctx,
                                              TraceView trace)
     {
+        auto &lease = get_lease(param, ctx);
+
         if (param.cached_data.has_value())
         {
             p_->put_rdma_buffer(std::move(param.cached_data.value()));
@@ -301,13 +316,13 @@ private:
         DCHECK_NE(rdma_buf.buffer, nullptr);
         param.cached_data = std::move(rdma_buf);
 
-        if (!param.lease.success())
+        if (!lease.success())
         {
-            param.lease = do_acquire_lease(param.gaddr, param.size, ctx);
-            DCHECK(param.lease.success());
+            lease = do_acquire_lease(param.gaddr, param.size, ctx);
+            DCHECK(lease.success());
         }
-        CHECK_GE(param.lease.buffer_size(), actual_size);
-        auto rc = p_->write(param.lease,
+        CHECK_GE(lease.buffer_size(), actual_size);
+        auto rc = p_->write(lease,
                             param.cached_data.value().buffer,
                             actual_size,
                             0 /* offset */,
@@ -320,13 +335,31 @@ private:
                                    Buffer &&rdma_buf,
                                    size_t actual_size,
                                    TraceView trace = util::nulltrace);
-
+    /**
+     * if use_step, we shared lease across lambdas
+     * if not use_step, lambdas use their own leases.
+     * This function distinguish these behaviour
+     */
+    Lease &get_lease(ParameterContext &param, CoroContext *ctx)
+    {
+        if (config_.use_step_lambda)
+        {
+            return param.leases[0];
+        }
+        else
+        {
+            auto cid = DCHECK_NOTNULL(ctx)->coro_id();
+            return param.leases[cid];
+        }
+    }
     [[nodiscard]] const Buffer &do_get_data(ParameterContext &param,
                                             GlobalAddress gaddr,
                                             size_t size,
                                             CoroContext *ctx,
                                             TraceView trace = util::nulltrace)
     {
+        auto &lease = get_lease(param, ctx);
+
         if (likely(param.cached_data.has_value()))
         {
             return param.cached_data.value();
@@ -336,19 +369,19 @@ private:
         {
             DCHECK_EQ(param.gaddr, nullgaddr);
             DCHECK(!param.cached_data.has_value());
-            DCHECK(!param.lease.success());
+            DCHECK(!lease.success());
             param.size = size;
             param.gaddr = gaddr;
         }
-        if (unlikely(param.lease.success() && param.lease.buffer_size() < size))
+        if (unlikely(lease.success() && lease.buffer_size() < size))
         {
-            do_relinquish_lease(param.lease, ctx, trace);
-            DCHECK(!param.lease.success());
+            do_relinquish_lease(lease, ctx, trace);
+            DCHECK(!lease.success());
         }
-        if (unlikely(!param.lease.success()))
+        if (unlikely(!lease.success()))
         {
-            param.lease = do_acquire_lease(gaddr, size, ctx, trace);
-            DCHECK(param.lease.success());
+            lease = do_acquire_lease(gaddr, size, ctx, trace);
+            DCHECK(lease.success());
             param.size = size;
             param.gaddr = gaddr;
         }
@@ -359,7 +392,7 @@ private:
         DCHECK_EQ(param.gaddr, gaddr)
             << "** Mismatch detected for param: " << param;
         DCHECK_GE(param.size, size);
-        p_->read(param.lease,
+        p_->read(lease,
                  param.cached_data.value().buffer,
                  size,
                  0 /* 0ffset */,
@@ -391,6 +424,9 @@ private:
                                   c.ns,
                                   c.acquire_flag,
                                   ctx);
+        // LOG(INFO) << "[debug] !!! get_wlease get: " << ret
+        //           << " for gaddr: " << gaddr << ", size: " << size
+        //           << ", ctx: " << pre_coro_ctx(ctx);
         DCHECK(ret.success());
         acquire_nr_++;
         trace.pin("acquire");
@@ -423,11 +459,12 @@ private:
         return ret;
     }
 
+    using Context = std::map<std::string, ParameterContext>;
     patronus::Patronus::pointer p_{};
     size_t server_nid_{};
     size_t dir_id_{};
     Config config_;
-    std::map<std::string, ParameterContext> contexts_;
+    Context contexts_;
     util::TraceManager tm_;
     util::TraceView trace_{util::nulltrace};
 
@@ -462,11 +499,12 @@ void Parameters::do_set_param(ParameterContext &c,
                               TraceView trace)
 {
     CHECK_GT(actual_size, 0);
+    auto &lease = get_lease(c, ctx);
     if (unlikely(c.size == 0))
     {
         // consistent checks
         DCHECK_EQ(c.gaddr, nullgaddr);
-        DCHECK(!c.lease.success());
+        DCHECK(!lease.success());
         DCHECK(!c.cached_data.has_value());
     }
     if (c.cached_data.has_value())
@@ -479,20 +517,20 @@ void Parameters::do_set_param(ParameterContext &c,
     // otherwise, passing parameters require RM
     if (!config_.use_step_lambda)
     {
-        if (c.lease.success() && c.lease.buffer_size() < actual_size)
+        if (lease.success() && lease.buffer_size() < actual_size)
         {
-            do_relinquish_lease(c.lease, ctx, trace);
-            DCHECK(!c.lease.success());
+            do_relinquish_lease(lease, ctx, trace);
+            DCHECK(!lease.success());
         }
-        if (!c.lease.success())
+        if (!lease.success())
         {
-            c.lease = do_alloc_lease(actual_size, ctx, trace);
-            DCHECK(c.lease.success());
-            c.gaddr = p_->get_gaddr(c.lease);
+            lease = do_alloc_lease(actual_size, ctx, trace);
+            DCHECK(lease.success());
+            c.gaddr = p_->get_gaddr(lease);
             c.size = actual_size;
         }
         DCHECK(c.cached_data.has_value());
-        p_->write(c.lease,
+        p_->write(lease,
                   c.cached_data.value().buffer,
                   actual_size,
                   0 /* offset */,
@@ -518,10 +556,10 @@ Buffer Parameters::read(const std::string &name,
     auto [it, inserted] = contexts_.try_emplace(name);
     CHECK(!inserted) << "** Failed to locate parameter with name " << name;
     auto &c = it->second;
-    prepare_wlease(c, ctx, trace);
+    auto &lease = prepare_wlease(c, ctx, trace);
     auto rdma_buf = p_->get_rdma_buffer(c.size);
-    DCHECK(c.lease.success());
-    p_->read(c.lease,
+    DCHECK(lease.success());
+    p_->read(lease,
              rdma_buf.buffer,
              c.size,
              0 /* offset */,
@@ -540,10 +578,11 @@ void Parameters::alloc(const std::string &name,
     auto [it, inserted] = contexts_.try_emplace(name);
     CHECK(inserted) << "** Duplicated parameter detected for " << name;
     auto &c = it->second;
-    DCHECK(!c.lease.success());
-    c.lease = do_alloc_lease(size, ctx, trace);
+    auto &lease = get_lease(c, ctx);
+    DCHECK(!lease.success());
+    lease = do_alloc_lease(size, ctx, trace);
     c.size = size;
-    c.gaddr = p_->get_gaddr(c.lease);
+    c.gaddr = p_->get_gaddr(lease);
     DCHECK(!c.cached_data.has_value());
 }
 
@@ -552,11 +591,11 @@ RetCode Parameters::do_write(ParameterContext &c,
                              CoroContext *ctx,
                              TraceView trace)
 {
-    prepare_wlease(c, ctx, trace);
+    auto &lease = prepare_wlease(c, ctx, trace);
 
     // dont pollute cache
     DCHECK_GE(rdma_buf.size, c.size);
-    auto rc = p_->write(c.lease,
+    auto rc = p_->write(lease,
                         rdma_buf.buffer,
                         c.size,
                         0 /* offset */,
@@ -577,10 +616,10 @@ RetCode Parameters::cas(const std::string &name,
     auto [it, inserted] = contexts_.try_emplace(name);
     CHECK(!inserted) << "** Failed to locate param with name " << name;
     auto &c = it->second;
-    prepare_wlease(c, ctx, trace);
+    auto &lease = prepare_wlease(c, ctx, trace);
 
     DCHECK_GE(rdma_buf.size, sizeof(uint64_t));
-    auto rc = p_->cas(c.lease,
+    auto rc = p_->cas(lease,
                       rdma_buf.buffer,
                       0 /* offset */,
                       compare,
@@ -601,9 +640,9 @@ RetCode Parameters::faa(const std::string &name,
     auto [it, inserted] = contexts_.try_emplace(name);
     CHECK(!inserted) << "** Failed to locate param with name " << name;
     auto &c = it->second;
-    prepare_wlease(c, ctx, trace);
+    auto &lease = prepare_wlease(c, ctx, trace);
 
-    auto rc = p_->faa(c.lease,
+    auto rc = p_->faa(lease,
                       rdma_buf.buffer,
                       0 /* offset */,
                       value,

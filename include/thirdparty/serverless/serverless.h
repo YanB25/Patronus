@@ -179,6 +179,9 @@ private:
             for (size_t i = 0; i < nr; ++i)
             {
                 auto coro_id = coro_buf[i];
+                DLOG_IF(INFO, ::config::kMonitorCoroSwitch)
+                    << "[Coro] " << mctx << " yielding to worker "
+                    << (int) coro_id << " for continue.";
                 mctx.yield_to_worker(coro_id);
             }
 
@@ -187,6 +190,9 @@ private:
             {
                 if (readys_[i] && !running_[i] && waiting_nr_[i] == 0)
                 {
+                    DLOG_IF(INFO, ::config::kMonitorCoroSwitch)
+                        << "[Coro] " << mctx << " yielding to worker " << i
+                        << " for runnable.";
                     mctx.yield_to_worker(i);
                 }
             }
@@ -212,11 +218,14 @@ private:
 
         while (coro_ex_.get_private_data().thread_remain_task > 0)
         {
+            lambda_finished_[coro_id] = false;
+
             auto parameters = DCHECK_NOTNULL(parameters_[coro_id]);
 
             auto &lambda = lambdas_[coro_id];
 
-            DCHECK(readys_[coro_id]);
+            DCHECK(readys_[coro_id])
+                << "** coro_id " << coro_id << " not ready. ctx: " << ctx;
             DCHECK_EQ(waiting_nr_[coro_id], 0) << "** this lambda not ready.";
             DCHECK(!running_[coro_id]);
             running_[coro_id] = true;
@@ -277,6 +286,10 @@ private:
                          << ". ctx: " << ctx;
             }
 
+            DLOG_IF(INFO, ::config::kMonitorCoroSwitch)
+                << "[Coro] " << ctx << " yielding to master for next lambda";
+            lambda_finished_[coro_id] = true;
+
             ctx.yield_to_master();
         }
 
@@ -284,20 +297,27 @@ private:
         running_[coro_id] = false;
         coro_ex_.worker_finished(coro_id);
 
-        bool can_exit = true;
-        for (size_t i = 0; i < lambda_nr_; ++i)
+        // calculate is_finished_
+        do
         {
-            if (readys_[i] || running_[i])
+            bool can_exit = true;
+            for (size_t i = 0; i < lambda_nr_; ++i)
             {
-                can_exit = false;
-                break;
+                if (readys_[i] || running_[i] || !lambda_finished_[i])
+                {
+                    can_exit = false;
+                    break;
+                }
             }
-        }
-        if (can_exit)
-        {
-            is_finished_ = true;
-        }
+            if (can_exit)
+            {
+                is_finished_ = true;
+            }
+        } while (0);
 
+        DLOG_IF(INFO, ::config::kMonitorCoroSwitch)
+            << "[Coro] " << ctx
+            << " yielding to master for finished. no yield back.";
         ctx.yield_to_master();
         LOG(FATAL) << "** coro " << coro_id
                    << " expect unreachable. ctx: " << ctx;
@@ -341,6 +361,7 @@ private:
     std::array<bool, kMaxLambdaNr> readys_{};
     std::array<bool, kMaxLambdaNr> running_{};
     std::array<ssize_t, kMaxLambdaNr> waiting_nr_{};
+    std::array<bool, kMaxLambdaNr> lambda_finished_{};
 
     bool is_finished_{false};
 

@@ -1,5 +1,6 @@
 #include <iostream>
 #include <thread>
+#include <unordered_map>
 
 #include "DSM.h"
 #include "gflags/gflags.h"
@@ -30,24 +31,44 @@ int main(int argc, char *argv[])
 
     // LOG(INFO) << "Connection build. node_id: " << dsm->get_node_id()
     //           << ", thread_id: " << dsm->get_thread_id();
-    size_t m = patronus::MemoryMessagePayload();
-    LOG(INFO) << "max size: " << m;
-    // LOG(INFO) << "Patronus: " << sizeof(patronus::Patronus)
-    //           << ", DSM: " << sizeof(DSM)
-    //           << ", umsg: " << sizeof(UnreliableConnection<32>)
-    //           << ", receiver: " <<
-    //           sizeof(UnreliableRecvMessageConnection<32>)
-    //           << ", sender: " << sizeof(UnreliableSendMessageConnection<32>);
-    // char buffer[(uint64_t) 1_GB];
-    // buffer[0] = 'a';
-
-    // See
-    // DSM::read(...)
-    // DSM::write(...)
-    // DSM::cas(...)
-    // For more information
-
-    // See `test/atomic_latency` for the use of DSM.
+    // size_t m = patronus::MemoryMessagePayload();
+    // LOG(INFO) << "max size: " << m;
+    using namespace util::pre;
+    {
+        std::unordered_map<std::string, std::string> m;
+        m["a"] = "b";
+        m["c"] = "d";
+        m["e"] = "f";
+        m["g"] = "h";
+        LOG(INFO) << util::pre_umap(m, 2);
+        LOG(INFO) << util::pre_umap(m);
+        LOG(INFO) << m;
+    }
+    {
+        std::map<std::string, std::string> m;
+        m["a"] = "b";
+        m["c"] = "d";
+        m["e"] = "f";
+        m["g"] = "h";
+        LOG(INFO) << util::pre_map(m, 2);
+        LOG(INFO) << util::pre_map(m);
+        LOG(INFO) << m;
+    }
+    {
+        std::vector<std::string> v;
+        v.push_back("a");
+        v.push_back("b");
+        v.push_back("c");
+        v.push_back("d");
+        LOG(INFO) << util::pre_iter(v, 2);
+        LOG(INFO) << util::pre_iter(v);
+        LOG(INFO) << v;
+    }
+    {
+        std::pair<std::string, std::string> p("abc", "def");
+        LOG(INFO) << util::pre_pair(p);
+        LOG(INFO) << p;
+    }
 
     return 0;
 }

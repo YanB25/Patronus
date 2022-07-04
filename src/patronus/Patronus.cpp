@@ -2416,6 +2416,8 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
     req_ctx.relinquish.do_nothing = true;
     if (unlikely(lease_ctx == nullptr))
     {
+        LOG(INFO) << "[patronus][gc_lease] skip relinquish. lease_id "
+                  << lease_id << " no valid lease context.";
         DVLOG(4) << "[patronus][gc_lease] skip relinquish. lease_id "
                  << lease_id << " no valid lease context.";
         return;

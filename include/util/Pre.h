@@ -259,7 +259,7 @@ inline std::ostream &operator<<(std::ostream &os, pre_iter<T> iterable)
             os << ", ";
         }
     }
-    auto back_iter = iter.cend();
+    auto back_iter = iter.rbegin();
     for (size_t i = 0; i < end_size; ++i)
     {
         bool last = i + 1 == end_size;
@@ -276,6 +276,82 @@ inline std::ostream &operator<<(std::ostream &os, pre_iter<T> iterable)
     os << "] (sz: " << iter.size() << ", ommitted " << ommitted << ")";
     return os;
 }
+
+template <typename K, typename V>
+struct pre_umap
+{
+    pre_umap(const std::unordered_map<K, V> &m,
+             size_t limit = std::numeric_limits<size_t>::max())
+        : m_(m), limit_(limit)
+    {
+    }
+    size_t limit() const
+    {
+        return limit_;
+    }
+    const std::unordered_map<K, V> &m_;
+    size_t limit_;
+};
+
+template <typename K, typename V>
+inline std::ostream &operator<<(std::ostream &os, const pre_umap<K, V> &m)
+{
+    os << "{";
+    bool ellipsis = m.m_.size() > m.limit();
+    auto limit = std::min(m.limit(), m.m_.size());
+    auto before_size = limit;
+    size_t omitted = m.m_.size() - limit;
+
+    auto it = m.m_.begin();
+    for (size_t i = 0; i < before_size; ++i)
+    {
+        bool last = i + 1 == before_size;
+        os << it->first << ": " << it->second;
+        if (!last)
+        {
+            os << ", ";
+        }
+        it++;
+    }
+    if (ellipsis)
+    {
+        os << ", ...";
+    }
+
+    os << "} (sz: " << m.m_.size() << ", omitted " << omitted << ")";
+
+    return os;
+}
+
+namespace pre
+{
+template <typename K, typename V>
+inline std::ostream &operator<<(std::ostream &os,
+                                const std::unordered_map<K, V> &map)
+{
+    os << util::pre_umap(map);
+    return os;
+}
+template <typename K, typename V>
+inline std::ostream &operator<<(std::ostream &os, const std::map<K, V> &map)
+{
+    os << util::pre_map(map);
+    return os;
+}
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os, const std::vector<T> &vec)
+{
+    os << util::pre_iter(vec);
+    return os;
+}
+template <typename U, typename V>
+inline std::ostream &operator<<(std::ostream &os, const std::pair<U, V> &p)
+{
+    os << util::pre_pair(p);
+    return os;
+}
+
+}  // namespace pre
 
 }  // namespace util
 
