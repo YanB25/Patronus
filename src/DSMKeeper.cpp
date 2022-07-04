@@ -222,11 +222,11 @@ void DSMKeeper::connectThread(ThreadConnection &th,
                         exMeta.dirTh[dirID].gid,
                         &th.ctx));
     CHECK(modifyQPtoRTS(qp));
-    DVLOG(1) << "[keeper] (re)connection ThreadConnection[" << th.threadID
-             << "]. for remoteID " << remoteID << ", DIR " << dirID
-             << ". dirRcQpn2app: " << exMeta.dirRcQpn2app[dirID][th.threadID]
-             << ", lid: " << exMeta.dirTh[dirID].lid
-             << ", gid: " << exMeta.dirTh[dirID].gid;
+    // DVLOG(1) << "[keeper] (re)connection ThreadConnection[" << th.threadID
+    //          << "]. for remoteID " << remoteID << ", DIR " << dirID
+    //          << ". dirRcQpn2app: " << exMeta.dirRcQpn2app[dirID][th.threadID]
+    //          << ", lid: " << exMeta.dirTh[dirID].lid
+    //          << ", gid: " << exMeta.dirTh[dirID].gid;
 }
 
 void DSMKeeper::updateRemoteConnectionForDir(RemoteConnection &remote,
@@ -268,11 +268,11 @@ void DSMKeeper::connectDir(DirectoryConnection &dir,
                         exMeta.appTh[appID].gid,
                         &dir.ctx));
     CHECK(modifyQPtoRTS(qp));
-    DVLOG(1) << "[keeper] (re)connection DirectoryConnection[" << dir.dirID
-             << "]. for remoteID " << remoteID << ", Th " << appID
-             << ". dirRcQpn2app: " << exMeta.appRcQpn2dir[appID][dir.dirID]
-             << ", lid: " << exMeta.appTh[appID].lid
-             << ", gid: " << (void *) exMeta.appTh[appID].gid;
+    // DVLOG(1) << "[keeper] (re)connection DirectoryConnection[" << dir.dirID
+    //          << "]. for remoteID " << remoteID << ", Th " << appID
+    //          << ". dirRcQpn2app: " << exMeta.appRcQpn2dir[appID][dir.dirID]
+    //          << ", lid: " << exMeta.appTh[appID].lid
+    //          << ", gid: " << (void *) exMeta.appTh[appID].gid;
 }
 
 void DSMKeeper::applyExchangeMeta(uint16_t remoteID, const ExchangeMeta &exMeta)

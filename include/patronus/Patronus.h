@@ -111,6 +111,8 @@ class pre_patronus_explain;
 class Patronus
 {
 public:
+    constexpr static size_t V = ::config::verbose::kPatronus;
+    constexpr static size_t SV = ::config::verbose::kSystem;
     using pointer = std::shared_ptr<Patronus>;
 
     constexpr static size_t kMaxCoroNr = ::config::patronus::kMaxCoroNr;
@@ -327,7 +329,8 @@ public:
               std::enable_if_t<!std::is_array_v<V>, bool> = true>
     void put(const std::string &key, const V &v, const T &sleep_time)
     {
-        DVLOG(1) << "[keeper] PUT key: `" << key << "` value: `" << v;
+        DVLOG(::config::verbose::kSystem)
+            << "[keeper] PUT key: `" << key << "` value: `" << v;
         auto value = std::string((const char *) &v, sizeof(V));
         return dsm_->put(key, value, sleep_time);
     }
@@ -336,7 +339,8 @@ public:
              const std::string &value,
              const T &sleep_time)
     {
-        DVLOG(1) << "[keeper] PUT key: `" << key << "` value: `" << value;
+        DVLOG(::config::verbose::kSystem)
+            << "[keeper] PUT key: `" << key << "` value: `" << value;
         return dsm_->put(key, value, sleep_time);
     }
     template <typename T>
@@ -348,7 +352,8 @@ public:
     std::string get(const std::string &key, const T &sleep_time)
     {
         auto value = dsm_->get(key, sleep_time);
-        DVLOG(1) << "[keeper] GET key: `" << key << "` value: `" << value;
+        DVLOG(::config::verbose::kSystem)
+            << "[keeper] GET key: `" << key << "` value: `" << value;
         return value;
     }
     template <typename V, typename T>
@@ -358,7 +363,8 @@ public:
         V ret;
         CHECK_GE(v.size(), sizeof(V));
         memcpy((char *) &ret, v.data(), sizeof(V));
-        DVLOG(1) << "[keeper] GET_OBJ key: " << key << ", obj: " << ret;
+        DVLOG(::config::verbose::kSystem)
+            << "[keeper] GET_OBJ key: " << key << ", obj: " << ret;
         return ret;
     }
 
@@ -829,7 +835,7 @@ private:
         auto *ret = DCHECK_NOTNULL(lease_context_.id_to_obj(id));
         if (unlikely(!ret->valid))
         {
-            DVLOG(4) << "[Patronus] get_lease_context(id) related to invalid "
+            DVLOG(V) << "[Patronus] get_lease_context(id) related to invalid "
                         "contexts";
             return nullptr;
         }
@@ -1306,7 +1312,7 @@ RetCode Patronus::rpc_extend_impl(Lease &lease,
                                   flag_t flag,
                                   CoroContext *ctx)
 {
-    DVLOG(4) << "[patronus][rpc-extend-impl] trying to extend. ns: " << ns
+    DVLOG(V) << "[patronus][rpc-extend-impl] trying to extend. ns: " << ns
              << ", flag:" << LeaseModifyFlagOut(flag)
              << ", coro:" << (ctx ? *ctx : nullctx)
              << "original lease: " << lease;
@@ -1321,7 +1327,7 @@ RetCode Patronus::extend_impl(Lease &lease,
                               CoroContext *ctx,
                               util::TraceView trace)
 {
-    DVLOG(4) << "[patronus][extend-impl] trying to extend. extend_unit_nr: "
+    DVLOG(V) << "[patronus][extend-impl] trying to extend. extend_unit_nr: "
              << extend_unit_nr << ", flag:" << LeaseModifyFlagOut(flag)
              << ", coro:" << (ctx ? *ctx : nullctx)
              << "original lease: " << lease;
@@ -1346,7 +1352,7 @@ RetCode Patronus::extend_impl(Lease &lease,
         lease.update_ddl_term();
     }
     put_rdma_buffer(std::move(rdma_buffer));
-    DVLOG(4) << "[patronus][extend-impl] Done extend. coro: "
+    DVLOG(V) << "[patronus][extend-impl] Done extend. coro: "
              << (ctx ? *ctx : nullctx) << ". cas_ec: " << cas_ec
              << ". Now lease: " << lease;
     return cas_ec;
@@ -1400,7 +1406,7 @@ RetCode Patronus::extend(Lease &lease,
     // if (unlikely(already_pass_ddl))
     // {
     //     // already pass DDL, no need to extend.
-    //     DVLOG(4) << "[patronus][maybe-extend] Assume DDL passed (not extend).
+    //     DVLOG(V) << "[patronus][maybe-extend] Assume DDL passed (not extend).
     //     "
     //                 "lease ddl: "
     //              << patronus_ddl << ", patronus_now: " << patronus_now
@@ -1467,7 +1473,7 @@ RetCode Patronus::validate_lease([[maybe_unused]] const Lease &lease)
     auto ret = time_syncer_->definitely_lt(patronus_now, lease_patronus_ddl)
                    ? RC::kOk
                    : RC::kLeaseLocalExpiredErr;
-    DVLOG(5) << "[patronus][validate_lease] patronus_now: " << patronus_now
+    DVLOG(V) << "[patronus][validate_lease] patronus_now: " << patronus_now
              << ", ddl: " << lease_patronus_ddl << ", ret: " << ret;
     return ret;
 }

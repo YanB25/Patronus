@@ -239,9 +239,10 @@ bool rdmaRead(ibv_qp *qp,
     wr.wr.rdma.rkey = remoteRKey;
     wr.wr_id = wrID;
 
-    DVLOG(3) << "[READ] remote_addr: " << (void *) dest << ", size " << size
-             << ", rkey: " << remoteRKey << ", QPN: " << qp->qp_num
-             << ", signal: " << signal << ", wr_id: " << WRID(wrID);
+    DVLOG(::config::verbose::kRdmaOperation)
+        << "[READ] remote_addr: " << (void *) dest << ", size " << size
+        << ", rkey: " << remoteRKey << ", QPN: " << qp->qp_num
+        << ", signal: " << signal << ", wr_id: " << WRID(wrID);
 
     if (ibv_post_send(qp, &wr, &wrBad))
     {
@@ -323,9 +324,10 @@ bool rdmaWrite(ibv_qp *qp,
     wr.wr.rdma.rkey = remoteRKey;
     wr.wr_id = wrID;
 
-    DVLOG(3) << "[WRITE] remote_addr: " << (void *) dest << ", size " << size
-             << ", rkey: " << remoteRKey << ", QPN: " << qp->qp_num
-             << ", signal: " << isSignaled << ", wr_id: " << WRID(wrID);
+    DVLOG(::config::verbose::kRdmaOperation)
+        << "[WRITE] remote_addr: " << (void *) dest << ", size " << size
+        << ", rkey: " << remoteRKey << ", QPN: " << qp->qp_num
+        << ", signal: " << isSignaled << ", wr_id: " << WRID(wrID);
 
     if (ibv_post_send(qp, &wr, &wrBad) != 0)
     {
@@ -586,9 +588,10 @@ uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
         }
     }
 
-    DVLOG(4) << "[BIND_MW] Binding addr " << (void *) mm << " size " << mmSize
-             << " to rkey " << mw->rkey << ", with QPN: " << qp->qp_num
-             << ", signal: " << signal << ", wr_id: " << WRID(wrID);
+    DVLOG(::config::verbose::kRdmaOperation)
+        << "[BIND_MW] Binding addr " << (void *) mm << " size " << mmSize
+        << " to rkey " << mw->rkey << ", with QPN: " << qp->qp_num
+        << ", signal: " << signal << ", wr_id: " << WRID(wrID);
 
     return mw->rkey;
 }

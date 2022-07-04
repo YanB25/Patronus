@@ -79,7 +79,8 @@ void ngx_destroy_pool(ngx_pool_t *pool)
     {
         if (c->handler)
         {
-            DVLOG(6) << "[ngx][alloc] run cleanup: " << (void *) c;
+            DVLOG(::config::verbose::kVerbose)
+                << "[ngx][alloc] run cleanup: " << (void *) c;
             c->handler(c->data);
         }
     }
@@ -239,7 +240,8 @@ static void *ngx_palloc_block(ngx_pool_t *pool, size_t size)
 
     if (pool->internal_allocator)
     {
-        DVLOG(6) << "[ngx][alloc] allocating block of " << psize;
+        DVLOG(::config::verbose::kVerbose)
+            << "[ngx][alloc] allocating block of " << psize;
         m = (u_char *) pool->internal_allocator->alloc(psize);
     }
     else
@@ -283,7 +285,8 @@ static void *ngx_palloc_large(ngx_pool_t *pool, size_t size)
 
     if (pool->internal_allocator)
     {
-        DVLOG(6) << "[ngx][alloc] allocating block of " << size;
+        DVLOG(::config::verbose::kVerbose)
+            << "[ngx][alloc] allocating block of " << size;
         p = pool->internal_allocator->alloc(size);
     }
     else
@@ -337,7 +340,8 @@ void *ngx_pmemalign(ngx_pool_t *pool, size_t size, size_t alignment)
 
     if (pool->internal_allocator)
     {
-        DVLOG(6) << "[ngx][alloc] allocate block of " << size;
+        DVLOG(::config::verbose::kVerbose)
+            << "[ngx][alloc] allocate block of " << size;
         p = pool->internal_allocator->alloc(size);
         CHECK_EQ((uint64_t) p % alignment, 0);
     }
@@ -430,7 +434,8 @@ ngx_pool_cleanup_t *ngx_pool_cleanup_add(ngx_pool_t *p, size_t size)
 
     p->cleanup = c;
 
-    DVLOG(6) << "[ngx][alloc] add cleanup: " << (void *) c;
+    DVLOG(::config::verbose::kVerbose)
+        << "[ngx][alloc] add cleanup: " << (void *) c;
 
     return c;
 }

@@ -52,6 +52,7 @@ inline std::ostream &operator<<(std::ostream &os,
 
 class TimeSyncer
 {
+    constexpr static size_t V = ::config::verbose::kTimeSyncer;
     constexpr static size_t kMagic = 0xaabbccdd10103232;
     constexpr static size_t kRequiredContConvergeEpoch = 5;
     constexpr static int64_t kSyncTimeBoundNs = 1_K;  // 1us

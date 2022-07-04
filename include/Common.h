@@ -155,11 +155,17 @@ namespace config::verbose
 constexpr static size_t kBenchReserve_1 = 1;
 constexpr static size_t kBenchReserve_2 = 2;
 constexpr static size_t kSystem = 3;
-constexpr static size_t kRdmaAdpt = 4;
-constexpr static size_t kPatronus = 5;
-constexpr static size_t kDSM = 6;
-constexpr static size_t kUmsg = 7;
-constexpr static size_t kRdmaOperation = 8;
+constexpr static size_t kUserApp_1 = 4;
+constexpr static size_t kUserApp_2 = 5;
+constexpr static size_t kRdmaAdpt = 6;
+constexpr static size_t kPatronus = 7;
+constexpr static size_t kPatronusUtils = 8;
+constexpr static size_t kDSM = 9;
+constexpr static size_t kUmsg = 10;
+constexpr static size_t kRdmaOperation = 11;
+
+constexpr static size_t kCoroLauncher = kPatronus;
+constexpr static size_t kTimeSyncer = kRdmaOperation;
 
 constexpr static size_t kVerbose = 20;
 }  // namespace config::verbose

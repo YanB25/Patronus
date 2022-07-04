@@ -23,7 +23,8 @@ bool modifyErrQPtoNormal(struct ibv_qp *qp,
     {
         return false;
     }
-    DVLOG(1) << "Succeed in switch QP: " << qp << " to normal state.";
+    DVLOG(::config::verbose::kSystem)
+        << "Succeed in switch QP: " << qp << " to normal state.";
     return true;
 }
 bool modifyQPtoReset(struct ibv_qp *qp)

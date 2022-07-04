@@ -25,6 +25,7 @@ public:
     using Lambda = std::function<RetCode(
         Parameters &parameters, CoroContext *, util::TraceView)>;
     using ParameterMap = std::map<std::string, Parameter>;
+    constexpr static size_t V = ::config::verbose::kCoroLauncher;
     CoroLauncher(patronus::Patronus::pointer p,
                  size_t server_nid,
                  size_t dir_id,
@@ -229,12 +230,12 @@ private:
             DCHECK_EQ(waiting_nr_[coro_id], 0) << "** this lambda not ready.";
             DCHECK(!running_[coro_id]);
             running_[coro_id] = true;
-            DVLOG(4) << "[launcher] Entering lambda(" << coro_id
+            DVLOG(V) << "[launcher] Entering lambda(" << coro_id
                      << ") with param: " << *parameters << ", ctx: " << ctx;
             auto trace = parameters->trace();
             auto rc = lambda(*parameters, &ctx, trace.child("lambda"));
             CHECK_EQ(rc, RC::kOk) << "** Not prepared to handle any error";
-            DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
+            DVLOG(V) << "[launcher] Leaving lambda(" << coro_id
                      << ") with updated params: " << *parameters
                      << ", ctx: " << ctx;
 
@@ -267,7 +268,7 @@ private:
                 DCHECK_EQ(waiting_nr_[root], 0);
 
                 // clear and reinstall parameters for a restart
-                DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
+                DVLOG(V) << "[launcher] Leaving lambda(" << coro_id
                          << ") reloop to root " << root << ", ctx: " << ctx;
             }
 
@@ -280,7 +281,7 @@ private:
                 {
                     readys_[l] = true;
                 }
-                DVLOG(4) << "[launcher] Leaving lambda(" << coro_id
+                DVLOG(V) << "[launcher] Leaving lambda(" << coro_id
                          << ") solve dependency => " << l << " to "
                          << waiting_nr_[l] << ", ready: " << readys_[l]
                          << ". ctx: " << ctx;

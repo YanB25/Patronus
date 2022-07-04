@@ -15,6 +15,8 @@
 template <size_t kEndpointNr>
 class UnreliableRecvMessageConnection
 {
+    constexpr static size_t V = ::config::verbose::kUmsg;
+
     constexpr static int kUserMessageSize = config::umsg::kUserMessageSize;
     constexpr static int kPostMessageSize = config::umsg::kPostMessageSize;
     constexpr static size_t kRecvBuffer = config::umsg::kRecvBuffer;
@@ -184,18 +186,19 @@ void UnreliableRecvMessageConnection<kEndpointNr>::fills(ibv_sge &sge,
     wr.num_sge = 1;
     if ((batch_id + 1) % kPostRecvBufferBatch == 0)
     {
-        DVLOG(10) << "[umsg-recv] recvs[" << th_id << "][" << batch_id
-                  << "] set next to "
-                  << "nullptr. Current k " << batch_id << " @"
-                  << (void *) sge.addr;
+        DVLOG(::config::verbose::kVerbose)
+            << "[umsg-recv] recvs[" << th_id << "][" << batch_id
+            << "] set next to "
+            << "nullptr. Current k " << batch_id << " @" << (void *) sge.addr;
         wr.next = nullptr;
     }
     else
     {
-        DVLOG(10) << "[umesg-recv] recvs[" << th_id << "][" << batch_id
-                  << "] set next to "
-                  << "recvs[" << th_id << "][" << batch_id + 1
-                  << "]. Current k " << batch_id << " @" << (void *) sge.addr;
+        DVLOG(::config::verbose::kVerbose)
+            << "[umesg-recv] recvs[" << th_id << "][" << batch_id
+            << "] set next to "
+            << "recvs[" << th_id << "][" << batch_id + 1 << "]. Current k "
+            << batch_id << " @" << (void *) sge.addr;
         wr.next = &recvs[th_id][batch_id + 1];
         DCHECK_LT(batch_id + 1, kRecvBuffer) << "Current  k " << batch_id;
         DCHECK_LT(th_id, kEndpointNr);
@@ -231,7 +234,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::init()
             {
                 PLOG(ERROR) << "Receive failed.";
             }
-            DVLOG(3) << "[umsg] posting recvs[" << ep_id << "]["
+            DVLOG(V) << "[umsg] posting recvs[" << ep_id << "]["
                      << i * kPostRecvBufferBatch << "] with WRID "
                      << WRID(post_wr->wr_id);
         }
@@ -353,7 +356,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
         buf += 40;
         memcpy(ibuf, buf, actual_size);
 
-        DVLOG(3) << "[umsg] Recved msg size " << actual_size << " from ep_id "
+        DVLOG(V) << "[umsg] Recved msg size " << actual_size << " from ep_id "
                  << th_id << ", batch_id: " << batch_id << ", cur_idx "
                  << cur_idx << ", hash is " << std::hex
                  << CityHash64(buf, actual_size) << " @" << (void *) buf
@@ -361,7 +364,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
     }
     else
     {
-        DVLOG(3) << "[umsg] Recved msg, wr: " << wrid << ", cur_idx "
+        DVLOG(V) << "[umsg] Recved msg, wr: " << wrid << ", cur_idx "
                  << cur_idx;
     }
 
@@ -375,7 +378,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc(char *ibuf,
         post_batch_id %= kPostRecvBufferBatchNr;
         size_t post_idx = post_batch_id * kPostRecvBufferBatch;
         ibv_recv_wr *bad;
-        DVLOG(3) << "[umsg] Posting another " << kPostRecvBufferBatch
+        DVLOG(V) << "[umsg] Posting another " << kPostRecvBufferBatch
                  << " recvs, th_id " << th_id << ". cur_idx " << cur_idx
                  << " i.e. recvs[" << th_id << "][" << post_idx << "]";
 
@@ -429,14 +432,14 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc_no_cpy(
             mark_buffer_in_used(th_id, batch_id);
         }
 
-        DVLOG(3) << "[umsg] Recved msg size " << actual_size << " from ep_id "
+        DVLOG(V) << "[umsg] Recved msg size " << actual_size << " from ep_id "
                  << th_id << ", buf_id: " << buf_id << ", cur_idx " << cur_idx
                  << ", hash is " << std::hex << CityHash64(buf, actual_size)
                  << " @" << (void *) buf << ". WRID: " << wrid;
     }
     else
     {
-        DVLOG(3) << "[umsg] Recved msg, wr: " << wrid << ", cur_idx "
+        DVLOG(V) << "[umsg] Recved msg, wr: " << wrid << ", cur_idx "
                  << cur_idx;
     }
 
@@ -451,7 +454,7 @@ void UnreliableRecvMessageConnection<kEndpointNr>::handle_wc_no_cpy(
         size_t post_idx = post_batch_id * kPostRecvBufferBatch;
 
         ibv_recv_wr *bad;
-        DVLOG(3) << "[umsg] Posting another " << kPostRecvBufferBatch
+        DVLOG(V) << "[umsg] Posting another " << kPostRecvBufferBatch
                  << " recvs, th_id " << th_id << ". cur_idx " << cur_idx
                  << " i.e. recvs[" << th_id << "][" << post_idx << "]";
 

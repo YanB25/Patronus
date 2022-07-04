@@ -24,6 +24,7 @@ enum class PatronusOp
 class PatronusBatchContext
 {
 public:
+    constexpr static size_t V = ::config::verbose::kPatronusUtils;
     using node_t = uint32_t;
     using dir_t = uint32_t;
     constexpr static size_t kMaxOp = 16;
@@ -90,7 +91,7 @@ public:
         wr.wr.rdma.rkey = rkey;
 
         idx_++;
-        DVLOG(4) << "[patronus] [batch] WRITE node_id: " << node_id
+        DVLOG(V) << "[patronus] [batch] WRITE node_id: " << node_id
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", size: " << size
                  << ", at idx: " << idx_;
@@ -125,7 +126,7 @@ public:
         wr.wr.rdma.rkey = rkey;
 
         idx_++;
-        DVLOG(4) << "[patronus] [batch] READ node_id: " << node_id
+        DVLOG(V) << "[patronus] [batch] READ node_id: " << node_id
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", size: " << size
                  << ", at idx: " << idx_;
@@ -164,7 +165,7 @@ public:
             << "** CAS addr should be 8-byte aligned. got " << (void *) dest;
 
         idx_++;
-        DVLOG(4) << "[patronus] [batch] FAA node_id: " << node_id
+        DVLOG(V) << "[patronus] [batch] FAA node_id: " << node_id
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", value: " << value
                  << ", at idx: " << idx_;
@@ -205,7 +206,7 @@ public:
             << "** CAS addr should be 8-byte aligned. got " << (void *) dest;
 
         idx_++;
-        DVLOG(4) << "[patronus] [batch] CAS node_id: " << node_id
+        DVLOG(V) << "[patronus] [batch] CAS node_id: " << node_id
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", compare: " << compare
                  << ", swap: " << swap << ", at idx: " << idx_;
@@ -234,7 +235,7 @@ public:
 
             send_wrs_[i].wr_id = wr_id;
         }
-        DVLOG(4) << "[patronus][batch] commiting " << idx_ << " WRs.";
+        DVLOG(V) << "[patronus][batch] commiting " << idx_ << " WRs.";
 
         auto ret = ibv_post_send(qp_, send_wrs_, &bad_wr_);
         if (unlikely(ret))

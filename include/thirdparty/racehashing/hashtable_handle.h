@@ -74,6 +74,8 @@ public:
 
     constexpr static size_t kOngoingHandleSize = 32;
 
+    constexpr static size_t V = ::config::verbose::kUserApp_2;
+
     RaceHashingHandleImpl(uint16_t node_id,
                           GlobalAddress table_meta_addr,
                           const RaceHashingHandleConfig &conf,
@@ -240,7 +242,7 @@ public:
         auto rounded_m = round_to_bits(m, gd());
         auto [h1, h2] = hash_h1_h2(hash);
 
-        DVLOG(3) << "[race] DEL key " << pre(key) << ", got hash "
+        DVLOG(V) << "[race] DEL key " << pre(key) << ", got hash "
                  << pre_hash(hash) << ", m: " << m << ", rounded to "
                  << rounded_m << " by cached_gd: " << gd()
                  << ". fp: " << pre_fp(fp);
@@ -1751,7 +1753,7 @@ public:
         auto rounded_m = round_to_bits(m, cached_gd);
         auto [h1, h2] = hash_h1_h2(hash);
 
-        DVLOG(3) << "[race] GET key " << pre(key) << ", got hash "
+        DVLOG(V) << "[race] GET key " << pre(key) << ", got hash "
                  << pre_hash(hash) << ", m: " << m << ", rounded to "
                  << rounded_m << " by cached_gd: " << cached_gd
                  << ". fp: " << pre_fp(fp);
@@ -1841,14 +1843,14 @@ public:
             {
                 if (expect_slot.empty())
                 {
-                    DVLOG(4) << "[race][subtable] do_update SUCC: update into "
+                    DVLOG(V) << "[race][subtable] do_update SUCC: update into "
                                 "an empty slot. New_slot "
                              << new_slot;
                 }
                 else
                 {
                     auto kvblock_remote_mem = expect_slot.ptr();
-                    DVLOG(4) << "[race][subtable] do_update SUCC: for slot "
+                    DVLOG(V) << "[race][subtable] do_update SUCC: for slot "
                                 "with kvblock_handle:"
                              << kvblock_handle << ". New_slot " << new_slot;
                     do_free_kvblock(kvblock_remote_mem);
@@ -1860,7 +1862,7 @@ public:
                 trace.pin("OK");
                 return kOk;
             }
-            DVLOG(4) << "[race][subtable] do_update FAILED: new_slot "
+            DVLOG(V) << "[race][subtable] do_update FAILED: new_slot "
                      << new_slot;
             DLOG_IF(INFO, config::kEnableDebug)
                 << "[race][trace][subtable] do_update FAILED: cas failed. slot "
@@ -1879,7 +1881,7 @@ public:
         std::ignore = trace;
         if (kvblock->key_len != key.size())
         {
-            // DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
+            // DVLOG(V) << "[race][subtable] slot_real_match FAILED: key "
             //          << pre(key) << " miss: key len mismatch";
             DLOG_IF(INFO, config::kEnableLocateDebug)
                 << "[race][stable] is_real_match FAILED: key len " << key.size()
@@ -1889,7 +1891,7 @@ public:
         }
         if (memcmp(key.data(), kvblock->buf, key.size()) != 0)
         {
-            // DVLOG(4) << "[race][subtable] slot_real_match FAILED: key "
+            // DVLOG(V) << "[race][subtable] slot_real_match FAILED: key "
             //          << pre(key) << " miss: key content mismatch";
             DLOG_IF(INFO, config::kEnableLocateDebug)
                 << "[race][stable] is_real_match FAILED: key content mismatch. "
@@ -1899,7 +1901,7 @@ public:
                 << util::pre_map(trace.kv());
             return kNotFound;
         }
-        // DVLOG(4) << "[race][subtable] slot_real_match SUCCEED: key "
+        // DVLOG(V) << "[race][subtable] slot_real_match SUCCEED: key "
         //          << pre(key);
         DLOG_IF(INFO, config::kEnableLocateDebug)
             << "[race][stable] is_real_match SUCC. "

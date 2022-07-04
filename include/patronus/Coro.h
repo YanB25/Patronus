@@ -145,6 +145,7 @@ public:
     // buffer_mw & header_mw: the max ibv_post_send nr is twice the number of
     // message
     // The auto-relinquish experiments may also contain ones. So double again.
+    constexpr static size_t V = ::config::verbose::kPatronusUtils;
     ServerCoroBatchExecutionContext()
     {
         prepared_tasks_.reserve(max_wr_size());

@@ -49,7 +49,8 @@ public:
 private:
     void block_alloc()
     {
-        DVLOG(1) << "[mw_pool] block alloc " << cache_size_;
+        DVLOG(::config::verbose::kSystem)
+            << "[mw_pool] block alloc " << cache_size_;
         for (size_t i = 0; i < cache_size_; ++i)
         {
             mw_pool_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));

@@ -22,6 +22,7 @@ template <size_t kEndpointNr>
 class UnreliableSendMessageConnection
 {
 public:
+    constexpr static size_t V = ::config::verbose::kUmsg;
     constexpr static size_t kUserMessageSize = config::umsg::kUserMessageSize;
     constexpr static int kSendBatch = config::umsg::kSenderBatchSize;
     UnreliableSendMessageConnection(
@@ -146,7 +147,7 @@ void UnreliableSendMessageConnection<kEndpointNr>::commit_send(size_t i_ep_id)
         << "to make sure the poll_cq loop will not be dead loop";
 
     ongoing_signal += signal_nr;
-    DVLOG(3) << "[umsg] commit_send: ongoing_signal(after): " << ongoing_signal
+    DVLOG(V) << "[umsg] commit_send: ongoing_signal(after): " << ongoing_signal
              << ", batch_signal: " << signal_nr
              << ", max_allowd: " << max_allowed_ongoing
              << ", will wait: " << (ongoing_signal >= max_allowed_ongoing)
@@ -223,7 +224,7 @@ bool UnreliableSendMessageConnection<kEndpointNr>::prepare_send(
         wr.send_flags |= IBV_SEND_INLINE;
     }
 
-    DVLOG(3) << "[umsg] EP: " << i_ep_id << " PREPARED sending to node "
+    DVLOG(V) << "[umsg] EP: " << i_ep_id << " PREPARED sending to node "
              << node_id << " QP[" << target_ep_id << "] with size " << size
              << ", inlined: " << inlined << ". Hash: " << std::hex
              << CityHash64(buf, size);
@@ -248,7 +249,7 @@ void UnreliableSendMessageConnection<kEndpointNr>::send(size_t i_ep_id,
     auto &ongoing_signal = ongoing_signals_[i_ep_id];
     if (unlikely(msg_idx % kSendBatch == 0))
     {
-        DVLOG(3) << "[umsg] triggers one poll for i_ep_id: " << i_ep_id;
+        DVLOG(V) << "[umsg] triggers one poll for i_ep_id: " << i_ep_id;
         signal = true;
         ongoing_signal++;
         if (unlikely(ongoing_signal >= max_allowed_ongoing))
@@ -265,7 +266,7 @@ void UnreliableSendMessageConnection<kEndpointNr>::send(size_t i_ep_id,
     }
     bool inlined = (size <= 32);
 
-    DVLOG(3) << "[umsg] EP: " << i_ep_id << " sending to node " << node_id
+    DVLOG(V) << "[umsg] EP: " << i_ep_id << " sending to node " << node_id
              << " QP[" << target_ep_id << "] with size " << size
              << ", inlined: " << inlined << ", signal: " << signal
              << ". Hash: " << std::hex << CityHash64(buf, size);

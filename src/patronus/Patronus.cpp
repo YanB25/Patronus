@@ -83,7 +83,7 @@ Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
         << "**dsm should provide reserved buffer at least what Patronus "
            "requries";
 
-    // DVLOG(1) << "[patronus] Barrier: ctor of DSM";
+    // DVLOG(SV) << "[patronus] Barrier: ctor of DSM";
     dsm_->keeper_barrier("__patronus::internal_barrier", 10ms);
 
     // for initial of allocator
@@ -245,7 +245,7 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     {
         ctx->timer().pin("[get] Before send");
     }
-    DVLOG(4) << "[patronus] get_lease from node_id: " << node_id
+    DVLOG(V) << "[patronus] get_lease from node_id: " << node_id
              << ", dir_id: " << dir_id << ", for key_or_hint: " << key_or_hint
              << ", size: " << size << ", ns: " << ns << ", type: " << type
              << ", flag: " << AcquireRequestFlagOut(flag)
@@ -316,7 +316,7 @@ RetCode Patronus::protection_region_rw_impl(Lease &lease,
 
     uint32_t rkey = lease.header_rkey_;
     uint64_t remote_addr = lease.header_addr_ + offset;
-    VLOG(4) << "[patronus] protection_region_rw_impl. remote_addr: "
+    VLOG(V) << "[patronus] protection_region_rw_impl. remote_addr: "
             << remote_addr << ", rkey: " << rkey
             << " (header_addr: " << lease.header_addr_ << ")";
 
@@ -358,7 +358,7 @@ RetCode Patronus::protection_region_cas_impl(Lease &lease,
 
     uint32_t rkey = lease.header_rkey_;
     uint64_t remote_addr = lease.header_addr_ + offset;
-    DVLOG(4) << "[patronus] protection_region_cas. remote_addr: " << remote_addr
+    DVLOG(V) << "[patronus] protection_region_cas. remote_addr: " << remote_addr
              << ", rkey: " << rkey << " (header_addr: " << lease.header_addr_
              << "). coro: " << (ctx ? *ctx : nullctx);
 
@@ -493,7 +493,7 @@ size_t Patronus::handle_response_messages(msg_desc_t *msg_descs,
         case RpcType::kAcquireLeaseResp:
         {
             auto *msg = (AcquireResponse *) base;
-            DVLOG(4) << "[patronus] handling acquire response. " << *msg
+            DVLOG(V) << "[patronus] handling acquire response. " << *msg
                      << " at patronus_now: " << time_syncer_->patronus_now();
             if (unlikely(msg->status == AcquireRequestStatus::kReserved))
             {
@@ -508,7 +508,7 @@ size_t Patronus::handle_response_messages(msg_desc_t *msg_descs,
         case RpcType::kRelinquishResp:
         {
             auto *msg = (LeaseModifyResponse *) base;
-            DVLOG(4) << "[patronus] handling lease modify response " << *msg
+            DVLOG(V) << "[patronus] handling lease modify response " << *msg
                      << " at patronus_now: " << time_syncer_->patronus_now();
             DCHECK(is_client_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -525,7 +525,7 @@ size_t Patronus::handle_response_messages(msg_desc_t *msg_descs,
         case RpcType::kExtendResp:
         {
             auto *msg = (LeaseModifyResponse *) base;
-            DVLOG(4) << "[patronus] handling lease modify response " << *msg
+            DVLOG(V) << "[patronus] handling lease modify response " << *msg
                      << " at patronus_now: " << time_syncer_->patronus_now();
             DCHECK(is_client_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -542,7 +542,7 @@ size_t Patronus::handle_response_messages(msg_desc_t *msg_descs,
         case RpcType::kAdmin:
         {
             auto *msg = (AdminRequest *) base;
-            DVLOG(4) << "[patronus] handling admin request " << *msg
+            DVLOG(V) << "[patronus] handling admin request " << *msg
                      << " at patronus_now: " << time_syncer_->patronus_now();
 
             if constexpr (debug())
@@ -637,7 +637,7 @@ void Patronus::prepare_handle_request_messages(
         case RpcType::kAcquireWLeaseReq:
         {
             auto *msg = (AcquireRequest *) base;
-            DVLOG(4) << "[patronus] prepare handling acquire request " << *msg
+            DVLOG(V) << "[patronus] prepare handling acquire request " << *msg
                      << " coro " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -656,7 +656,7 @@ void Patronus::prepare_handle_request_messages(
         case RpcType::kRelinquishReq:
         {
             auto *msg = (LeaseModifyRequest *) base;
-            DVLOG(4) << "[patronus] prepare handling lease modify request "
+            DVLOG(V) << "[patronus] prepare handling lease modify request "
                      << *msg << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -673,7 +673,7 @@ void Patronus::prepare_handle_request_messages(
         case RpcType::kMemoryReq:
         {
             auto *msg = (MemoryRequest *) base;
-            DVLOG(4) << "[patronus] prepare handling memory request " << *msg
+            DVLOG(V) << "[patronus] prepare handling memory request " << *msg
                      << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -691,7 +691,7 @@ void Patronus::prepare_handle_request_messages(
         case RpcType::kAdminReq:
         {
             auto *msg = (AdminRequest *) base;
-            DVLOG(4) << "[patronus] handling admin request " << *msg << *ctx;
+            DVLOG(V) << "[patronus] handling admin request " << *msg << *ctx;
             auto admin_type = (AdminFlag) msg->flag;
 
             if constexpr (debug())
@@ -1023,7 +1023,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                                        &req_ctx.status,
                                        &req_ctx.acquire.buffer_mw);
 
-                DVLOG(4) << "[patronus] Bind mw for buffer. addr "
+                DVLOG(V) << "[patronus] Bind mw for buffer. addr "
                          << (void *) object_addr
                          << "(dsm_offset: " << object_dsm_offset
                          << "), size: " << req->size << " with access flag "
@@ -1038,7 +1038,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                                        access_flag,
                                        &req_ctx.status,
                                        &req_ctx.acquire.buffer_mw);
-                DVLOG(4) << "[patronus] Bind mw for buffer. addr "
+                DVLOG(V) << "[patronus] Bind mw for buffer. addr "
                          << (void *) object_addr
                          << "(dsm_offset: " << object_dsm_offset
                          << "), size: " << req->size << " with access flag "
@@ -1051,7 +1051,7 @@ void Patronus::prepare_handle_request_acquire(AcquireRequest *req,
                                        IBV_ACCESS_CUSTOM_REMOTE_RW,
                                        &req_ctx.status,
                                        &req_ctx.acquire.header_mw);
-                DVLOG(4) << "[patronus] Bind mw for header. addr: "
+                DVLOG(V) << "[patronus] Bind mw for header. addr: "
                          << (void *) header_addr
                          << " (dsm_offset: " << header_dsm_offset << ")"
                          << ", size: " << sizeof(ProtectionRegion)
@@ -1182,7 +1182,7 @@ void Patronus::post_handle_request_messages(
         case RpcType::kAcquireWLeaseReq:
         {
             auto *msg = (AcquireRequest *) base;
-            DVLOG(4) << "[patronus] post handling acquire request " << *msg
+            DVLOG(V) << "[patronus] post handling acquire request " << *msg
                      << " coro " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -1192,7 +1192,7 @@ void Patronus::post_handle_request_messages(
         case RpcType::kExtendReq:
         {
             auto *msg = (LeaseModifyRequest *) base;
-            DVLOG(4) << "[patronus] post handling lease modify request " << *msg
+            DVLOG(V) << "[patronus] post handling lease modify request " << *msg
                      << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -1202,7 +1202,7 @@ void Patronus::post_handle_request_messages(
         case RpcType::kRelinquishReq:
         {
             auto *msg = (LeaseModifyRequest *) base;
-            DVLOG(4) << "[patronus] post handling lease modify request " << *msg
+            DVLOG(V) << "[patronus] post handling lease modify request " << *msg
                      << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -1212,7 +1212,7 @@ void Patronus::post_handle_request_messages(
         case RpcType::kMemoryReq:
         {
             auto *msg = (MemoryRequest *) base;
-            DVLOG(4) << "[patronus] post handling lease modify request " << *msg
+            DVLOG(V) << "[patronus] post handling lease modify request " << *msg
                      << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -1224,7 +1224,7 @@ void Patronus::post_handle_request_messages(
         {
             // do nothing
             auto *msg = (AdminRequest *) base;
-            DVLOG(4) << "[patronus] post handling admin request " << *msg
+            DVLOG(V) << "[patronus] post handling admin request " << *msg
                      << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
@@ -1273,7 +1273,7 @@ size_t Patronus::handle_rdma_finishes(
         if (likely(wc.status == IBV_WC_SUCCESS))
         {
             rw_context->wc_status = IBV_WC_SUCCESS;
-            DVLOG(4) << "[patronus] handle rdma finishes SUCCESS for coro "
+            DVLOG(V) << "[patronus] handle rdma finishes SUCCESS for coro "
                      << (int) coro_id << ". set "
                      << (void *) rw_context->wc_status << " to IBV_WC_SUCCESS";
         }
@@ -1297,7 +1297,7 @@ size_t Patronus::handle_rdma_finishes(
 
 void Patronus::finished(uint64_t key)
 {
-    VLOG(1) << "[patronus] finished(" << key << ")";
+    VLOG(SV) << "[patronus] finished(" << key << ")";
     finished_[key][dsm_->get_node_id()] = true;
 
     auto tid = get_thread_id();
@@ -1408,14 +1408,14 @@ void Patronus::handle_admin_exit(AdminRequest *req,
     {
         if (!finished_[key][i])
         {
-            VLOG(1) << "[patronus] receive exit request by " << from_node
-                    << ". but (at least) node " << i
-                    << " not finished yet. key: " << key;
+            VLOG(SV) << "[patronus] receive exit request by " << from_node
+                     << ". but (at least) node " << i
+                     << " not finished yet. key: " << key;
             return;
         }
     }
 
-    VLOG(1) << "[patronus] set should_exit to true";
+    VLOG(SV) << "[patronus] set should_exit to true";
     DCHECK_LT(key, should_exit_.size());
     should_exit_[key].store(true, std::memory_order_release);
 }
@@ -1554,8 +1554,8 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
     {
         if (unlikely(fail_nr > 0))
         {
-            DVLOG(1) << "[patronus] handle rdma finishes got failure nr: "
-                     << fail_nr << ". expect " << rw_context_.ongoing_size();
+            DVLOG(SV) << "[patronus] handle rdma finishes got failure nr: "
+                      << fail_nr << ". expect " << rw_context_.ongoing_size();
         }
     }
     cur_idx += rdma_nr;
@@ -1571,12 +1571,12 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
         bool succ = fast_switch_backup_qp(trace);
         if (succ)
         {
-            DVLOG(1) << "[patronus] succeeded in QP recovery fast path.";
+            DVLOG(SV) << "[patronus] succeeded in QP recovery fast path.";
             return cur_idx;
         }
         else
         {
-            DVLOG(1) << "[patronus] failed in QP recovery fast path.";
+            DVLOG(SV) << "[patronus] failed in QP recovery fast path.";
         }
 
         LOG(WARNING) << "[patronus] QP failed. Recovering is triggered. tid: "
@@ -1586,8 +1586,8 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
 
         if constexpr (debug())
         {
-            DVLOG(1) << "[patronus] failed. expect nr: "
-                     << rw_context_.ongoing_size();
+            DVLOG(SV) << "[patronus] failed. expect nr: "
+                      << rw_context_.ongoing_size();
         }
         while (fail_nr < rw_context_.ongoing_size())
         {
@@ -1735,7 +1735,7 @@ void Patronus::server_serve(uint64_t key)
     const auto &comm = server_coro_ctx_.comm;
     CHECK(comm.task_queue.empty());
 
-    DVLOG(1) << "[patronus] server_serve(" << key << ")";
+    DVLOG(SV) << "[patronus] server_serve(" << key << ")";
     auto &server_workers = server_coro_ctx_.server_workers;
     auto &server_master = server_coro_ctx_.server_master;
 
@@ -1806,7 +1806,7 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
 
         if (likely(nr > 0))
         {
-            DVLOG(4) << "[patronus] server recv messages " << nr;
+            DVLOG(V) << "[patronus] server recv messages " << nr;
             auto *task = DCHECK_NOTNULL(task_pool.get());
             // move ownership of msg_descs to task
             task->msg_descs = DCHECK_NOTNULL(msg_descs);
@@ -1828,7 +1828,7 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
                 if (comm.finished[i])
                 {
                     comm.finished[i] = false;
-                    DVLOG(4) << "[patronus] yield to " << (int) i
+                    DVLOG(V) << "[patronus] yield to " << (int) i
                              << " for further new task. " << mctx;
                     mctx.yield_to_worker(i);
                 }
@@ -1879,14 +1879,14 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
             }
             else
             {
-                DVLOG(4) << "[patronus] server got dir CQE for coro "
+                DVLOG(V) << "[patronus] server got dir CQE for coro "
                          << (int) coro_id << ". wr_id: " << wrid << ". "
                          << mctx;
                 rw_ctx->wc_status = IBV_WC_SUCCESS;
             }
             rw_ctx->ready.store(true, std::memory_order_release);
 
-            DVLOG(4) << "[patronus] server yield to coro " << (int) coro_id
+            DVLOG(V) << "[patronus] server yield to coro " << (int) coro_id
                      << " for Dir CQE. rw_ctx_id: " << rw_ctx_id
                      << ", ready at " << (void *) &rw_ctx->ready
                      << ", rw_ctx at " << (void *) rw_ctx << ", ready is "
@@ -2247,7 +2247,7 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
         // memcpy
         DCHECK_GE(resp_msg.buffer_capacity(), req->size);
         memcpy(resp_msg.buffer, addr, req->size);
-        DVLOG(4) << "[patronus][rpc-mem]  handling rpc memory read at "
+        DVLOG(V) << "[patronus][rpc-mem]  handling rpc memory read at "
                  << (void *) addr << " with size " << (size_t) req->size
                  << ". dsm_base: " << (void *) dsm->get_base_addr()
                  << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
@@ -2259,7 +2259,7 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
         // memcpy
         DCHECK_GE(req->buffer_capacity(), req->size);
         memcpy(addr, req->buffer, req->size);
-        DVLOG(4) << "[patronus][rpc-mem] handling rpc memory write at "
+        DVLOG(V) << "[patronus][rpc-mem] handling rpc memory write at "
                  << (void *) addr << " with size " << (size_t) req->size
                  << ". dsm_base: " << (void *) dsm->get_base_addr()
                  << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
@@ -2278,7 +2278,7 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
         resp_msg.success = true;
         resp_msg.size = sizeof(uint64_t);
         memcpy(resp_msg.buffer, &compare, sizeof(compare));
-        DVLOG(4) << "[patronus][rpc-mem] handling rpc memory CAS at "
+        DVLOG(V) << "[patronus][rpc-mem] handling rpc memory CAS at "
                  << (void *) addr << " with size " << (size_t) req->size
                  << ". dsm_base: " << (void *) dsm->get_base_addr()
                  << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
@@ -2295,7 +2295,7 @@ void Patronus::post_handle_request_memory_access(MemoryRequest *req,
         resp_msg.success = true;
         resp_msg.size = sizeof(int64_t);
         memcpy(resp_msg.buffer, &got, sizeof(int64_t));
-        DVLOG(4) << "[patronus][rpc-mem] handling rpc memory FAA at "
+        DVLOG(V) << "[patronus][rpc-mem] handling rpc memory FAA at "
                  << (void *) addr << " with size " << (size_t) req->size
                  << ". dsm_base: " << (void *) dsm->get_base_addr()
                  << ", reserve_size: " << (void *) dsm->dsm_reserve_size()
@@ -2396,7 +2396,7 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
 
     auto &ex_ctx = coro_ex_ctx(ctx->coro_id());
 
-    DVLOG(4) << "[patronus][gc_lease] task_gc_lease for lease_id " << lease_id
+    DVLOG(V) << "[patronus][gc_lease] task_gc_lease for lease_id " << lease_id
              << ", expect cid " << cid << ", coro: " << pre_coro_ctx(ctx)
              << ", at patronus time: " << time_syncer_->patronus_now();
 
@@ -2418,7 +2418,7 @@ void Patronus::prepare_gc_lease(uint64_t lease_id,
     {
         LOG(INFO) << "[patronus][gc_lease] skip relinquish. lease_id "
                   << lease_id << " no valid lease context.";
-        DVLOG(4) << "[patronus][gc_lease] skip relinquish. lease_id "
+        DVLOG(V) << "[patronus][gc_lease] skip relinquish. lease_id "
                  << lease_id << " no valid lease context.";
         return;
     }
@@ -2567,7 +2567,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
 {
     debug_validate_lease_modify_flag(flag);
 
-    DVLOG(4) << "[patronus][gc_lease] task_gc_lease for lease_id " << lease_id
+    DVLOG(V) << "[patronus][gc_lease] task_gc_lease for lease_id " << lease_id
              << ", expect cid " << cid << ", coro: " << pre_coro_ctx(ctx)
              << ", at patronus time: " << time_syncer_->patronus_now();
 
@@ -2585,14 +2585,14 @@ void Patronus::task_gc_lease(uint64_t lease_id,
     auto *lease_ctx = get_lease_context(lease_id);
     if (unlikely(lease_ctx == nullptr))
     {
-        DVLOG(4) << "[patronus][gc_lease] skip relinquish. lease_id "
+        DVLOG(V) << "[patronus][gc_lease] skip relinquish. lease_id "
                  << lease_id << " no valid lease context.";
         return;
     }
     DCHECK(lease_ctx->valid);
     if (unlikely(!lease_ctx->client_cid.is_same(cid)))
     {
-        DVLOG(4) << "[patronus][gc_lease] skip relinquish. cid mismatch: "
+        DVLOG(V) << "[patronus][gc_lease] skip relinquish. cid mismatch: "
                     "expect: "
                  << lease_ctx->client_cid << ", got: " << cid
                  << ". lease_ctx at " << (void *) lease_ctx;
@@ -2648,7 +2648,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         // indicate that server will by no means GC the lease
         bool force_gc = flag & (flag_t) LeaseModifyFlag::kForceUnbind;
         bool client_already_exteded = unit_nr_to_ddl != expect_unit_nr_to_ddl;
-        DVLOG(4) << "[patronus][gc_lease] determine the behaviour : force_gc : "
+        DVLOG(V) << "[patronus][gc_lease] determine the behaviour : force_gc : "
                  << force_gc
                  << ", client_already_extended: " << client_already_exteded
                  << " (pr->aba_unit_nr_to_ddl: " << aba_unit_nr_to_ddl
@@ -2693,7 +2693,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
                                   flag,
                                   ctx);
                 });
-            DVLOG(3) << "[patronus][gc_lease] skip relinquish because client's "
+            DVLOG(V) << "[patronus][gc_lease] skip relinquish because client's "
                         "extend. lease_id: "
                      << lease_id << "ProtectionRegion: " << (*protection_region)
                      << ", next_ddl: " << next_ddl << ", next_ns: " << next_ns
@@ -2704,7 +2704,7 @@ void Patronus::task_gc_lease(uint64_t lease_id,
         }
         else
         {
-            DVLOG(3) << "[patronus][gc_lease] relinquish from "
+            DVLOG(V) << "[patronus][gc_lease] relinquish from "
                         "decision(client_already_extended: "
                      << client_already_exteded << ", force_gc: " << force_gc
                      << "). lease_id: " << lease_id
@@ -2856,7 +2856,7 @@ void Patronus::server_coro_worker(coro_t coro_id,
             task->fetched_nr += acquire_task;
             DCHECK_LE(task->fetched_nr, task->msg_nr);
 
-            DVLOG(4) << "[patronus] server acquiring task @" << (void *) task
+            DVLOG(V) << "[patronus] server acquiring task @" << (void *) task
                      << ": " << *task << ", handle " << acquire_task
                      << ". coro: " << ctx;
 
@@ -2871,7 +2871,7 @@ void Patronus::server_coro_worker(coro_t coro_id,
 
             ex_ctx.clear();
 
-            DVLOG(4) << "[patronus] server handling task @" << (void *) task
+            DVLOG(V) << "[patronus] server handling task @" << (void *) task
                      << ", message_nr " << task->msg_nr << ", handle "
                      << acquire_task << ". coro: " << ctx;
         }
@@ -2909,7 +2909,7 @@ void Patronus::server_coro_worker(coro_t coro_id,
 
             if (task->active_coro_nr == 0 && (task->fetched_nr == task->msg_nr))
             {
-                DVLOG(4) << "[patronus] server handling callback of task @"
+                DVLOG(V) << "[patronus] server handling callback of task @"
                          << (void *) task << ": " << *task << ". coro: " << ctx;
 
                 dsm_->return_buf_no_cpy(task->msg_descs, task->msg_nr);
@@ -2920,14 +2920,14 @@ void Patronus::server_coro_worker(coro_t coro_id,
 
         // debug_analysis_per_qp_batch(msg_buf, acquire_task, per_qp_batch_m);
 
-        DVLOG(4) << "[patronus] server " << ctx
+        DVLOG(V) << "[patronus] server " << ctx
                  << " finished current task. yield to master.";
         comm.finished[coro_id] = true;
 
         ctx.yield_to_master();
     }
 
-    DVLOG(3) << "[bench] server coro: " << ctx << " exit.";
+    DVLOG(V) << "[bench] server coro: " << ctx << " exit.";
     comm.finished[coro_id] = true;
     ctx.yield_to_master();
     CHECK(false) << "** never reach here";
@@ -2971,7 +2971,7 @@ RetCode Patronus::maybe_auto_extend(Lease &lease,
     if (unlikely(already_pass_ddl))
     {
         // already pass DDL, no need to extend.
-        DVLOG(4) << "[patronus][maybe-extend] Assume DDL passed (not extend). "
+        DVLOG(V) << "[patronus][maybe-extend] Assume DDL passed (not extend). "
                     "lease ddl: "
                  << patronus_ddl << ", patronus_now: " << patronus_now
                  << ", diff_ns: " << diff_ns << " < 0 + epsilon(" << epsilon
@@ -2995,7 +2995,7 @@ RetCode Patronus::maybe_auto_extend(Lease &lease,
         return extend_impl(
             lease, lease.next_extend_unit_nr(), 0 /* flag */, ctx, trace);
     }
-    DVLOG(4) << "[patronus][maybe-extend] Not reach lease DDL (not extend). "
+    DVLOG(V) << "[patronus][maybe-extend] Not reach lease DDL (not extend). "
                 "lease ddl:"
              << patronus_ddl << ", patronus_now: " << patronus_now
              << ", diff_ns: " << diff_ns << ", > margin_duration_ns("

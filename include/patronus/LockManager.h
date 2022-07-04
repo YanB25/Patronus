@@ -17,6 +17,7 @@ template <size_t kBucketNr, size_t kSlotNr>
 class LockManager
 {
 public:
+    static constexpr size_t V = ::config::verbose::kPatronusUtils;
     using bucket_t = uint32_t;
     using slot_t = uint32_t;
 
@@ -47,7 +48,7 @@ public:
 
         uint8_t expect = byte.load(std::memory_order_relaxed);
         uint8_t target_bit = 1 << slot_bit;
-        DVLOG(4) << "[lock] locking bucket " << b << ", slot_byte " << slot_byte
+        DVLOG(V) << "[lock] locking bucket " << b << ", slot_byte " << slot_byte
                  << ", bit " << slot_bit
                  << ", expect: " << std::bitset<8>(expect)
                  << ", addr: " << (void *) &byte;
@@ -77,7 +78,7 @@ public:
 
         uint8_t expect = byte.load(std::memory_order_relaxed);
         uint8_t target_bit = 1 << slot_bit;
-        DVLOG(4) << "[lock] unlocking bucket " << b
+        DVLOG(V) << "[lock] unlocking bucket " << b
                  << ", slot_byte: " << slot_byte << ", bit " << slot_bit
                  << ", expect: " << std::bitset<8>(expect)
                  << ", addr: " << (void *) &byte;

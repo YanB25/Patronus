@@ -51,6 +51,8 @@ inline std::ostream &operator<<(std::ostream &os,
 class DSM : public std::enable_shared_from_this<DSM>
 {
 public:
+    constexpr static size_t V = ::config::verbose::kDSM;
+    constexpr static size_t SV = ::config::verbose::kSystem;
     using pointer = std::shared_ptr<DSM>;
     using WcErrHandler = WcErrHandler;
 
@@ -518,9 +520,9 @@ public:
     template <typename Duration>
     void keeper_barrier(const std::string &key, Duration sleep_time)
     {
-        VLOG(1) << "[DSM] Entering Barrier " << key;
+        VLOG(SV) << "[DSM] Entering Barrier " << key;
         keeper->barrier(key, sleep_time);
-        VLOG(1) << "[DSM] Leaving Barrier " << key;
+        VLOG(SV) << "[DSM] Leaving Barrier " << key;
     }
     template <typename Duration>
     void keeper_partial_barrier(const std::string &key,
@@ -528,11 +530,11 @@ public:
                                 bool is_master,
                                 Duration sleep_time)
     {
-        VLOG(1) << "[DSM] Entering Barrier " << key << " (expect " << expect_nr
-                << ", is_master: " << is_master << ")";
+        VLOG(SV) << "[DSM] Entering Barrier " << key << " (expect " << expect_nr
+                 << ", is_master: " << is_master << ")";
         keeper->partial_barrier(key, expect_nr, is_master, sleep_time);
-        VLOG(1) << "[DSM] Leaving Barrier " << key << " (expect " << expect_nr
-                << ", is_master: " << is_master << ")";
+        VLOG(SV) << "[DSM] Leaving Barrier " << key << " (expect " << expect_nr
+                 << ", is_master: " << is_master << ")";
     }
 
     // ClockManager &clock_manager()

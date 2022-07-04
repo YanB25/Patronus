@@ -78,9 +78,9 @@ public:
             {
                 return done;
             }
-            DVLOG(4) << "[DDLManager] protronus_now: "
-                     << time::PatronusTime(until)
-                     << ", ns_diff: " << until - front.ddl();
+            DVLOG(::config::verbose::kVerbose)
+                << "[DDLManager] protronus_now: " << time::PatronusTime(until)
+                << ", ns_diff: " << until - front.ddl();
             // NOTE: we have to do the copy
             // because the following pop will invalidate the reference
             auto task = front.task();

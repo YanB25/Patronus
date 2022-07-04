@@ -200,7 +200,7 @@ bool ServerCoroBatchExecutionContext::commit_wo_mw_reuse_optimization(
             req_ctx_[i].status = AcquireRequestStatus::kBindErr;
         }
     }
-    DVLOG(4) << "[patronus] batch commit with prefix "
+    DVLOG(V) << "[patronus] batch commit with prefix "
              << pre_wrid_prefix(prefix)
              << ", rw_ctx_id: " << (uint64_t) rw_ctx_id
              << ", post size: " << post_wr_nr << ", request size " << req_idx_
@@ -355,7 +355,7 @@ bool ServerCoroBatchExecutionContext::commit_with_mw_reuse_optimization(
             req_ctx_[i].status = AcquireRequestStatus::kBindErr;
         }
     }
-    DVLOG(4) << "[patronus] batch commit with prefix "
+    DVLOG(V) << "[patronus] batch commit with prefix "
              << pre_wrid_prefix(prefix)
              << ", rw_ctx_id: " << (uint64_t) rw_ctx_id
              << ", post size: " << post_wr_nr << "(unbind_nr: " << unbind_wr_idx

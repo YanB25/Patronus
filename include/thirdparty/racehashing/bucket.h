@@ -90,7 +90,7 @@ public:
                 full_nr++;
             }
         }
-        // DVLOG(1) << "[slot] utilization: full_nr: " << full_nr
+        // DVLOG(V) << "[slot] utilization: full_nr: " << full_nr
         //          << ", total: " << kDataSlotNr
         //          << ", util: " << 1.0 * full_nr / kDataSlotNr;
         return 1.0 * full_nr / kDataSlotNr;
@@ -113,6 +113,7 @@ class BucketHandle
 public:
     static_assert(kSlotNr > 1);
     constexpr static size_t kDataSlotNr = kSlotNr - 1;
+    constexpr static size_t V = ::config::verbose::kUserApp_2;
 
     BucketHandle(GlobalAddress gaddr, char *bucket_buf)
         : gaddr_(gaddr), bucket_buf_(bucket_buf)
@@ -159,7 +160,7 @@ public:
             }
             return kOk;
         }
-        DVLOG(4) << "[race][handle] do_update FAILED: new_slot " << new_slot;
+        DVLOG(V) << "[race][handle] do_update FAILED: new_slot " << new_slot;
         DLOG_IF(INFO, config::kEnableDebug)
             << "[race][trace][handle] do_update FAILED: cas failed. slot "
             << slot_handle << util::pre_map(trace.kv());

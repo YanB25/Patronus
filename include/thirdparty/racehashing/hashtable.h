@@ -119,8 +119,9 @@ public:
         CHECK_LE(initial_subtable_nr, kDEntryNr);
 
         auto ld = gd();
-        DVLOG(1) << "[race] initial_subtable_nr: " << initial_subtable_nr
-                 << ", gd: " << gd();
+        DVLOG(::config::verbose::kBenchReserve_2)
+            << "[race] initial_subtable_nr: " << initial_subtable_nr
+            << ", gd: " << gd();
         for (size_t i = 0; i < initial_subtable_nr; ++i)
         {
             auto alloc_size = SubTableT::size_bytes();
@@ -129,9 +130,10 @@ public:
                 << "** failed to alloc size " << alloc_size;
             memset(alloc_mem, 0, alloc_size);
 
-            DVLOG(1) << "[race] allocating subtable " << i << " at "
-                     << (void *) alloc_mem << " for size "
-                     << SubTableT::size_bytes();
+            DVLOG(::config::verbose::kBenchReserve_2)
+                << "[race] allocating subtable " << i << " at "
+                << (void *) alloc_mem << " for size "
+                << SubTableT::size_bytes();
 
             subtables_[i] = std::make_shared<SubTableT>(alloc_mem, alloc_size);
             subtables_[i]->update_header(ld, i);
@@ -153,8 +155,9 @@ public:
         memset(alloc_addr, 0, alloc_size);
         meta_ = (MetaT *) alloc_addr;
 
-        DVLOG(1) << "Allocated meta region " << (void *) meta_ << " with size "
-                 << alloc_size;
+        DVLOG(::config::verbose::kBenchReserve_2)
+            << "Allocated meta region " << (void *) meta_ << " with size "
+            << alloc_size;
     }
     void init_kvblock()
     {

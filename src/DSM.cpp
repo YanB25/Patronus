@@ -134,10 +134,10 @@ bool DSM::reinitializeDir(size_t dirID)
     for (size_t remoteID = 0; remoteID < getClusterSize(); ++remoteID)
     {
         auto ex = keeper->updateDirMetadata(*dirCon[dirID], remoteID);
-        DVLOG(1) << "[DSM] update dir meta for " << remoteID
-                 << ", hash: " << std::hex
-                 << util::djb2_digest((char *) &ex, sizeof(ex))
-                 << ", rkey: " << ex.dirTh[dirID].rKey;
+        // DVLOG(1) << "[DSM] update dir meta for " << remoteID
+        //          << ", hash: " << std::hex
+        //          << util::djb2_digest((char *) &ex, sizeof(ex))
+        //          << ", rkey: " << ex.dirTh[dirID].rKey;
         syncMetadataBootstrap(ex, remoteID);
         auto connect_dir_ex = getExchangeMetaBootstrap(remoteID);
 
@@ -170,11 +170,12 @@ bool DSM::reconnectThreadToDir(size_t node_id, size_t dirID)
         }
         const auto &cur_meta = getExchangeMetaBootstrap(node_id);
 
-        DVLOG(1) << "[DSM] reconnecting ThreadConnection[" << i
-                 << "]. node_id: " << node_id << ", dirID: " << dirID
-                 << ", meta digest: " << std::hex
-                 << util::djb2_digest((char *) &cur_meta, sizeof(cur_meta))
-                 << ", rkey: " << cur_meta.dirTh[dirID].rKey;
+        DVLOG(::config::verbose::kSystem)
+            << "[DSM] reconnecting ThreadConnection[" << i
+            << "]. node_id: " << node_id << ", dirID: " << dirID
+            << ", meta digest: " << std::hex
+            << util::djb2_digest((char *) &cur_meta, sizeof(cur_meta))
+            << ", rkey: " << cur_meta.dirTh[dirID].rKey;
 
         keeper->connectThread(*thCon[i], node_id, dirID, cur_meta);
 
@@ -190,8 +191,9 @@ bool DSM::recoverThreadQP(int node_id, size_t dirID, util::TraceView v)
 {
     auto tid = get_thread_id();
     ibv_qp *qp = get_th_qp(node_id, dirID);
-    DVLOG(1) << "Recovering th qp: " << qp << ". node_id: " << node_id
-             << ", thread_id: " << tid;
+    DVLOG(::config::verbose::kSystem)
+        << "Recovering th qp: " << qp << ". node_id: " << node_id
+        << ", thread_id: " << tid;
     const auto &ex = getExchangeMetaBootstrap(node_id);
 
     if (!modifyErrQPtoNormal(qp,
@@ -213,8 +215,9 @@ bool DSM::recoverThreadQP(int node_id, size_t dirID, util::TraceView v)
 bool DSM::recoverDirQP(int node_id, int thread_id, size_t dirID)
 {
     ibv_qp *qp = get_dir_qp(node_id, thread_id, dirID);
-    DVLOG(1) << "Recovering dir qp " << qp << ". node_id: " << node_id
-             << ", thread_id: " << thread_id;
+    DVLOG(::config::verbose::kSystem)
+        << "Recovering dir qp " << qp << ". node_id: " << node_id
+        << ", thread_id: " << thread_id;
     const auto &ex = getExchangeMetaBootstrap(node_id);
     if (!modifyErrQPtoNormal(qp,
                              ex.appRcQpn2dir[thread_id][dirID],
