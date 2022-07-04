@@ -49,6 +49,7 @@ thread_local bool Patronus::self_managing_client_rdma_buffer_{false};
 thread_local bool Patronus::has_registered_{false};
 thread_local std::vector<ServerCoroBatchExecutionContext>
     Patronus::coro_batch_ex_ctx_;
+thread_local PatronusBatchContext Patronus::one_shot_batch_ctx_{};
 
 // clang-format off
 /**
@@ -303,103 +304,13 @@ Lease Patronus::get_lease_impl(uint16_t node_id,
     return ret_lease;
 }
 
-RetCode Patronus::read_write_impl(char *iobuf,
-                                  size_t size,
-                                  size_t node_id,
-                                  size_t dir_id,
-                                  uint32_t rkey,
-                                  uint64_t remote_addr,
-                                  bool is_read,
-                                  uint16_t wrid_prefix,
-                                  CoroContext *ctx,
-                                  TraceView v)
-{
-    GlobalAddress gaddr;
-    gaddr.nodeID = node_id;
-    DCHECK_NE(gaddr.nodeID, get_node_id())
-        << "make no sense to R/W local buffer with RDMA.";
-    gaddr.offset = remote_addr;
-    auto coro_id = ctx ? ctx->coro_id() : kNotACoro;
-    if constexpr (debug())
-    {
-        debug_valid_rdma_buffer(iobuf);
-    }
-
-    auto *rw_context = get_rw_context();
-    uint16_t rw_ctx_id = get_rw_context_id(rw_context);
-    rw_context->wc_status = IBV_WC_SUCCESS;
-    rw_context->ready = false;
-    rw_context->coro_id = coro_id;
-    rw_context->target_node = gaddr.nodeID;
-    rw_context->dir_id = dir_id;
-    rw_context->trace_view = v;
-    v.pin("issue");
-
-    // already switch ctx if not null
-    if (is_read)
-    {
-        dsm_->rkey_read(rkey,
-                        iobuf,
-                        gaddr,
-                        size,
-                        dir_id,
-                        true,
-                        ctx,
-                        WRID(wrid_prefix, rw_ctx_id).val);
-    }
-    else
-    {
-        dsm_->rkey_write(rkey,
-                         iobuf,
-                         gaddr,
-                         size,
-                         dir_id,
-                         true,
-                         ctx,
-                         WRID(wrid_prefix, rw_ctx_id).val);
-    }
-
-    if (unlikely(ctx == nullptr))
-    {
-        dsm_->poll_rdma_cq(1);
-        rw_context->ready.store(true);
-    }
-
-    DCHECK(rw_context->ready)
-        << "** Should have been ready when switching back to worker " << ctx
-        << ", rw_ctx_id: " << rw_ctx_id << ", ready at "
-        << (void *) &rw_context->ready;
-
-    auto wc_status = rw_context->wc_status;
-
-    DCHECK(wc_status == IBV_WC_SUCCESS || wc_status == IBV_WC_WR_FLUSH_ERR ||
-           wc_status == IBV_WC_REM_ACCESS_ERR || wc_status == IBV_WC_REM_OP_ERR)
-        << "** unexpected status " << ibv_wc_status_str(wc_status) << " ["
-        << (int) wc_status << "]";
-
-    if constexpr (debug())
-    {
-        memset(rw_context, 0, sizeof(RWContext));
-    }
-
-    put_rw_context(rw_context);
-
-    if (wc_status == IBV_WC_SUCCESS)
-    {
-        return kOk;
-    }
-    else
-    {
-        return kRdmaProtectionErr;
-    }
-}
-
 RetCode Patronus::protection_region_rw_impl(Lease &lease,
                                             char *io_buf,
                                             size_t size,
                                             size_t offset,
                                             bool is_read,
-                                            CoroContext *ctx)
+                                            CoroContext *ctx,
+                                            util::TraceView trace)
 {
     CHECK(lease.success());
 
@@ -408,46 +319,40 @@ RetCode Patronus::protection_region_rw_impl(Lease &lease,
     VLOG(4) << "[patronus] protection_region_rw_impl. remote_addr: "
             << remote_addr << ", rkey: " << rkey
             << " (header_addr: " << lease.header_addr_ << ")";
-    return read_write_impl(io_buf,
-                           size,
-                           lease.node_id_,
-                           lease.dir_id_,
-                           rkey,
-                           remote_addr,
-                           is_read,
-                           WRID_PREFIX_PATRONUS_PR_RW,
-                           ctx);
-}
-RetCode Patronus::buffer_cas_impl(Lease &lease,
-                                  char *iobuf,
-                                  size_t offset,
-                                  uint64_t compare,
-                                  uint64_t swap,
-                                  CoroContext *ctx)
-{
-    CHECK(lease.success());
-    uint32_t rkey = lease.cur_rkey();
-    uint64_t remote_addr = lease.base_addr_ + offset;
-    VLOG(4) << "[patronus] buffer_cas. remote_addr: " << remote_addr
-            << ", rkey: " << rkey << " (base_addr: " << lease.base_addr_
-            << ", remote_addr: " << remote_addr
-            << "). coro: " << (ctx ? *ctx : nullctx);
-    return cas_impl(iobuf,
-                    lease.node_id_,
-                    lease.dir_id_,
-                    rkey,
-                    remote_addr,
-                    compare,
-                    swap,
-                    WRID_PREFIX_PATRONUS_CAS,
-                    ctx);
+
+    if (is_read)
+    {
+        prepare_read(one_shot_batch_ctx_,
+                     lease,
+                     io_buf,
+                     size,
+                     offset,
+                     0 /* flag */,
+                     ctx,
+                     trace)
+            .expect(RC::kOk);
+    }
+    else
+    {
+        prepare_write(one_shot_batch_ctx_,
+                      lease,
+                      io_buf,
+                      size,
+                      offset,
+                      0 /* flag */,
+                      ctx,
+                      trace)
+            .expect(RC::kOk);
+    }
+    return commit(one_shot_batch_ctx_, ctx, trace);
 }
 RetCode Patronus::protection_region_cas_impl(Lease &lease,
                                              char *iobuf,
                                              size_t offset,
                                              uint64_t compare,
                                              uint64_t swap,
-                                             CoroContext *ctx)
+                                             CoroContext *ctx,
+                                             util::TraceView trace)
 {
     DCHECK(lease.success());
 
@@ -456,107 +361,20 @@ RetCode Patronus::protection_region_cas_impl(Lease &lease,
     DVLOG(4) << "[patronus] protection_region_cas. remote_addr: " << remote_addr
              << ", rkey: " << rkey << " (header_addr: " << lease.header_addr_
              << "). coro: " << (ctx ? *ctx : nullctx);
-    return cas_impl(iobuf,
-                    lease.node_id_,
-                    lease.dir_id_,
-                    rkey,
-                    remote_addr,
-                    compare,
-                    swap,
-                    WRID_PREFIX_PATRONUS_PR_CAS,
-                    ctx);
+
+    prepare_cas(one_shot_batch_ctx_,
+                lease,
+                iobuf,
+                offset,
+                compare,
+                swap,
+                0 /* flag */,
+                ctx,
+                trace)
+        .expect(RC::kOk);
+    return commit(one_shot_batch_ctx_, ctx, trace);
 }
 
-RetCode Patronus::cas_impl(char *iobuf /* old value fill here */,
-                           size_t node_id,
-                           size_t dir_id,
-                           uint32_t rkey,
-                           uint64_t remote_addr,
-                           uint64_t compare,
-                           uint64_t swap,
-                           uint16_t wr_prefix,
-                           CoroContext *ctx,
-                           TraceView v)
-{
-    GlobalAddress gaddr;
-    gaddr.nodeID = node_id;
-    DCHECK_NE(gaddr.nodeID, get_node_id())
-        << "make no sense to CAS local buffer with RDMA";
-    gaddr.offset = remote_addr;
-    auto coro_id = ctx ? ctx->coro_id() : kNotACoro;
-    if constexpr (debug())
-    {
-        debug_valid_rdma_buffer(iobuf);
-    }
-    auto *rw_context = get_rw_context();
-    uint16_t rw_ctx_id = get_rw_context_id(rw_context);
-    rw_context->wc_status = IBV_WC_SUCCESS;
-    rw_context->ready = false;
-    rw_context->coro_id = coro_id;
-    rw_context->target_node = gaddr.nodeID;
-    rw_context->dir_id = dir_id;
-    rw_context->trace_view = v;
-    v.pin("issue");
-
-    auto wrid = WRID(wr_prefix, rw_ctx_id);
-    DVLOG(4) << "[patronus] CAS node_id: " << node_id << ", dir_id " << dir_id
-             << ", rkey: " << rkey << ", remote_addr: " << remote_addr
-             << ", compare: " << compare << ", swap: " << swap
-             << ", wr_id: " << wrid << ", coro: " << (ctx ? *ctx : nullctx);
-
-    dsm_->rkey_cas(rkey,
-                   iobuf,
-                   gaddr,
-                   dir_id,
-                   compare,
-                   swap,
-                   true /* is_signal */,
-                   wrid.val,
-                   ctx);
-    if (unlikely(ctx == nullptr))
-    {
-        dsm_->poll_rdma_cq(1);
-        rw_context->ready.store(true);
-    }
-
-    DCHECK(rw_context->ready)
-        << "** Should have been ready when switching back to worker " << ctx
-        << ", rw_ctx_id: " << rw_ctx_id << ", ready at "
-        << (void *) &rw_context->ready;
-    auto wc_status = rw_context->wc_status;
-    bool success = wc_status == IBV_WC_SUCCESS;
-    if constexpr (debug())
-    {
-        memset(rw_context, 0, sizeof(RWContext));
-    }
-    put_rw_context(rw_context);
-
-    if (unlikely(!success))
-    {
-        DVLOG(4) << "[patronus] CAS failed by protection. wr_id: " << wrid
-                 << ", wc_status: " << ibv_wc_status_str(wc_status)
-                 << "coro: " << (ctx ? *ctx : nullctx);
-        return RC::kRdmaProtectionErr;
-    }
-    // see if cas can success
-    auto read_remote = *(uint64_t *) iobuf;
-    if (read_remote == compare)
-    {
-        DVLOG(4) << "[patronus] CAS success. wr_id: " << wrid
-                 << ", coro: " << (ctx ? *ctx : nullctx)
-                 << ", read: " << compound_uint64_t(read_remote)
-                 << ", compare: " << compound_uint64_t(compare)
-                 << ", new: " << compound_uint64_t(swap);
-        return RC::kOk;
-    }
-    DVLOG(4) << "[patronus] CAS failed by mismatch @compare. wr_id: " << wrid
-             << ", coro: " << (ctx ? *ctx : nullctx)
-             << ", actual: " << compound_uint64_t(read_remote)
-             << ", compare: " << compound_uint64_t(compare)
-             << ", swap: " << compound_uint64_t(swap);
-
-    return RC::kRdmaExecutionErr;
-}
 /**
  * @brief the actual implementation to modify a lease (especially relinquish
  * it).
@@ -1864,8 +1682,9 @@ void Patronus::handle_response_memory_access(MemoryResponse *resp,
     else
     {
         CHECK(false) << "** two-sided RPC memory request should not get rdma "
-                        "execution error.";
-        rpc_context->ret_code = RC::kRdmaExecutionErr;
+                        "execution error. BTW, a failed CAS should report as a "
+                        "succeeded operation.";
+        rpc_context->ret_code = RC::kInvalid;
     }
 
     if (mf == MemoryRequestFlag::kCAS)
@@ -3135,7 +2954,9 @@ void Patronus::commit_handle_request_messages(
     put_rw_context(rw_ctx);
 }
 
-RetCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
+RetCode Patronus::maybe_auto_extend(Lease &lease,
+                                    CoroContext *ctx,
+                                    util::TraceView trace)
 {
     using namespace std::chrono_literals;
 
@@ -3170,7 +2991,7 @@ RetCode Patronus::maybe_auto_extend(Lease &lease, CoroContext *ctx)
     if (diff_ns <= margin_duration_ns)
     {
         return extend_impl(
-            lease, lease.next_extend_unit_nr(), 0 /* flag */, ctx);
+            lease, lease.next_extend_unit_nr(), 0 /* flag */, ctx, trace);
     }
     DVLOG(4) << "[patronus][maybe-extend] Not reach lease DDL (not extend). "
                 "lease ddl:"
@@ -3242,6 +3063,11 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
         return rpc_write(lease, ibuf, size, offset, flag, ctx);
     }
 
+    if constexpr (debug())
+    {
+        debug_valid_rdma_buffer(ibuf);
+    }
+
     auto ec = handle_batch_op_flag(flag);
     if (unlikely(ec != RC::kOk))
     {
@@ -3288,7 +3114,12 @@ RetCode Patronus::prepare_read(PatronusBatchContext &batch,
     if (unlikely(use_two_sided))
     {
         debug_validate_rpc_rwcas_flag(flag);
-        return rpc_read(lease, obuf, size, offset, flag, ctx);
+        return rpc_read(lease, obuf, size, offset, flag, ctx, trace);
+    }
+
+    if constexpr (debug())
+    {
+        debug_valid_rdma_buffer(obuf);
     }
 
     auto ec = handle_batch_op_flag(flag);
@@ -3338,6 +3169,11 @@ RetCode Patronus::prepare_faa(PatronusBatchContext &batch,
     {
         debug_validate_rpc_rwcas_flag(flag);
         return rpc_faa(lease, iobuf, offset, value, ctx);
+    }
+
+    if constexpr (debug())
+    {
+        debug_valid_rdma_buffer(iobuf);
     }
 
     auto ec = handle_batch_op_flag(flag);
@@ -3390,6 +3226,11 @@ RetCode Patronus::prepare_cas(PatronusBatchContext &batch,
         return rpc_cas(lease, iobuf, offset, compare, swap, ctx);
     }
 
+    if constexpr (debug())
+    {
+        debug_valid_rdma_buffer(iobuf);
+    }
+
     auto ec = handle_batch_op_flag(flag);
     if (unlikely(ec != RC::kOk))
     {
@@ -3436,8 +3277,9 @@ RetCode Patronus::handle_batch_op_flag(flag_t flag) const
 {
     if constexpr (debug())
     {
-        bool no_local_check = flag & (flag_t) RWFlag::kNoLocalExpireCheck;
-        CHECK(no_local_check) << "** Batch op not support local expire checks";
+        // bool no_local_check = flag & (flag_t) RWFlag::kNoLocalExpireCheck;
+        // CHECK(no_local_check) << "** Batch op not support local expire
+        // checks";
         bool with_auto_expend = flag & (flag_t) RWFlag::kWithAutoExtend;
         CHECK(!with_auto_expend)
             << "** Batch op does not support auto lease extend";
@@ -3472,13 +3314,10 @@ RetCode Patronus::commit(PatronusBatchContext &batch,
     // so we retrieve from the batch
     rw_context->target_node = batch.node_id();
     rw_context->dir_id = batch.dir_id();
+    rw_context->trace_view = trace;
 
     WRID wr_id(WRID_PREFIX_PATRONUS_BATCH_RWCAS, rw_ctx_id);
     rc = batch.commit(wr_id.val, ctx, trace);
-    if (unlikely(rc != kOk))
-    {
-        goto ret;
-    }
 
     DCHECK(rw_context->ready)
         << "** When commit finished, should have been ready. rw_ctx at "
@@ -3487,6 +3326,16 @@ RetCode Patronus::commit(PatronusBatchContext &batch,
         << ", coro: " << pre_coro_ctx(ctx);
 
     wc_status = rw_context->wc_status;
+    DCHECK(wc_status == IBV_WC_SUCCESS || wc_status == IBV_WC_WR_FLUSH_ERR ||
+           wc_status == IBV_WC_REM_ACCESS_ERR || wc_status == IBV_WC_REM_OP_ERR)
+        << "** unexpected status " << ibv_wc_status_str(wc_status) << " ["
+        << (int) wc_status << "]";
+
+    if (unlikely(rc != kOk))
+    {
+        goto ret;
+    }
+
     ret_success = (wc_status == IBV_WC_SUCCESS);
 
     if (likely(ret_success))
@@ -3511,19 +3360,30 @@ void Patronus::hack_trigger_rdma_protection_error(size_t node_id,
 {
     size_t size = 1;
     auto rdma_buf = get_rdma_buffer(size);
-    auto rc = read_write_impl(rdma_buf.buffer,
-                              size,
-                              node_id,
-                              dir_id,
-                              0 /* rkey */,
-                              GlobalAddress(0).val,
-                              true /* is_read */,
-                              WRID_PREFIX_PATRONUS_GENERATE_FAULT,
-                              ctx);
-    CHECK_EQ(rc, kRdmaProtectionErr);
+    auto ac_flag = (flag_t) AcquireRequestFlag::kNoRpc;
+    auto fake_lease = get_wlease(node_id,
+                                 dir_id,
+                                 GlobalAddress(0, 0),
+                                 0 /* hint */,
+                                 1 /* size */,
+                                 1ns,
+                                 ac_flag,
+                                 nullptr);
+
+    prepare_write(one_shot_batch_ctx_,
+                  fake_lease,
+                  rdma_buf.buffer,
+                  1 /* size */,
+                  1024 /* offset */,
+                  0 /* rw flag */,
+                  ctx)
+        .expect(RC::kOk);
+    commit(one_shot_batch_ctx_, ctx).expect(RC::kRdmaProtectionErr);
     // NOTE:
     // do not put rdma buffer from previous thread desc.
-    // put_rdma_buffer(rdma_buf);
+    auto rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
+    relinquish(fake_lease, 0 /* hint */, rel_flag, ctx);
+    // put_rdma_buffer(std::move(rdma_buf));
 }
 
 void Patronus::prepare_fast_backup_recovery(size_t prepare_nr)

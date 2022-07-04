@@ -176,7 +176,7 @@ public:
                               TraceView trace = util::nulltrace);
     [[nodiscard]] RetCode faa(const std::string &,
                               int64_t value,
-                              Buffer &&rdma_buf,
+                              const Buffer &rdma_buf,
                               CoroContext *ctx,
                               TraceView trace = util::nulltrace);
 
@@ -594,7 +594,7 @@ RetCode Parameters::cas(const std::string &name,
 
 RetCode Parameters::faa(const std::string &name,
                         int64_t value,
-                        Buffer &&rdma_buf,
+                        const Buffer &rdma_buf,
                         CoroContext *ctx,
                         TraceView trace)
 {
@@ -610,7 +610,6 @@ RetCode Parameters::faa(const std::string &name,
                       0 /* flag */,
                       ctx,
                       trace);
-    p_->put_rdma_buffer(std::move(rdma_buf));
     return rc;
 }
 

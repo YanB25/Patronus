@@ -421,7 +421,7 @@ void benchmark(Patronus::pointer patronus,
     serverless_configs.emplace_back(
         serverless::Config::get_mw("mw[nested]", false));
 
-    for (size_t thread_nr : {1})
+    for (size_t thread_nr : {kMaxAppThread})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
 

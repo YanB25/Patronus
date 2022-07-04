@@ -855,7 +855,7 @@ void benchmark(Patronus::pointer patronus,
         for (size_t block_size : {64ul})
         {
             // for (size_t coro_nr : {2, 4, 8, 16, 32})
-            for (size_t coro_nr : {2, 4, 8, 16, 32})
+            for (size_t coro_nr : {32})
             {
                 auto total_test_times = kTestTimePerThread * 4;
                 {

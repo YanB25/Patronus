@@ -194,7 +194,8 @@ public:
     [[nodiscard]] inline RetCode extend(Lease &lease,
                                         std::chrono::nanoseconds ns,
                                         flag_t flag /* LeaseModifyFlag */,
-                                        CoroContext *ctx = nullptr);
+                                        CoroContext *ctx = nullptr,
+                                        TraceView = util::nulltrace);
     [[nodiscard]] inline RetCode rpc_extend(Lease &lease,
                                             std::chrono::nanoseconds ns,
                                             flag_t flag /* LeaseModifyFlag */,
@@ -1007,29 +1008,16 @@ private:
                                       size_t size,
                                       size_t offset,
                                       bool is_read,
-                                      CoroContext *ctx = nullptr);
+                                      CoroContext *ctx = nullptr,
+                                      util::TraceView = util::nulltrace);
     RetCode protection_region_cas_impl(Lease &lease,
                                        char *iobuf,
                                        size_t offset,
                                        uint64_t compare,
                                        uint64_t swap,
-                                       CoroContext *ctx = nullptr);
-    RetCode buffer_cas_impl(Lease &lease,
-                            char *iobuf,
-                            size_t offset,
-                            uint64_t compare,
-                            uint64_t swap,
-                            CoroContext *ctx);
-    RetCode read_write_impl(char *iobuf,
-                            size_t size,
-                            size_t node_id,
-                            size_t dir_id,
-                            uint32_t rkey,
-                            size_t remote_addr,
-                            bool is_read,
-                            uint16_t wrid_prefix,
-                            CoroContext *ctx,
-                            TraceView = util::nulltrace);
+                                       CoroContext *ctx = nullptr,
+                                       util::TraceView = util::nulltrace);
+
     inline RetCode rpc_rwcas_impl(char *iobuf,
                                   size_t size,
                                   size_t node_id,
@@ -1041,21 +1029,12 @@ private:
     inline RetCode extend_impl(Lease &lease,
                                size_t extend_unit_nr,
                                flag_t flag,
-                               CoroContext *ctx);
+                               CoroContext *ctx,
+                               util::TraceView trace);
     inline RetCode rpc_extend_impl(Lease &lease,
                                    uint64_t ns,
                                    flag_t flag,
                                    CoroContext *ctx);
-    RetCode cas_impl(char *iobuf,
-                     size_t node_id,
-                     size_t dir_id,
-                     uint32_t rkey,
-                     uint64_t remote_addr,
-                     uint64_t compare,
-                     uint64_t swap,
-                     uint16_t wr_prefix,
-                     CoroContext *ctx,
-                     TraceView = util::nulltrace);
     RetCode lease_modify_impl(Lease &lease,
                               uint64_t hint,
                               RpcType type,
@@ -1068,7 +1047,9 @@ private:
                                 uint64_t addr,
                                 size_t length,
                                 int access_flag);
-    RetCode maybe_auto_extend(Lease &lease, CoroContext *ctx = nullptr);
+    RetCode maybe_auto_extend(Lease &lease,
+                              CoroContext *ctx = nullptr,
+                              util::TraceView = util::nulltrace);
 
     inline bool valid_lease_buffer_offset(size_t buffer_offset) const;
     inline bool valid_total_buffer_offset(size_t buffer_offset) const;
@@ -1099,6 +1080,7 @@ private:
         rdma_client_buffer_8B_;
     static thread_local char *client_rdma_buffer_;
     static thread_local size_t client_rdma_buffer_size_;
+    static thread_local PatronusBatchContext one_shot_batch_ctx_;
 
     static thread_local bool is_server_;
     static thread_local bool is_client_;
@@ -1336,7 +1318,8 @@ RetCode Patronus::rpc_extend_impl(Lease &lease,
 RetCode Patronus::extend_impl(Lease &lease,
                               size_t extend_unit_nr,
                               flag_t flag,
-                              CoroContext *ctx)
+                              CoroContext *ctx,
+                              util::TraceView trace)
 {
     DVLOG(4) << "[patronus][extend-impl] trying to extend. extend_unit_nr: "
              << extend_unit_nr << ", flag:" << LeaseModifyFlagOut(flag)
@@ -1355,7 +1338,7 @@ RetCode Patronus::extend_impl(Lease &lease,
     auto swap = aba_unit_nr_to_ddl.val;
 
     auto cas_ec = protection_region_cas_impl(
-        lease, rdma_buffer.buffer, offset, compare, swap, ctx);
+        lease, rdma_buffer.buffer, offset, compare, swap, ctx, trace);
 
     if (likely(cas_ec == RC::kOk))
     {
@@ -1397,7 +1380,8 @@ RetCode Patronus::rpc_extend(Lease &lease,
 RetCode Patronus::extend(Lease &lease,
                          std::chrono::nanoseconds chrono_ns,
                          flag_t flag,
-                         CoroContext *ctx)
+                         CoroContext *ctx,
+                         TraceView trace)
 {
     debug_validate_lease_modify_flag(flag);
     auto ns =
@@ -1428,7 +1412,7 @@ RetCode Patronus::extend(Lease &lease,
     //     return RC::kLeaseLocalExpiredErr;
     // }
 
-    return extend_impl(lease, extend_unit_nr, flag, ctx);
+    return extend_impl(lease, extend_unit_nr, flag, ctx, trace);
 }
 
 // gaddr is buffer offset
@@ -1526,14 +1510,21 @@ RetCode Patronus::read(Lease &lease,
                        size_t offset,
                        flag_t flag,
                        CoroContext *ctx,
-                       TraceView v)
+                       TraceView trace)
 {
+    bool use_two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (unlikely(use_two_sided))
+    {
+        debug_validate_rpc_rwcas_flag(flag);
+        return rpc_read(lease, obuf, size, offset, flag, ctx, trace);
+    }
+
     RetCode ec = RC::kOk;
+    // auto-extend lease here
     if ((ec = handle_rwcas_flag(lease, flag, ctx)) != RC::kOk)
     {
         return ec;
     }
-
     bool with_cache = flag & (flag_t) RWFlag::kWithCache;
     if (with_cache)
     {
@@ -1543,88 +1534,42 @@ RetCode Patronus::read(Lease &lease,
             return RC::kOk;
         }
     }
+    prepare_read(
+        one_shot_batch_ctx_, lease, obuf, size, offset, flag, ctx, trace)
+        .expect(RC::kOk);
 
-    CHECK(lease.success());
-    CHECK(lease.is_readable());
-
-    auto node_id = lease.node_id_;
-    auto dir_id = lease.dir_id_;
-    uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
-    if (use_universal_rkey)
-    {
-        rkey = dsm_->get_rkey(node_id, dir_id);
-    }
-    else
-    {
-        rkey = lease.cur_rkey_;
-    }
-    uint64_t remote_addr = lease.base_addr_ + offset;
-
-    ec = read_write_impl(obuf,
-                         size,
-                         node_id,
-                         dir_id,
-                         rkey,
-                         remote_addr,
-                         true /* is_read */,
-                         WRID_PREFIX_PATRONUS_RW,
-                         ctx,
-                         v);
-    return ec;
+    return commit(one_shot_batch_ctx_, ctx, trace);
 }
+
 RetCode Patronus::write(Lease &lease,
                         const char *ibuf,
                         size_t size,
                         size_t offset,
                         flag_t flag,
                         CoroContext *ctx,
-                        TraceView v)
+                        TraceView trace)
 {
-    bool two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
-    if (two_sided)
+    bool use_two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (unlikely(use_two_sided))
     {
         debug_validate_rpc_rwcas_flag(flag);
-        return rpc_write(lease, ibuf, size, offset, flag, ctx, v);
+        return rpc_write(lease, ibuf, size, offset, flag, ctx, trace);
     }
-
-    auto ec = handle_rwcas_flag(lease, flag, ctx);
-    if (unlikely(ec != RC::kOk))
+    RetCode ec = RC::kOk;
+    if ((ec = handle_rwcas_flag(lease, flag, ctx)) != RC::kOk)
     {
         return ec;
     }
-
-    auto node_id = lease.node_id_;
-    auto dir_id = lease.dir_id_;
-    uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
-    if (use_universal_rkey)
-    {
-        rkey = dsm_->get_rkey(node_id, dir_id);
-    }
-    else
-    {
-        rkey = lease.cur_rkey_;
-    }
-    uint64_t remote_addr = lease.base_addr_ + offset;
-    ec = read_write_impl((char *) ibuf,
-                         size,
-                         node_id,
-                         dir_id,
-                         rkey,
-                         remote_addr,
-                         false /* is_read */,
-                         WRID_PREFIX_PATRONUS_RW,
-                         ctx,
-                         v);
-
     bool with_cache = flag & (flag_t) RWFlag::kWithCache;
-    if (ec == RC::kOk && with_cache)
+    if (with_cache)
     {
         lease.cache_insert(offset, size, ibuf);
     }
 
-    return ec;
+    prepare_write(
+        one_shot_batch_ctx_, lease, ibuf, size, offset, flag, ctx, trace)
+        .expect(RC::kOk);
+    return commit(one_shot_batch_ctx_, ctx, trace);
 }
 
 RetCode Patronus::faa(Lease &lease,
@@ -1642,29 +1587,18 @@ RetCode Patronus::faa(Lease &lease,
         return rpc_faa(lease, iobuf, offset, value, ctx, trace);
     }
 
-    auto ec = handle_rwcas_flag(lease, flag, ctx);
-    if (unlikely(ec != RC::kOk))
+    RetCode ec = RC::kOk;
+    if ((ec = handle_rwcas_flag(lease, flag, ctx)) != RC::kOk)
     {
         return ec;
     }
+    bool with_cache = flag & (flag_t) RWFlag::kWithCache;
+    CHECK(!with_cache) << "** fetch-and-add does not support caching";
 
-    auto node_id = lease.node_id_;
-    auto dir_id = lease.dir_id_;
-    uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
-    if (use_universal_rkey)
-    {
-        rkey = dsm_->get_rkey(node_id, dir_id);
-    }
-    else
-    {
-        rkey = lease.cur_rkey_;
-    }
-    // uint64_t remote_addr = lease.base_addr_ + offset;
-
-    CHECK(false) << "TODO: not implemented.";
-
-    return ec;
+    prepare_faa(
+        one_shot_batch_ctx_, lease, iobuf, offset, value, flag, ctx, trace)
+        .expect(RC::kOk);
+    return commit(one_shot_batch_ctx_, ctx, trace);
 }
 
 RetCode Patronus::cas(Lease &lease,
@@ -1674,45 +1608,34 @@ RetCode Patronus::cas(Lease &lease,
                       uint64_t swap,
                       flag_t flag,
                       CoroContext *ctx,
-                      TraceView v)
+                      TraceView trace)
 {
-    auto ec = handle_rwcas_flag(lease, flag, ctx);
-    if (unlikely(ec != RC::kOk))
+    bool two_sided = flag & (flag_t) RWFlag::kUseTwoSided;
+    if (two_sided)
+    {
+        debug_validate_rpc_rwcas_flag(flag);
+        return rpc_cas(lease, iobuf, offset, compare, swap, ctx, trace);
+    }
+
+    RetCode ec = RC::kOk;
+    if ((ec = handle_rwcas_flag(lease, flag, ctx)) != RC::kOk)
     {
         return ec;
     }
-
-    auto node_id = lease.node_id_;
-    auto dir_id = lease.dir_id_;
-    uint32_t rkey = 0;
-    bool use_universal_rkey = flag & (flag_t) RWFlag::kUseUniversalRkey;
-    if (use_universal_rkey)
-    {
-        rkey = dsm_->get_rkey(node_id, dir_id);
-    }
-    else
-    {
-        rkey = lease.cur_rkey_;
-    }
-    uint64_t remote_addr = lease.base_addr_ + offset;
-    ec = cas_impl(iobuf,
-                  node_id,
-                  dir_id,
-                  rkey,
-                  remote_addr,
-                  compare,
-                  swap,
-                  WRID_PREFIX_PATRONUS_CAS,
-                  ctx,
-                  v);
-
     bool with_cache = flag & (flag_t) RWFlag::kWithCache;
-    if (ec == RC::kOk && with_cache)
-    {
-        DCHECK_GE(sizeof(swap), 8);
-        lease.cache_insert(offset, 8 /* size */, (const char *) swap);
-    }
-    return ec;
+    CHECK(!with_cache) << "** fetch-and-add does not support caching";
+
+    prepare_cas(one_shot_batch_ctx_,
+                lease,
+                iobuf,
+                offset,
+                compare,
+                swap,
+                flag,
+                ctx,
+                trace)
+        .expect(RC::kOk);
+    return commit(one_shot_batch_ctx_, ctx, trace);
 }
 
 void Patronus::fill_bind_mw_wr(ibv_send_wr &wr,

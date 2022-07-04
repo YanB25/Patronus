@@ -239,15 +239,16 @@ public:
         auto ret = ibv_post_send(qp_, send_wrs_, &bad_wr_);
         if (unlikely(ret))
         {
-            PLOG(ERROR) << "[patronus][batch] commit: failed to "
+            PLOG(FATAL) << "[patronus][batch] commit: failed to "
                            "ibv_post_send. bad_wr: wr_id: "
                         << WRID(bad_wr_->wr_id) << ", ret: " << ret;
-            return RC::kRdmaExecutionErr;
+            return RC::kInvalid;
         }
+        clear();
+
         CHECK_NOTNULL(ctx)->yield_to_master(wr_id);
 
-        clear();
-        trace.pin("ibv_post");
+        trace.pin("commit batch");
         return RC::kOk;
     }
     dir_t dir_id() const
