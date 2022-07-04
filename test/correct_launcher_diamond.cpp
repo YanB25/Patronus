@@ -23,14 +23,14 @@ using namespace util::literals;
 using namespace patronus;
 using namespace std::chrono_literals;
 
-// constexpr static size_t kClientThreadNr = kMaxAppThread;
-constexpr static size_t kClientThreadNr = 1;
+constexpr static size_t kClientThreadNr = kMaxAppThread;
+// constexpr static size_t kClientThreadNr = 1;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-// constexpr static size_t kTestTimePerThread = 5_K;
-constexpr static size_t kTestTimePerThread = 100;
+constexpr static size_t kTestTimePerThread = 5_K;
+// constexpr static size_t kTestTimePerThread = 100;
 
-constexpr static size_t kChainNr = 1;
+constexpr static size_t kChainNr = 2;
 
 using namespace hmdf;
 
@@ -395,14 +395,14 @@ void benchmark(Patronus::pointer patronus,
     size_t key = 0;
 
     std::vector<serverless::Config> serverless_configs;
-    // serverless_configs.emplace_back(
-    //     serverless::Config::get_mw("mw[step]", true));
+    serverless_configs.emplace_back(
+        serverless::Config::get_mw("mw[step]", true));
     serverless_configs.emplace_back(
         serverless::Config::get_mw("mw[nested]", false));
 
     // for (size_t thread_nr : {32})
     // for (size_t thread_nr : {32})
-    for (size_t thread_nr : {1})
+    for (size_t thread_nr : {kMaxAppThread})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t coro_nr : {2, 4, 8, 16, 32})

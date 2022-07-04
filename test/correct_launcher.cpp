@@ -27,10 +27,10 @@ constexpr static size_t kClientThreadNr = kMaxAppThread;
 // constexpr static size_t kClientThreadNr = 1;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-constexpr static size_t kChainNr = 2;
+constexpr static size_t kChainNr = 4;
 // constexpr static size_t kChainNr = 1;
 
-constexpr static size_t kTestTimePerThread = 1_K;
+constexpr static size_t kTestTimePerThread = 10_K;
 // constexpr static size_t kTestTimePerThread = 100;
 
 using namespace hmdf;
