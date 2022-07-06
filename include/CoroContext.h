@@ -204,6 +204,11 @@ public:
         return std::all_of(
             finish_all_.begin(), finish_all_.end(), [](bool i) { return i; });
     }
+    bool is_finished(size_t wid) const
+    {
+        DCHECK_LT(wid, kCoroCnt);
+        return finish_all_[wid];
+    }
     CoroCall *workers()
     {
         return workers_.data();

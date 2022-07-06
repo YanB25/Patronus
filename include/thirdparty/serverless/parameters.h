@@ -112,9 +112,11 @@ public:
         return prv_;
     }
 
-    [[nodiscard]] const Buffer &get_param(const std::string &name,
-                                          CoroContext *ctx,
-                                          TraceView trace = util::nulltrace);
+    [[nodiscard]] std::pair<const Buffer &, size_t> get_param(
+        const std::string &name,
+        CoroContext *ctx,
+        TraceView trace = util::nulltrace);
+
     Buffer get_buffer(size_t size)
     {
         auto ret = p_->get_rdma_buffer(size);
@@ -154,9 +156,10 @@ public:
                    size_t param_size,
                    CoroContext *ctx,
                    TraceView trace = util::nulltrace);
-    [[nodiscard]] Buffer read(const std::string &,
-                              CoroContext *ctx,
-                              TraceView trace = util::nulltrace);
+    [[nodiscard]] std::pair<Buffer, size_t> read(
+        const std::string &,
+        CoroContext *ctx,
+        TraceView trace = util::nulltrace);
     void alloc(const std::string &,
                size_t size,
                CoroContext *ctx,
@@ -352,17 +355,19 @@ private:
             return param.leases[cid];
         }
     }
-    [[nodiscard]] const Buffer &do_get_data(ParameterContext &param,
-                                            GlobalAddress gaddr,
-                                            size_t size,
-                                            CoroContext *ctx,
-                                            TraceView trace = util::nulltrace)
+    [[nodiscard]] std::pair<const Buffer &, size_t> do_get_data(
+        ParameterContext &param,
+        GlobalAddress gaddr,
+        size_t size,
+        CoroContext *ctx,
+        TraceView trace = util::nulltrace)
     {
         auto &lease = get_lease(param, ctx);
 
         if (likely(param.cached_data.has_value()))
         {
-            return param.cached_data.value();
+            DCHECK_GE(param.cached_data.value().size, param.size);
+            return {param.cached_data.value(), param.size};
         }
         DCHECK_GT(size, 0);
         if (unlikely(param.size == 0))
@@ -400,12 +405,12 @@ private:
                  ctx)
             .expect(RC::kOk);
         trace.pin("read");
-        return param.cached_data.value();
+        DCHECK_GE(param.cached_data.value().size, param.size);
+        return {param.cached_data.value(), param.size};
     }
 
-    [[nodiscard]] const Buffer &do_get_param(ParameterContext &param,
-                                             CoroContext *ctx,
-                                             TraceView trace)
+    [[nodiscard]] std::pair<const Buffer &, size_t> do_get_param(
+        ParameterContext &param, CoroContext *ctx, TraceView trace)
     {
         return do_get_data(param, param.gaddr, param.size, ctx, trace);
     }
@@ -474,9 +479,9 @@ private:
     ssize_t relinquish_nr_{0};
 };
 
-const Buffer &Parameters::get_param(const std::string &name,
-                                    CoroContext *ctx,
-                                    TraceView trace)
+std::pair<const Buffer &, size_t> Parameters::get_param(const std::string &name,
+                                                        CoroContext *ctx,
+                                                        TraceView trace)
 {
     auto &c = contexts_[name];
     return do_get_param(c, ctx, trace);
@@ -549,9 +554,9 @@ inline std::ostream &operator<<(std::ostream &os, const Parameters &p)
     return os;
 }
 
-Buffer Parameters::read(const std::string &name,
-                        CoroContext *ctx,
-                        TraceView trace)
+std::pair<Buffer, size_t> Parameters::read(const std::string &name,
+                                           CoroContext *ctx,
+                                           TraceView trace)
 {
     auto [it, inserted] = contexts_.try_emplace(name);
     CHECK(!inserted) << "** Failed to locate parameter with name " << name;
@@ -559,6 +564,8 @@ Buffer Parameters::read(const std::string &name,
     auto &lease = prepare_wlease(c, ctx, trace);
     auto rdma_buf = p_->get_rdma_buffer(c.size);
     DCHECK(lease.success());
+    DCHECK_NE(rdma_buf.buffer, nullptr);
+    DCHECK_GE(rdma_buf.size, c.size);
     p_->read(lease,
              rdma_buf.buffer,
              c.size,
@@ -567,7 +574,8 @@ Buffer Parameters::read(const std::string &name,
              ctx,
              trace)
         .expect(RC::kOk);
-    return rdma_buf;
+
+    return {std::move(rdma_buf), c.size};
 }
 
 void Parameters::alloc(const std::string &name,

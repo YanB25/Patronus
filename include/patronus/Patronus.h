@@ -47,6 +47,8 @@ struct PatronusConfig
     // see also @alloc_buffer_size
     std::vector<size_t> block_class{2_MB};
     std::vector<double> block_ratio{1};
+    mem::SlabAllocatorConfig client_rdma_buffer{
+        {config::patronus::kClientRdmaBufferSize, 8_B}, {0.95, 0.05}};
 
     size_t total_buffer_size() const
     {
@@ -100,10 +102,7 @@ struct PatronusThreadResourceDesc
         rdma_small_message_buffer_pool;
     char *client_rdma_buffer;
     size_t client_rdma_buffer_size;
-    std::unique_ptr<
-        ThreadUnsafeBufferPool<config::patronus::kClientRdmaBufferSize>>
-        rdma_client_buffer;
-    std::unique_ptr<ThreadUnsafeBufferPool<8>> rdma_client_buffer_8B;
+    mem::SlabAllocator::pointer rdma_client_buffer;
 };
 
 class pre_patronus_explain;
@@ -470,25 +469,6 @@ public:
                                           CoroContext *ctx);
     void post_handle_request_admin(AdminRequest *req, CoroContext *ctx);
 
-    [[nodiscard]] Buffer get_rdma_buffer_8B()
-    {
-        CHECK(!self_managing_client_rdma_buffer_);
-        auto *ret = (char *) rdma_client_buffer_8B_->get();
-        if (likely(ret != nullptr))
-        {
-            return Buffer(ret, 8);
-        }
-        return Buffer(nullptr, 0);
-    }
-    void put_rdma_buffer_8B(Buffer &&buffer)
-    {
-        if (buffer.buffer)
-        {
-            DCHECK_EQ(buffer.size, 8);
-            rdma_client_buffer_8B_->put(buffer.buffer);
-        }
-    }
-
     [[nodiscard]] Buffer get_self_managed_rdma_buffer()
     {
         CHECK(!self_managing_client_rdma_buffer_);
@@ -506,15 +486,10 @@ public:
     [[nodiscard]] Buffer get_rdma_buffer(size_t size)
     {
         CHECK(!self_managing_client_rdma_buffer_);
-        if (size <= 8)
-        {
-            return get_rdma_buffer_8B();
-        }
-        auto *buf = (char *) rdma_client_buffer_->get();
-        DCHECK_GE(kClientRdmaBufferSize, size);
+        auto *buf = (char *) rdma_client_buffer_->alloc(size);
         if (likely(buf != nullptr))
         {
-            return Buffer(buf, kClientRdmaBufferSize);
+            return Buffer(buf, size);
         }
         return Buffer(nullptr, 0);
     }
@@ -524,14 +499,7 @@ public:
         DCHECK_NE(buffer.size, 0);
         if (buffer.buffer)
         {
-            if (buffer.size <= 8)
-            {
-                put_rdma_buffer_8B(std::move(buffer));
-            }
-            else
-            {
-                rdma_client_buffer_->put(buffer.buffer);
-            }
+            rdma_client_buffer_->free(buffer.buffer);
         }
     }
 
@@ -1079,11 +1047,7 @@ private:
     // owned by client threads
     static thread_local ThreadUnsafePool<RpcContext, kMaxCoroNr> rpc_context_;
     static thread_local ThreadUnsafePool<RWContext, 2 * kMaxCoroNr> rw_context_;
-    static thread_local std::unique_ptr<
-        ThreadUnsafeBufferPool<kClientRdmaBufferSize>>
-        rdma_client_buffer_;
-    static thread_local std::unique_ptr<ThreadUnsafeBufferPool<8>>
-        rdma_client_buffer_8B_;
+    static thread_local mem::SlabAllocator::pointer rdma_client_buffer_;
     static thread_local char *client_rdma_buffer_;
     static thread_local size_t client_rdma_buffer_size_;
     static thread_local PatronusBatchContext one_shot_batch_ctx_;
@@ -1756,17 +1720,10 @@ inline std::ostream &operator<<(std::ostream &os,
     }
     if (p.rdma_client_buffer_)
     {
-        os << "rdma_client_buffer(thread): " << p.rdma_client_buffer_->size()
-           << " nr with size " << Patronus::kClientRdmaBufferSize << " B. at "
+        os << "rdma_client_buffer(thread): " << *p.rdma_client_buffer_
+           << " with size " << Patronus::kClientRdmaBufferSize << " B. at "
            << (void *) p.rdma_client_buffer_.get() << ". ";
     }
-    if (p.rdma_client_buffer_8B_)
-    {
-        os << "rdma_client_buffer_8B(thread): "
-           << p.rdma_client_buffer_8B_->size() << " nr with size 8 B. at "
-           << (void *) p.rdma_client_buffer_8B_.get() << ". ";
-    }
-
     os << "rpc_context(thread): " << p.rpc_context_.size() << " with "
        << sizeof(RpcContext) << " B. at " << (void *) &p.rpc_context_ << ". ";
     os << "rw_context(thread): " << p.rw_context_.size() << " with "

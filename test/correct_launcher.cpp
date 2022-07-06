@@ -153,7 +153,8 @@ RetCode worker_do(Parameters &parameters,
 
     // read, validate same
     {
-        auto buffer_read = parameters.read("addr", ctx, trace);
+        auto [buffer_read, _] = parameters.read("addr", ctx, trace);
+        std::ignore = _;
         uint64_t got = *(uint64_t *) buffer_read.buffer;
         CHECK_EQ(got, c->magic);
         parameters.put_rdma_buffer(std::move(buffer_read));
@@ -170,7 +171,8 @@ RetCode worker_do(Parameters &parameters,
 
     // debug: reread, make sure we really write it successfully
     {
-        auto buffer_read = parameters.read("addr", ctx, trace);
+        auto [buffer_read, _] = parameters.read("addr", ctx, trace);
+        std::ignore = _;
         auto got = *(uint64_t *) buffer_read.buffer;
         CHECK_EQ(got, c->magic);
         parameters.put_rdma_buffer(std::move(buffer_read));

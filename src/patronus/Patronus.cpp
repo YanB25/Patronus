@@ -22,11 +22,7 @@ thread_local std::unique_ptr<
     ThreadUnsafeBufferPool<Patronus::kSmallMessageSize>>
     Patronus::rdma_small_message_buffer_pool_;
 
-thread_local std::unique_ptr<
-    ThreadUnsafeBufferPool<Patronus::kClientRdmaBufferSize>>
-    Patronus::rdma_client_buffer_;
-thread_local std::unique_ptr<ThreadUnsafeBufferPool<8>>
-    Patronus::rdma_client_buffer_8B_;
+thread_local mem::SlabAllocator::pointer Patronus::rdma_client_buffer_;
 thread_local ThreadUnsafePool<RpcContext, Patronus::kMaxCoroNr>
     Patronus::rpc_context_;
 thread_local ThreadUnsafePool<RWContext, 2 * Patronus::kMaxCoroNr>
@@ -3010,7 +3006,6 @@ void Patronus::thread_explain() const
               << ", rdma_message_buffer_pool: "
               << rdma_message_buffer_pool_.get()
               << ", rdma_client_buffer: " << rdma_client_buffer_.get()
-              << ", rdma_client_buffer_8B: " << rdma_client_buffer_8B_.get()
               << ", rpc_context: " << (void *) &rpc_context_
               << ", rw_context: " << (void *) &rw_context_
               << ", lease_context: " << (void *) &lease_context_
@@ -3439,17 +3434,8 @@ PatronusThreadResourceDesc Patronus::prepare_client_thread(
     desc.client_rdma_buffer = client_rdma_buffer;
     desc.client_rdma_buffer_size = rdma_buffer_size;
 
-    auto rdma_buffer_size_8B = 8 * 1024;
-    CHECK_GE(rdma_buffer_size, rdma_buffer_size_8B);
-    auto rdma_buffer_size_non_8B = rdma_buffer_size - rdma_buffer_size_8B;
-    auto *client_rdma_buffer_8B = client_rdma_buffer;
-    auto *client_rdma_buffer_non_8B = client_rdma_buffer + rdma_buffer_size_8B;
-
-    desc.rdma_client_buffer_8B = std::make_unique<ThreadUnsafeBufferPool<8>>(
-        client_rdma_buffer_8B, rdma_buffer_size_8B);
-    desc.rdma_client_buffer =
-        std::make_unique<ThreadUnsafeBufferPool<kClientRdmaBufferSize>>(
-            client_rdma_buffer_non_8B, rdma_buffer_size_non_8B);
+    desc.rdma_client_buffer = mem::SlabAllocator::new_instance(
+        client_rdma_buffer, rdma_buffer_size, conf_.client_rdma_buffer);
     return desc;
 }
 
@@ -3469,7 +3455,6 @@ bool Patronus::apply_client_resource(PatronusThreadResourceDesc &&desc,
         std::move(desc.rdma_small_message_buffer_pool);
     client_rdma_buffer_ = desc.client_rdma_buffer;
     client_rdma_buffer_size_ = desc.client_rdma_buffer_size;
-    rdma_client_buffer_8B_ = std::move(desc.rdma_client_buffer_8B);
     rdma_client_buffer_ = std::move(desc.rdma_client_buffer);
 
     is_client_ = true;

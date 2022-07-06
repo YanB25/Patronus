@@ -156,7 +156,8 @@ RetCode worker_do(Parameters &parameters,
     else
     {
         CHECK(tail);
-        auto got_buffer = parameters.read("addr", ctx, trace);
+        auto [got_buffer, _] = parameters.read("addr", ctx, trace);
+        std::ignore = _;
         int64_t got = *(int64_t *) got_buffer.buffer;
         CHECK_EQ(got, c->magic + expect_faa_nr);
         parameters.put_rdma_buffer(std::move(got_buffer));

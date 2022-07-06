@@ -288,7 +288,7 @@ bool DSM::applyResource(const ThreadResourceDesc &desc, bool bind_core)
     {
         bindCore(thread_id_);
     }
-    LOG(INFO) << "[DSM] thread applying to: " << desc;
+    VLOG(SV) << "[DSM] thread applying to: " << desc;
 
     if (unlikely(thread_id_ == 0))
     {
