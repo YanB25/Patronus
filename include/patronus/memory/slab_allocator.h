@@ -280,8 +280,8 @@ public:
         if (it == blocks_.end())
         {
             // no such large block
-            DCHECK(false) << "[slab] no such large block. Requested: " << size
-                          << ". Class: " << pre_class_info(class_info_);
+            CHECK(false) << "[slab] no such large block. Requested: " << size
+                         << ". Class: " << pre_class_info(class_info_);
             return nullptr;
         }
         auto *ret = it->second->get();

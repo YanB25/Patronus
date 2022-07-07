@@ -168,20 +168,13 @@ void bench_alloc_thread_coro_worker(
                    &ctx)
             .expect(RC::kOk);
 
-        // char *buf = (char *) malloc(coro_comm.img_size);
-        // memcpy(buf, img_rdma_buf.buffer, coro_comm.img_size);
-        // LOG(ERROR) << "!!! buf: size: " << coro_comm.img_size << ", checksum:
-        // "
-        //            << (void *) util::djb2_digest(buf, coro_comm.img_size);
-        // Magick::Blob blob(buf, coro_comm.img_size);
+        auto image2 = *prv.image;
+        image2.zoom({image2.columns() / 10, image2.rows() / 10});
+        Magick::Blob dump_blob;
+        image2.write(&dump_blob);
 
-        // for (size_t i = 0; i < 10; ++i)
-        // {
-        // Magick::Image img(blob);
-        // LOG(INFO) << "img: " << img.fileSize();
-        // }
-
-        // free(buf);
+        LOG(INFO) << "image2 size: " << dump_blob.length()
+                  << ", image size: " << prv.image->fileSize();
 
         patronus->put_rdma_buffer(std::move(img_rdma_buf));
         patronus->relinquish(lease, 0 /* hint */, 0 /* flag */, &ctx);

@@ -145,7 +145,9 @@ RetCode worker_do(Parameters &parameters,
     {
         auto buffer = parameters.get_buffer(sizeof(uint64_t));
         memcpy(buffer.buffer, &(c->magic), sizeof(uint64_t));
-        parameters.write("addr", std::move(buffer), ctx, trace).expect(RC::kOk);
+        parameters
+            .write("addr", std::move(buffer), sizeof(uint64_t), ctx, trace)
+            .expect(RC::kOk);
     }
     else if (!tail)
     {

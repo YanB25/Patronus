@@ -31,7 +31,14 @@ using namespace util::pre;
 
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kTestTimePerThread = 5_K;
+constexpr static size_t kTestTimePerThread = 500;
+
+constexpr static size_t kExpectCompressedImgSize = 69922;
+
+[[maybe_unused]] constexpr static size_t V1 =
+    ::config::verbose::kBenchReserve_1;
+[[maybe_unused]] constexpr static size_t V2 =
+    ::config::verbose::kBenchReserve_2;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -104,29 +111,45 @@ struct ImageMeta
     size_t scaled_rows;
     size_t file_size;
 };
+inline std::ostream &operator<<(std::ostream &os, const ImageMeta &meta)
+{
+    os << "{ImageMeta columns: " << meta.columns << ", rows: " << meta.rows
+       << ", scaled_columns: " << meta.scaled_columns
+       << ", scaled_rows: " << meta.scaled_rows
+       << ", file_size: " << meta.file_size << "}";
+    return os;
+}
+
+void init_allocator(Patronus::pointer p,
+                    size_t dir_id,
+                    size_t thread_nr,
+                    size_t expect_size)
+{
+    auto rh_buffer = p->get_user_reserved_buffer();
+    auto thread_pool_size = rh_buffer.size / thread_nr;
+    void *thread_pool_addr = rh_buffer.buffer + dir_id * thread_pool_size;
+
+    mem::SlabAllocatorConfig slab_config;
+    slab_config.block_class = {expect_size};
+    slab_config.block_ratio = {1.0};
+    slab_config.enable_recycle = true;
+    auto allocator = mem::SlabAllocator::new_instance(
+        thread_pool_addr, thread_pool_size, slab_config);
+    p->reg_allocator(config::serverless::kAllocHint, allocator);
+}
 
 void register_lambdas(serverless::CoroLauncher &launcher,
                       GlobalAddress image_gaddr,
-                      size_t image_size)
+                      size_t image_size,
+                      Magick::Image image)
 {
-    auto extract_meta_data = [](Parameters &parameters,
-                                CoroContext *ctx,
-                                util::TraceView trace) -> RetCode {
+    auto extract_meta_data = [image](Parameters &parameters,
+                                     CoroContext *ctx,
+                                     util::TraceView trace) -> RetCode {
         auto [img_buffer, img_size] = parameters.read("img_data", ctx, trace);
-        LOG(INFO) << "Allocating size " << img_size;
         LOG_IF(WARNING, img_size >= 32_MB)
             << "** Too large. Is it really correct? got: " << img_size;
         DCHECK_GE(img_buffer.size, img_size);
-
-        auto *buf = malloc(img_size);
-        memcpy(buf, img_buffer.buffer, img_size);
-
-        LOG(ERROR) << "[debug] !! blob_size: " << img_size << ", checksum: "
-                   << (void *) util::djb2_digest(buf, img_size);
-
-        Magick::Blob blob(buf, img_size);
-        Magick::Image image(blob);
-        free(buf);
 
         auto img_meta_buffer = parameters.get_buffer(sizeof(ImageMeta));
         auto &img_meta = *(ImageMeta *) img_meta_buffer.buffer;
@@ -140,6 +163,7 @@ void register_lambdas(serverless::CoroLauncher &launcher,
                              sizeof(ImageMeta),
                              ctx,
                              trace);
+        DVLOG(V2) << "l1 img_meta: " << img_meta;
 
         parameters.put_rdma_buffer(std::move(img_buffer));
         trace.pin("done: extrace meta");
@@ -164,6 +188,8 @@ void register_lambdas(serverless::CoroLauncher &launcher,
                              sizeof(ImageMeta),
                              ctx,
                              trace);
+
+        DVLOG(V2) << "l2 img_meta: " << img_meta;
         trace.pin("done: transfer meta");
         return RC::kOk;
     };
@@ -176,29 +202,48 @@ void register_lambdas(serverless::CoroLauncher &launcher,
         DCHECK_GT(img_meta.file_size, 0);
         parameters.alloc("thumbnail", img_meta.file_size, ctx, trace);
 
+        DVLOG(V2) << "l3 allocated with size " << img_meta.file_size;
         trace.pin("done: handler");
         return RC::kOk;
     };
-    auto thumbnail = [](Parameters &parameters,
-                        CoroContext *ctx,
-                        util::TraceView trace) -> RetCode {
+    auto thumbnail = [image](Parameters &parameters,
+                             CoroContext *ctx,
+                             util::TraceView trace) mutable -> RetCode {
         auto [img_meta_buffer, img_meta_size] =
-            parameters.read("img_meta", ctx, trace);
+            parameters.get_param("img_meta", ctx, trace);
         const auto &img_meta = *(ImageMeta *) img_meta_buffer.buffer;
+
+        std::ignore = img_meta;
+        std::ignore = image;
 
         auto [img_buffer, img_size] = parameters.read("img_data", ctx, trace);
         DCHECK_GE(img_buffer.size, img_size);
-        Magick::Blob blob(img_buffer.buffer, img_size);
-        Magick::Image image(blob);
 
-        image.zoom({img_meta.scaled_columns, img_meta.scaled_rows});
-        image.write(&blob);
+        auto img2 = image;
+        trace.pin("img cpy");
+        CHECK_GT(img_meta.scaled_columns, 0);
+        CHECK_GT(img_meta.scaled_rows, 0);
+        DVLOG(V2) << "l4 zooming to " << img_meta.scaled_columns << ", "
+                  << img_meta.scaled_rows;
+        img2.zoom({img_meta.scaled_columns, img_meta.scaled_rows});
+        trace.pin("img zoom");
+        Magick::Blob blob;
+        img2.write(&blob);
+        trace.pin("img dump");
+
         auto img_write_buffer = parameters.get_buffer(blob.length());
         memcpy(img_write_buffer.buffer, blob.data(), blob.length());
-        parameters.write("thumbnail", std::move(img_write_buffer), ctx, trace)
+        parameters
+            .write("thumbnail",
+                   std::move(img_write_buffer),
+                   blob.length(),
+                   ctx,
+                   trace)
             .expect(RC::kOk);
 
         parameters.put_rdma_buffer(std::move(img_buffer));
+
+        DVLOG(V2) << "l4 write thumbnail with size: " << image.fileSize();
 
         trace.pin("done: thumbnail");
         return RC::kOk;
@@ -216,6 +261,7 @@ void register_lambdas(serverless::CoroLauncher &launcher,
                              sizeof(ImageMeta),
                              ctx,
                              trace);
+        DVLOG(V2) << "l5 response.";
         trace.pin("done: response");
         return RC::kOk;
     };
@@ -223,7 +269,6 @@ void register_lambdas(serverless::CoroLauncher &launcher,
     ParameterMap init_param;
     init_param["img_data"].gaddr = image_gaddr;
     init_param["img_data"].size = image_size;
-    LOG(INFO) << "[debug] !! it is " << init_param;
 
     auto extract_meta_id = launcher.add_lambda(extract_meta_data,
                                                init_param,
@@ -251,14 +296,13 @@ void register_lambdas(serverless::CoroLauncher &launcher,
                             thumbnail_id,
                             {thumbnail_id},
                             extract_meta_id);
-
-    launcher.launch();
 }
 
 void bench_alloc_thread_coro(
     Patronus::pointer patronus,
     GlobalAddress img_gaddr,
     size_t img_size,
+    Magick::Image image,
     [[maybe_unused]] OnePassBucketMonitor<uint64_t> &lat_m,
     [[maybe_unused]] bool is_master,
     std::atomic<ssize_t> &work_nr,
@@ -271,14 +315,20 @@ void bench_alloc_thread_coro(
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
 
-    serverless::CoroLauncher launcher(
-        patronus, server_nid, dir_id, serverless_config, test_times, work_nr);
+    {
+        serverless::CoroLauncher launcher(patronus,
+                                          server_nid,
+                                          dir_id,
+                                          serverless_config,
+                                          test_times,
+                                          work_nr);
 
-    LOG(INFO) << "img_gaddr: " << img_gaddr << ", size: " << img_size;
-    register_lambdas(launcher, img_gaddr, img_size);
+        // LOG(INFO) << "img_gaddr: " << img_gaddr << ", size: " << img_size
+        //           << ", serverless config: " << serverless_config;
+        register_lambdas(launcher, img_gaddr, img_size, image);
 
-    launcher.launch();
-
+        launcher.launch();
+    }
     return;
 }
 
@@ -286,6 +336,7 @@ void bench_template(const std::string &name,
                     Patronus::pointer patronus,
                     GlobalAddress img_gaddr,
                     size_t img_size,
+                    Magick::Image img_data,
                     boost::barrier &bar,
                     std::atomic<ssize_t> &work_nr,
                     bool is_master,
@@ -317,10 +368,11 @@ void bench_template(const std::string &name,
 
     if (tid < thread_nr)
     {
-        LOG(INFO) << "it is " << img_gaddr << ", " << img_size;
+        // LOG(INFO) << "it is " << img_gaddr << ", " << img_size;
         bench_alloc_thread_coro(patronus,
                                 img_gaddr,
                                 img_size,
+                                img_data,
                                 lat_m,
                                 is_master,
                                 work_nr,
@@ -348,25 +400,38 @@ void init_meta(Patronus::pointer patronus)
 
     patronus->put("serverless:img_gaddr", blob_gaddr, 0ns);
     patronus->put("serverless:img_size", blob_size, 0ns);
+    auto img_blob = std::string((const char *) blob.data(), blob.length());
+    patronus->put("serverless:img_blob", img_blob, 1ms);
     LOG(INFO) << "Puting to serverless:meta_gaddr: " << blob_gaddr
-              << ", size: " << blob_size;
+              << ", size: " << blob_size << ", blob checksum: "
+              << util::djb2_digest(img_blob.data(), img_blob.length());
 }
-
 void run_benchmark_server(Patronus::pointer patronus,
                           const BenchConfig &conf,
                           bool is_master,
+                          boost::barrier &bar,
                           uint64_t key)
 {
+    auto tid = patronus->get_thread_id();
+    auto dir_id = tid;
     std::ignore = conf;
 
     init_meta(patronus);
+
+    // Make sure kExpectCompressedImgSize large enough
+    init_allocator(patronus, dir_id, kServerThreadNr, kExpectCompressedImgSize);
 
     if (is_master)
     {
         patronus->finished(key);
     }
 
-    auto tid = patronus->get_thread_id();
+    bar.wait();
+    if (is_master)
+    {
+        patronus->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
+    }
+
     LOG(INFO) << "[coro] server thread tid " << tid;
 
     LOG(INFO) << "[bench] BENCH: " << conf.name
@@ -379,6 +444,7 @@ std::atomic<ssize_t> shared_task_nr;
 
 GlobalAddress g_img_gaddr;
 uint64_t g_img_size;
+Magick::Image g_img_data;
 void run_benchmark_client(Patronus::pointer patronus,
                           const serverless::Config &serverless_config,
                           const BenchConfig &conf,
@@ -393,16 +459,24 @@ void run_benchmark_client(Patronus::pointer patronus,
             patronus->get_object<GlobalAddress>("serverless:img_gaddr", 100ms);
         g_img_size =
             patronus->get_object<uint64_t>("serverless:img_size", 100ms);
+        auto img_data = patronus->get("serverless:img_blob", 100ms);
+        Magick::Blob blob(img_data.data(), img_data.size());
+        g_img_data.read(blob);
         LOG(INFO) << "Getting serverless:img_gaddr " << g_img_gaddr
-                  << ", serverless:img_size: " << g_img_size;
+                  << ", serverless:img_size: " << g_img_size << ", checksum: "
+                  << util::djb2_digest(img_data.data(), img_data.length());
+
+        patronus->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
     }
+
     bar.wait();
 
-    LOG(INFO) << "It is " << g_img_gaddr << ", " << g_img_size;
+    // LOG(INFO) << "It is " << g_img_gaddr << ", " << g_img_size;
     bench_template(conf.name,
                    patronus,
                    g_img_gaddr,
                    g_img_size,
+                   g_img_data,
                    bar,
                    shared_task_nr,
                    is_master,
@@ -434,7 +508,7 @@ void run_benchmark(Patronus::pointer patronus,
         }
         else
         {
-            run_benchmark_server(patronus, conf, is_master, key);
+            run_benchmark_server(patronus, conf, is_master, bar, key);
         }
         if (is_master)
         {
@@ -457,8 +531,8 @@ void benchmark(Patronus::pointer patronus,
     serverless_configs.emplace_back(
         serverless::Config::get_mw("mw[nested]", false));
 
-    // for (size_t thread_nr : {32})
-    for (size_t thread_nr : {1})
+    for (size_t thread_nr : {32})
+    // for (size_t thread_nr : {1})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t coro_nr : {2, 4, 8, 16, 32})
@@ -469,7 +543,7 @@ void benchmark(Patronus::pointer patronus,
             for (const auto &serverless_config : serverless_configs)
             {
                 auto configs = BenchConfigFactory::get_basic(
-                    "diamond", thread_nr, coro_nr, total_test_times);
+                    "img", thread_nr, coro_nr, total_test_times);
                 LOG_IF(INFO, is_master) << "[config] " << serverless_config;
                 run_benchmark(patronus,
                               serverless_config,
@@ -494,6 +568,9 @@ int main(int argc, char *argv[])
     config.machine_nr = ::config::kMachineNr;
     config.block_class = {2_MB};
     config.block_ratio = {1};
+    config.reserved_buffer_size = 1_GB;
+    config.lease_buffer_size = (kDSMCacheSize - 1_GB) / 2;
+    config.alloc_buffer_size = (kDSMCacheSize - 1_GB) / 2;
     config.client_rdma_buffer.block_class = {70_KB, 8_KB, 8_B};
     config.client_rdma_buffer.block_ratio = {0.1, 1 - 0.1 - 0.001, 0.001};
 

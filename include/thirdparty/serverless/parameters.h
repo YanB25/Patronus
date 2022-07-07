@@ -8,7 +8,7 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "./config.h"
+#include "./conf.h"
 #include "patronus/All.h"
 #include "patronus/Lease.h"
 #include "util/Tracer.h"
@@ -121,7 +121,8 @@ public:
     {
         auto ret = p_->get_rdma_buffer(size);
         DCHECK_NE(size, 0);
-        DCHECK_GE(ret.size, 0) << "** Possible run out of buffer. got: " << ret;
+        DCHECK_GE(ret.size, size)
+            << "** Possible run out of buffer. got: " << ret;
         return ret;
     }
     void put_rdma_buffer(Buffer &&rdma_buf)
@@ -166,12 +167,14 @@ public:
                TraceView trace = util::nulltrace);
     [[nodiscard]] RetCode write(const std::string &name,
                                 Buffer &&rdma_buf,
+                                size_t actual_size,
                                 CoroContext *ctx,
                                 TraceView trace = util::nulltrace)
     {
         auto [it, inserted] = contexts_.try_emplace(name);
         CHECK(!inserted) << "** Failed to locate parameter with name " << name;
-        return do_write(it->second, std::move(rdma_buf), ctx, trace);
+        return do_write(
+            it->second, std::move(rdma_buf), actual_size, ctx, trace);
     }
     [[nodiscard]] RetCode cas(const std::string &,
                               uint64_t compare,
@@ -196,8 +199,7 @@ public:
                 std::ignore = name;
                 if (c.cached_data.has_value())
                 {
-                    p_->put_rdma_message_buffer(
-                        std::move(c.cached_data.value()));
+                    put_rdma_buffer(std::move(c.cached_data.value()));
                     c.cached_data = std::nullopt;
                 }
                 auto cid = DCHECK_NOTNULL(ctx)->coro_id();
@@ -262,6 +264,7 @@ private:
             lease = do_acquire_lease(c.gaddr, c.size, ctx, trace);
             DCHECK(lease.success());
         }
+        trace.pin("prepare lease done");
         return lease;
     }
 
@@ -272,6 +275,7 @@ private:
                       TraceView = util::nulltrace);
     [[nodiscard]] RetCode do_write(ParameterContext &,
                                    Buffer &&rdma_buf,
+                                   size_t actual_size,
                                    CoroContext *ctx,
                                    TraceView = util::nulltrace);
     [[nodiscard]] RetCode do_allocate_param(ParameterContext &param,
@@ -293,13 +297,14 @@ private:
         param.cached_data = std::move(rdma_buf);
         trace.pin("allocate param");
 
-        return p_->write(lease,
-                         param.cached_data.value().buffer,
-                         actual_size,
-                         0 /* offset */,
-                         0 /* flag */,
-                         ctx,
-                         trace);
+        auto rc = p_->write(lease,
+                            param.cached_data.value().buffer,
+                            actual_size,
+                            0 /* offset */,
+                            0 /* flag */,
+                            ctx,
+                            trace);
+        return rc;
     }
 
     [[nodiscard]] RetCode do_overwrite_param(ParameterContext &param,
@@ -367,6 +372,7 @@ private:
         if (likely(param.cached_data.has_value()))
         {
             DCHECK_GE(param.cached_data.value().size, param.size);
+            trace.pin("do get data");
             return {param.cached_data.value(), param.size};
         }
         DCHECK_GT(size, 0);
@@ -391,7 +397,7 @@ private:
             param.gaddr = gaddr;
         }
         DCHECK(!param.cached_data.has_value());
-        param.cached_data = p_->get_rdma_buffer(size);
+        param.cached_data = get_buffer(size);
         DCHECK_GE(param.cached_data.value().size, size);
         DCHECK_NE(param.cached_data.value().buffer, nullptr);
         DCHECK_EQ(param.gaddr, gaddr)
@@ -518,6 +524,7 @@ void Parameters::do_set_param(ParameterContext &c,
         c.cached_data = std::nullopt;
     }
     c.cached_data = std::move(rdma_buf);
+    c.size = actual_size;
     // if using step_lambda, we optimize how parameters are passing
     // otherwise, passing parameters require RM
     if (!config_.use_step_lambda)
@@ -562,7 +569,7 @@ std::pair<Buffer, size_t> Parameters::read(const std::string &name,
     CHECK(!inserted) << "** Failed to locate parameter with name " << name;
     auto &c = it->second;
     auto &lease = prepare_wlease(c, ctx, trace);
-    auto rdma_buf = p_->get_rdma_buffer(c.size);
+    auto rdma_buf = get_buffer(c.size);
     DCHECK(lease.success());
     DCHECK_NE(rdma_buf.buffer, nullptr);
     DCHECK_GE(rdma_buf.size, c.size);
@@ -596,16 +603,18 @@ void Parameters::alloc(const std::string &name,
 
 RetCode Parameters::do_write(ParameterContext &c,
                              Buffer &&rdma_buf,
+                             size_t actual_size,
                              CoroContext *ctx,
                              TraceView trace)
 {
     auto &lease = prepare_wlease(c, ctx, trace);
 
     // dont pollute cache
-    DCHECK_GE(rdma_buf.size, c.size);
+    DCHECK_LE(actual_size, c.size) << "** Actual size exceeding c.size";
+    DCHECK_GE(rdma_buf.size, actual_size);
     auto rc = p_->write(lease,
                         rdma_buf.buffer,
-                        c.size,
+                        actual_size,
                         0 /* offset */,
                         0 /* flag */,
                         ctx,

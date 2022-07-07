@@ -5,6 +5,7 @@
 #include "DSM.h"
 #include "gflags/gflags.h"
 #include "patronus/Patronus.h"
+// #include "util/ezprint.h"
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -14,10 +15,22 @@ struct Test
     char buffer[];
 };
 
+struct Test2
+{
+    size_t age;
+    std::string name;
+};
+
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+    Test2 test;
+    test.age = 10;
+    test.name = "yb";
+    // LOG(INFO) << "It is " << util::pre_ez(test);
+    // ez::print(test);
 
     // DSMConfig config;
     // config.machineNR = ::config::kMachineNr;
@@ -40,9 +53,9 @@ int main(int argc, char *argv[])
         m["c"] = "d";
         m["e"] = "f";
         m["g"] = "h";
-        LOG(INFO) << util::pre_umap(m, 2);
-        LOG(INFO) << util::pre_umap(m);
-        LOG(INFO) << m;
+        // LOG(INFO) << util::pre_umap(m, 2);
+        // LOG(INFO) << util::pre_umap(m);
+        // LOG(INFO) << m;
     }
     {
         std::map<std::string, std::string> m;
@@ -50,9 +63,9 @@ int main(int argc, char *argv[])
         m["c"] = "d";
         m["e"] = "f";
         m["g"] = "h";
-        LOG(INFO) << util::pre_map(m, 2);
-        LOG(INFO) << util::pre_map(m);
-        LOG(INFO) << m;
+        // LOG(INFO) << util::pre_map(m, 2);
+        // LOG(INFO) << util::pre_map(m);
+        // LOG(INFO) << m;
     }
     {
         std::vector<std::string> v;
@@ -60,14 +73,14 @@ int main(int argc, char *argv[])
         v.push_back("b");
         v.push_back("c");
         v.push_back("d");
-        LOG(INFO) << util::pre_iter(v, 2);
-        LOG(INFO) << util::pre_iter(v);
-        LOG(INFO) << v;
+        // LOG(INFO) << util::pre_iter(v, 2);
+        // LOG(INFO) << util::pre_iter(v);
+        // LOG(INFO) << v;
     }
     {
         std::pair<std::string, std::string> p("abc", "def");
-        LOG(INFO) << util::pre_pair(p);
-        LOG(INFO) << p;
+        // LOG(INFO) << util::pre_pair(p);
+        // LOG(INFO) << p;
     }
 
     return 0;

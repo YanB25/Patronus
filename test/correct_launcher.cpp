@@ -134,7 +134,9 @@ RetCode worker_do(Parameters &parameters,
         auto magic = fast_pseudo_rand_int();
         auto buffer = parameters.get_buffer(sizeof(uint64_t));
         memcpy(buffer.buffer, &magic, sizeof(uint64_t));
-        parameters.write("addr", std::move(buffer), ctx, trace).expect(RC::kOk);
+        parameters
+            .write("addr", std::move(buffer), sizeof(uint64_t), ctx, trace)
+            .expect(RC::kOk);
         trace.pin("init magic");
         CHECK_EQ(parameters.prv(), nullptr)
             << "** parameters at " << (void *) &parameters << " with prv "
@@ -165,7 +167,9 @@ RetCode worker_do(Parameters &parameters,
         auto buffer_write = parameters.get_buffer(sizeof(uint64_t));
         c->magic = c->magic + 1;
         memcpy(buffer_write.buffer, &(c->magic), sizeof(uint64_t));
-        parameters.write("addr", std::move(buffer_write), ctx, trace)
+        parameters
+            .write(
+                "addr", std::move(buffer_write), sizeof(uint64_t), ctx, trace)
             .expect(RC::kOk);
     }
 
