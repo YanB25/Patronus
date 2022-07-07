@@ -1964,7 +1964,7 @@ RetCode Patronus::rpc_read(Lease &lease,
                            TraceView trace)
 {
     bool auto_pack = flag & (flag_t) RWFlag::kUseTwoSidedAutoPacking;
-    for (size_t i = 0; i < size; i += MemoryResponse::buffer_capacity())
+    for (size_t i = 0; i < size; i += MemoryMessagePayload())
     {
         if (unlikely(i > 0))
         {
@@ -1973,8 +1973,7 @@ RetCode Patronus::rpc_read(Lease &lease,
         }
 
         char *cur_obuf = obuf + i;
-        size_t cur_size =
-            std::min((size - i), MemoryResponse::buffer_capacity());
+        size_t cur_size = std::min((size - i), MemoryMessagePayload());
         size_t cur_offset = offset + i;
         uint64_t cur_remote_addr = lease.base_addr_ + cur_offset;
         CHECK_LE(cur_offset, lease.buffer_size_);
@@ -2002,12 +2001,11 @@ RetCode Patronus::rpc_write(Lease &lease,
                             CoroContext *ctx,
                             TraceView trace)
 {
-    bool auto_pack = flag & (flag_t) RWFlag::kWithAutoExtend;
-    for (size_t i = 0; i < size; i += MemoryRequest::buffer_capacity())
+    bool auto_pack = flag & (flag_t) RWFlag::kUseTwoSidedAutoPacking;
+    for (size_t i = 0; i < size; i += MemoryMessagePayload())
     {
         const char *cur_ibuf = ibuf + i;
-        size_t cur_size =
-            std::min((size - i), MemoryRequest::buffer_capacity());
+        size_t cur_size = std::min((size - i), MemoryMessagePayload());
         size_t cur_offset = offset + i;
         uint64_t cur_remote_addr = lease.base_addr_ + cur_offset;
         CHECK_LE(cur_offset, lease.buffer_size_);
@@ -2026,7 +2024,8 @@ RetCode Patronus::rpc_write(Lease &lease,
         if (unlikely(i > 0))
         {
             CHECK(auto_pack)
-                << "** size overflow for " << size << " without auto_pack on.";
+                << "** size overflow for " << size
+                << " without auto_pack on. flag: " << RWFlagOut(flag);
         }
     }
     return RC::kOk;

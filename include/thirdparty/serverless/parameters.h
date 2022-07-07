@@ -75,6 +75,8 @@ class Parameters
     using LeaseModifyFlag = patronus::LeaseModifyFlag;
     using TraceView = util::TraceView;
     using Lease = patronus::Lease;
+    using flag_t = patronus::flag_t;
+    using RWFlag = patronus::RWFlag;
 
 public:
     using pointer = std::shared_ptr<Parameters>;
@@ -128,6 +130,22 @@ public:
     void put_rdma_buffer(Buffer &&rdma_buf)
     {
         p_->put_rdma_buffer(std::move(rdma_buf));
+    }
+    flag_t get_rw_flag() const
+    {
+        if (config_.bypass_prot)
+        {
+            return (flag_t) RWFlag::kUseUniversalRkey;
+        }
+        else if (config_.use_rpc)
+        {
+            return (flag_t) RWFlag::kUseTwoSided |
+                   (flag_t) RWFlag::kUseTwoSidedAutoPacking;
+        }
+        else
+        {
+            return 0;
+        }
     }
 
     /**
@@ -301,7 +319,7 @@ private:
                             param.cached_data.value().buffer,
                             actual_size,
                             0 /* offset */,
-                            0 /* flag */,
+                            get_rw_flag(),
                             ctx,
                             trace);
         return rc;
@@ -334,7 +352,7 @@ private:
                             param.cached_data.value().buffer,
                             actual_size,
                             0 /* offset */,
-                            0 /* flag */,
+                            get_rw_flag(),
                             ctx);
         trace.pin("write");
         return rc;
@@ -407,7 +425,7 @@ private:
                  param.cached_data.value().buffer,
                  size,
                  0 /* 0ffset */,
-                 0 /* rw flag */,
+                 get_rw_flag(),
                  ctx)
             .expect(RC::kOk);
         trace.pin("read");
@@ -546,7 +564,7 @@ void Parameters::do_set_param(ParameterContext &c,
                   c.cached_data.value().buffer,
                   actual_size,
                   0 /* offset */,
-                  0 /* flag */,
+                  get_rw_flag(),
                   ctx,
                   trace)
             .expect(RC::kOk);
@@ -577,7 +595,7 @@ std::pair<Buffer, size_t> Parameters::read(const std::string &name,
              rdma_buf.buffer,
              c.size,
              0 /* offset */,
-             0 /* flag */,
+             get_rw_flag(),
              ctx,
              trace)
         .expect(RC::kOk);
@@ -616,7 +634,7 @@ RetCode Parameters::do_write(ParameterContext &c,
                         rdma_buf.buffer,
                         actual_size,
                         0 /* offset */,
-                        0 /* flag */,
+                        get_rw_flag(),
                         ctx,
                         trace);
     p_->put_rdma_buffer(std::move(rdma_buf));
@@ -641,7 +659,7 @@ RetCode Parameters::cas(const std::string &name,
                       0 /* offset */,
                       compare,
                       swap,
-                      0 /* flag */,
+                      get_rw_flag(),
                       ctx,
                       trace);
     p_->put_rdma_buffer(std::move(rdma_buf));
@@ -663,7 +681,7 @@ RetCode Parameters::faa(const std::string &name,
                       rdma_buf.buffer,
                       0 /* offset */,
                       value,
-                      0 /* flag */,
+                      get_rw_flag(),
                       ctx,
                       trace);
     return rc;

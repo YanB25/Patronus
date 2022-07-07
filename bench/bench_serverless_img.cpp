@@ -31,7 +31,7 @@ using namespace util::pre;
 
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kTestTimePerThread = 500;
+constexpr static size_t kTestTimePerThread = 20_K;
 
 constexpr static size_t kExpectCompressedImgSize = 69922;
 
@@ -39,6 +39,15 @@ constexpr static size_t kExpectCompressedImgSize = 69922;
     ::config::verbose::kBenchReserve_1;
 [[maybe_unused]] constexpr static size_t V2 =
     ::config::verbose::kBenchReserve_2;
+
+std::vector<std::string> col_idx;
+std::vector<size_t> col_x_thread_nr;
+std::vector<size_t> col_x_coro_nr;
+std::vector<size_t> col_test_op_nr;
+std::vector<size_t> col_ns;
+
+std::vector<std::string> col_lat_idx;
+std::map<std::string, std::vector<uint64_t>> lat_data;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -51,6 +60,11 @@ struct BenchConfig
     size_t task_nr;
     std::string name;
     bool report;
+
+    bool should_report_lat() const
+    {
+        return thread_nr == kMaxAppThread && coro_nr == 1;
+    }
 
     static BenchConfig get_empty_conf(const std::string &name,
                                       size_t thread_nr,
@@ -219,16 +233,15 @@ void register_lambdas(serverless::CoroLauncher &launcher,
         auto [img_buffer, img_size] = parameters.read("img_data", ctx, trace);
         DCHECK_GE(img_buffer.size, img_size);
 
-        auto img2 = image;
         trace.pin("img cpy");
         CHECK_GT(img_meta.scaled_columns, 0);
         CHECK_GT(img_meta.scaled_rows, 0);
         DVLOG(V2) << "l4 zooming to " << img_meta.scaled_columns << ", "
                   << img_meta.scaled_rows;
-        img2.zoom({img_meta.scaled_columns, img_meta.scaled_rows});
+        image.zoom({img_meta.scaled_columns, img_meta.scaled_rows});
         trace.pin("img zoom");
         Magick::Blob blob;
-        img2.write(&blob);
+        image.write(&blob);
         trace.pin("img dump");
 
         auto img_write_buffer = parameters.get_buffer(blob.length());
@@ -298,8 +311,45 @@ void register_lambdas(serverless::CoroLauncher &launcher,
                             extract_meta_id);
 }
 
+void reg_result(const std::string &name,
+                const BenchConfig &bench_conf,
+                uint64_t ns)
+{
+    col_idx.push_back(name);
+    col_x_thread_nr.push_back(bench_conf.thread_nr);
+    col_x_coro_nr.push_back(bench_conf.coro_nr);
+    col_test_op_nr.push_back(bench_conf.task_nr);
+    col_ns.push_back(ns);
+}
+
+void reg_lat_result(const std::string &name,
+                    const OnePassBucketMonitor<uint64_t> &lat_m,
+                    [[maybe_unused]] const BenchConfig &bench_conf)
+{
+    if (col_lat_idx.empty())
+    {
+        col_lat_idx.push_back("lat_min(avg)");
+        col_lat_idx.push_back("lat_p5(avg)");
+        col_lat_idx.push_back("lat_p9(avg)");
+        col_lat_idx.push_back("lat_p99(avg)");
+    }
+    if (likely(lat_data[name].empty()))
+    {
+        lat_data[name].push_back(lat_m.min());
+        lat_data[name].push_back(lat_m.percentile(0.5));
+        lat_data[name].push_back(lat_m.percentile(0.9));
+        lat_data[name].push_back(lat_m.percentile(0.99));
+    }
+    else
+    {
+        LOG(WARNING) << "** Recording latency for `" << name
+                     << "` duplicated. Skip.";
+    }
+}
+
 void bench_alloc_thread_coro(
     Patronus::pointer patronus,
+    boost::barrier &bar,
     GlobalAddress img_gaddr,
     size_t img_size,
     Magick::Image image,
@@ -314,21 +364,41 @@ void bench_alloc_thread_coro(
     auto server_nid = ::config::get_server_nids().front();
     auto tid = patronus->get_thread_id();
     auto dir_id = tid % kServerThreadNr;
+    size_t thread_nr = conf.thread_nr;
 
+    std::unique_ptr<serverless::CoroLauncher> launcher;
+    if (tid < thread_nr)
     {
-        serverless::CoroLauncher launcher(patronus,
-                                          server_nid,
-                                          dir_id,
-                                          serverless_config,
-                                          test_times,
-                                          work_nr);
-
-        // LOG(INFO) << "img_gaddr: " << img_gaddr << ", size: " << img_size
-        //           << ", serverless config: " << serverless_config;
-        register_lambdas(launcher, img_gaddr, img_size, image);
-
-        launcher.launch();
+        launcher = std::make_unique<serverless::CoroLauncher>(patronus,
+                                                              server_nid,
+                                                              dir_id,
+                                                              serverless_config,
+                                                              test_times,
+                                                              work_nr,
+                                                              0);
+        // 20 * 1.0 / kTestTimePerThread);
+        register_lambdas(*launcher, img_gaddr, img_size, image);
     }
+
+    bar.wait();
+    ChronoTimer timer;
+    if (launcher)
+    {
+        launcher->launch();
+    }
+    bar.wait();
+    auto ns = timer.pin();
+
+    if (is_master)
+    {
+        auto report_name = conf.name + "-" + serverless_config.name;
+        reg_result(report_name, conf, ns);
+        if (conf.should_report_lat())
+        {
+            reg_lat_result(report_name, lat_m, conf);
+        }
+    }
+
     return;
 }
 
@@ -359,26 +429,23 @@ void bench_template(const std::string &name,
     bar.wait();
     ChronoTimer timer;
 
-    auto tid = patronus->get_thread_id();
+    // auto tid = patronus->get_thread_id();
 
     auto min = util::time::to_ns(0ns);
     auto max = util::time::to_ns(10ms);
     auto range = util::time::to_ns(1us);
     OnePassBucketMonitor lat_m(min, max, range);
 
-    if (tid < thread_nr)
-    {
-        // LOG(INFO) << "it is " << img_gaddr << ", " << img_size;
-        bench_alloc_thread_coro(patronus,
-                                img_gaddr,
-                                img_size,
-                                img_data,
-                                lat_m,
-                                is_master,
-                                work_nr,
-                                serverless_config,
-                                conf);
-    }
+    bench_alloc_thread_coro(patronus,
+                            bar,
+                            img_gaddr,
+                            img_size,
+                            img_data,
+                            lat_m,
+                            is_master,
+                            work_nr,
+                            serverless_config,
+                            conf);
 
     bar.wait();
 }
@@ -527,23 +594,40 @@ void benchmark(Patronus::pointer patronus,
 
     std::vector<serverless::Config> serverless_configs;
     serverless_configs.emplace_back(
+        serverless::Config::get_unprot("unprot[step]", true));
+    serverless_configs.emplace_back(
+        serverless::Config::get_unprot("unprot[nested]", false));
+    serverless_configs.emplace_back(
         serverless::Config::get_mw("mw[step]", true));
     serverless_configs.emplace_back(
         serverless::Config::get_mw("mw[nested]", false));
+    // serverless_configs.emplace_back(
+    //     serverless::Config::get_mr("mr[step]", true));
+    // serverless_configs.emplace_back(
+    //     serverless::Config::get_mr("mr[nested]", false));
+    // serverless_configs.emplace_back(
+    //     serverless::Config::get_rpc("rpc[step]", true));
+    // serverless_configs.emplace_back(
+    //     serverless::Config::get_rpc("rpc[nested]", false));
 
-    for (size_t thread_nr : {32})
+    for (size_t thread_nr : {1, 4, 8, 32})
+    // for (size_t thread_nr : {32})
     // for (size_t thread_nr : {1})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t coro_nr : {2, 4, 8, 16, 32})
         // for (size_t coro_nr : {1, 32})
+        // for (size_t coro_nr : {32})
         for (size_t coro_nr : {32})
         {
             auto total_test_times = kTestTimePerThread * 4;
             for (const auto &serverless_config : serverless_configs)
             {
                 auto configs = BenchConfigFactory::get_basic(
-                    "img", thread_nr, coro_nr, total_test_times);
+                    "img",
+                    thread_nr,
+                    coro_nr,
+                    total_test_times * serverless_config.scale_factor);
                 LOG_IF(INFO, is_master) << "[config] " << serverless_config;
                 run_benchmark(patronus,
                               serverless_config,
@@ -628,6 +712,69 @@ int main(int argc, char *argv[])
         {
             t.join();
         }
+    }
+
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_idx));
+        df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
+        df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
+        df.load_column<size_t>("test_nr(total)", std::move(col_test_op_nr));
+        df.load_column<size_t>("test_ns(total)", std::move(col_ns));
+
+        auto div_f = gen_F_div<size_t, size_t, double>();
+        auto div_f2 = gen_F_div<double, size_t, double>();
+        auto ops_f = gen_F_ops<size_t, size_t, double>();
+        auto mul_f = gen_F_mul<double, size_t, double>();
+        auto mul_f2 = gen_F_mul<size_t, size_t, size_t>();
+        df.consolidate<size_t, size_t, size_t>(
+            "x_thread_nr", "x_coro_nr", "client_nr(effective)", mul_f2, false);
+        df.consolidate<size_t, size_t, size_t>("test_ns(total)",
+                                               "client_nr(effective)",
+                                               "test_ns(effective)",
+                                               mul_f2,
+                                               false);
+        df.consolidate<size_t, size_t, double>(
+            "test_ns(total)", "test_nr(total)", "lat(div)", div_f, false);
+        df.consolidate<size_t, size_t, double>(
+            "test_ns(effective)", "test_nr(total)", "lat(avg)", div_f, false);
+        df.consolidate<size_t, size_t, double>(
+            "test_nr(total)", "test_ns(total)", "ops(total)", ops_f, false);
+
+        auto client_nr = ::config::get_client_nids().size();
+        auto replace_mul_f = gen_replace_F_mul<double>(client_nr);
+        df.load_column<double>("ops(cluster)",
+                               df.get_column<double>("ops(total)"));
+        df.replace<double>("ops(cluster)", replace_mul_f);
+
+        df.consolidate<double, size_t, double>(
+            "ops(total)", "x_thread_nr", "ops(thread)", div_f2, false);
+        df.consolidate<double, size_t, double>(
+            "ops(thread)", "x_coro_nr", "ops(coro)", div_f2, false);
+
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
+    }
+
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_lat_idx));
+        for (auto &[name, vec] : lat_data)
+        {
+            df.load_column<uint64_t>(name.c_str(), std::move(vec));
+        }
+
+        std::map<std::string, std::string> info;
+        info.emplace("kind", "lat");
+
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
     }
 
     patronus->keeper_barrier("finished", 100ms);
