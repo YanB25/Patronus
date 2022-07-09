@@ -31,7 +31,7 @@ using namespace util::pre;
 
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kTestTimePerThread = 20_K;
+constexpr static size_t kTestTimePerThread = 5_K;
 
 constexpr static size_t kExpectCompressedImgSize = 69922;
 
@@ -153,6 +153,7 @@ void init_allocator(Patronus::pointer p,
 }
 
 void register_lambdas(serverless::CoroLauncher &launcher,
+                      size_t coro_nr,
                       GlobalAddress image_gaddr,
                       size_t image_size,
                       Magick::Image image)
@@ -283,32 +284,38 @@ void register_lambdas(serverless::CoroLauncher &launcher,
     init_param["img_data"].gaddr = image_gaddr;
     init_param["img_data"].size = image_size;
 
-    auto extract_meta_id = launcher.add_lambda(extract_meta_data,
-                                               init_param,
-                                               {} /* recv from */,
-                                               {} /* depend on */,
-                                               {} /* reloop to */);
-    auto transfer_meta_id = launcher.add_lambda(transfer_meta,
+    size_t lambda_nr = 0;
+    constexpr static size_t kLambdaNrPerChain = 5;
+    while (lambda_nr + kLambdaNrPerChain <= coro_nr)
+    {
+        auto extract_meta_id = launcher.add_lambda(extract_meta_data,
+                                                   init_param,
+                                                   {} /* recv from */,
+                                                   {} /* depend on */,
+                                                   {} /* reloop to */);
+        auto transfer_meta_id = launcher.add_lambda(transfer_meta,
+                                                    {} /* init param */,
+                                                    extract_meta_id,
+                                                    {extract_meta_id},
+                                                    {} /* reloop */);
+        auto handler_id = launcher.add_lambda(handler,
+                                              {} /* init param */,
+                                              transfer_meta_id,
+                                              {transfer_meta_id},
+                                              {} /* reloop */);
+        auto thumbnail_id = launcher.add_lambda(thumbnail,
                                                 {} /* init param */,
-                                                extract_meta_id,
-                                                {extract_meta_id},
+                                                handler_id,
+                                                {handler_id},
                                                 {} /* reloop */);
-    auto handler_id = launcher.add_lambda(handler,
-                                          {} /* init param */,
-                                          transfer_meta_id,
-                                          {transfer_meta_id},
-                                          {} /* reloop */);
-    auto thumbnail_id = launcher.add_lambda(thumbnail,
-                                            {} /* init param */,
-                                            handler_id,
-                                            {handler_id},
-                                            {} /* reloop */);
-    [[maybe_unused]] auto response_meta_id =
-        launcher.add_lambda(response_meta,
-                            {} /* init param */,
-                            thumbnail_id,
-                            {thumbnail_id},
-                            extract_meta_id);
+        [[maybe_unused]] auto response_meta_id =
+            launcher.add_lambda(response_meta,
+                                {} /* init param */,
+                                thumbnail_id,
+                                {thumbnail_id},
+                                extract_meta_id);
+        lambda_nr += kLambdaNrPerChain;
+    }
 }
 
 void reg_result(const std::string &name,
@@ -377,7 +384,7 @@ void bench_alloc_thread_coro(
                                                               work_nr,
                                                               0);
         // 20 * 1.0 / kTestTimePerThread);
-        register_lambdas(*launcher, img_gaddr, img_size, image);
+        register_lambdas(*launcher, conf.coro_nr, img_gaddr, img_size, image);
     }
 
     bar.wait();
@@ -612,15 +619,14 @@ void benchmark(Patronus::pointer patronus,
 
     for (size_t thread_nr : {1, 4, 8, 32})
     // for (size_t thread_nr : {32})
-    // for (size_t thread_nr : {1})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t coro_nr : {2, 4, 8, 16, 32})
         // for (size_t coro_nr : {1, 32})
-        // for (size_t coro_nr : {32})
-        for (size_t coro_nr : {32})
+        for (size_t coro_nr : {5})
         {
-            auto total_test_times = kTestTimePerThread * 4;
+            auto total_test_times =
+                kTestTimePerThread * std::min(size_t(4), thread_nr);
             for (const auto &serverless_config : serverless_configs)
             {
                 auto configs = BenchConfigFactory::get_basic(
