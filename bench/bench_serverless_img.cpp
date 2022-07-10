@@ -608,22 +608,22 @@ void benchmark(Patronus::pointer patronus,
         serverless::Config::get_mw("mw[step]", true));
     serverless_configs.emplace_back(
         serverless::Config::get_mw("mw[nested]", false));
-    // serverless_configs.emplace_back(
-    //     serverless::Config::get_mr("mr[step]", true));
-    // serverless_configs.emplace_back(
-    //     serverless::Config::get_mr("mr[nested]", false));
-    // serverless_configs.emplace_back(
-    //     serverless::Config::get_rpc("rpc[step]", true));
-    // serverless_configs.emplace_back(
-    //     serverless::Config::get_rpc("rpc[nested]", false));
+    serverless_configs.emplace_back(
+        serverless::Config::get_mr("mr[step]", true));
+    serverless_configs.emplace_back(
+        serverless::Config::get_mr("mr[nested]", false));
+    serverless_configs.emplace_back(
+        serverless::Config::get_rpc("rpc[step]", true));
+    serverless_configs.emplace_back(
+        serverless::Config::get_rpc("rpc[nested]", false));
 
-    for (size_t thread_nr : {1, 4, 8, 32})
+    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
     // for (size_t thread_nr : {32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t coro_nr : {2, 4, 8, 16, 32})
         // for (size_t coro_nr : {1, 32})
-        for (size_t coro_nr : {5})
+        for (size_t coro_nr : {32})
         {
             auto total_test_times =
                 kTestTimePerThread * std::min(size_t(4), thread_nr);
