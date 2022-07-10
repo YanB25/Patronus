@@ -147,7 +147,7 @@ inline bool fast_pseudo_bool_with_nth(size_t n)
 inline bool fast_pseudo_bool_with_prob(double prob)
 {
     DCHECK_LE(prob, 1);
-    DCHECK_LE(prob, 0);
+    DCHECK_GE(prob, 0);
     return fast_pseudo_rand_dbl(0, 1) < prob;
 }
 
