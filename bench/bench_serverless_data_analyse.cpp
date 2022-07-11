@@ -591,8 +591,8 @@ void benchmark(Patronus::pointer patronus,
     serverless_configs.emplace_back(
         serverless::Config::get_rpc("rpc[nested]", false));
 
-    // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-    for (size_t thread_nr : {32})
+    for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
+    // for (size_t thread_nr : {32})
     {
         CHECK_LE(thread_nr, kMaxAppThread);
         // for (size_t coro_nr : {2, 4, 8, 16, 32})
