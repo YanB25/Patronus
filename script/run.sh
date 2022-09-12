@@ -38,7 +38,7 @@ for (( i=1; i<${#vms[@]}; i++ )); do
     # nohup ssh root@${inets[$i]} "cd ${BIN_DIR}; source /etc/profile; export TERM='linux'; ldd ${BIN_DIR}/$cmd $@ ${EXEC_META_FLAGS} 1>${WORK_DIR}/LOG 2>&1" &
 done
 
-./ssh.sh ${inets[0]} "cd ${BIN_DIR}; source /etc/profile; export TERM='linux'; ${GLOG_FLAGS} ${ASAN_FLAGS} unbuffer ${BIN_DIR}/$cmd ${EXEC_META_FLAGS} $param 2>&1 | tee ../LOG"
+# ./ssh.sh ${inets[0]} "cd ${BIN_DIR}; source /etc/profile; export TERM='linux'; ${GLOG_FLAGS} ${ASAN_FLAGS} unbuffer ${BIN_DIR}/$cmd ${EXEC_META_FLAGS} $param 2>&1 | tee ../LOG"
 # ./ssh.sh ${inets[0]} "cd ${BIN_DIR}; source /etc/profile; export TERM='linux'; ldd ${BIN_DIR}/$cmd ${EXEC_META_FLAGS} $@ 2>&1 | tee ../LOG"
-# echo [Waiting peers to finish]
-# wait
+echo [Waiting peers to finish]
+wait

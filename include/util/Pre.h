@@ -353,6 +353,36 @@ inline std::ostream &operator<<(std::ostream &os, const std::pair<U, V> &p)
 
 }  // namespace pre
 
+class pre_ns
+{
+public:
+    pre_ns(uint64_t ns) : ns_(ns)
+    {
+    }
+
+    uint64_t ns_;
+};
+inline std::ostream &operator<<(std::ostream &os, pre_ns pns)
+{
+    if (pns.ns_ < 1_K)
+    {
+        os << pns.ns_ << " ns";
+    }
+    else if (pns.ns_ < 1_M)
+    {
+        os << 1.0 * pns.ns_ / 1_K << " us";
+    }
+    else if (pns.ns_ < 1_G)
+    {
+        os << 1.0 * pns.ns_ / 1_M << " ms";
+    }
+    else
+    {
+        os << 1.0 * pns.ns_ / 1_G << " s";
+    }
+    return os;
+}
+
 }  // namespace util
 
 #endif

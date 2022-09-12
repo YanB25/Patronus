@@ -35,7 +35,8 @@ struct RdmaOpRegion
     uint64_t size;
 
     uint32_t lkey;
-    union {
+    union
+    {
         uint32_t remoteRKey;
         bool is_on_chip;
     };
@@ -113,6 +114,7 @@ ibv_mr *createMemoryRegion(uint64_t mm,
                            uint64_t mmSize,
                            const RdmaContext *ctx);
 bool destroyMemoryRegion(ibv_mr *mr);
+bool reregisterMemoryRegionAccess(ibv_mr *mr, int access, RdmaContext *ctx);
 ibv_mr *createMemoryRegionOnChip(uint64_t mm,
                                  uint64_t mmSize,
                                  RdmaContext *ctx);

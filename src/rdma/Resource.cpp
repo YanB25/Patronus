@@ -266,6 +266,18 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, const RdmaContext *ctx)
     return mr;
 }
 
+bool reregisterMemoryRegionAccess(ibv_mr *mr, int access, RdmaContext *ctx)
+{
+    int ret = ibv_rereg_mr(DCHECK_NOTNULL(mr),
+                           IBV_REREG_MR_CHANGE_ACCESS,
+                           DCHECK_NOTNULL(ctx)->pd,
+                           nullptr /* not used */,
+                           0 /* not used */,
+                           access);
+    PLOG_IF(ERROR, ret) << "Failed to reregister MR for access. ret: " << ret;
+    return ret == 0;
+}
+
 bool destroyMemoryRegion(ibv_mr *mr)
 {
     if (mr)
