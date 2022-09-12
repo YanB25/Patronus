@@ -383,6 +383,75 @@ inline std::ostream &operator<<(std::ostream &os, pre_ns pns)
     return os;
 }
 
+class pre_op
+{
+public:
+    pre_op(uint64_t op) : op_(op)
+    {
+    }
+    uint64_t op_;
+};
+
+inline std::ostream &operator<<(std::ostream &os, pre_op p)
+{
+    uint64_t op = p.op_;
+    if (op < 1_K)
+    {
+        os << op;
+    }
+    else if (op < 1_M)
+    {
+        os << op / 1_K << " K";
+    }
+    else if (op < 1_G)
+    {
+        os << op / 1_M << " M";
+    }
+    else
+    {
+        os << op / 1_G << " G";
+    }
+    return os;
+}
+
+class pre_ops
+{
+public:
+    pre_ops(uint64_t op, uint64_t ns, bool verbose = false)
+        : op_(op), ns_(ns), verbose_(verbose)
+    {
+    }
+    uint64_t op_;
+    uint64_t ns_;
+    bool verbose_;
+};
+
+inline std::ostream &operator<<(std::ostream &os, pre_ops p)
+{
+    double ops = 1e9 * p.op_ / p.ns_;
+    if (ops < 1_K)
+    {
+        os << ops << " ops";
+    }
+    else if (ops < 1_M)
+    {
+        os << ops / 1_K << " Kops";
+    }
+    else if (ops < 1_G)
+    {
+        os << ops / 1_M << " Mops";
+    }
+    else
+    {
+        os << ops / 1_G << " Gops";
+    }
+    if (p.verbose_)
+    {
+        os << "[" << p.op_ << " in " << pre_ns(p.ns_) << "]";
+    }
+    return os;
+}
+
 }  // namespace util
 
 #endif

@@ -177,7 +177,39 @@ void bench_mr(RdmaContext &rdma_ctx, size_t bind_size, size_t test_times)
     }
 }
 
-void benchmark(DSM::pointer dsm)
+void bench_mr_multiple_thread(size_t bind_size,
+                              size_t test_times,
+                              size_t thread_nr)
+{
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < thread_nr; ++i)
+    {
+        threads.emplace_back([bind_size, test_times, tid = i]() {
+            // TODO: change into reregister mr
+            bindCore(tid + 1);
+            auto *mm = CHECK_NOTNULL(hugePageAlloc(bind_size));
+            RdmaContext rdma_ctx;
+            CHECK(createContext(&rdma_ctx));
+            auto *mr = CHECK_NOTNULL(
+                createMemoryRegion((uint64_t) mm, bind_size, &rdma_ctx));
+            int access_ro = IBV_ACCESS_REMOTE_READ;
+            int access_rw = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                            IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
+            int accesses[2] = {access_ro, access_rw};
+            for (size_t i = 0; i < test_times; ++i)
+            {
+                CHECK(reregisterMemoryRegionAccess(
+                    mr, accesses[i % 2], &rdma_ctx));
+            }
+        });
+    }
+
+    for (auto &t : threads)
+    {
+        t.join();
+    }
+}
+void benchmark()
 {
     RdmaContext rdma_ctx;
     CHECK(createContext(&rdma_ctx));
@@ -186,12 +218,21 @@ void benchmark(DSM::pointer dsm)
     // bench_mr(rdma_ctx, 2_GB, test_times);
     // bench_mw(p);
 
-    auto test_times = 20000;
-    bench_qp_flag(dsm, test_times);
+    // auto test_times = 20000;
+    // bench_qp_flag(dsm, test_times);
 
+    // auto ns = timer.pin();
+    // LOG(INFO) << "[system] benchmark takes " << util::pre_ns(ns) << ", "
+    //           << util::pre_ns(1.0 * ns / test_times) << " per op.";
+
+    auto test_times = 800;
+    size_t thread_nr = 16;
+    bench_mr_multiple_thread(1_GB, test_times, thread_nr);
     auto ns = timer.pin();
-    LOG(INFO) << "[system] benchmark takes " << util::pre_ns(ns) << ", "
-              << util::pre_ns(1.0 * ns / test_times) << " per op.";
+    LOG(INFO) << "[bench] takes " << util::pre_ns(ns) << " with " << thread_nr
+              << " threads. total: "
+              << util::pre_ops(test_times * thread_nr, ns, true)
+              << " per-thread: " << util::pre_ops(test_times, ns, true);
 }
 
 int main(int argc, char *argv[])
@@ -199,16 +240,16 @@ int main(int argc, char *argv[])
     google::InitGoogleLogging(argv[0]);
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    DSMConfig config;
-    config.machineNR = ::config::kMachineNr;
+    // DSMConfig config;
+    // config.machineNR = ::config::kMachineNr;
 
-    auto dsm = DSM::getInstance(config);
+    // auto dsm = DSM::getInstance(config);
 
     LOG(INFO) << "[bench] this benchmark is used for overhead breakdown. It "
                  "evaluates the overhead of MR and qp modification. Use linux "
                  "perf to view the overhead.";
     LOG(INFO) << "Enter benchmark";
-    benchmark(dsm);
+    benchmark();
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
