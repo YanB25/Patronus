@@ -64,6 +64,80 @@ void bench_mw_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
     // LOG(INFO) << "rkeys are: " << util::pre_vec(rkey_seq.to_vector(), 1024);
 }
 
+void bench_mw_every_cq_cli(Patronus::pointer p,
+                           size_t test_time,
+                           size_t bind_size)
+{
+    constexpr static ssize_t kBatchSize = 8;
+    // Sequence<uint32_t> rkey_seq;
+
+    auto dsm = p->get_dsm();
+    std::vector<ibv_mw *> mw_pool;
+    for (size_t i = 0; i < kBatchSize * 4; ++i)
+    {
+        mw_pool.push_back(CHECK_NOTNULL(dsm->alloc_mw(kDirID)));
+    }
+    auto srv_buffer = dsm->get_server_internal_dsm_buffer();
+    uint64_t min = util::time::to_ns(0ns);
+    uint64_t max = util::time::to_ns(5ms);
+    uint64_t rng = util::time::to_ns(1ns);
+    OnePassBucketMonitor<uint64_t> lat_m(min, max, rng);
+
+    ssize_t remain_task = test_time;
+    ssize_t ongoing_token = kBatchSize;
+    auto *qp = dsm->get_dir_qp(0, 0, kDirID);
+    auto *mr = dsm->get_dir_mr(kDirID);
+    auto *cq = dsm->get_dir_cq(kDirID);
+    struct ibv_mw_bind mw_bind;
+    memset(&mw_bind, 0, sizeof(mw_bind));
+    ibv_wc wcs[64];
+    size_t mw_rr_index = 0;
+    ChronoTimer global_timer;
+    while (remain_task >= 0)
+    {
+        while (ongoing_token)
+        {
+            mw_bind.wr_id = 0;
+            mw_bind.bind_info.mr = mr;
+            mw_bind.bind_info.addr = (uint64_t)(srv_buffer.buffer);
+            mw_bind.bind_info.length = bind_size;
+            mw_bind.bind_info.mw_access_flags = 31;  // magic, all access perm
+            mw_bind.send_flags |= IBV_SEND_SIGNALED;
+
+            auto mw_index = (mw_rr_index + 1) % mw_pool.size();
+            auto *mw = mw_pool[mw_index];
+            int ret = ibv_bind_mw(qp, mw, &mw_bind);
+            PLOG_IF(FATAL, ret) << "Failed to call ibv_bind_mw.";
+            ongoing_token--;
+            remain_task--;
+        }
+
+        int polled = ibv_poll_cq(cq, 64, wcs);
+        PLOG_IF(FATAL, polled < 0) << "Failed to call ibv_poll_cq";
+        ongoing_token += polled;
+    }
+    auto ns = global_timer.pin();
+    LOG(INFO) << "Local MW with every CQed: " << util::pre_ops(test_time, ns);
+
+    LOG(INFO) << lat_m;
+    for (auto *mw : mw_pool)
+    {
+        dsm->free_mw(mw);
+    }
+
+    CHECK_EQ(lat_m.overflow_nr(), 0) << lat_m;
+
+    col_idx.push_back("mw");
+    col_x_test_time.push_back(test_time);
+    col_x_bind_size.push_back(bind_size);
+    col_lat_min.push_back(lat_m.min());
+    col_lat_p5.push_back(lat_m.percentile(0.5));
+    col_lat_p9.push_back(lat_m.percentile(0.9));
+    col_lat_p99.push_back(lat_m.percentile(0.99));
+
+    // LOG(INFO) << "rkeys are: " << util::pre_vec(rkey_seq.to_vector(), 1024);
+}
+
 void bench_mr_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
 {
     // auto *buffer = CHECK_NOTNULL(hugePageAlloc(128_MB));
