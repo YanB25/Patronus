@@ -146,21 +146,27 @@ void bench_mr_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
     auto *buffer = (char *) dsm->get_base_addr();
     CHECK_LE(bind_size, dsm->get_base_size());
 
+    auto *rdma_ctx = dsm->get_rdma_context(kDirID);
+    auto *mr = CHECK_NOTNULL(
+        createMemoryRegion((uint64_t) buffer, bind_size, rdma_ctx));
+
     uint64_t min = util::time::to_ns(0ns);
     uint64_t max = util::time::to_ns(2s);
     uint64_t rng = util::time::to_ns(1us);
     OnePassBucketMonitor<uint64_t> lat_m(min, max, rng);
 
-    auto *rdma_ctx = dsm->get_rdma_context(kDirID);
+    int access_no = IBV_ACCESS_LOCAL_WRITE;
+    int access_rw = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                    IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
+    int accesses[2] = {access_no, access_rw};
     for (size_t i = 0; i < test_time; ++i)
     {
         ChronoTimer timer;
-        auto *mr = CHECK_NOTNULL(
-            createMemoryRegion((uint64_t) buffer, bind_size, rdma_ctx));
+
+        CHECK(reregisterMemoryRegionAccess(mr, accesses[i % 2], rdma_ctx));
+
         auto ns = timer.pin();
         lat_m.collect(ns);
-
-        CHECK(destroyMemoryRegion(mr));
     }
     CHECK_EQ(lat_m.overflow_nr(), 0) << lat_m;
     LOG(INFO) << lat_m;
@@ -172,6 +178,8 @@ void bench_mr_cli(Patronus::pointer p, size_t test_time, size_t bind_size)
     col_lat_p5.push_back(lat_m.percentile(0.5));
     col_lat_p9.push_back(lat_m.percentile(0.9));
     col_lat_p99.push_back(lat_m.percentile(0.99));
+
+    CHECK(destroyMemoryRegion(mr));
 
     // CHECK(hugePageFree(buffer, 128_MB));
 }

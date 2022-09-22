@@ -115,6 +115,11 @@ ibv_mr *createMemoryRegion(uint64_t mm,
                            const RdmaContext *ctx);
 bool destroyMemoryRegion(ibv_mr *mr);
 bool reregisterMemoryRegionAccess(ibv_mr *mr, int access, RdmaContext *ctx);
+bool reregisterMemoryRegionTranslate(ibv_mr *mr,
+                                     void *mm,
+                                     size_t mm_size,
+                                     RdmaContext *ctx);
+
 ibv_mr *createMemoryRegionOnChip(uint64_t mm,
                                  uint64_t mmSize,
                                  RdmaContext *ctx);

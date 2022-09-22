@@ -278,6 +278,21 @@ bool reregisterMemoryRegionAccess(ibv_mr *mr, int access, RdmaContext *ctx)
     return ret == 0;
 }
 
+bool reregisterMemoryRegionTranslate(ibv_mr *mr,
+                                     void *mm,
+                                     size_t mm_size,
+                                     RdmaContext *ctx)
+{
+    int ret = ibv_rereg_mr(DCHECK_NOTNULL(mr),
+                           IBV_REREG_MR_CHANGE_TRANSLATION,
+                           DCHECK_NOTNULL(ctx)->pd,
+                           (void *) mm,
+                           mm_size,
+                           0 /* not used */);
+    PLOG_IF(ERROR, ret) << "Failed to reregister MR for access. ret: " << ret;
+    return ret == 0;
+}
+
 bool destroyMemoryRegion(ibv_mr *mr)
 {
     if (mr)

@@ -161,20 +161,60 @@ void bench_qp_state(Patronus::pointer p, size_t test_time)
     col_lat_p99.push_back(lat_m.percentile(0.99));
 }
 
-void bench_mr(RdmaContext &rdma_ctx, size_t bind_size, size_t test_times)
+void bench_mr(size_t bind_size, size_t test_times)
 {
+    /**
+     * 2GB 1000, change permission (with KEEP_VALID flags, rereg failed.)
+     * [bench] takes 16.3936 s. 60.9995 ops[1000 in 16.3936 s], lat: 16.3936 ms
+     *
+     * 2GB 1000, change translate
+     * [bench] takes 20.1896 s. 49.5304 ops[1000 in 20.1896 s], lat: 20.1896 ms
+     *
+     * 2GB 1000, register + deregister
+     * [bench] takes 8.67359 s. 115.293 ops[1000 in 8.67359 s], lat: 8.67359 ms
+     */
+    RdmaContext rdma_ctx;
+    CHECK(createContext(&rdma_ctx));
+
     auto *mm = CHECK_NOTNULL(hugePageAlloc(bind_size));
+    auto *nullmm = CHECK_NOTNULL(hugePageAlloc(2_MB));
     // TODO: change into reregister mr
     auto *mr =
         CHECK_NOTNULL(createMemoryRegion((uint64_t) mm, bind_size, &rdma_ctx));
-    int access_ro = IBV_ACCESS_REMOTE_READ;
+    int access_no = IBV_ACCESS_LOCAL_WRITE;
     int access_rw = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                     IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
-    int accesses[2] = {access_ro, access_rw};
+    [[maybe_unused]] int accesses[2] = {access_no, access_rw};
+
+    [[maybe_unused]] size_t sizes[2] = {bind_size, 2_MB};
+    [[maybe_unused]] void *mms[2] = {mm, nullmm};
+
+    ChronoTimer timer;
     for (size_t i = 0; i < test_times; ++i)
     {
-        CHECK(reregisterMemoryRegionAccess(mr, accesses[i % 2], &rdma_ctx));
+        // (a)
+        // CHECK(reregisterMemoryRegionAccess(mr, accesses[i % 2], &rdma_ctx));
+
+        // (b)
+        // CHECK(reregisterMemoryRegionTranslate(
+        //     mr, mms[i % 2], sizes[i % 2], &rdma_ctx));
+
+        // (c)
+        if (mr)
+        {
+            CHECK(destroyMemoryRegion(mr));
+            mr = nullptr;
+        }
+        else
+        {
+            mr = CHECK_NOTNULL(
+                createMemoryRegion((uint64_t) mm, bind_size, &rdma_ctx));
+        }
     }
+    auto ns = timer.pin();
+    LOG(INFO) << "[bench] takes " << util::pre_ns(ns) << ". "
+              << util::pre_ops(test_times, ns, true)
+              << ", lat: " << util::pre_ns(1.0 * ns / test_times);
 }
 
 void bench_mr_multiple_thread(size_t bind_size,
@@ -209,6 +249,7 @@ void bench_mr_multiple_thread(size_t bind_size,
         t.join();
     }
 }
+
 void benchmark()
 {
     RdmaContext rdma_ctx;
@@ -225,14 +266,15 @@ void benchmark()
     // LOG(INFO) << "[system] benchmark takes " << util::pre_ns(ns) << ", "
     //           << util::pre_ns(1.0 * ns / test_times) << " per op.";
 
-    auto test_times = 800;
-    size_t thread_nr = 16;
-    bench_mr_multiple_thread(1_GB, test_times, thread_nr);
-    auto ns = timer.pin();
-    LOG(INFO) << "[bench] takes " << util::pre_ns(ns) << " with " << thread_nr
-              << " threads. total: "
-              << util::pre_ops(test_times * thread_nr, ns, true)
-              << " per-thread: " << util::pre_ops(test_times, ns, true);
+    // auto test_times = 800;
+    // size_t thread_nr = 16;
+    // bench_mr_multiple_thread(1_GB, test_times, thread_nr);
+    // auto ns = timer.pin();
+    // LOG(INFO) << "[bench] takes " << util::pre_ns(ns) << " with " <<
+    // thread_nr
+    //           << " threads. total: "
+    //           << util::pre_ops(test_times * thread_nr, ns, true)
+    //           << " per-thread: " << util::pre_ops(test_times, ns, true);
 }
 
 void bench_alloc_mw()
@@ -290,7 +332,9 @@ int main(int argc, char *argv[])
     LOG(INFO) << "Enter benchmark";
     // benchmark();
     // bench_alloc_mw();
-    bench_qp_query_lat();
+    // bench_qp_query_lat();
+
+    bench_mr(2_GB, 1000);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
