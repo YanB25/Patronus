@@ -235,6 +235,45 @@ void benchmark()
               << " per-thread: " << util::pre_ops(test_times, ns, true);
 }
 
+void bench_alloc_mw()
+{
+    DSMConfig config;
+    config.machineNR = ::config::kMachineNr;
+
+    auto dsm = DSM::getInstance(config);
+
+    ChronoTimer timer;
+    size_t test_times = 10_K;
+    for (size_t i = 0; i < test_times; ++i)
+    {
+        dsm->alloc_mw(0);
+    }
+    auto ns = timer.pin();
+    LOG(INFO) << "[bench] dsm->alloc_mw: "
+              << util::pre_ops(test_times, ns, true);
+}
+
+void bench_qp_query_lat()
+{
+    DSMConfig config;
+    config.machineNR = ::config::kMachineNr;
+
+    auto dsm = DSM::getInstance(config);
+
+    ChronoTimer timer;
+    size_t test_times = 100_K;
+    for (size_t i = 0; i < test_times; ++i)
+    {
+        auto client_nid = ::config::get_client_nids().front();
+        auto tid = 0;
+        auto dir = 0;
+        std::ignore = rdmaQueryQueuePair(dsm->get_dir_qp(client_nid, tid, dir));
+    }
+    auto ns = timer.pin();
+    LOG(INFO) << "[bench] rdmaQueryQueuePair: "
+              << util::pre_ops(test_times, ns, true);
+}
+
 int main(int argc, char *argv[])
 {
     google::InitGoogleLogging(argv[0]);
@@ -249,7 +288,9 @@ int main(int argc, char *argv[])
                  "evaluates the overhead of MR and qp modification. Use linux "
                  "perf to view the overhead.";
     LOG(INFO) << "Enter benchmark";
-    benchmark();
+    // benchmark();
+    // bench_alloc_mw();
+    bench_qp_query_lat();
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
