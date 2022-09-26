@@ -101,7 +101,7 @@ public:
             mw_pool_loc_.pop();
             free_nr++;
         }
-        CHECK_EQ(free_nr, allocated_)
+        LOG_IF(WARNING, free_nr != allocated_)
             << "[mw_pool] Possible memory leak: expect freeing " << allocated_
             << ", actual " << free_nr;
     }
