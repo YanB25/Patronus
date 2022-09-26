@@ -664,16 +664,15 @@ private:
 
     ibv_mw *get_mw(size_t dirID)
     {
-        DCHECK(!mw_pool_[dirID].empty());
-        auto *ret = mw_pool_[dirID].front();
-        mw_pool_[dirID].pop();
+        DCHECK(!mw_pool_[dirID]->empty());
+        auto *ret = mw_pool_[dirID]->alloc();
         return DCHECK_NOTNULL(ret);
     }
     void put_mw(size_t dirID, ibv_mw *mw)
     {
         if (mw != nullptr)
         {
-            mw_pool_[dirID].push(mw);
+            mw_pool_[dirID]->free(mw);
         }
     }
     [[nodiscard]] inline Lease do_get_wlease(
@@ -1059,7 +1058,8 @@ private:
 
     // owned by server threads
     // [NR_DIRECTORY]
-    static thread_local std::queue<ibv_mw *> mw_pool_[NR_DIRECTORY];
+    static thread_local std::array<std::unique_ptr<MWPool>, NR_DIRECTORY>
+        mw_pool_;
     std::unordered_set<ibv_mw *> allocated_mws_;
     std::mutex allocated_mws_mu_;
     static thread_local ThreadUnsafePool<LeaseContext, kLeaseContextNr>

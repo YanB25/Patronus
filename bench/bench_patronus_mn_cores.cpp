@@ -325,9 +325,11 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
         {
             op_timer.pin();
         }
+        auto gaddr =
+            nullgaddr + fast_pseudo_rand_int(0, 2_GB / alloc_size) * alloc_size;
         auto lease = patronus->get_rlease(server_nid,
                                           dir_id,
-                                          nullgaddr,
+                                          gaddr,
                                           0 /* alloc_hint */,
                                           alloc_size,
                                           acquire_ns,
@@ -556,10 +558,10 @@ void benchmark(Patronus::pointer patronus,
 
     size_t key = 0;
     // for (size_t server_thread_nr : {1, 2, 4, 8, 10, 12, 14, 16})
-    for (size_t server_thread_nr : {1, 2, 4, 8, 10, 12, 14})
+    for (size_t server_thread_nr : {1, 2, 4, 8, 16})
     {
         size_t thread_nr = 32;
-        size_t coro_nr = std::min((size_t) 16, 2 * server_thread_nr);
+        size_t coro_nr = std::min((size_t) 8, 2 * server_thread_nr);
         CHECK_LE(thread_nr, kMaxAppThread);
         CHECK_LE(server_thread_nr, kMaxServerThreadNr);
         for (size_t block_size : {64ul})
@@ -588,19 +590,19 @@ void benchmark(Patronus::pointer patronus,
                 run_benchmark(
                     patronus, configs, bar, is_client, is_master, key);
             }
-            {
-                auto configs = BenchConfigFactory::
-                    get_rlease_one_bind_one_unbind_reuse_mw_opt_gc(
-                        "+ auto-GC (1+0)",
-                        server_thread_nr,
-                        thread_nr,
-                        coro_nr,
-                        block_size,
-                        total_test_times,
-                        100us);
-                run_benchmark(
-                    patronus, configs, bar, is_client, is_master, key);
-            }
+            // {
+            //     auto configs = BenchConfigFactory::
+            //         get_rlease_one_bind_one_unbind_reuse_mw_opt_gc(
+            //             "+ auto-GC (1+0)",
+            //             server_thread_nr,
+            //             thread_nr,
+            //             coro_nr,
+            //             block_size,
+            //             total_test_times,
+            //             100us);
+            //     run_benchmark(
+            //         patronus, configs, bar, is_client, is_master, key);
+            // }
         }
     }
 

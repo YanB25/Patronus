@@ -27,7 +27,8 @@ thread_local ThreadUnsafePool<RpcContext, Patronus::kMaxCoroNr>
     Patronus::rpc_context_;
 thread_local ThreadUnsafePool<RWContext, 2 * Patronus::kMaxCoroNr>
     Patronus::rw_context_;
-thread_local std::queue<ibv_mw *> Patronus::mw_pool_[NR_DIRECTORY];
+thread_local std::array<std::unique_ptr<MWPool>, NR_DIRECTORY>
+    Patronus::mw_pool_;
 thread_local ThreadUnsafePool<LeaseContext, Patronus::kLeaseContextNr>
     Patronus::lease_context_;
 thread_local ServerCoroContext Patronus::server_coro_ctx_;
@@ -113,10 +114,10 @@ Patronus::~Patronus()
                         .count();
     DLOG(INFO) << "[patronus] Elaps " << 1.0 * elaps_ms << " ms, or "
                << 1.0 * elaps_ms / 1000 << " s";
-
-    for (ibv_mw *mw : allocated_mws_)
+    // early deconstruct mw_pools here
+    for (auto &&mw_pool : mw_pool_)
     {
-        dsm_->free_mw(mw);
+        mw_pool.reset();
     }
 }
 
@@ -1456,15 +1457,8 @@ void Patronus::registerServerThread()
     size_t alloc_mw_nr = kMwPoolSizePerThread / NR_DIRECTORY;
     for (size_t dirID = 0; dirID < NR_DIRECTORY; ++dirID)
     {
-        for (size_t i = 0; i < alloc_mw_nr; ++i)
-        {
-            auto *mw = CHECK_NOTNULL(dsm_->alloc_mw(dirID));
-            mw_pool_[dirID].push(mw);
-            {
-                std::lock_guard<std::mutex> lk(allocated_mws_mu_);
-                allocated_mws_.insert(mw);
-            }
-        }
+        auto dsm = get_dsm();
+        mw_pool_[dirID] = std::make_unique<MWPool>(dsm, dirID, alloc_mw_nr);
     }
 
     auto tid = get_thread_id();

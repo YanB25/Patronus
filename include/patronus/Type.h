@@ -10,6 +10,7 @@
 #include "Common.h"
 #include "patronus/Config.h"
 #include "patronus/Time.h"
+#include "patronus/memory/mw_allocator.h"
 #include "umsg/Config.h"
 #include "umsg/UnreliableConnection.h"
 #include "util/Coro.h"
@@ -21,6 +22,7 @@ using id_t = uint64_t;
 using rkey_t = uint32_t;
 using chrono_time_t = std::chrono::time_point<std::chrono::steady_clock>;
 using flag_t = uint64_t;
+using MWPool = patronus::mem::MWPool<true /* locality */>;
 
 // force enum to be sizeof(uint8_t)
 enum class RpcType : uint8_t
@@ -59,7 +61,8 @@ std::ostream &operator<<(std::ostream &os, AcquireRequestStatus status);
 
 struct ClientID
 {
-    union {
+    union
+    {
         struct
         {
             uint16_t node_id;

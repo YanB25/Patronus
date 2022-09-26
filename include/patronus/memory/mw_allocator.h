@@ -3,6 +3,9 @@
 #ifndef MEMORY_MW_ALLOCATOR_H_
 #define MEMORY_MW_ALLOCATOR_H_
 
+#include <queue>
+#include <stack>
+
 #include "DSM.h"
 #include "Rdma.h"
 #include "allocator.h"
@@ -10,27 +13,78 @@
 
 namespace patronus::mem
 {
+template <bool kLocality>
 class MWPool
 {
 public:
-    MWPool(DSM::pointer dsm, size_t dir_id, size_t cache_size)
-        : dsm_(dsm), dir_id_(dir_id), cache_size_(cache_size)
+    MWPool(DSM::pointer dsm, size_t dir_id, size_t allocate_nr)
+        : dsm_(dsm), dir_id_(dir_id), allocated_(allocate_nr)
     {
-        block_alloc();
+        DVLOG(::config::verbose::kSystem) << "[mw_pool] alloc " << allocate_nr;
+        if constexpr (kLocality)
+        {
+            for (size_t i = 0; i < allocate_nr; ++i)
+            {
+                mw_pool_loc_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
+            }
+        }
+        else
+        {
+            for (size_t i = 0; i < allocate_nr; ++i)
+            {
+                mw_pool_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
+            }
+        }
     }
     ibv_mw *alloc()
     {
-        if (unlikely(mw_pool_.empty()))
+        if constexpr (kLocality)
         {
-            return nullptr;
+            if (unlikely(mw_pool_loc_.empty()))
+            {
+                return nullptr;
+            }
+            auto *ret = mw_pool_loc_.top();
+            mw_pool_loc_.pop();
+            return DCHECK_NOTNULL(ret);
         }
-        auto *ret = mw_pool_.front();
-        mw_pool_.pop();
-        return DCHECK_NOTNULL(ret);
+        else
+        {
+            if (unlikely(mw_pool_.empty()))
+            {
+                return nullptr;
+            }
+            auto *ret = mw_pool_.front();
+            mw_pool_.pop();
+            return DCHECK_NOTNULL(ret);
+        }
     }
     void free(ibv_mw *mw)
     {
-        mw_pool_.push(mw);
+        if (unlikely(mw == nullptr))
+        {
+            return;
+        }
+
+        if constexpr (kLocality)
+        {
+            mw_pool_loc_.push(mw);
+        }
+        else
+        {
+            mw_pool_.push(mw);
+        }
+    }
+    bool empty() const
+    {
+        if constexpr (kLocality)
+        {
+            return mw_pool_loc_.empty();
+        }
+        else
+        {
+            return mw_pool_.empty();
+        }
     }
     ~MWPool()
     {
@@ -41,34 +95,40 @@ public:
             mw_pool_.pop();
             free_nr++;
         }
+        while (!mw_pool_loc_.empty())
+        {
+            dsm_->free_mw(mw_pool_loc_.top());
+            mw_pool_loc_.pop();
+            free_nr++;
+        }
         CHECK_EQ(free_nr, allocated_)
             << "[mw_pool] Possible memory leak: expect freeing " << allocated_
             << ", actual " << free_nr;
     }
 
 private:
-    void block_alloc()
-    {
-        DVLOG(::config::verbose::kSystem)
-            << "[mw_pool] block alloc " << cache_size_;
-        for (size_t i = 0; i < cache_size_; ++i)
-        {
-            mw_pool_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
-        }
-        allocated_ += cache_size_;
-    }
+    // void block_alloc()
+    // {
+    //     DVLOG(::config::verbose::kSystem)
+    //         << "[mw_pool] block alloc " << cache_size_;
+    //     for (size_t i = 0; i < cache_size_; ++i)
+    //     {
+    //         mw_pool_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
+    //     }
+    //     allocated_ += cache_size_;
+    // }
 
     DSM::pointer dsm_;
     size_t dir_id_{0};
     std::queue<ibv_mw *> mw_pool_;
-    size_t cache_size_{0};
+    std::stack<ibv_mw *> mw_pool_loc_;
     size_t allocated_{0};
 };
 
 struct MWAllocatorConfig
 {
     std::shared_ptr<IAllocator> allocator;
-    std::shared_ptr<MWPool> mw_pool;
+    std::shared_ptr<MWPool<true /* locality */>> mw_pool;
     DSM::pointer dsm;
     size_t dir_id;
     size_t node_id;
