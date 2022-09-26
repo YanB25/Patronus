@@ -161,7 +161,83 @@ void bench_qp_state(Patronus::pointer p, size_t test_time)
     col_lat_p99.push_back(lat_m.percentile(0.99));
 }
 
-void bench_mr(size_t bind_size, size_t test_times)
+/**
+ * @brief use the rereg API of MR
+ */
+void bench_rereg_mr(size_t bind_size, size_t test_times, bool use_huge_page)
+{
+    bindCore(1);
+
+    // 1) allocate the memory
+    void *mm = nullptr;
+    if (use_huge_page)
+    {
+        mm = CHECK_NOTNULL(hugePageAlloc(bind_size));
+    }
+    else
+    {
+        mm = malloc(bind_size);
+    }
+
+    // 2) pre-fault
+    char *mm_ = (char *) mm;
+    if (use_huge_page)
+    {
+        for (size_t i = 0; i < bind_size; i += 2_MB)
+        {
+            mm_[i] = 1;
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < bind_size; i += 4_KB)
+        {
+            mm_[i] = 1;
+        }
+    }
+
+    // 3) set up RDMA logic
+    RdmaContext rdma_ctx;
+    CHECK(createContext(&rdma_ctx));
+
+    auto *mr =
+        CHECK_NOTNULL(createMemoryRegion((uint64_t) mm, bind_size, &rdma_ctx));
+    int access_no = IBV_ACCESS_LOCAL_WRITE;
+    int access_rw = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+                    IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
+    int accesses[2] = {access_no, access_rw};
+
+    ChronoTimer timer;
+    for (size_t i = 0; i < test_times; ++i)
+    {
+        CHECK(reregisterMemoryRegionAccess(mr, accesses[i % 2], &rdma_ctx));
+    }
+    auto ns = timer.pin();
+    LOG(INFO) << "[bench] reregister: " << util::pre_ns(ns) << ". "
+              << util::pre_ops(test_times, ns, true);
+}
+
+void pre_fault(char *mm, size_t size, bool use_huge_page)
+{
+    if (use_huge_page)
+    {
+        for (size_t i = 0; i < size; i += 2_MB)
+        {
+            mm[i] = 1;
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < size; i += 4_KB)
+        {
+            mm[i] = 1;
+        }
+    }
+}
+/**
+ * @brief use the dereg API
+ */
+void bench_dereg_mr(size_t bind_size, size_t test_times, bool use_huge_page)
 {
     /**
      * 2GB 1000, change permission (with KEEP_VALID flags, rereg failed.)
@@ -173,48 +249,39 @@ void bench_mr(size_t bind_size, size_t test_times)
      * 2GB 1000, register + deregister
      * [bench] takes 8.67359 s. 115.293 ops[1000 in 8.67359 s], lat: 8.67359 ms
      */
+    bindCore(1);
+
+    // 1) allocate the memory
+    void *mm = nullptr;
+    if (use_huge_page)
+    {
+        mm = CHECK_NOTNULL(hugePageAlloc(bind_size));
+    }
+    else
+    {
+        mm = malloc(bind_size);
+    }
+
+    // 2) pre-fault
+    pre_fault((char *) mm, bind_size, use_huge_page);
+
+    // 3) set up RDMA logic
     RdmaContext rdma_ctx;
     CHECK(createContext(&rdma_ctx));
 
-    auto *mm = CHECK_NOTNULL(hugePageAlloc(bind_size));
-    auto *nullmm = CHECK_NOTNULL(hugePageAlloc(2_MB));
-    // TODO: change into reregister mr
     auto *mr =
         CHECK_NOTNULL(createMemoryRegion((uint64_t) mm, bind_size, &rdma_ctx));
-    int access_no = IBV_ACCESS_LOCAL_WRITE;
-    int access_rw = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-                    IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
-    [[maybe_unused]] int accesses[2] = {access_no, access_rw};
-
-    [[maybe_unused]] size_t sizes[2] = {bind_size, 2_MB};
-    [[maybe_unused]] void *mms[2] = {mm, nullmm};
 
     ChronoTimer timer;
     for (size_t i = 0; i < test_times; ++i)
     {
-        // (a)
-        // CHECK(reregisterMemoryRegionAccess(mr, accesses[i % 2], &rdma_ctx));
-
-        // (b)
-        // CHECK(reregisterMemoryRegionTranslate(
-        //     mr, mms[i % 2], sizes[i % 2], &rdma_ctx));
-
-        // (c)
-        if (mr)
-        {
-            CHECK(destroyMemoryRegion(mr));
-            mr = nullptr;
-        }
-        else
-        {
-            mr = CHECK_NOTNULL(
-                createMemoryRegion((uint64_t) mm, bind_size, &rdma_ctx));
-        }
+        CHECK(destroyMemoryRegion(mr));
+        mr = CHECK_NOTNULL(
+            createMemoryRegion((uint64_t) mm, bind_size, &rdma_ctx));
     }
     auto ns = timer.pin();
-    LOG(INFO) << "[bench] takes " << util::pre_ns(ns) << ". "
-              << util::pre_ops(test_times, ns, true)
-              << ", lat: " << util::pre_ns(1.0 * ns / test_times);
+    LOG(INFO) << "[bench] deregister + register: " << util::pre_ns(ns) << ". "
+              << util::pre_ops(test_times, ns, true);
 }
 
 void bench_mr_multiple_thread(size_t bind_size,
@@ -334,7 +401,15 @@ int main(int argc, char *argv[])
     // bench_alloc_mw();
     // bench_qp_query_lat();
 
-    bench_mr(2_GB, 1000);
+    // clang-format off
+    /**
+     * rereg: 137ms per op [hugepage, 16GB, 100 op] (16.7 us per hugepage)
+     * rereg: 12.4s per op [page, 16GB, 10 op] (3 us per page, i.e., 1536 us per hugepages) 
+     * dereg: 136ms per op [hugepage, 16GB, 100op]
+     */
+    // clang-format on
+    bench_rereg_mr(16_GB, 500, true);
+    // bench_dereg_mr(16_GB, 100, true);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

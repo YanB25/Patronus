@@ -429,6 +429,7 @@ public:
 inline std::ostream &operator<<(std::ostream &os, pre_ops p)
 {
     double ops = 1e9 * p.op_ / p.ns_;
+    double lat_ns = 1.0 * p.ns_ / p.op_;
     if (ops < 1_K)
     {
         os << ops << " ops";
@@ -447,7 +448,8 @@ inline std::ostream &operator<<(std::ostream &os, pre_ops p)
     }
     if (p.verbose_)
     {
-        os << "[" << p.op_ << " in " << pre_ns(p.ns_) << "]";
+        os << "[" << p.op_ << " in " << pre_ns(p.ns_) << " (" << pre_ns(lat_ns)
+           << "/op)]";
     }
     return os;
 }
