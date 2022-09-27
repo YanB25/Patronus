@@ -23,14 +23,14 @@ thread_local std::unique_ptr<
     Patronus::rdma_small_message_buffer_pool_;
 
 thread_local mem::SlabAllocator::pointer Patronus::rdma_client_buffer_;
-thread_local ThreadUnsafePool<RpcContext, Patronus::kMaxCoroNr>
-    Patronus::rpc_context_;
-thread_local ThreadUnsafePool<RWContext, 2 * Patronus::kMaxCoroNr>
-    Patronus::rw_context_;
+thread_local LocalityObjectPool<RpcContext> Patronus::rpc_context_(
+    Patronus::kMaxCoroNr);
+thread_local LocalityObjectPool<RWContext> Patronus::rw_context_(
+    2 * Patronus::kMaxCoroNr);
 thread_local std::array<std::unique_ptr<MWPool>, NR_DIRECTORY>
     Patronus::mw_pool_;
-thread_local ThreadUnsafePool<LeaseContext, Patronus::kLeaseContextNr>
-    Patronus::lease_context_;
+thread_local LocalityObjectPool<LeaseContext> Patronus::lease_context_(
+    Patronus::kLeaseContextNr);
 thread_local ServerCoroContext Patronus::server_coro_ctx_;
 thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
     Patronus::protection_region_pool_;
@@ -114,11 +114,6 @@ Patronus::~Patronus()
                         .count();
     DLOG(INFO) << "[patronus] Elaps " << 1.0 * elaps_ms << " ms, or "
                << 1.0 * elaps_ms / 1000 << " s";
-    // early deconstruct mw_pools here
-    for (auto &&mw_pool : mw_pool_)
-    {
-        mw_pool.reset();
-    }
 }
 
 void Patronus::explain(const PatronusConfig &conf)
@@ -1769,11 +1764,8 @@ void Patronus::server_coro_master(CoroYield &yield, uint64_t wait_key)
         ::config::umsg::kRecvLimit * sizeof(msg_desc_t);
     constexpr static size_t kServerBufferNr =
         kMaxCoroNr * MAX_MACHINE * kClientThreadPerServerThread;
-    std::vector<char> __buffer(kMsgDescSize * kServerBufferNr);
-
     server_coro_ctx_.msg_desc_pool =
-        std::make_unique<ThreadUnsafeBufferPool<kMsgDescSize>>(
-            __buffer.data(), kMsgDescSize * kServerBufferNr);
+        std::make_unique<LocalityBufferPool>(kServerBufferNr, kMsgDescSize);
     auto &msg_desc_pool = *server_coro_ctx_.msg_desc_pool;
 
     OnePassBucketMonitor batch_m(

@@ -1044,8 +1044,12 @@ private:
     PatronusLockManager lock_manager_;
 
     // owned by client threads
-    static thread_local ThreadUnsafePool<RpcContext, kMaxCoroNr> rpc_context_;
-    static thread_local ThreadUnsafePool<RWContext, 2 * kMaxCoroNr> rw_context_;
+    // static thread_local LocalityObjectPool<RpcContext, kMaxCoroNr>
+    // rpc_context_; static thread_local LocalityObjectPool<RWContext, 2 *
+    // kMaxCoroNr>
+    //     rw_context_;
+    static thread_local LocalityObjectPool<RpcContext> rpc_context_;
+    static thread_local LocalityObjectPool<RWContext> rw_context_;
     static thread_local mem::SlabAllocator::pointer rdma_client_buffer_;
     static thread_local char *client_rdma_buffer_;
     static thread_local size_t client_rdma_buffer_size_;
@@ -1062,8 +1066,9 @@ private:
         mw_pool_;
     std::unordered_set<ibv_mw *> allocated_mws_;
     std::mutex allocated_mws_mu_;
-    static thread_local ThreadUnsafePool<LeaseContext, kLeaseContextNr>
-        lease_context_;
+    // static thread_local LocalityObjectPool<LeaseContext, kLeaseContextNr>
+    //     lease_context_;
+    static thread_local LocalityObjectPool<LeaseContext> lease_context_;
     static thread_local ServerCoroContext server_coro_ctx_;
     static thread_local std::unique_ptr<
         ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>

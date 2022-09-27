@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     {
-        ThreadUnsafePool<Object, 1024> obj_pool;
+        LocalityObjectPool<Object> obj_pool(1024);
         for (size_t times = 0; times < 4; ++times)
         {
             std::set<Object *> obj_addrs;
@@ -52,9 +52,7 @@ int main(int argc, char *argv[])
     }
 
     {
-        char __buffer[sizeof(Object) * 1024];
-        ThreadUnsafeBufferPool<sizeof(Object)> buff_pool(__buffer,
-                                                         sizeof(Object) * 1024);
+        LocalityBufferPool buff_pool(1024, sizeof(Object));
         for (size_t times = 0; times < 5; ++times)
         {
             std::set<void *> buf_addrs;
@@ -82,4 +80,5 @@ int main(int argc, char *argv[])
             }
         }
     }
+    LOG(INFO) << "PASS";
 }

@@ -48,9 +48,8 @@ struct ServerCoroContext
         define::kMaxCoroNr *
             MAX_MACHINE * ::config::patronus::kClientThreadPerServerThread>
         task_pool;
-    std::unique_ptr<ThreadUnsafeBufferPool<::config::umsg::kRecvLimit *
-                                           sizeof(DSM::msg_desc_t)>>
-        msg_desc_pool;
+
+    std::unique_ptr<LocalityBufferPool> msg_desc_pool;
     CoroControlBlock::pointer cb;
 };
 

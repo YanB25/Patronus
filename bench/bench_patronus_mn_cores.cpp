@@ -25,7 +25,7 @@ using namespace std::chrono_literals;
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kMaxServerThreadNr = NR_DIRECTORY;
 
-constexpr static size_t kTestTimePerThread = 500_K;
+constexpr static size_t kTestTimePerThread = 1_M;
 // constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
