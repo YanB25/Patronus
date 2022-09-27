@@ -52,7 +52,7 @@ bool ServerCoroBatchExecutionContext::commit(uint16_t prefix,
 
     while (!free_mws_.empty())
     {
-        auto *mw = free_mws_.front();
+        auto *mw = free_mws_.top();
         free_mws_.pop();
         patronus_->put_mw(dir_id_, mw);
     }
@@ -252,7 +252,7 @@ bool ServerCoroBatchExecutionContext::commit_with_mw_reuse_optimization(
         {
             // okay, here we reuse the unbind.
             DCHECK(!free_mws_.empty());
-            auto *reuse_mw = free_mws_.front();
+            auto *reuse_mw = free_mws_.top();
             free_mws_.pop();
             *task.o_mw = reuse_mw;
 

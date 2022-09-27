@@ -281,7 +281,7 @@ private:
 
     ibv_send_wr *bad_wr_;
 
-    std::queue<ibv_mw *> free_mws_;
+    std::stack<ibv_mw *> free_mws_;
 
     static thread_local size_t rr_thread_idx_;
     static thread_local size_t rr_machine_idx_;
