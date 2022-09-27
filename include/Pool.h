@@ -264,11 +264,11 @@ public:
     {
         return pool_.put((void *) addr);
     }
-    uint64_t buf_to_id(void *addr)
+    uint64_t obj_to_id(void *addr)
     {
         return pool_.obj_to_id((void *) addr);
     }
-    char *id_to_buf(uint64_t id)
+    char *id_to_obj(uint64_t id)
     {
         return (char *) pool_.id_to_obj(id);
     }

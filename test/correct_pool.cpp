@@ -65,10 +65,10 @@ int main(int argc, char *argv[])
                     << " times " << times << ", i " << i << ", addr "
                     << (void *) addr;
                 buf_addrs.insert(addr);
-                auto id = buff_pool.buf_to_id(addr);
+                auto id = buff_pool.obj_to_id(addr);
                 CHECK_EQ(ids.count(id), 0);
                 ids.insert(id);
-                CHECK_EQ(buff_pool.id_to_buf(id), addr)
+                CHECK_EQ(buff_pool.id_to_obj(id), addr)
                     << "check failed at times " << times << ", i = " << i
                     << ", id " << id << ", addr" << (void *) addr;
             }
