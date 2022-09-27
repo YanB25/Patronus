@@ -26,7 +26,7 @@
 using namespace util::literals;
 
 constexpr static size_t MAX_MACHINE = 4;
-constexpr static int NR_DIRECTORY = 4;
+constexpr static int NR_DIRECTORY = 16;
 constexpr static ssize_t kMaxAppThread = 32;
 
 #define MESSAGE_SIZE 96  // byte
