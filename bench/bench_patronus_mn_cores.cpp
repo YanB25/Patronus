@@ -619,6 +619,10 @@ int main(int argc, char *argv[])
     config.block_class = {2_MB};
     config.block_ratio = {1};
 
+    LOG(ERROR) << "[bench] To evaluate this, try to turn ON/OFF MW locality "
+                  "(in patronus/Type.h). With more than 8 cores, the locality "
+                  "problem exists.";
+
     auto patronus = Patronus::ins(config);
 
     auto nid = patronus->get_node_id();

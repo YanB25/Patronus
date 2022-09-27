@@ -43,11 +43,10 @@ struct ServerCoroContext
     CoroCall server_workers[define::kMaxCoroNr];
     CoroCall server_master;
     ServerCoroCommunication comm;
-    ThreadUnsafePool<
-        ServerCoroTask,
-        define::kMaxCoroNr *
-            MAX_MACHINE * ::config::patronus::kClientThreadPerServerThread>
-        task_pool;
+    constexpr static size_t kTaskNr =
+        define::kMaxCoroNr * MAX_MACHINE *
+        ::config::patronus::kClientThreadPerServerThread;
+    LocalityObjectPool<ServerCoroTask> task_pool{kTaskNr};
 
     std::unique_ptr<LocalityBufferPool> msg_desc_pool;
     CoroControlBlock::pointer cb;
