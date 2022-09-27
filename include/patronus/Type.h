@@ -22,7 +22,7 @@ using id_t = uint64_t;
 using rkey_t = uint32_t;
 using chrono_time_t = std::chrono::time_point<std::chrono::steady_clock>;
 using flag_t = uint64_t;
-using MWPool = patronus::mem::MWPool<true /* locality */>;
+using MWPool = patronus::mem::MWPool<::config::patronus::kEnableMWLocality>;
 
 // force enum to be sizeof(uint8_t)
 enum class RpcType : uint8_t

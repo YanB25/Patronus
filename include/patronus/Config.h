@@ -13,6 +13,7 @@ constexpr static size_t kMessageSize = ::config::umsg::kUserMessageSize;
 constexpr static size_t kSmallMessageSize = 64_B;
 constexpr static size_t kClientRdmaBufferSize = 8_KB;
 constexpr static size_t kHandleRequestBatchLimit = 32;
+constexpr static bool kEnableMWLocality = false;
 
 constexpr static size_t kClientThreadPerServerThread =
     kMaxAppThread / NR_DIRECTORY;
