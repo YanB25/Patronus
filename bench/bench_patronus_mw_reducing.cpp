@@ -26,7 +26,7 @@ constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
 constexpr static size_t kTestTimePerThread = 500_K;
-// constexpr static size_t kTestTimePerThread = 100;
+// constexpr static size_t kTestTimePerThread = 200_K;
 
 std::vector<std::string> col_idx;
 std::vector<size_t> col_x_alloc_size;
@@ -939,6 +939,9 @@ int main(int argc, char *argv[])
     config.machine_nr = ::config::kMachineNr;
     config.block_class = {2_MB};
     config.block_ratio = {1};
+
+    LOG(ERROR) << "TODO: if u want to re-evaluate this bench, try to turn on "
+                  "auto-expiration for every one.";
 
     auto patronus = Patronus::ins(config);
 

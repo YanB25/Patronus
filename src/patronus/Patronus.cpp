@@ -32,7 +32,8 @@ thread_local std::array<std::unique_ptr<MWPool>, NR_DIRECTORY>
 thread_local LocalityObjectPool<LeaseContext> Patronus::lease_context_(
     Patronus::kLeaseContextNr);
 thread_local ServerCoroContext Patronus::server_coro_ctx_;
-thread_local std::unique_ptr<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
+thread_local std::unique_ptr<
+    ThreadUnsafeBufferPool<sizeof(ProtectionRegion), true /* locality */>>
     Patronus::protection_region_pool_;
 thread_local DDLManager Patronus::ddl_manager_;
 thread_local mem::SlabAllocator::pointer Patronus::default_allocator_;
@@ -1470,11 +1471,11 @@ void Patronus::registerServerThread()
     auto protection_region_buffer = get_protection_region_buffer();
     auto pr_total_size = protection_region_buffer.size;
     auto pr_size_per_thread = pr_total_size / kMaxServerThreadNr;
-    auto pr_buffer_self = protection_region_buffer.buffer +
-                          (pr_size_per_thread * get_thread_id());
-    protection_region_pool_ =
-        std::make_unique<ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>(
-            pr_buffer_self, pr_size_per_thread);
+    auto *pr_buffer_self = protection_region_buffer.buffer +
+                           (pr_size_per_thread * get_thread_id());
+    protection_region_pool_ = std::make_unique<
+        ThreadUnsafeBufferPool<sizeof(ProtectionRegion), true /* locality */>>(
+        pr_buffer_self, pr_size_per_thread);
 
     // allocator
     mem::SlabAllocatorConfig slab_alloc_conf;

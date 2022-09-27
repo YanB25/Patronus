@@ -1071,7 +1071,7 @@ private:
     static thread_local LocalityObjectPool<LeaseContext> lease_context_;
     static thread_local ServerCoroContext server_coro_ctx_;
     static thread_local std::unique_ptr<
-        ThreadUnsafeBufferPool<sizeof(ProtectionRegion)>>
+        ThreadUnsafeBufferPool<sizeof(ProtectionRegion), true /* locality */>>
         protection_region_pool_;
     static thread_local DDLManager ddl_manager_;
     static thread_local bool has_registered_;
