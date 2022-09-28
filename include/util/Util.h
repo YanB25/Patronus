@@ -1,8 +1,12 @@
 #pragma once
 #ifndef UTIL_UTIL_H_
 #define UTIL_UTIL_H_
+#include <boost/algorithm/string.hpp>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -14,7 +18,8 @@
 
 struct Data
 {
-    union {
+    union
+    {
         struct
         {
             uint32_t lower;

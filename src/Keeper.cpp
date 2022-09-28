@@ -6,6 +6,9 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <sstream>
+
+#include "util/Util.h"
 
 using namespace std::chrono_literals;
 
@@ -98,6 +101,11 @@ void Keeper::serverEnter()
         if (rc == MEMCACHED_SUCCESS)
         {
             myNodeID = serverNum - 1;
+            auto overwrite_node_id = util::node_id_in_rank_file();
+            if (overwrite_node_id.has_value())
+            {
+                myNodeID = overwrite_node_id.value();
+            }
 
             DLOG(INFO) << "This server get NodeId " << myNodeID << "["
                        << getIP() << "]";

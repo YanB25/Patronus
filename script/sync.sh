@@ -14,3 +14,6 @@ rsync -av -e ssh ../artifacts/* $1:${ARTIFACTS_DIR}
 # for profiling and flame graph
 rsync -av -e ssh ./perf_local_run.sh $1:${BIN_DIR}
 rsync -av -e ssh ./gen_flame_graph.sh $1:${BIN_DIR}
+
+# sending the inet.conf to rank the node
+rsync -av -e ssh ./inet.conf $1:${BIN_DIR}

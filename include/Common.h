@@ -28,6 +28,8 @@ using namespace util::literals;
 constexpr static size_t MAX_MACHINE = 4;
 constexpr static int NR_DIRECTORY = 4;
 constexpr static ssize_t kMaxAppThread = 32;
+constexpr static const char *kNICName = "eno1";
+constexpr static const char *kNodeRankFileName = "inet.conf";
 
 #define MESSAGE_SIZE 96  // byte
 #define RAW_RECV_CQ_COUNT 128
@@ -72,8 +74,8 @@ constexpr static char kSelectMlxVersion = '5';  // mlx5
 constexpr static char kSelectMlxNicIdx = '0';
 constexpr static size_t kMachineNr = 4;
 static_assert(kMachineNr <= MAX_MACHINE);
-static const std::vector<size_t> __kServerNodeIds{0};
-static const std::vector<size_t> __kClientNodeIds{1, 2, 3};
+static const std::vector<size_t> __kServerNodeIds{3};
+static const std::vector<size_t> __kClientNodeIds{0, 1, 2};
 inline bool is_server(size_t nid)
 {
     auto it =
@@ -169,5 +171,42 @@ constexpr static size_t kTimeSyncer = kRdmaOperation;
 
 constexpr static size_t kVerbose = 20;
 }  // namespace config::verbose
+
+namespace util
+{
+inline std::optional<int> node_id_in_rank_file()
+{
+    constexpr static size_t V = ::config::verbose::kSystem;
+    auto rank_file_name = std::filesystem::current_path() / kNodeRankFileName;
+    if (std::filesystem::exists(rank_file_name))
+    {
+        std::ifstream t(rank_file_name);
+        std::string buffer((std::istreambuf_iterator<char>(t)),
+                           std::istreambuf_iterator<char>());
+        std::vector<std::string> results;
+        boost::split(results, buffer, boost::is_any_of("\n"));
+        std::string ip_addr = getIP();
+        auto it = std::find(results.begin(), results.end(), ip_addr);
+        if (it == results.end())
+        {
+            LOG(FATAL) << "[util] file " << rank_file_name << " exists. but ip "
+                       << ip_addr << " not found.";
+            return std::nullopt;
+        }
+        else
+        {
+            int idx = it - results.begin();
+            VLOG(V) << "[util] file " << rank_file_name
+                    << " exists. got node_id: " << idx;
+            return idx;
+        }
+    }
+    else
+    {
+        LOG(ERROR) << "[util] rank_file " << rank_file_name << " not found. ";
+        return std::nullopt;
+    }
+}
+}  // namespace util
 
 #endif /* __COMMON_H__ */
