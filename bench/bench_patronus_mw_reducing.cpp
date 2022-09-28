@@ -940,8 +940,10 @@ int main(int argc, char *argv[])
     config.block_class = {2_MB};
     config.block_ratio = {1};
 
-    LOG(ERROR) << "TODO: if u want to re-evaluate this bench, try to turn on "
-                  "auto-expiration for every one.";
+    LOG(WARNING) << "DEPRECATED. This bench is replaced by "
+                    "bench_patronus_mw_reducing_lease, because we find that "
+                    "the auto-expiration is so important, without which "
+                    "performance degrades seriously.";
 
     auto patronus = Patronus::ins(config);
 
