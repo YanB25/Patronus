@@ -23,9 +23,8 @@ using namespace util::literals;
 using namespace patronus;
 using namespace hmdf;
 
-[[maybe_unused]] constexpr uint16_t kClientNodeId = 1;
-[[maybe_unused]] constexpr uint16_t kServerNodeId = 0;
-constexpr uint32_t kMachineNr = 2;
+[[maybe_unused]] constexpr uint16_t kClientNodeId = 0;
+[[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 constexpr static size_t kTotalThreadNr = 16;
 constexpr static size_t kPreparedThreadNr = 10;
 constexpr static size_t kWorkerThreadNr = 6;
@@ -180,10 +179,11 @@ void test_basic_client_worker(
 
         bool should_fault = (executed_nr >= conf.fault_after_nr) &&
                             (executed_nr % conf.fault_every == 0);
-        util::TraceManager tm(1);
+        util::TraceManager crash_tm(1);
+        util::TraceManager rw_tm(1);
         if (unlikely(i_trigger_fault && should_fault))
         {
-            auto trace = tm.trace("crash");
+            auto trace = crash_tm.trace("crash");
 
             ChronoTimer timer;
             // p->trig
@@ -203,14 +203,21 @@ void test_basic_client_worker(
 
             auto rw_flag = (flag_t) RWFlag::kNoLocalExpireCheck |
                            (flag_t) RWFlag::kUseUniversalRkey;
+            // must get a new buffer here
+            // because the QP may potentially switched
+            auto rdma_buf2 = p->get_rdma_buffer(8);
+            // not important this copy
+            memcpy(rdma_buf2.buffer, rdma_buf.buffer, 8);
             ec = p->write(
-                lease, rdma_buf.buffer, 8, 0 /* offset */, rw_flag, &ctx);
+                lease, rdma_buf2.buffer, 8, 0 /* offset */, rw_flag, &ctx);
 
             CHECK_EQ(ec, kOk);
 
-            auto trace2 = tm.trace("rw");
+            auto rdma_buf3 = p->get_rdma_buffer(8);
+            memcpy(rdma_buf3.buffer, rdma_buf2.buffer, 8);
+            auto trace2 = rw_tm.trace("rw");
             ec = p->write(lease,
-                          rdma_buf.buffer,
+                          rdma_buf3.buffer,
                           8,
                           0 /* offset */,
                           rw_flag,
@@ -219,14 +226,16 @@ void test_basic_client_worker(
 
             CHECK_EQ(ec, kOk);
 
-            DLOG(INFO) << "[bench] crash op takes " << fault_ns
-                       << " ns. total: " << fault_ns << " ns. Trace: " << trace;
+            LOG(INFO) << "[bench] crash op takes " << fault_ns
+                      << " ns. total: " << fault_ns << " ns. Trace: " << trace;
 
             uint64_t total_fault_ns = 0;
             CHECK(trace.enabled());
             CHECK(trace2.enabled());
             auto map = trace.retrieve_map();
             auto map2 = trace2.retrieve_map();
+            LOG(INFO) << "[debug] map: " << util::pre_map(map)
+                      << ", map2: " << util::pre_map(map2);
             col_idx.push_back(std::to_string(col_idx.size()));
             auto fault_issue_ns = map["issue"];
             total_fault_ns += fault_issue_ns;
@@ -239,8 +248,10 @@ void test_basic_client_worker(
             if (map.count("switch-thread-desc"))
             {
                 col_is_fast_recovery.push_back(true);
-                CHECK_EQ(map.count("signal-server-recovery"), 0);
-                CHECK_EQ(map.count("client-recovery"), 0);
+                CHECK_EQ(map.count("signal-server-recovery"), 0)
+                    << "map is " << util::pre_map(map);
+                CHECK_EQ(map.count("client-recovery"), 0)
+                    << "map is " << util::pre_map(map);
                 auto switch_ns = map["switch-thread-desc"];
                 total_fault_ns += switch_ns;
                 col_fast_thread_desc_ns.push_back(switch_ns);
@@ -250,8 +261,10 @@ void test_basic_client_worker(
             else
             {
                 col_is_fast_recovery.push_back(false);
-                CHECK_EQ(map.count("signal-server-recovery"), 1);
-                CHECK_EQ(map.count("client-recovery"), 1);
+                CHECK_EQ(map.count("signal-server-recovery"), 1)
+                    << "map is " << util::pre_map(map);
+                CHECK_EQ(map.count("client-recovery"), 1)
+                    << "map is " << util::pre_map(map);
                 col_fast_thread_desc_ns.push_back(0);
                 auto client_recv_ns = map["client-recovery"];
                 col_slow_client_recover_ns.push_back(client_recv_ns);
@@ -383,7 +396,11 @@ void benchmark_client(Patronus::pointer p,
         g_total_test_nr = conf.test_nr;
         if (first_enter)
         {
-            p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
+            auto dsm = p->get_dsm();
+            dsm->keeper_partial_barrier("server_ready-" + std::to_string(key),
+                                        2 /* expect_nr */,
+                                        false,
+                                        100ms);
         }
     }
     bar.wait();
@@ -449,7 +466,11 @@ void benchmark_server(Patronus::pointer p,
     bar.wait();
     if (is_master)
     {
-        p->keeper_barrier("server_ready-" + std::to_string(key), 100ms);
+        auto dsm = p->get_dsm();
+        dsm->keeper_partial_barrier("server_ready-" + std::to_string(key),
+                                    2 /* expect_nr */,
+                                    true,
+                                    100ms);
     }
 
     p->server_serve(key);
@@ -493,7 +514,7 @@ int main(int argc, char *argv[])
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     PatronusConfig pconfig;
-    pconfig.machine_nr = kMachineNr;
+    pconfig.machine_nr = ::config::kMachineNr;
     pconfig.block_class = {2_MB, 8_KB};
     pconfig.block_ratio = {0.5, 0.5};
     pconfig.reserved_buffer_size = 2_GB;
@@ -505,6 +526,7 @@ int main(int argc, char *argv[])
     auto nid = patronus->get_node_id();
 
     bool is_client = nid == kClientNodeId;
+    bool is_server = nid == kServerNodeId;
 
     LOG(WARNING)
         << "TODO: This benchmark can not re-enter. Only one sub-conf "
@@ -541,7 +563,7 @@ int main(int argc, char *argv[])
             t.join();
         }
     }
-    else
+    else if (is_server)
     {
         std::vector<std::thread> threads;
         boost::barrier bar(kTotalThreadNr);
@@ -571,6 +593,14 @@ int main(int argc, char *argv[])
         {
             t.join();
         }
+    }
+    else
+    {
+        for (size_t i = 0; i < 4; ++i)
+        {
+            patronus->finished(i);
+        }
+        LOG(INFO) << "SKIP.";
     }
 
     StrDataFrame df;

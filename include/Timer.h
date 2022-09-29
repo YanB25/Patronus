@@ -316,6 +316,7 @@ public:
             ret.push_back(record);
         }
         cached_vec_ = std::move(ret);
+        DCHECK(cached_vec_.has_value());
         return cached_vec_.value();
     }
     /**
@@ -335,6 +336,7 @@ public:
             ret[record.name] += record.ns;
         }
         cached_map_ = std::move(ret);
+        DCHECK(cached_map_.has_value());
         return cached_map_.value();
     }
     uint64_t sum_ns() const

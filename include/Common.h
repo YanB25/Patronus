@@ -26,7 +26,7 @@
 using namespace util::literals;
 
 constexpr static size_t MAX_MACHINE = 4;
-constexpr static int NR_DIRECTORY = 4;
+constexpr static int NR_DIRECTORY = 16;
 constexpr static ssize_t kMaxAppThread = 32;
 constexpr static const char *kNICName = "eno1";
 constexpr static const char *kNodeRankFileName = "inet.conf";
@@ -74,8 +74,8 @@ constexpr static char kSelectMlxVersion = '5';  // mlx5
 constexpr static char kSelectMlxNicIdx = '0';
 constexpr static size_t kMachineNr = 4;
 static_assert(kMachineNr <= MAX_MACHINE);
-static const std::vector<size_t> __kServerNodeIds{3};
-static const std::vector<size_t> __kClientNodeIds{0, 1, 2};
+static const std::vector<size_t> __kServerNodeIds{1};
+static const std::vector<size_t> __kClientNodeIds{0, 2, 3};
 inline bool is_server(size_t nid)
 {
     auto it =

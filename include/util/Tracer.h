@@ -142,8 +142,9 @@ public:
         }
         else
         {
-            map_records_ = {};
+            map_records_ = std::map<std::string, uint64_t>();
         }
+        DCHECK(map_records_.has_value());
 
         for (const auto &node : list_)
         {
@@ -163,9 +164,10 @@ public:
         }
         else
         {
-            vec_records_ = {};
+            vec_records_ = std::vector<RetrieveTimerRecord>();
         }
 
+        CHECK(vec_records_.has_value());
         for (const auto &node : list_)
         {
             vec_records_.value().emplace_back(node.name(), node.sum_ns());

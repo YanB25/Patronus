@@ -622,6 +622,10 @@ public:
         return umsg_->recv(get_thread_id(), ibuf, limit);
     }
     inline uint32_t get_icon_lkey();
+    inline ibv_cq *get_icon_cq()
+    {
+        return iCon_->cq;
+    }
 
     inline bool modify_th_qp_access_flag(int node_id,
                                          size_t dir_id,
@@ -704,6 +708,7 @@ public:
      */
     Buffer get_rdma_buffer()
     {
+        DCHECK(hasRegistered());
         return Buffer(rdma_buffer_, define::kRDMABufferSize);
     }
     inline Buffer get_server_internal_dsm_buffer();

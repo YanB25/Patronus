@@ -22,7 +22,7 @@ thread_local std::unique_ptr<
     ThreadUnsafeBufferPool<Patronus::kSmallMessageSize>>
     Patronus::rdma_small_message_buffer_pool_;
 
-thread_local mem::SlabAllocator::pointer Patronus::rdma_client_buffer_;
+thread_local std::unique_ptr<mem::SlabAllocator> Patronus::rdma_client_buffer_;
 thread_local LocalityObjectPool<RpcContext> Patronus::rpc_context_(
     Patronus::kMaxCoroNr);
 thread_local LocalityObjectPool<RWContext> Patronus::rw_context_(
@@ -3421,7 +3421,7 @@ PatronusThreadResourceDesc Patronus::prepare_client_thread(
     desc.client_rdma_buffer = client_rdma_buffer;
     desc.client_rdma_buffer_size = rdma_buffer_size;
 
-    desc.rdma_client_buffer = mem::SlabAllocator::new_instance(
+    desc.rdma_client_buffer = std::make_unique<mem::SlabAllocator>(
         client_rdma_buffer, rdma_buffer_size, conf_.client_rdma_buffer);
     return desc;
 }
@@ -3437,6 +3437,11 @@ bool Patronus::apply_client_resource(PatronusThreadResourceDesc &&desc,
 {
     auto succ = dsm_->applyResource(desc.dsm_desc, bind_core);
     CHECK(succ);
+    // deliberately leaks the memory, so that
+    // the dctor of them will not be called (quicker).
+    rdma_message_buffer_pool_.release();
+    rdma_client_buffer_.release();
+    rdma_small_message_buffer_pool_.release();
     rdma_message_buffer_pool_ = std::move(desc.rdma_message_buffer_pool);
     rdma_small_message_buffer_pool_ =
         std::move(desc.rdma_small_message_buffer_pool);

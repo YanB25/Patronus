@@ -102,7 +102,7 @@ struct PatronusThreadResourceDesc
         rdma_small_message_buffer_pool;
     char *client_rdma_buffer;
     size_t client_rdma_buffer_size;
-    mem::SlabAllocator::pointer rdma_client_buffer;
+    std::unique_ptr<mem::SlabAllocator> rdma_client_buffer;
 };
 
 class pre_patronus_explain;
@@ -1050,7 +1050,7 @@ private:
     //     rw_context_;
     static thread_local LocalityObjectPool<RpcContext> rpc_context_;
     static thread_local LocalityObjectPool<RWContext> rw_context_;
-    static thread_local mem::SlabAllocator::pointer rdma_client_buffer_;
+    static thread_local std::unique_ptr<mem::SlabAllocator> rdma_client_buffer_;
     static thread_local char *client_rdma_buffer_;
     static thread_local size_t client_rdma_buffer_size_;
     static thread_local PatronusBatchContext one_shot_batch_ctx_;
