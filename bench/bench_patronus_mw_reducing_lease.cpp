@@ -949,7 +949,7 @@ int main(int argc, char *argv[])
     config.block_class = {2_MB};
     config.block_ratio = {1};
 
-    LOG(FATAL) << "TODO: since auto-expiration is turn on, the rolling header "
+    LOG(ERROR) << "TODO: since auto-expiration is turn on, the rolling header "
                   "is not work. Try to add a flag in acquisition";
 
     auto patronus = Patronus::ins(config);
