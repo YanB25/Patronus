@@ -9,7 +9,7 @@ namespace config::umsg
 constexpr static bool kEnableNoCpySafeCheck = true;
 
 constexpr static size_t kExpectInFlightMessageNr = define::kMaxCoroNr;
-constexpr static size_t kScale = 2;
+constexpr static size_t kScale = 3;
 static_assert(kScale >= 2, "At least allocate double the out-standing buffers");
 // Machine: MAX_MACHIEN - 1
 // Thread: kMaxAppThread (client) / NR_DIRECTORY (server)

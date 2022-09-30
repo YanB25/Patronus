@@ -31,7 +31,7 @@ std::vector<size_t> col_alloc_ns;
 
 using namespace hmdf;
 
-using MWPool = mem::MWPool<true>;
+using MWPool = mem::MWPool;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
 
@@ -824,8 +824,10 @@ void bench_slab_alloc_reg_mw_over_mr_coro(size_t test_times,
         conf.dsm = dsm;
         conf.node_id = 0;
         conf.thread_id = i;
-        conf.mw_pool =
-            std::make_shared<MWPool>(dsm, conf.dir_id, mw_pool_size_thread);
+        conf.mw_pool = std::make_shared<MWPool>(dsm,
+                                                conf.dir_id,
+                                                mw_pool_size_thread,
+                                                true /* enable locality opt */);
         allocators.push_back(std::make_shared<mem::MWAllocator>(conf));
     }
     bench_template_coro(
@@ -886,8 +888,10 @@ void bench_slab_alloc_reg_mw_over_mr(size_t test_times,
         conf.dsm = dsm;
         conf.node_id = 0;
         conf.thread_id = i;
-        conf.mw_pool =
-            std::make_shared<MWPool>(dsm, conf.dir_id, mw_pool_size_thread);
+        conf.mw_pool = std::make_shared<MWPool>(dsm,
+                                                conf.dir_id,
+                                                mw_pool_size_thread,
+                                                true /* enable locality opt */);
         allocators.push_back(std::make_shared<mem::MWAllocator>(conf));
     }
     bench_template("alloc (slab) + MW (allocator w/ MR)",
@@ -939,8 +943,10 @@ void bench_slab_alloc_reg_mw(size_t test_times,
         conf.dsm = dsm;
         conf.node_id = 0;
         conf.thread_id = i;
-        conf.mw_pool =
-            std::make_shared<MWPool>(dsm, conf.dir_id, mw_pool_size_thread);
+        conf.mw_pool = std::make_shared<MWPool>(dsm,
+                                                conf.dir_id,
+                                                mw_pool_size_thread,
+                                                true /* enable locality opt */);
         allocators.push_back(std::make_shared<mem::MWAllocator>(conf));
     }
     bench_template("alloc (slab) + MW (allocator w/o MR)",
@@ -980,8 +986,8 @@ void bench_alloc_reg_mw_with_mw_allocator(size_t test_times,
         conf.dsm = dsm;
         conf.node_id = 0;
         conf.thread_id = i;
-        conf.mw_pool =
-            std::make_shared<MWPool>(dsm, conf.dir_id, mw_pool_thread);
+        conf.mw_pool = std::make_shared<MWPool>(
+            dsm, conf.dir_id, mw_pool_thread, true /* enable locality opt */);
         allocators.push_back(std::make_shared<mem::MWAllocator>(conf));
     }
 
@@ -1017,8 +1023,8 @@ void bench_alloc_reg_mw_signal_batching(size_t test_times,
     {
         auto dir_id = i % NR_DIRECTORY;
         allocators.push_back(std::make_shared<mem::RawAllocator>());
-        mw_pools.push_back(
-            std::make_shared<MWPool>(dsm, dir_id, mw_pool_size_thread));
+        mw_pools.push_back(std::make_shared<MWPool>(
+            dsm, dir_id, mw_pool_size_thread, true /* enable locality opt */));
     }
 
     CHECK_EQ(allocators.size(), thread_nr);

@@ -82,6 +82,7 @@ public:
      *
      */
     void sync();
+    void skip_sync();
 
     static std::chrono::time_point<std::chrono::system_clock>
     ns_to_system_clock(uint64_t ns)

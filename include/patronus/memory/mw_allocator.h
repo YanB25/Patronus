@@ -13,32 +13,36 @@
 
 namespace patronus::mem
 {
-template <bool kLocality>
 class MWPool
 {
 public:
-    MWPool(DSM::pointer dsm, size_t dir_id, size_t allocate_nr)
-        : dsm_(dsm), dir_id_(dir_id), allocated_(allocate_nr)
+    MWPool(DSM::pointer dsm,
+           size_t dir_id,
+           size_t allocate_nr,
+           bool enable_locality)
+        : dsm_(dsm),
+          dir_id_(dir_id),
+          allocated_(2 * allocate_nr),
+          enable_locality_(enable_locality)
     {
         DVLOG(::config::verbose::kSystem) << "[mw_pool] alloc " << allocate_nr;
-        if constexpr (kLocality)
+        for (size_t i = 0; i < allocate_nr; ++i)
         {
-            for (size_t i = 0; i < allocate_nr; ++i)
-            {
-                mw_pool_loc_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
-            }
+            mw_pool_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
+            mw_pool_loc_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
         }
-        else
-        {
-            for (size_t i = 0; i < allocate_nr; ++i)
-            {
-                mw_pool_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
-            }
-        }
+    }
+    bool enabled_locality() const
+    {
+        return enable_locality_;
+    }
+    void set_enable_locality(bool enable)
+    {
+        enable_locality_ = enable;
     }
     ibv_mw *alloc()
     {
-        if constexpr (kLocality)
+        if (likely(enable_locality_))
         {
             if (unlikely(mw_pool_loc_.empty()))
             {
@@ -66,7 +70,7 @@ public:
             return;
         }
 
-        if constexpr (kLocality)
+        if (likely(enable_locality_))
         {
             mw_pool_loc_.push(mw);
         }
@@ -77,7 +81,7 @@ public:
     }
     bool empty() const
     {
-        if constexpr (kLocality)
+        if (likely(enable_locality_))
         {
             return mw_pool_loc_.empty();
         }
@@ -107,28 +111,18 @@ public:
     }
 
 private:
-    // void block_alloc()
-    // {
-    //     DVLOG(::config::verbose::kSystem)
-    //         << "[mw_pool] block alloc " << cache_size_;
-    //     for (size_t i = 0; i < cache_size_; ++i)
-    //     {
-    //         mw_pool_.push(CHECK_NOTNULL(dsm_->alloc_mw(dir_id_)));
-    //     }
-    //     allocated_ += cache_size_;
-    // }
-
     DSM::pointer dsm_;
     size_t dir_id_{0};
     std::queue<ibv_mw *> mw_pool_;
     std::stack<ibv_mw *> mw_pool_loc_;
     size_t allocated_{0};
+    bool enable_locality_;
 };
 
 struct MWAllocatorConfig
 {
     std::shared_ptr<IAllocator> allocator;
-    std::shared_ptr<MWPool<true /* locality */>> mw_pool;
+    std::shared_ptr<MWPool> mw_pool;
     DSM::pointer dsm;
     size_t dir_id;
     size_t node_id;

@@ -12,7 +12,7 @@ using namespace std::chrono_literals;
 // Two nodes
 // one node issues cas operations
 
-constexpr uint16_t kClientNodeId = 0;
+[[maybe_unused]] constexpr uint16_t kClientNodeId = 0;
 [[maybe_unused]] constexpr uint16_t kServerNodeId = 1;
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");
@@ -34,28 +34,7 @@ int main(int argc, char *argv[])
     LOG(INFO) << "Support color ? " << getenv("TERM");
     LOG(INFO) << "Hash of 100 is " << std::hash<int>{}(100);
 
-    rdmaQueryDevice();
-
-    DSMConfig config;
-    config.machineNR = ::config::kMachineNr;
-
-    accept_duration(10ns);
-    accept_duration(10us);
-    accept_duration(10ms);
-    accept_duration(10s);
-
-    auto dsm = DSM::getInstance(config);
-
-    dsm->registerThread();
-
-    // let client spining
-    auto nid = dsm->getMyNodeID();
-    if (nid == kClientNodeId)
-    {
-    }
-    else
-    {
-    }
+    std::this_thread::sleep_for(5s);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }

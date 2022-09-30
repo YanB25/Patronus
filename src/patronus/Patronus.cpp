@@ -98,7 +98,14 @@ Patronus::Patronus(const PatronusConfig &conf) : conf_(conf)
     time_syncer_ = time::TimeSyncer::new_instance(
         dsm_, gaddr, time_sync_buffer.buffer, time_sync_buffer.size);
 
-    time_syncer_->sync();
+    if (conf_.simplify)
+    {
+        time_syncer_->skip_sync();
+    }
+    else
+    {
+        time_syncer_->sync();
+    }
     finish_time_sync_now_ = std::chrono::steady_clock::now();
 
     explain(conf);
@@ -1454,7 +1461,8 @@ void Patronus::registerServerThread()
     for (size_t dirID = 0; dirID < NR_DIRECTORY; ++dirID)
     {
         auto dsm = get_dsm();
-        mw_pool_[dirID] = std::make_unique<MWPool>(dsm, dirID, alloc_mw_nr);
+        mw_pool_[dirID] = std::make_unique<MWPool>(
+            dsm, dirID, alloc_mw_nr, true /* enable locality optimization */);
     }
 
     auto tid = get_thread_id();
@@ -3483,6 +3491,25 @@ bool Patronus::get_configure_reuse_mw_opt()
         }
     }
     return conf;
+}
+void Patronus::set_configure_mw_locality_opt(bool val)
+{
+    for (auto &mw_pool : mw_pool_)
+    {
+        mw_pool->set_enable_locality(val);
+    }
+}
+bool Patronus::get_configure_mw_locality_opt()
+{
+    auto ret = mw_pool_.front()->enabled_locality();
+    if constexpr (debug())
+    {
+        for (const auto &mw_pool : mw_pool_)
+        {
+            CHECK_EQ(mw_pool->enabled_locality(), ret);
+        }
+    }
+    return ret;
 }
 
 }  // namespace patronus

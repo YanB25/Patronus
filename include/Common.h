@@ -46,7 +46,9 @@ constexpr uint64_t kChunkSize = 32_MB;
 
 // lock on-chip memory
 constexpr uint64_t kLockStartAddr = 0;
-constexpr uint64_t kLockChipMemSize = 256 * 1024;
+// constexpr uint64_t kLockChipMemSize = 256 * 1024;
+// Just one 1/4, yes, you could use all of them.
+constexpr uint64_t kLockChipMemSize = 64_KB;
 
 constexpr uint16_t kMaxCoroNr = 32;
 

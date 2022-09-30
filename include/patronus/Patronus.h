@@ -49,6 +49,9 @@ struct PatronusConfig
     std::vector<double> block_ratio{1};
     mem::SlabAllocatorConfig client_rdma_buffer{
         {config::patronus::kClientRdmaBufferSize, 8_B}, {0.95, 0.05}};
+    // in simplified mode, time syncer is diabled to avoid generating RDMA
+    // access.
+    bool simplify{false};
 
     size_t total_buffer_size() const
     {
@@ -609,6 +612,8 @@ public:
 
     void set_configure_reuse_mw_opt(bool val);
     bool get_configure_reuse_mw_opt();
+    void set_configure_mw_locality_opt(bool val);
+    bool get_configure_mw_locality_opt();
 
 private:
     PatronusConfig conf_;

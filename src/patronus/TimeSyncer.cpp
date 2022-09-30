@@ -20,6 +20,10 @@ TimeSyncer::TimeSyncer(DSM::pointer dsm,
     CHECK_LE(sizeof(ClockInfo), buf_size_);
     node_finished_.fill(false);
 }
+void TimeSyncer::skip_sync()
+{
+    ready_ = true;
+}
 
 void TimeSyncer::sync()
 {
