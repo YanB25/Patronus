@@ -488,8 +488,14 @@ void benchmark(Patronus::pointer p, boost::barrier &bar, bool is_client)
     {
         {
             key++;
-            auto confs = ConfigFactory::get_basic(
-                "crash", thread_nr, 1, 1_K + 100, 1_K, 20);
+            constexpr static size_t kFaultNr = 2 * kPreparedThreadNr;
+            constexpr static size_t kFaultEvery = 100;
+            auto confs = ConfigFactory::get_basic("crash",
+                                                  thread_nr,
+                                                  1,
+                                                  10_K + kFaultNr * kFaultEvery,
+                                                  10_K,
+                                                  kFaultNr);
 
             if (is_client)
             {
@@ -596,6 +602,7 @@ int main(int argc, char *argv[])
     }
     else
     {
+        patronus->registerClientThread();
         for (size_t i = 0; i < 4; ++i)
         {
             patronus->finished(i);
