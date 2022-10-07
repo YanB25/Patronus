@@ -436,7 +436,6 @@ void do_bench_mw(DSM::pointer dsm,
                  size_t test_times,
                  size_t bind_size,
                  size_t batch_size,
-                 std::vector<ibv_mw *> &constant_active_pool,
                  std::vector<ibv_mw *> &mw_pool)
 {
     auto tid = dsm->get_thread_id();
@@ -455,17 +454,18 @@ void do_bench_mw(DSM::pointer dsm,
     auto srv_buffer = dsm->get_server_internal_dsm_buffer();
     ibv_wc wcs[128];
     size_t mw_index = 0;
-    size_t constantly_active_mw_index = 0;
     while (remain_task > 0)
     {
         while (ongoing_token > 0)
         {
             ibv_mw_bind mw_bind;
+            memset(&mw_bind, 0, sizeof(mw_bind));
             mw_bind.wr_id = 0;
             mw_bind.bind_info.mr = mr;
             // get a little bit random by + 64 * mw_index
-            mw_bind.bind_info.addr = (uint64_t)(srv_buffer.buffer) +
-                                     64 * fast_pseudo_rand_int(0, 2_GB / 64);
+            // mw_bind.bind_info.addr = (uint64_t)(srv_buffer.buffer) +
+            //                          64 * fast_pseudo_rand_int(0, 1_GB / 64);
+            mw_bind.bind_info.addr = (uint64_t)(srv_buffer.buffer);
             // std::ignore = fast_pseudo_rand_int(0, 2_GB / 64);
             // mw_bind.bind_info.addr = (uint64_t)(srv_buffer.buffer);
             mw_bind.bind_info.length = bind_size;
@@ -476,18 +476,13 @@ void do_bench_mw(DSM::pointer dsm,
             // the first @constantly_active_pool.size() MW
             // will always be in the pool, so that they are
             // always active.
-            ibv_mw *mw = nullptr;
-            if (unlikely(constantly_active_mw_index <
-                         constant_active_pool.size()))
-            {
-                mw = constant_active_pool[constantly_active_mw_index++];
-            }
-            else
-            {
-                mw = mw_pool[(mw_index++) % mw_pool.size()];
-            }
+            ibv_mw *mw = mw_pool[(mw_index++) % mw_pool.size()];
             int ret = ibv_bind_mw(qp, mw, &mw_bind);
-            PLOG_IF(FATAL, ret) << "Failed to call ibv_bind_mw.";
+            PLOG_IF(FATAL, ret)
+                << "Failed to call ibv_bind_mw. qp: " << (void *) qp
+                << ", mw: " << (void *) mw << ", mr: " << (void *) mr
+                << ", addr: " << (void *) mw_bind.bind_info.addr
+                << ", length: " << bind_size;
             ongoing_token--;
             remain_task--;
         }
@@ -503,11 +498,11 @@ void enter_bench_mw(DSM::pointer dsm,
                     size_t test_times)
 {
     constexpr static ssize_t kBatchSize = 4;
-    constexpr static ssize_t kAllocMwNr = 4;
+    constexpr static ssize_t kAllocMwNr = 1024;
     // constexpr static ssize_t kAllocMwNr = 1024;
-    constexpr static ssize_t kConstantlyActiveMwNr = 10240;
 
-    for (size_t thread_nr : {1, 4, 8, 16})
+    // for (size_t thread_nr : {1, 4, 8, 16})
+    for (size_t thread_nr : {16})
     {
         auto tid = dsm->get_thread_id();
         bool need_to_run = (size_t) tid < thread_nr;
@@ -518,14 +513,9 @@ void enter_bench_mw(DSM::pointer dsm,
                       "Recommend turn up kAllocMwNr.");
 
         std::vector<ibv_mw *> mw_pool;
-        std::vector<ibv_mw *> constantly_active_mw;
         if (need_to_run)
         {
             auto dir_id = tid;
-            for (size_t i = 0; i < kConstantlyActiveMwNr; ++i)
-            {
-                constantly_active_mw.push_back(dsm->alloc_mw(dir_id));
-            }
             for (size_t i = 0; i < kAllocMwNr; ++i)
             {
                 mw_pool.push_back(dsm->alloc_mw(dir_id));
@@ -536,12 +526,7 @@ void enter_bench_mw(DSM::pointer dsm,
         ChronoTimer timer;
         if (need_to_run)
         {
-            do_bench_mw(dsm,
-                        test_times,
-                        bind_size,
-                        kBatchSize,
-                        constantly_active_mw,
-                        mw_pool);
+            do_bench_mw(dsm, test_times, bind_size, kBatchSize, mw_pool);
         }
         bar.wait();
         auto ns = timer.pin();
@@ -553,10 +538,6 @@ void enter_bench_mw(DSM::pointer dsm,
             << ", per_thread: " << util::pre_ops(test_times, ns, true);
 
         for (ibv_mw *mw : mw_pool)
-        {
-            dsm->free_mw(mw);
-        }
-        for (ibv_mw *mw : constantly_active_mw)
         {
             dsm->free_mw(mw);
         }
@@ -629,7 +610,7 @@ int main(int argc, char *argv[])
     // bench_rereg_mr(4_MB, 2000, true);
     // bench_dereg_mr(16_GB, 100, true);
 
-    bench_mw_launcher(64, 2_M);
+    bench_mw_launcher(64, 10_M);
 
     LOG(INFO) << "finished. ctrl+C to quit.";
 }
