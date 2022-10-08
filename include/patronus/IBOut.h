@@ -41,12 +41,12 @@ const char *wc_opcode_str(ibv_wc_opcode opcode)
 
 inline std::ostream &operator<<(std::ostream &os, const ibv_wc_status &status)
 {
-    os << ibv_wc_status_str(status);
+    os << ibv_wc_status_str(status) << "(" << (int) status << ")";
     return os;
 }
 inline std::ostream &operator<<(std::ostream &os, const ibv_wc_opcode &opcode)
 {
-    os << wc_opcode_str(opcode);
+    os << wc_opcode_str(opcode) << "(" << (int) opcode << ")";
     return os;
 }
 inline std::ostream &operator<<(std::ostream &os, const ibv_send_wr &wr)
@@ -60,7 +60,9 @@ inline std::ostream &operator<<(std::ostream &os, const ibv_wc &wc)
 {
     os << "{ibv_wc wr_id: " << WRID(wc.wr_id) << ", status: " << wc.status
        << ", op: " << wc.opcode << ", vendor_err: " << wc.vendor_err
-       << ", imm_data: " << wc.imm_data << ", qp_num: " << wc.qp_num << "}";
+       << ", byte_len: " << (size_t) wc.byte_len
+       << ", imm_data: " << wc.imm_data << ", qp_num: " << wc.qp_num
+       << ", src_qp:" << wc.src_qp << "}";
     return os;
 }
 
