@@ -40,6 +40,16 @@ public:
         master_f_ = master_f;
     }
 
+    using HookF = typename ManagerT::HookF;
+    void register_start_bench(const HookF &hook_f)
+    {
+        m_.register_start_bench(hook_f);
+    }
+    void register_end_bench(const HookF &hook_f)
+    {
+        m_.register_end_bench(hook_f);
+    }
+
     using WorkerF = std::function<void(size_t,
                                        CoroYield &,
                                        CoroCall *,
@@ -50,12 +60,6 @@ public:
     void register_worker_coro(const WorkerF &worker_f)
     {
         worker_f_ = worker_f;
-    }
-
-    using PostSubBenchF = typename ManagerT::PostSubBenchF;
-    void register_post_sub_bench(PostSubBenchF &post_sub_bench_f)
-    {
-        m_.register_post_sub_bench(post_sub_bench_f);
     }
 
     void bench(const std::vector<Config> &configs)

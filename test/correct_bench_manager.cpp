@@ -58,7 +58,7 @@ inline uint64_t gen_magic(size_t thread_id, size_t coro_id)
 void client_worker(Patronus::pointer p,
                    const Config &config,
                    CoroContext &ctx,
-                   bool is_master)
+                   bool)
 {
     auto coro_id = ctx.coro_id();
     auto tid = p->get_thread_id();
@@ -70,6 +70,7 @@ void client_worker(Patronus::pointer p,
     size_t coro_key = gen_coro_key(tid, coro_id);
     [[maybe_unused]] size_t coro_magic = gen_magic(tid, coro_id);
 
+    // LOG(INFO) << "[bench] Entering: " << ctx;
     for (size_t time = 0; time < config.test_times; ++time)
     {
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
@@ -129,14 +130,19 @@ void client_worker(Patronus::pointer p,
     // LOG(INFO) << "worker coro " << (int) coro_id << ", thread " << tid
     //           << " finished ALL THE TASK. yield to master.";
 
-    if (is_master)
-    {
-        p->finished(config.wait_key);
-        LOG(INFO) << "Finished one bench.";
-    }
+    // LOG(INFO) << "Finished. from " << ctx;
+    // if (is_master && coro_id == 0)
+    // {
+    //     p->finished(config.wait_key);
+    //     LOG(INFO) << "Finished one bench. from " << ctx;
+    // }
 }
 
-using Context = Void;
+// using Context = Void;
+struct Context
+{
+    ChronoTimer timer;
+};
 using CoroComm = Void;
 
 int main(int argc, char *argv[])
@@ -172,14 +178,19 @@ int main(int argc, char *argv[])
                const Config &config,
                CoroContext &ctx,
                bool is_master) { client_worker(p, config, ctx, is_master); });
+        manager.register_start_bench([](Context &context, const Config &) {
+            context.timer.pin();
+            LOG(INFO) << "[bench] called timer.pin";
+        });
+        manager.register_end_bench([](Context &context, const Config &) {
+            auto ns = context.timer.pin();
+            LOG(INFO) << "[bench] called timer.pin on end. takes: "
+                      << util::pre_ns(ns);
+        });
     }
     else
     {
-        manager.register_server_task(
-            [](Patronus::pointer p, Context &, const Config &config) {
-                p->finished(config.wait_key);
-                p->server_serve(config.wait_key);
-            });
+        // pass
     }
 
     manager.bench(configs);

@@ -30,6 +30,16 @@ public:
         bench_f_ = bench_f;
     }
 
+    using HookF = std::function<void(Context &, const Config &)>;
+    void register_start_bench(const HookF &hook_f)
+    {
+        start_bench_f_ = hook_f;
+    }
+    void register_end_bench(const HookF &hook_f)
+    {
+        end_bench_f_ = hook_f;
+    }
+
     using NodeBarrier = std::function<void()>;
     using ClusterBarrier = std::function<void(const std::string &)>;
 
@@ -43,19 +53,6 @@ public:
         has_cluster_barrier_ = true;
         cluster_barrier_f_ = cluster_barrier_f;
     }
-
-    using PostSubBenchF = std::function<void(uint64_t, const Config &)>;
-    void register_post_sub_bench(PostSubBenchF &post_sub_bench_f)
-    {
-        has_post_sub_bench_ = true;
-        post_sub_bench_f_ = post_sub_bench_f;
-    }
-
-    constexpr static auto default_post_sub_bench = [](uint64_t ns,
-                                                      const Config &) {
-        LOG(WARNING) << "** no post_sub_bench registered. take: "
-                     << util::pre_ns(ns) << " ns";
-    };
 
     void bench(const std::vector<Config> &configs)
     {
@@ -86,8 +83,9 @@ private:
     NodeBarrier node_barrier_f_;
     bool has_cluster_barrier_{false};
     ClusterBarrier cluster_barrier_f_;
-    bool has_post_sub_bench_{false};
-    PostSubBenchF post_sub_bench_f_{default_post_sub_bench};
+
+    std::optional<HookF> start_bench_f_;
+    std::optional<HookF> end_bench_f_;
 
     void do_bench_thread(const Config &config, Context &context, bool is_master)
     {
@@ -109,7 +107,6 @@ private:
             cluster_barrier_f_("manager:enter");
         }
 
-        uint64_t ns = 0;
         for (const auto &config : configs)
         {
             if (is_master)
@@ -121,19 +118,23 @@ private:
             }
 
             node_barrier_f_();
-            ChronoTimer timer;
+
+            if (is_master && start_bench_f_.has_value())
+            {
+                start_bench_f_.value()(context_, config);
+            }
+
             VLOG(V) << "[manager] entering benchmark";
             do_bench_thread(config, context_, is_master);
             VLOG(V) << "[manager] leaving benchmark, waiting for node barrier";
             node_barrier_f_();
             VLOG(V) << "[manager] node barrier leaved.";
-            ns = timer.pin();
 
-            if (is_master)
+            if (is_master && end_bench_f_.has_value())
             {
-                VLOG(V) << "[manager] entering post_sub_bench";
-                post_sub_bench_f_(ns, config);
+                end_bench_f_.value()(context_, config);
             }
+
             node_barrier_f_();
         }
 
@@ -151,8 +152,7 @@ inline std::ostream &operator<<(std::ostream &os,
     os << "{manager has_init: " << m.has_init_
        << ", has_bench: " << m.has_bench_
        << ", has_node_barrier: " << m.has_node_barrier_
-       << ", has_cluster_barrier: " << m.has_cluster_barrier_
-       << ", has_post_sub_bench: " << m.has_post_sub_bench_;
+       << ", has_cluster_barrier: " << m.has_cluster_barrier_ << "}";
     return os;
 }
 }  // namespace bench
