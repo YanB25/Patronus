@@ -16,6 +16,7 @@ public:
         : m_(thread_nr, context), coro_nr_(coro_nr)
     {
         CHECK_LE(coro_nr, define::kMaxCoroNr);
+        CHECK_LE(thread_nr, kMaxAppThread);
     }
     void register_init(const InitF &init_f)
     {
@@ -68,36 +69,49 @@ public:
 
     void do_bench_thread(Context &context, const Config &config, bool is_master)
     {
+        VLOG(V) << "[coro_manager] entering do_bench_thread: start of coro "
+                   "lifecycle";
         CoroComm coro_context;
+        CoroCall workers[define::kMaxCoroNr];
+        CoroCall master;
         for (size_t i = 0; i < coro_nr_; ++i)
         {
-            workers_[i] =
-                CoroCall([i, &context, &coro_context, &config, is_master, this](
-                             CoroYield &yield) {
-                    bench_worker_coro(
-                        i, yield, context, coro_context, config, is_master);
+            workers[i] = CoroCall(
+                [i, &master, &context, &coro_context, &config, is_master, this](
+                    CoroYield &yield) {
+                    bench_worker_coro(i,
+                                      yield,
+                                      &master,
+                                      context,
+                                      coro_context,
+                                      config,
+                                      is_master);
                 });
         }
-        master_ = CoroCall(
-            [&context, &coro_context, &config, this](CoroYield &yield) {
-                bench_master_coro(yield, context, coro_context, config);
-            });
+        master = CoroCall([&workers, &context, &coro_context, &config, this](
+                              CoroYield &yield) {
+            bench_master_coro(yield, workers, context, coro_context, config);
+        });
 
-        master_();
+        master();
+        VLOG(V) << "[coro_manager] leaving do_bench_thread: end of coro "
+                   "lifecycle";
     }
 
     void bench_master_coro(CoroYield &yield,
+                           CoroCall *workers,
                            Context &context,
                            CoroComm &coro_context,
                            const Config &config)
     {
         VLOG(V) << "[coro_manager] entering master coro";
-        master_f_(yield, workers_, context, coro_context, config);
+        master_f_(yield, workers, context, coro_context, config);
         VLOG(V) << "[coro_manager] leaving master coro";
     }
 
     void bench_worker_coro(size_t coro_id,
                            CoroYield &yield,
+                           CoroCall *master,
                            Context &context,
                            CoroComm &coro_context,
                            const Config &config,
@@ -105,8 +119,8 @@ public:
     {
         VLOG(V) << "[coro_manager] entering worker coro(" << coro_id << ")";
         worker_f_(
-            coro_id, yield, &master_, context, coro_context, config, is_master);
-        VLOG(V) << "[coro_manager] entering worker coro(" << coro_id << ")";
+            coro_id, yield, master, context, coro_context, config, is_master);
+        VLOG(V) << "[coro_manager] leaving worker coro(" << coro_id << ")";
     }
 
 private:
@@ -114,8 +128,5 @@ private:
     size_t coro_nr_;
     MasterF master_f_;
     WorkerF worker_f_;
-
-    CoroCall workers_[define::kMaxCoroNr];
-    CoroCall master_;
 };
 }  // namespace bench

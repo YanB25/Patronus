@@ -11,6 +11,7 @@ template <typename Context, typename Config, typename CoroComm>
 class PatronusManager
 {
 public:
+    constexpr static size_t V = ::config::verbose::kCoroLauncher;
     using CoroManagerT = ::bench::CoroManager<Context, Config, CoroComm>;
     PatronusManager(Patronus::pointer patronus,
                     size_t thread_nr,
@@ -76,7 +77,9 @@ public:
                                                          const Config &config,
                                                          bool is_master) {
             std::ignore = is_master;
+            VLOG(V) << "[patronus_manager] entering task_f";
             task_f(p, context, config);
+            VLOG(V) << "[patronus_manager] leaving task_f";
         });
     }
 
@@ -96,12 +99,18 @@ public:
                                           CoroComm &coro_comm,
                                           const Config &config,
                                           bool is_master) {
+                VLOG(V) << "[patronus_manager] entering worker coro.";
                 auto tid = p->get_thread_id();
-                CHECK(!finish_all_task_[coro_id]);
+                auto &finish_all_task = finish_all_tasks_[tid];
+                CHECK(!finish_all_task[coro_id]);
                 CoroContext ctx(tid, &yield, master, coro_id);
 
+                VLOG(V) << "[patronus_manager] entering task_f " << ctx;
                 task_f(p, context, coro_comm, config, ctx, is_master);
-                finish_all_task_[coro_id] = true;
+                finish_all_task[coro_id] = true;
+                VLOG(V) << "[patronus_manager] coro finishing all the tasks. "
+                           "leaving... "
+                        << ctx << ", " << util::pre_vec(finish_all_task);
                 ctx.yield_to_master();
                 LOG(FATAL) << "** not reachable.";
             });
@@ -113,6 +122,7 @@ public:
                                      CoroComm &coro_context,
                                      const Config &config)
     {
+        VLOG(V) << "[patronus_manager] entering patronus_client_master_coro";
         std::ignore = context;
         std::ignore = coro_context;
         std::ignore = config;
@@ -122,17 +132,20 @@ public:
         CoroContext mctx(tid, &yield, workers);
         CHECK(mctx.is_master());
 
-        finish_all_task_.clear();
-        finish_all_task_.resize(coro_nr_, false);
+        auto &finish_all_task = finish_all_tasks_[tid];
+        finish_all_task.clear();
+        finish_all_task.resize(coro_nr_, false);
 
         for (size_t i = 0; i < coro_nr_; ++i)
         {
+            VLOG(V) << "[patronus_manager] before yielding to worker " << i
+                    << " for init. " << mctx;
             mctx.yield_to_worker(i);
         }
         LOG(INFO) << "Return back to master. start to recv messages";
         coro_t coro_buf[2 * define::kMaxCoroNr];
-        while (!std::all_of(std::begin(finish_all_task_),
-                            std::end(finish_all_task_),
+        while (!std::all_of(std::begin(finish_all_task),
+                            std::end(finish_all_task),
                             [](bool i) { return i; }))
         {
             auto nr = patronus_->try_get_client_continue_coros(
@@ -140,13 +153,15 @@ public:
             for (size_t i = 0; i < nr; ++i)
             {
                 auto coro_id = coro_buf[i];
-                DVLOG(1) << "[bench] yielding due to CQE";
+                VLOG(V) << "[patronus_manager] before yielding to worker " << i
+                        << " for CQE. " << mctx;
                 mctx.yield_to_worker(coro_id);
             }
         }
 
-        LOG(WARNING) << "[bench] all worker finish their work. at tid " << tid
-                     << " thread exiting...";
+        VLOG(V) << "[patronus_manager] master coro detects all work finished. "
+                   "leaving... "
+                << mctx;
     }
     using PostSubBenchF = typename CoroManagerT::PostSubBenchF;
     void register_post_sub_bench(PostSubBenchF &post_sub_bench_f)
@@ -183,6 +198,6 @@ private:
     boost::barrier bar_;
     bool is_client_{false};
 
-    std::vector<bool> finish_all_task_;
+    Perthread<std::vector<bool>> finish_all_tasks_;
 };
 }  // namespace patronus::bench

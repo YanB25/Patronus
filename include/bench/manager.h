@@ -98,6 +98,8 @@ private:
 
     void bench_thread(const std::vector<Config> &configs, bool is_master)
     {
+        static size_t __times = 0;
+        VLOG(V) << "[manager] initing";
         init_f_();
 
         node_barrier_f_();
@@ -110,14 +112,26 @@ private:
         uint64_t ns = 0;
         for (const auto &config : configs)
         {
+            if (is_master)
+            {
+                auto name =
+                    std::string("manager:run-") + std::to_string(__times);
+                __times++;
+                cluster_barrier_f_(name);
+            }
+
             node_barrier_f_();
             ChronoTimer timer;
+            VLOG(V) << "[manager] entering benchmark";
             do_bench_thread(config, context_, is_master);
+            VLOG(V) << "[manager] leaving benchmark, waiting for node barrier";
             node_barrier_f_();
+            VLOG(V) << "[manager] node barrier leaved.";
             ns = timer.pin();
 
             if (is_master)
             {
+                VLOG(V) << "[manager] entering post_sub_bench";
                 post_sub_bench_f_(ns, config);
             }
             node_barrier_f_();

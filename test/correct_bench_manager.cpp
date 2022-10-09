@@ -12,7 +12,7 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 using namespace patronus;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kClientThreadNr = 4;
+constexpr static size_t kClientThreadNr = kMaxAppThread;
 
 static_assert(kClientThreadNr <= kMaxAppThread);
 static_assert(kServerThreadNr <= NR_DIRECTORY);
@@ -66,8 +66,6 @@ void client_worker(Patronus::pointer p,
 
     auto dir_id = tid % kServerThreadNr;
     CHECK_LT(dir_id, kServerThreadNr);
-
-    LOG(INFO) << "[bench] tid " << tid << ", coro: " << ctx;
 
     size_t coro_key = gen_coro_key(tid, coro_id);
     [[maybe_unused]] size_t coro_magic = gen_magic(tid, coro_id);
@@ -128,12 +126,13 @@ void client_worker(Patronus::pointer p,
 
         p->put_rdma_buffer(std::move(rdma_buf));
     }
-    LOG(WARNING) << "worker coro " << (int) coro_id << ", thread " << tid
-                 << " finished ALL THE TASK. yield to master.";
+    // LOG(INFO) << "worker coro " << (int) coro_id << ", thread " << tid
+    //           << " finished ALL THE TASK. yield to master.";
 
     if (is_master)
     {
         p->finished(config.wait_key);
+        LOG(INFO) << "Finished one bench.";
     }
 }
 
