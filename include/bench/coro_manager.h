@@ -61,7 +61,6 @@ public:
     {
         m_.register_bench(
             [this](Context &context, const Config &config, bool is_master) {
-                LOG(INFO) << "[debug] !!! entering do_bench_thread";
                 do_bench_thread(context, config, is_master);
             });
         m_.bench(configs);
@@ -70,8 +69,6 @@ public:
     void do_bench_thread(Context &context, const Config &config, bool is_master)
     {
         CoroComm coro_context;
-        LOG(INFO) << "[debug] !! setting " << coro_nr_ << " coros workers at "
-                  << (void *) workers_;
         for (size_t i = 0; i < coro_nr_; ++i)
         {
             workers_[i] =

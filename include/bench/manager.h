@@ -3,6 +3,7 @@
 #include <thread>
 
 #include "Common.h"
+#include "util/Pre.h"
 
 namespace bench
 {
@@ -43,15 +44,17 @@ public:
         cluster_barrier_f_ = cluster_barrier_f;
     }
 
-    using PostSubBenchF = std::function<void()>;
+    using PostSubBenchF = std::function<void(uint64_t, const Config &)>;
     void register_post_sub_bench(PostSubBenchF &post_sub_bench_f)
     {
         has_post_sub_bench_ = true;
         post_sub_bench_f_ = post_sub_bench_f;
     }
 
-    constexpr static auto default_post_sub_bench = []() {
-        LOG(WARNING) << "** no post_sub_bench registered.";
+    constexpr static auto default_post_sub_bench = [](uint64_t ns,
+                                                      const Config &) {
+        LOG(WARNING) << "** no post_sub_bench registered. take: "
+                     << util::pre_ns(ns) << " ns";
     };
 
     void bench(const std::vector<Config> &configs)
@@ -104,15 +107,18 @@ private:
             cluster_barrier_f_("manager:enter");
         }
 
+        uint64_t ns = 0;
         for (const auto &config : configs)
         {
             node_barrier_f_();
+            ChronoTimer timer;
             do_bench_thread(config, context_, is_master);
             node_barrier_f_();
+            ns = timer.pin();
 
             if (is_master)
             {
-                post_sub_bench_f_();
+                post_sub_bench_f_(ns, config);
             }
             node_barrier_f_();
         }

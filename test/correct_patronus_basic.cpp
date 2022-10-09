@@ -112,7 +112,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         memset(rdma_buf.buffer, 0, sizeof(Object));
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
-        CHECK_LT(sizeof(Object), rdma_buf.size);
+        CHECK_LE(sizeof(Object), rdma_buf.size);
         auto ec = p->read(lease,
                           rdma_buf.buffer,
                           sizeof(Object),
