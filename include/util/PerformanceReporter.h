@@ -317,6 +317,8 @@ public:
     OnePassBucketMonitor(const OnePassBucketMonitor<T> &rhs) = delete;
     OnePassBucketMonitor<T> &operator=(const OnePassBucketMonitor<T> &) =
         delete;
+    OnePassBucketMonitor(OnePassBucketMonitor<T> &&rhs) = default;
+    OnePassBucketMonitor &operator=(OnePassBucketMonitor<T> &&rhs) = default;
 
     void collect(T t)
     {

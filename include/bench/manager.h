@@ -7,14 +7,23 @@
 
 namespace bench
 {
+/**
+ * workflow
+ *
+ * init() - called once, at very begin
+ *
+ * start_bench() - called once, at each config
+ * bench() - called each thread, a each config
+ * end_bench() - called once, at each config
+ *
+ */
 template <typename Context, typename Config>
 class Manager
 {
 public:
     constexpr static size_t V = config::verbose::kCoroLauncher;
-    using InitF = std::function<void()>;
-    Manager(size_t thread_nr, const Context &context = {})
-        : thread_nr_(thread_nr), context_(context)
+    using InitF = std::function<void(Context &)>;
+    Manager(size_t thread_nr) : thread_nr_(thread_nr)
     {
     }
     void register_init(const InitF &init_f)
@@ -98,7 +107,7 @@ private:
     {
         static size_t __times = 0;
         VLOG(V) << "[manager] initing";
-        init_f_();
+        init_f_(context_);
 
         node_barrier_f_();
 

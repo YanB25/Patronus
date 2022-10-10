@@ -39,13 +39,14 @@ public:
 
         if (is_client_)
         {
-            client_m_.register_init(
-                [p = patronus_]() { p->registerClientThread(); });
             client_m_.register_node_barrier([this]() { bar_.wait(); });
             client_m_.register_cluster_barrier(
                 [p = patronus_](const std::string &key) {
                     p->keeper_barrier(key, 100ms);
                 });
+
+            client_m_.register_init(
+                [this](Context &context) { client_init_hook(context); });
 
             client_m_.register_master_coro(
                 [p = patronus_, this](CoroYield &yield,
@@ -56,13 +57,6 @@ public:
                     patronus_client_master_coro(
                         yield, workers, context, coro_context, config);
                 });
-            // client_m_.register_end_bench(
-            //     [p = patronus_, this](Context &, const Config &) {
-            //         p->finished(wait_key_);
-            //         wait_key_++;
-            //         // DLOG(INFO)
-            //         //     << "client finished key(" << wait_key_ << ")";
-            //     });
             client_m_.register_start_bench(
                 [this](Context &context, const Config &config) {
                     client_start_bench_hook(context, config);
@@ -74,13 +68,14 @@ public:
         }
         else
         {
-            server_m_.register_init(
-                [p = patronus_]() { p->registerServerThread(); });
             server_m_.register_node_barrier([this]() { bar_.wait(); });
             server_m_.register_cluster_barrier(
                 [p = patronus_](const std::string &key) {
                     p->keeper_barrier(key, 100ms);
                 });
+
+            server_m_.register_init(
+                [this](Context &context) { server_init_hook(context); });
             server_m_.register_start_bench(
                 [this](Context &context, const Config &config) {
                     server_start_bench_hook(context, config);
@@ -96,40 +91,10 @@ public:
         }
     }
 
-    void server_start_bench_hook(Context &context, const Config &config)
+    using InitF = typename CoroManagerT::InitF;
+    void register_init(const InitF init_f)
     {
-        if (start_bench_f_.has_value())
-        {
-            start_bench_f_.value()(context, config);
-        }
-
-        patronus_->finished(wait_key_);
-    }
-    void server_end_bench_hook(Context &context, const Config &config)
-    {
-        if (end_bench_f_.has_value())
-        {
-            end_bench_f_.value()(context, config);
-        }
-        wait_key_++;
-    }
-
-    void client_start_bench_hook(Context &context, const Config &config)
-    {
-        if (start_bench_f_.has_value())
-        {
-            start_bench_f_.value()(context, config);
-        }
-    }
-    void client_end_bench_hook(Context &context, const Config &config)
-    {
-        if (end_bench_f_.has_value())
-        {
-            end_bench_f_.value()(context, config);
-        }
-
-        patronus_->finished(wait_key_);
-        wait_key_++;
+        init_f_ = init_f;
     }
 
     using ServerTaskF =
@@ -189,6 +154,90 @@ public:
             });
     }
 
+    void bench(const std::vector<Config> &configs)
+    {
+        if (is_client_)
+        {
+            client_m_.bench(configs);
+        }
+        else
+        {
+            server_m_.bench(configs);
+        }
+    }
+
+private:
+    Patronus::pointer patronus_;
+    // for client
+    ::bench::CoroManager<Context, Config, CoroComm> client_m_;
+    // for server
+    ::bench::Manager<Context, Config> server_m_;
+    size_t thread_nr_;
+    size_t coro_nr_;
+    boost::barrier bar_;
+    bool is_client_{false};
+
+    std::optional<HookF> start_bench_f_;
+    std::optional<HookF> end_bench_f_;
+    std::optional<InitF> init_f_;
+
+    Perthread<std::vector<bool>> finish_all_tasks_;
+
+    uint64_t wait_key_{0};
+
+    void server_init_hook(Context &context)
+    {
+        patronus_->registerServerThread();
+        if (init_f_.has_value())
+        {
+            init_f_.value()(context);
+        }
+    }
+    void client_init_hook(Context &context)
+    {
+        patronus_->registerClientThread();
+        if (init_f_.has_value())
+        {
+            init_f_.value()(context);
+        }
+    }
+
+    void server_start_bench_hook(Context &context, const Config &config)
+    {
+        if (start_bench_f_.has_value())
+        {
+            start_bench_f_.value()(context, config);
+        }
+
+        patronus_->finished(wait_key_);
+    }
+    void server_end_bench_hook(Context &context, const Config &config)
+    {
+        if (end_bench_f_.has_value())
+        {
+            end_bench_f_.value()(context, config);
+        }
+        wait_key_++;
+    }
+
+    void client_start_bench_hook(Context &context, const Config &config)
+    {
+        if (start_bench_f_.has_value())
+        {
+            start_bench_f_.value()(context, config);
+        }
+    }
+    void client_end_bench_hook(Context &context, const Config &config)
+    {
+        if (end_bench_f_.has_value())
+        {
+            end_bench_f_.value()(context, config);
+        }
+
+        patronus_->finished(wait_key_);
+        wait_key_++;
+    }
+
     void patronus_client_master_coro(CoroYield &yield,
                                      CoroCall *workers,
                                      Context &context,
@@ -235,34 +284,5 @@ public:
                    "leaving... "
                 << mctx;
     }
-    void bench(const std::vector<Config> &configs)
-    {
-        if (is_client_)
-        {
-            client_m_.bench(configs);
-        }
-        else
-        {
-            server_m_.bench(configs);
-        }
-    }
-
-private:
-    Patronus::pointer patronus_;
-    // for client
-    ::bench::CoroManager<Context, Config, CoroComm> client_m_;
-    // for server
-    ::bench::Manager<Context, Config> server_m_;
-    size_t thread_nr_;
-    size_t coro_nr_;
-    boost::barrier bar_;
-    bool is_client_{false};
-
-    std::optional<HookF> start_bench_f_;
-    std::optional<HookF> end_bench_f_;
-
-    Perthread<std::vector<bool>> finish_all_tasks_;
-
-    uint64_t wait_key_{0};
 };
 }  // namespace patronus::bench

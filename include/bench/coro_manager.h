@@ -12,8 +12,8 @@ public:
 
     using ManagerT = Manager<Context, Config>;
     using InitF = typename ManagerT::InitF;
-    CoroManager(size_t thread_nr, size_t coro_nr, const Context &context = {})
-        : m_(thread_nr, context), coro_nr_(coro_nr)
+    CoroManager(size_t thread_nr, size_t coro_nr)
+        : m_(thread_nr), coro_nr_(coro_nr)
     {
         CHECK_LE(coro_nr, define::kMaxCoroNr);
         CHECK_LE(thread_nr, kMaxAppThread);
