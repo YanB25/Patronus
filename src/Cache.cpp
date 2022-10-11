@@ -3,6 +3,8 @@
 #include <glog/logging.h>
 #include <inttypes.h>
 
+#include "util/Pre.h"
+
 Cache::Cache(const CacheConfig &cache_config)
 {
     DLOG_IF(WARNING, cache_config.cacheSize % 1_MB != 0)

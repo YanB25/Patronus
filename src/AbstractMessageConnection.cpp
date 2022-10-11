@@ -3,6 +3,7 @@
 #include <glog/logging.h>
 
 #include "Common.h"
+#include "util/Pre.h"
 
 #define ADD_ROUND(x, n) ((x) = ((x) + 1) % (n))
 

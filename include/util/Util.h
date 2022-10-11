@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "Cache.h"
 #include "Common.h"
 #include "util/Debug.h"
 

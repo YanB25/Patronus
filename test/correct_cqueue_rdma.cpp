@@ -567,8 +567,8 @@ int main(int argc, char *argv[])
     pconfig.block_class = {32_MB, 2_MB, 4_KB};
     pconfig.block_ratio = {0.1, 0.5, 0.4};
     pconfig.reserved_buffer_size = 2_GB;
-    pconfig.lease_buffer_size = (kDSMCacheSize - 2_GB) / 2;
-    pconfig.alloc_buffer_size = (kDSMCacheSize - 2_GB) / 2;
+    pconfig.lease_buffer_size = (::config::kDefaultDSMSize - 2_GB) / 2;
+    pconfig.alloc_buffer_size = (::config::kDefaultDSMSize - 2_GB) / 2;
 
     auto patronus = Patronus::ins(pconfig);
 

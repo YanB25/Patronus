@@ -26,7 +26,7 @@
 using namespace util::literals;
 
 constexpr static size_t MAX_MACHINE = 4;
-constexpr static int NR_DIRECTORY = 16;
+constexpr static int NR_DIRECTORY = 4;
 constexpr static ssize_t kMaxAppThread = 32;
 constexpr static const char *kNICName = "eno1";
 constexpr static const char *kNodeRankFileName = "inet.conf";
@@ -37,6 +37,15 @@ constexpr static const char *kNodeRankFileName = "inet.conf";
 #define DIR_MESSAGE_NR 128
 
 using trace_t = uint8_t;
+
+namespace config
+{
+constexpr static size_t kMachineNr = 4;
+static_assert(kMachineNr <= MAX_MACHINE);
+constexpr static size_t kDefaultDSMSize = 16_GB;
+constexpr static size_t kDefaultCacheSize = 8_GB;
+}  // namespace config
+
 namespace define
 {
 constexpr uint16_t kCacheLineSize = 64;
@@ -53,7 +62,8 @@ constexpr uint64_t kLockChipMemSize = 64_KB;
 constexpr uint16_t kMaxCoroNr = 32;
 
 // for dsm
-constexpr static uint32_t kRDMABufferSize = 32_MB;
+constexpr static uint32_t kRDMABufferSize =
+    ::config::kDefaultCacheSize / kMaxAppThread;
 constexpr int64_t kPerCoroRdmaBuf = 32_KB;
 }  // namespace define
 
@@ -74,8 +84,6 @@ namespace config
 constexpr static char kSelectMlxVersion = '5';  // mlx5
 // If you have multiple devices
 constexpr static char kSelectMlxNicIdx = '0';
-constexpr static size_t kMachineNr = 4;
-static_assert(kMachineNr <= MAX_MACHINE);
 static const std::vector<size_t> __kServerNodeIds{1};
 static const std::vector<size_t> __kClientNodeIds{0, 2, 3};
 inline bool is_server(size_t nid)

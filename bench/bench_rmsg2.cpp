@@ -22,8 +22,8 @@ using namespace patronus;
 using namespace std::chrono_literals;
 
 constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
-constexpr static size_t kServerThreadNr = 4;
-static_assert(kServerThreadNr <= NR_DIRECTORY);
+constexpr static size_t kServerThreadNr = NR_DIRECTORY;
+// static_assert(kServerThreadNr <= NR_DIRECTORY);
 static_assert(kClientThreadNr <= kMaxAppThread);
 
 DEFINE_string(exec_meta, "", "The meta data of this execution");

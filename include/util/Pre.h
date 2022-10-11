@@ -454,6 +454,39 @@ inline std::ostream &operator<<(std::ostream &os, pre_ops p)
     return os;
 }
 
+class pre_byte
+{
+public:
+    pre_byte(uint64_t byte) : byte_(byte)
+    {
+    }
+    uint64_t byte_;
+};
+inline std::ostream &operator<<(std::ostream &os, pre_byte b)
+{
+    if (b.byte_ < 1_KB)
+    {
+        os << b.byte_ << " B";
+    }
+    else if (b.byte_ < 1_MB)
+    {
+        os << 1.0 * b.byte_ / 1_KB << " KB";
+    }
+    else if (b.byte_ < 1_GB)
+    {
+        os << 1.0 * b.byte_ / 1_MB << " MB";
+    }
+    else if (b.byte_ < 1_TB)
+    {
+        os << 1.0 * b.byte_ / 1_GB << " GB";
+    }
+    else
+    {
+        os << 1.0 * b.byte_ / 1_TB << " TB";
+    }
+    return os;
+}
+
 }  // namespace util
 
 #endif

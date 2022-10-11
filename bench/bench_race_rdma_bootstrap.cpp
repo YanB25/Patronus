@@ -840,8 +840,8 @@ int main(int argc, char *argv[])
     pconfig.block_class = {2_MB, 8_KB};
     pconfig.block_ratio = {0.5, 0.5};
     pconfig.reserved_buffer_size = 2_GB;
-    pconfig.lease_buffer_size = (kDSMCacheSize - 2_GB) / 2;
-    pconfig.alloc_buffer_size = (kDSMCacheSize - 2_GB) / 2;
+    pconfig.lease_buffer_size = (::config::kDefaultDSMSize - 2_GB) / 2;
+    pconfig.alloc_buffer_size = (::config::kDefaultDSMSize - 2_GB) / 2;
 
     LOG(WARNING) << "[bench] The unprotected with io_nr > 0 is not accurate. "
                     "It will bind subtable.";

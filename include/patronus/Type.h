@@ -41,6 +41,8 @@ enum class RpcType : uint8_t
     kMemoryReq,
     kMemoryResp,
     kTimeSync,
+    kMemcpyReq,
+    kMemcpyResp,
 };
 std::ostream &operator<<(std::ostream &os, const RpcType &t);
 
@@ -312,6 +314,28 @@ struct MemoryRequest
 static_assert(sizeof(MemoryRequest::flag) >= sizeof(MemoryRequestFlag));
 static_assert(std::numeric_limits<decltype(MemoryRequest::size)>::max() >= 32);
 std::ostream &operator<<(std::ostream &os, const MemoryRequest &req);
+
+struct MemcpyRequest
+{
+    enum RpcType type;
+    ClientID cid;
+    // uint64_t source;
+    // uint64_t target;
+    uint32_t times;
+    uint32_t size;
+    Debug<uint64_t> digest;
+} __attribute__((packed));
+static_assert(sizeof(MemcpyRequest) < ::config::umsg::kUserMessageSize);
+std::ostream &operator<<(std::ostream &os, const MemcpyRequest &req);
+
+struct MemcpyResponse
+{
+    enum RpcType type;
+    ClientID cid;
+    Debug<uint64_t> digest;
+};
+static_assert(sizeof(MemcpyResponse) < ::config::umsg::kUserMessageSize);
+std::ostream &operator<<(std::ostream &os, const MemcpyResponse &);
 
 struct MemoryResponse
 {

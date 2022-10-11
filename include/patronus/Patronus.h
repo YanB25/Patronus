@@ -37,9 +37,10 @@ class Patronus;
 class ServerCoroBatchExecutionContext;
 struct PatronusConfig
 {
+    constexpr static size_t kDefaultDSMSize = ::config::kDefaultDSMSize;
     size_t machine_nr{0};
-    size_t lease_buffer_size{(kDSMCacheSize - 1_GB) / 2};
-    size_t alloc_buffer_size{(kDSMCacheSize - 1_GB) / 2};
+    size_t lease_buffer_size{(kDefaultDSMSize - 1_GB) / 2};
+    size_t alloc_buffer_size{(kDefaultDSMSize - 1_GB) / 2};
     size_t reserved_buffer_size{1_GB};
     // for sync time
     size_t time_parent_node_id{0};
@@ -316,6 +317,8 @@ public:
                                          int64_t value,
                                          CoroContext *ctx = nullptr,
                                          TraceView = util::nulltrace);
+    [[nodiscard]] RetCode remote_memcpy(
+        size_t times, size_t size, size_t nid, size_t dir_id, CoroContext *ctx);
     [[nodiscard]] RetCode commit(PatronusBatchContext &batch,
                                  CoroContext *ctx = nullptr,
                                  TraceView = util::nulltrace);
@@ -468,6 +471,7 @@ public:
                                               CoroContext *ctx);
     void post_handle_request_memory_access(MemoryRequest *req,
                                            CoroContext *ctx);
+    void post_handle_request_memcpy(MemcpyRequest *req, CoroContext *ctx);
     void post_handle_request_lease_extend(LeaseModifyRequest *req,
                                           CoroContext *ctx);
     void post_handle_request_admin(AdminRequest *req, CoroContext *ctx);
@@ -926,6 +930,7 @@ private:
     inline void handle_response_admin_qp_modification(AdminResponse *resp,
                                                       CoroContext *ctx);
     void handle_response_memory_access(MemoryResponse *resp, CoroContext *ctx);
+    void handle_response_memcpy(MemcpyResponse *resp, CoroContext *ctx);
     void handle_admin_exit(AdminRequest *req, CoroContext *ctx);
     void handle_admin_recover(AdminRequest *req, CoroContext *ctx);
     void handle_admin_barrier(AdminRequest *req, CoroContext *ctx);

@@ -599,6 +599,21 @@ size_t Patronus::handle_response_messages(msg_desc_t *msg_descs,
             handle_response_admin_qp_modification(msg, nullptr);
             break;
         }
+        case RpcType::kMemcpyResp:
+        {
+            auto *msg = (MemcpyResponse *) base;
+
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest,
+                          util::djb2_digest(msg, sizeof(MemcpyResponse)));
+            }
+
+            handle_response_memcpy(msg, nullptr);
+            break;
+        }
         default:
         {
             LOG(FATAL) << "Unknown or invalid response type " << response_type
@@ -684,6 +699,23 @@ void Patronus::prepare_handle_request_messages(
                 DCHECK_EQ(digest, util::djb2_digest(msg, msg->msg_size()));
             }
             DCHECK(msg->validate());
+            // do nothing
+            break;
+        }
+        case RpcType::kMemcpyReq:
+        {
+            auto *msg = (MemcpyRequest *) base;
+            DVLOG(V) << "[patronus] prepare handling memcpy request " << *msg
+                     << ", coro: " << *ctx;
+            DCHECK(is_server_)
+                << "** only server can handle request_acquire. msg: " << *msg;
+            if constexpr (debug())
+            {
+                uint64_t digest = msg->digest.get();
+                msg->digest = 0;
+                DCHECK_EQ(digest,
+                          util::djb2_digest(msg, sizeof(MemcpyRequest)));
+            }
             // do nothing
             break;
         }
@@ -1212,11 +1244,21 @@ void Patronus::post_handle_request_messages(
         case RpcType::kMemoryReq:
         {
             auto *msg = (MemoryRequest *) base;
-            DVLOG(V) << "[patronus] post handling lease modify request " << *msg
-                     << ", coro: " << *ctx;
+            DVLOG(V) << "[patronus] post handling memory access request "
+                     << *msg << ", coro: " << *ctx;
             DCHECK(is_server_)
                 << "** only server can handle request_acquire. msg: " << *msg;
             post_handle_request_memory_access(msg, ctx);
+            break;
+        }
+        case RpcType::kMemcpyReq:
+        {
+            auto *msg = (MemcpyRequest *) base;
+            DVLOG(V) << "[patronus] post handling memcpy request " << *msg
+                     << ", coro: " << *ctx;
+            DCHECK(is_server_)
+                << "** only server can handle request_acquire. msg: " << *msg;
+            post_handle_request_memcpy(msg, ctx);
             break;
         }
         case RpcType::kAdmin:
@@ -1441,6 +1483,8 @@ void Patronus::registerServerThread()
     auto rdma_buffer = dsm_->get_rdma_buffer();
     auto *dsm_rdma_buffer = rdma_buffer.buffer;
     size_t message_pool_size = rdma_buffer.size;
+    LOG(INFO) << "[debug] total cache size is "
+              << util::pre_byte(message_pool_size);
 
     auto *large_rdma_buf = dsm_rdma_buffer;
     size_t large_message_pool_size = rdma_buffer.size / 2;
@@ -1646,6 +1690,18 @@ size_t Patronus::try_get_client_continue_coros(coro_t *coro_buf, size_t limit)
     }
 
     return cur_idx;
+}
+void Patronus::handle_response_memcpy(MemcpyResponse *resp, CoroContext *ctx)
+{
+    std::ignore = ctx;
+
+    auto type = resp->type;
+    DCHECK_EQ(type, RpcType::kMemcpyResp);
+    auto rpc_ctx_id = resp->cid.rpc_ctx_id;
+    auto *rpc_context = rpc_context_.id_to_obj(rpc_ctx_id);
+
+    rpc_context->ret_code = RC::kOk;
+    rpc_context->ready.store(true, std::memory_order_release);
 }
 
 void Patronus::handle_response_memory_access(MemoryResponse *resp,
@@ -2203,6 +2259,65 @@ void Patronus::post_handle_request_lease_extend(LeaseModifyRequest *req,
 
     dsm_->unreliable_send((const char *) resp_buf.buffer,
                           sizeof(LeaseModifyResponse),
+                          req->cid.node_id,
+                          req->cid.thread_id);
+    put_rdma_message_buffer(std::move(resp_buf));
+}
+void Patronus::post_handle_request_memcpy(MemcpyRequest *req, CoroContext *ctx)
+{
+    std::ignore = ctx;
+
+    auto resp_buf = get_rdma_message_buffer(sizeof(MemcpyResponse));
+    auto &resp_msg = *(MemcpyResponse *) resp_buf.buffer;
+    resp_msg.type = RpcType::kMemcpyResp;
+    resp_msg.cid = req->cid;
+    resp_msg.cid.node_id = get_node_id();
+    resp_msg.cid.thread_id = get_thread_id();
+    CHECK_EQ(resp_msg.type, RpcType::kMemcpyResp);
+
+    // NOTE: this function is different from post_handle_request_memory_access
+    // The address from memory_access is shifted by Lease at the client side.
+    // (+ user_reserve_size())
+    // However, in this function, the address is not shifted.
+    // Therefore, we need to shift it manually.
+
+    // auto dsm = get_dsm();
+    // char *source_addr = (char *) dsm->buffer_offset_to_addr(req->source);
+    // char *dst_addr = (char *) dsm->buffer_offset_to_addr(req->target);
+    // memcpy(source_addr, dst_addr, req->size);
+
+    auto dsm = get_dsm();
+    for (size_t i = 0; i < req->times; ++i)
+    {
+        char *start_addr = (char *) dsm->buffer_offset_to_addr(0);
+        auto max_size = dsm->buffer_size();
+        uint64_t source_offset =
+            req->size * fast_pseudo_rand_int(0, (max_size / req->size) - 1);
+        uint64_t dst_offset =
+            req->size * fast_pseudo_rand_int(0, (max_size / req->size) - 1);
+        char *source = start_addr + source_offset;
+        char *dst = start_addr + dst_offset;
+        memcpy(source, dst, req->size);
+
+        if constexpr (debug())
+        {
+            validate_buffer_not_overlapped(Buffer(source, dst - source),
+                                           resp_buf);
+        }
+    }
+
+    CHECK_EQ(resp_msg.type, RpcType::kMemcpyResp);
+
+    if constexpr (debug())
+    {
+        resp_msg.digest = 0;
+        resp_msg.digest = util::djb2_digest(&resp_msg, sizeof(MemcpyResponse));
+    }
+
+    CHECK_EQ(resp_msg.type, RpcType::kMemcpyResp);
+    CHECK_NE(resp_msg.type, RpcType::kAcquireRLeaseReq);
+    dsm_->unreliable_send((char *) resp_buf.buffer,
+                          sizeof(MemcpyResponse),
                           req->cid.node_id,
                           req->cid.thread_id);
     put_rdma_message_buffer(std::move(resp_buf));
@@ -3091,6 +3206,64 @@ RetCode Patronus::prepare_write(PatronusBatchContext &batch,
     auto *qp = DCHECK_NOTNULL(dsm_->get_th_qp(node_id, dir_id));
     return batch.prepare_write(
         qp, node_id, dir_id, dest, source, size, lkey, rkey, ctx, trace);
+}
+
+RetCode Patronus::remote_memcpy(
+    size_t times, size_t size, size_t nid, size_t dir_id, CoroContext *ctx)
+{
+    // CHECK_EQ(source.nodeID, target.nodeID)
+    //     << "node id mismatch: " << source << " v.s. " << target;
+    // auto nid = source.nodeID;
+
+    auto rdma_buf = get_rdma_message_buffer(sizeof(MemcpyRequest));
+    DCHECK_GE(rdma_buf.size, sizeof(MemcpyRequest));
+    auto *rpc_context = get_rpc_context();
+    uint16_t rpc_ctx_id = get_rpc_context_id(rpc_context);
+
+    auto *msg = (MemcpyRequest *) rdma_buf.buffer;
+    msg->type = RpcType::kMemcpyReq;
+    msg->cid.node_id = get_node_id();
+    msg->cid.thread_id = get_thread_id();
+    msg->cid.coro_id = ctx ? ctx->coro_id() : kNotACoro;
+    msg->cid.rpc_ctx_id = rpc_ctx_id;
+    // msg->source = source.offset;
+    // msg->target = target.offset;
+    msg->times = times;
+    msg->size = size;
+
+    rpc_context->dir_id = dir_id;
+    rpc_context->ready = false;
+    rpc_context->request = (BaseMessage *) msg;
+    rpc_context->ret_code = RC::kOk;
+
+    if constexpr (debug())
+    {
+        msg->digest = 0;
+        msg->digest = util::djb2_digest(msg, sizeof(MemcpyRequest));
+    }
+
+    CHECK_EQ(msg->type, RpcType::kMemcpyReq);
+    dsm_->unreliable_send(rdma_buf.buffer, sizeof(MemcpyRequest), nid, dir_id);
+    if (unlikely(ctx == nullptr))
+    {
+        while (!rpc_context->ready.load(std::memory_order_acquire))
+        {
+            std::this_thread::yield();
+        }
+    }
+    else
+    {
+        ctx->yield_to_master();
+    }
+    CHECK(rpc_context->ready) << "** Should have been ready when switch back "
+                                 "to worker coro. ctx: "
+                              << (ctx ? *ctx : nullctx);
+
+    auto ret = rpc_context->ret_code;
+    put_rpc_context(rpc_context);
+    put_rdma_message_buffer(std::move(rdma_buf));
+
+    return ret;
 }
 
 RetCode Patronus::prepare_read(PatronusBatchContext &batch,

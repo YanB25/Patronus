@@ -25,10 +25,11 @@ using namespace std::chrono_literals;
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-constexpr static size_t kTestTimePerThread = 1_M;
+constexpr static size_t kTestTimePerThread = 300_K;
 // constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
+std::vector<size_t> col_x_use_mn;
 std::vector<size_t> col_x_link_entry_nr;
 std::vector<size_t> col_x_link_entry_size;
 std::vector<size_t> col_x_thread_nr;
@@ -61,6 +62,7 @@ struct BenchConfig
     size_t link_entry_nr;
     size_t link_entry_size;
     size_t task_nr;
+    bool use_mn;
     std::string name;
     bool report;
 
@@ -69,6 +71,7 @@ struct BenchConfig
                                 size_t coro_nr,
                                 size_t link_entry_nr,
                                 size_t link_entry_size,
+                                bool use_mn,
                                 size_t task_nr)
     {
         BenchConfig ret;
@@ -78,6 +81,8 @@ struct BenchConfig
         ret.link_entry_nr = link_entry_nr;
         ret.link_entry_size = link_entry_size;
         ret.task_nr = task_nr;
+        ret.use_mn = use_mn;
+        ret.report = true;
         return ret;
     }
 };
@@ -85,6 +90,7 @@ struct BenchConfig
 void reg_result(size_t total_ns, const BenchConfig &conf)
 {
     col_idx.push_back(conf.name);
+    col_x_use_mn.push_back(conf.use_mn);
     col_x_link_entry_nr.push_back(conf.link_entry_nr);
     col_x_link_entry_size.push_back(conf.link_entry_size);
     col_x_thread_nr.push_back(conf.thread_nr);
@@ -122,13 +128,14 @@ void bench_alloc_thread_coro_master(Patronus::pointer patronus,
     CoroContext mctx(tid, &yield, coro_comm.workers);
     CHECK(mctx.is_master());
 
-    LOG_IF(WARNING, test_times % 1000 != 0)
+    DLOG_IF(WARNING, test_times % 1000 != 0)
         << "test_times % 1000 != 0. Will introduce 1/1000 performance error "
            "per thread";
 
     ssize_t task_per_sync = test_times / 1000;
-    LOG_IF(WARNING, task_per_sync <= (ssize_t) coro_nr)
-        << "test_times < coro_nr.";
+    DLOG_IF(WARNING, task_per_sync <= (ssize_t) coro_nr)
+        << "test_times < coro_nr. will result in variance in reported "
+           "performance";
 
     task_per_sync =
         std::max(task_per_sync, ssize_t(coro_nr));  // at least coro_nr
@@ -204,7 +211,7 @@ void bench_alloc_thread_coro_master(Patronus::pointer patronus,
     // LOG(WARNING) << "[coro] all worker finish their work. exiting...";
 }
 
-void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
+void bench_alloc_thread_coro_worker(Patronus::pointer p,
                                     size_t coro_id,
                                     CoroYield &yield,
                                     CoroCommunication &coro_comm,
@@ -212,7 +219,7 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
                                     bool is_master,
                                     const BenchConfig &conf)
 {
-    [[maybe_unused]] auto tid = patronus->get_thread_id();
+    [[maybe_unused]] auto tid = p->get_thread_id();
     [[maybe_unused]] auto dir_id = tid % kServerThreadNr;
     [[maybe_unused]] auto server_nid = ::config::get_server_nids().front();
     std::ignore = conf;
@@ -225,6 +232,9 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
 
     ChronoTimer timer;
     ChronoTimer op_timer;
+
+    auto sz = conf.link_entry_size;
+    auto rdma_buf = p->get_rdma_buffer(sz);
     while (coro_comm.thread_remain_task > 0)
     {
         // VLOG(4) << "[coro] tid " << tid << " get_rlease. coro: " << ctx;
@@ -233,15 +243,86 @@ void bench_alloc_thread_coro_worker(Patronus::pointer patronus,
             op_timer.pin();
         }
 
-        LOG(FATAL) << "TODO: fill me.";
+        if (conf.use_mn)
+        {
+            // call MN to help us to copy
+            p->remote_memcpy(conf.link_entry_nr,
+                             conf.link_entry_size,
+                             server_nid,
+                             dir_id,
+                             &ctx)
+                .expect(RC::kOk);
+        }
+        else
+        {
+            for (size_t i = 0; i < conf.link_entry_nr; ++i)
+            {
+                // read
+                {
+                    uint64_t remote_addr =
+                        sz * fast_pseudo_rand_int(0, 8_GB / sz);
+                    auto ac_flag = (flag_t) AcquireRequestFlag::kNoRpc |
+                                   (flag_t) AcquireRequestFlag::kNoGc;
+                    auto lease = p->get_rlease(server_nid,
+                                               dir_id,
+                                               GlobalAddress(0, remote_addr),
+                                               0 /* alloc_hint */,
+                                               sz,
+                                               0ns,
+                                               ac_flag,
+                                               &ctx);
+                    CHECK(lease.success());
+                    auto rw_flag = (flag_t) RWFlag::kUseUniversalRkey;
+                    p->read(lease,
+                            rdma_buf.buffer,
+                            sz,
+                            0 /* offset */,
+                            rw_flag,
+                            &ctx)
+                        .expect(RC::kOk);
+
+                    auto rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
+                    p->relinquish(lease, 0 /* alloc_hint */, rel_flag, &ctx);
+                }
+
+                // then write
+                {
+                    uint64_t remote_addr =
+                        sz * fast_pseudo_rand_int(0, 8_GB / sz);
+                    auto ac_flag = (flag_t) AcquireRequestFlag::kNoRpc |
+                                   (flag_t) AcquireRequestFlag::kNoGc;
+                    auto lease = p->get_wlease(server_nid,
+                                               dir_id,
+                                               GlobalAddress(0, remote_addr),
+                                               0 /* alloc_hint */,
+                                               sz,
+                                               0ns,
+                                               ac_flag,
+                                               &ctx);
+                    auto rw_flag = (flag_t) RWFlag::kUseUniversalRkey;
+                    p->write(lease,
+                             rdma_buf.buffer,
+                             sz,
+                             0 /* offset */,
+                             rw_flag,
+                             &ctx)
+                        .expect(RC::kOk);
+                    auto rel_flag = (flag_t) LeaseModifyFlag::kNoRpc;
+                    p->relinquish(lease, 0 /* hint */, rel_flag);
+                }
+            }
+        }
 
         if (is_master && coro_id == 0)
         {
             auto ns = op_timer.pin();
             lat_m.collect(ns);
         }
+        coro_comm.thread_remain_task--;
     }
     auto total_ns = timer.pin();
+
+    p->put_rdma_buffer(std::move(rdma_buf));
 
     coro_comm.finish_all[coro_id] = true;
 
@@ -314,15 +395,11 @@ void bench_template(const std::string &name,
     auto link_entry_nr = conf.link_entry_nr;
     auto link_entry_size = conf.link_entry_size;
     auto coro_nr = conf.coro_nr;
-    auto report = conf.report;
+    bool report = conf.report;
 
     if (is_master)
     {
         work_nr = test_times;
-        LOG(INFO) << "[bench] BENCH: " << name << ", thread_nr: " << thread_nr
-                  << ", entry_nr: " << link_entry_nr
-                  << ", entry_size: " << link_entry_size
-                  << "coro_nr: " << coro_nr << ", report: " << report;
     }
 
     bar.wait();
@@ -347,6 +424,12 @@ void bench_template(const std::string &name,
         reg_result(total_ns, conf);
         reg_latency(name, lat_m);
     }
+
+    LOG_IF(INFO, is_master)
+        << "[bench] BENCH: " << name << ", thread_nr: " << thread_nr
+        << ", coro_nr: " << coro_nr << ", entry_nr: " << link_entry_nr
+        << ", entry_size: " << link_entry_size << ", use_mn: " << conf.use_mn
+        << ". Takes: " << util::pre_ns(total_ns);
     bar.wait();
 }
 
@@ -427,62 +510,65 @@ void benchmark(Patronus::pointer patronus,
 
     [[maybe_unused]] size_t key = 0;
     std::ignore = patronus;
-    // for (size_t thread_nr : {1, 2, 4, 8, 16})
-    // for (size_t thread_nr : {1, 4, 16})
-    // for (size_t thread_nr : {1, 16})
-    // for (size_t thread_nr : {1, 4, 8, 16, 32})
-    // for (size_t thread_nr : {1, 2, 4, 8, 16, 32})
-    // {
-    //     CHECK_LE(thread_nr, kMaxAppThread);
-    //     // for (size_t block_size : {64ul, 2_MB, 128_MB})
-    //     for (size_t block_size : {64ul})
-    //     {
-    //         // for (size_t coro_nr : {1})
-    //         for (size_t coro_nr : {16})
-    //         // for (size_t coro_nr : {1, 2, 4, 8, 16, 32})
-    //         {
-    //             auto total_test_times = kTestTimePerThread * thread_nr;
-    //             {
-    //                 auto configs = BenchConfigFactory::get_rlease_nothing(
-    //                     "w/o(*)",
-    //                     thread_nr,
-    //                     coro_nr,
-    //                     block_size,
-    //                     total_test_times);
-    //                 run_benchmark(
-    //                     patronus, configs, bar, is_client, is_master, key);
-    //             }
-    //         }
-    //     }
-    // }
 
-    for (size_t thread_nr : {32})
+    size_t thread_nr = 32;
+    CHECK_LE(thread_nr, kMaxAppThread);
+    // std::vector<BenchConfig> configs;
+
+    for (bool use_mn : {true, false})
     {
-        CHECK_LE(thread_nr, kMaxAppThread);
-        for (size_t block_size : {64ul})
+        for (size_t coro_nr : {1, 16})
         {
-            // for (size_t coro_nr : {2, 4, 8, 16, 32})
-            // for (size_t coro_nr : {1, 32})
-            for (size_t coro_nr : {32})
+            for (size_t linked_list_length : {1})
             {
-                auto total_test_times = kTestTimePerThread * 4;
-                std::ignore = total_test_times;
-                std::ignore = coro_nr;
-                std::ignore = block_size;
-                std::ignore = thread_nr;
+                for (size_t entry_size : {8_B, 4_KB, 2_MB})
                 {
-                    // auto configs = BenchConfigFactory::get_rlease_nothing(
-                    //     "w/o(*)",
-                    //     thread_nr,
-                    //     coro_nr,
-                    //     block_size,
-                    //     total_test_times);
-                    // run_benchmark(
-                    //     patronus, configs, bar, is_client, is_master, key);
+                    auto test_times = kTestTimePerThread * thread_nr;
+                    double scale_factor = entry_size == 2_MB ? 0.002 : 1.0;
+                    if (use_mn)
+                    {
+                        scale_factor /= 5;
+                    }
+                    scale_factor /= linked_list_length;
+                    auto config =
+                        BenchConfig::get_conf("link",
+                                              thread_nr,
+                                              coro_nr,
+                                              linked_list_length,
+                                              entry_size,
+                                              use_mn,
+                                              test_times * scale_factor);
+                    run_benchmark(
+                        patronus, {config}, bar, is_client, is_master, key);
+                    key++;
                 }
             }
         }
     }
+
+    // for (bool use_mn : {true, false})
+    // {
+    //     for (size_t coro_nr : {1})
+    //     {
+    //         for (size_t linked_list_length : {1})
+    //         {
+    //             for (size_t entry_size : {128_MB})
+    //             {
+    //                 auto test_times = kTestTimePerThread * thread_nr / 50000;
+    //                 auto config = BenchConfig::get_conf("link",
+    //                                                     thread_nr,
+    //                                                     coro_nr,
+    //                                                     linked_list_length,
+    //                                                     entry_size,
+    //                                                     use_mn,
+    //                                                     test_times);
+    //                 run_benchmark(
+    //                     patronus, {config}, bar, is_client, is_master, key);
+    //                 key++;
+    //             }
+    //         }
+    //     }
+    // }
 
     bar.wait();
 }
@@ -496,6 +582,10 @@ int main(int argc, char *argv[])
     config.machine_nr = ::config::kMachineNr;
     config.block_class = {2_MB};
     config.block_ratio = {1};
+    config.client_rdma_buffer = {
+        {8_B, config::patronus::kClientRdmaBufferSize, 2_MB},
+        {0.01, 0.49, 0.5}};
+    // config.client_rdma_buffer = {{128_MB}, {1}};
 
     auto patronus = Patronus::ins(config);
 
@@ -558,6 +648,7 @@ int main(int argc, char *argv[])
         df.load_index(std::move(col_idx));
         df.load_column<size_t>("x_thread_nr", std::move(col_x_thread_nr));
         df.load_column<size_t>("x_coro_nr", std::move(col_x_coro_nr));
+        df.load_column<size_t>("x_use_mn", std::move(col_x_use_mn));
         df.load_column<size_t>("x_entry_nr", std::move(col_x_link_entry_nr));
         df.load_column<size_t>("x_entry_size",
                                std::move(col_x_link_entry_size));
@@ -579,24 +670,46 @@ int main(int argc, char *argv[])
             "x_thread_nr", "x_coro_nr", "x_effective_client_nr", mul_f2, false);
         df.replace<size_t>("x_effective_client_nr", replace_mul_f_size);
 
+        // for effective cpy bandwidth
+        {
+            df.consolidate<size_t, size_t, size_t>(
+                "x_entry_nr", "x_entry_size", "byte_per_test", mul_f2, false);
+            df.consolidate<size_t, size_t, size_t>("byte_per_test",
+                                                   "test_nr(total)",
+                                                   "byte(total)",
+                                                   mul_f2,
+                                                   false);
+            // it is byte / ns, should scale to byte / s
+            df.consolidate<size_t, size_t, double>("byte(total)",
+                                                   "test_ns(total)",
+                                                   "bandwidth(MB/s)",
+                                                   div_f,
+                                                   false);
+            // 1e9 to convert ns to s. /1024 / 1024 to convert B to MB.
+            auto replace_mul_bw = gen_replace_F_mul<double>(1e9 / 1024 / 1024);
+            df.replace<double>("bandwidth(MB/s)", replace_mul_bw);
+        }
+
         df.consolidate<size_t, size_t, double>(
-            "alloc_ns(total)", "alloc_nr(total)", "alloc lat", div_f, false);
-        df.consolidate<size_t, size_t, double>("alloc_nr(total)",
-                                               "alloc_ns(total)",
-                                               "alloc ops(total)",
+            "test_ns(total)", "test_nr(total)", "test lat", div_f, false);
+        df.consolidate<size_t, size_t, double>("test_nr(total)",
+                                               "test_ns(total)",
+                                               "test ops(total)",
                                                ops_f,
                                                false);
-        df.consolidate<double, size_t, double>("alloc ops(total)",
+        df.consolidate<double, size_t, double>("test ops(total)",
                                                "x_thread_nr",
-                                               "alloc ops(thread)",
+                                               "test ops(thread)",
                                                div_f2,
                                                false);
 
-        df.load_column<double>("alloc ops(cluster)",
-                               df.get_column<double>("alloc ops(total)"));
-        df.replace<double>("alloc ops(cluster)", replace_mul_f);
+        df.load_column<double>("test ops(cluster)",
+                               df.get_column<double>("test ops(total)"));
+        df.replace<double>("test ops(cluster)", replace_mul_f);
 
-        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta);
+        std::map<std::string, std::string> info;
+        info.emplace("core", std::to_string(kServerThreadNr));
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
         df.write<std::ostream, std::string, size_t, double>(std::cout,
                                                             io_format::csv2);
         df.write<std::string, size_t, double>(filename.c_str(),

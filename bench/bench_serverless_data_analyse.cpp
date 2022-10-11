@@ -633,8 +633,8 @@ int main(int argc, char *argv[])
     config.block_class = {2_MB};
     config.block_ratio = {1};
     config.reserved_buffer_size = 1_GB;
-    config.lease_buffer_size = (kDSMCacheSize - 1_GB) / 2;
-    config.alloc_buffer_size = (kDSMCacheSize - 1_GB) / 2;
+    config.lease_buffer_size = (::config::kDefaultDSMSize - 1_GB) / 2;
+    config.alloc_buffer_size = (::config::kDefaultDSMSize - 1_GB) / 2;
     size_t db_expect_size = sizeof(Person) * kPersonNr;
     config.client_rdma_buffer.block_class = {db_expect_size, 4_KB, 8_B};
     config.client_rdma_buffer.block_ratio = {0.1, 1 - 0.1 - 0.001, 0.001};

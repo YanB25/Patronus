@@ -73,6 +73,16 @@ std::ostream &operator<<(std::ostream &os, const RpcType &t)
         os << "Mem-resp";
         break;
     }
+    case RpcType::kMemcpyReq:
+    {
+        os << "Memcpy-req";
+        break;
+    }
+    case RpcType::kMemcpyResp:
+    {
+        os << "Memcpy-resp";
+        break;
+    }
     default:
     {
         os << "Unknown(" << (int) t << ")";
@@ -554,6 +564,23 @@ std::ostream &operator<<(std::ostream &os, const MemoryResponse &resp)
     os << "{MemoryResponse type: " << resp.type << ", cid: " << resp.cid
        << ", flag: " << (MemoryRequestFlag) resp.flag
        << ", success: " << resp.success << ", size: " << resp.size << "}";
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const MemcpyRequest &req)
+{
+    // os << "{MemcpyRequest type: " << req.type << ", cid: " << req.cid
+    //    << ", source: " << (void *) req.source
+    //    << ", target: " << (void *) req.target << ", size: " << req.size <<
+    //    "}";
+    os << "{MemcpyRequest type: " << req.type << ", cid: " << req.cid
+       << ", times: " << req.times << ", size: " << req.size << "}";
+    return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const MemcpyResponse &resp)
+{
+    os << "{MemcpyResponse type: " << resp.type << ", cid: " << resp.cid << "}";
     return os;
 }
 

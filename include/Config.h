@@ -7,16 +7,13 @@
 
 using namespace util::literals;
 
-constexpr static size_t kCacheSize = 1_GB;
-constexpr static size_t kDSMCacheSize = 16_GB;
-constexpr static size_t kDefaultMachineNr = 2;
-
 class CacheConfig
 {
 public:
     uint64_t cacheSize;
 
-    CacheConfig(uint64_t cacheSize = kCacheSize) : cacheSize(cacheSize)
+    CacheConfig(uint64_t cacheSize = ::config::kDefaultCacheSize)
+        : cacheSize(cacheSize)
     {
     }
 };
@@ -24,8 +21,8 @@ class DSMConfig
 {
 public:
     DSMConfig(const CacheConfig &cacheConfig = CacheConfig(),
-              uint32_t machineNR = kDefaultMachineNr,
-              uint64_t dsmSize = kDSMCacheSize,
+              uint32_t machineNR = ::config::kMachineNr,
+              uint64_t dsmSize = ::config::kDefaultDSMSize,
               size_t dsmReserveSize = 0)
         : cacheConfig(cacheConfig),
           machineNR(machineNR),

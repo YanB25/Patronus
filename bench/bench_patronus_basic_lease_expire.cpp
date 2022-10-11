@@ -24,7 +24,7 @@ constexpr static uint64_t kMagic = 0xaabbccdd11223344;
 constexpr static size_t kCoroStartKey = 1024;
 
 constexpr static size_t kTestTime = 1_M;
-constexpr static size_t kThreadNr = 4;
+constexpr static size_t kThreadNr = NR_DIRECTORY;
 static_assert(kThreadNr <= kMaxAppThread);
 static_assert(kThreadNr <= NR_DIRECTORY);
 
