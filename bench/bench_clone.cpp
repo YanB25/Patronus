@@ -25,7 +25,7 @@ using namespace std::chrono_literals;
 constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
-constexpr static size_t kTestTimePerThread = 300_K;
+// constexpr static size_t kTestTimePerThread = 300_K;
 // constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
@@ -235,9 +235,11 @@ void bench_alloc_thread_coro_worker(Patronus::pointer p,
 
     auto sz = conf.link_entry_size;
     auto rdma_buf = p->get_rdma_buffer(sz);
+    size_t actual_test_nr = 0;
     while (coro_comm.thread_remain_task > 0)
     {
         // VLOG(4) << "[coro] tid " << tid << " get_rlease. coro: " << ctx;
+        actual_test_nr++;
         if (is_master && coro_id == 0)
         {
             op_timer.pin();
@@ -329,6 +331,8 @@ void bench_alloc_thread_coro_worker(Patronus::pointer p,
     VLOG(1) << "[bench] tid " << tid << " got " << fail_nr
             << " failed lease. succ lease: " << succ_nr << " within "
             << total_ns << " ns. coro: " << ctx;
+    LOG_IF(INFO, is_master && coro_id == 0)
+        << "[bench] self run " << actual_test_nr << ".";
     ctx.yield_to_master();
     CHECK(false) << "yield back to me.";
 }
@@ -400,17 +404,18 @@ void bench_template(const std::string &name,
     if (is_master)
     {
         work_nr = test_times;
+        // LOG(INFO) << "debug !! work_nr: " << work_nr;
     }
-
-    bar.wait();
-    ChronoTimer timer;
-
-    auto tid = patronus->get_thread_id();
 
     auto min = util::time::to_ns(0ns);
     auto max = util::time::to_ns(10ms);
     auto range = util::time::to_ns(1us);
     OnePassBucketMonitor lat_m(min, max, range);
+
+    bar.wait();
+    ChronoTimer timer;
+
+    auto tid = patronus->get_thread_id();
 
     if (tid < thread_nr)
     {
@@ -429,7 +434,7 @@ void bench_template(const std::string &name,
         << "[bench] BENCH: " << name << ", thread_nr: " << thread_nr
         << ", coro_nr: " << coro_nr << ", entry_nr: " << link_entry_nr
         << ", entry_size: " << link_entry_size << ", use_mn: " << conf.use_mn
-        << ". Takes: " << util::pre_ns(total_ns);
+        << ". Takes: " << util::pre_ns(total_ns) << " with op " << test_times;
     bar.wait();
 }
 
@@ -517,27 +522,25 @@ void benchmark(Patronus::pointer patronus,
 
     for (bool use_mn : {true, false})
     {
-        for (size_t coro_nr : {1, 16})
+        // for (size_t coro_nr : {1, 16})
+        // for (size_t coro_nr : {1, 8})
+        for (size_t coro_nr : {1, 8})
         {
-            for (size_t linked_list_length : {1})
+            for (size_t linked_list_length : {1_K, 10_K, 50_K})
             {
-                for (size_t entry_size : {8_B, 4_KB, 2_MB})
+                // for (size_t entry_size : {8_B, 4_KB, 2_MB})
+                for (size_t entry_size : {8_B})
+                // for (size_t entry_size : {2_MB})
                 {
-                    auto test_times = kTestTimePerThread * thread_nr;
-                    double scale_factor = entry_size == 2_MB ? 0.002 : 1.0;
-                    if (use_mn)
-                    {
-                        scale_factor /= 5;
-                    }
-                    scale_factor /= linked_list_length;
-                    auto config =
-                        BenchConfig::get_conf("link",
-                                              thread_nr,
-                                              coro_nr,
-                                              linked_list_length,
-                                              entry_size,
-                                              use_mn,
-                                              test_times * scale_factor);
+                    // auto test_times = kTestTimePerThread * thread_nr / 1000;
+                    auto test_times = 1_M / linked_list_length;
+                    auto config = BenchConfig::get_conf("link",
+                                                        thread_nr,
+                                                        coro_nr,
+                                                        linked_list_length,
+                                                        entry_size,
+                                                        use_mn,
+                                                        test_times);
                     run_benchmark(
                         patronus, {config}, bar, is_client, is_master, key);
                     key++;
@@ -546,7 +549,7 @@ void benchmark(Patronus::pointer patronus,
         }
     }
 
-    // for (bool use_mn : {true, false})
+    // for (bool use_mn : {true, true, true, false, false, false})
     // {
     //     for (size_t coro_nr : {1})
     //     {
@@ -554,7 +557,8 @@ void benchmark(Patronus::pointer patronus,
     //         {
     //             for (size_t entry_size : {128_MB})
     //             {
-    //                 auto test_times = kTestTimePerThread * thread_nr / 50000;
+    //                 auto test_times =
+    //                     2 * kTestTimePerThread * thread_nr / 500000;
     //                 auto config = BenchConfig::get_conf("link",
     //                                                     thread_nr,
     //                                                     coro_nr,

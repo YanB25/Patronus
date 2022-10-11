@@ -44,6 +44,11 @@ constexpr static size_t kMachineNr = 4;
 static_assert(kMachineNr <= MAX_MACHINE);
 constexpr static size_t kDefaultDSMSize = 16_GB;
 constexpr static size_t kDefaultCacheSize = 8_GB;
+
+// it seems that vectorization gets slower.
+constexpr static bool kUseAVXMemcpy = false;
+constexpr static bool kUseSSEMemcpy = false;
+
 }  // namespace config
 
 namespace define

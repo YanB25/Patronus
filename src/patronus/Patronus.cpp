@@ -1,5 +1,7 @@
 #include "patronus/Patronus.h"
 
+#include "FastMemcpy/FastMemcpy.h"
+#include "FastMemcpy/FastMemcpy_Avx.h"
 #include "patronus/IBOut.h"
 #include "patronus/Time.h"
 #include "umsg/Config.h"
@@ -2297,7 +2299,22 @@ void Patronus::post_handle_request_memcpy(MemcpyRequest *req, CoroContext *ctx)
             req->size * fast_pseudo_rand_int(0, (max_size / req->size) - 1);
         char *source = start_addr + source_offset;
         char *dst = start_addr + dst_offset;
-        memcpy(source, dst, req->size);
+
+        if constexpr (::config::kUseAVXMemcpy || ::config::kUseSSEMemcpy)
+        {
+            if (::config::kUseAVXMemcpy)
+            {
+                util::avx::memcpy_fast(source, dst, req->size);
+            }
+            else
+            {
+                util::sse::memcpy_fast(source, dst, req->size);
+            }
+        }
+        else
+        {
+            memcpy(source, dst, req->size);
+        }
 
         if constexpr (debug())
         {

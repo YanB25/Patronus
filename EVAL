@@ -175,3 +175,27 @@ When threads are more, rpc better than mw, because RDMA FAA bottleneck. RDMA FAA
 T 16 32
 mw 1.78Mops, 1.75Mops
 rpc 22.6Mops, 23.7Mops
+
+# bench_clone
+with 4 cores (NR_DIRECTORY)
+
+size (1 coro/8 coro), MN vs CN
+8B 6.7Mops/7.2Mops vs 15.4Mops/35Mops x4.8
+4KB 3.1Mops/same vs 2.8Mops/same x1.1
+2_MB 8.6Kops/7.6Kops vs 5.5Kops/4.7Kops x1.56
+128MB 46 vs 37 x1.24
+Conclusion: copy once, MN favours larger buffer while CN favours smaller one.
+
+length with 8B (1coro/8coro)
+1 6.9Mops/7.3Mops vs 17.3Mops/63Mops
+64 356Kops vs 270Kops/994Kops
+1024 23Kops vs 16.9Kops/59Kops
+10K 2.3Kops vs 1.3Kops
+20K 198 vs 77
+Conclusion: CN always better with < 10K length, because ~60Mops is so huge that MN can not keep pace with.
+
+length with 2MB
+1 8.8Kops vs 5.2Kops
+64 153 vs 86
+256 38 vs 21
+Conclusion: meaningless

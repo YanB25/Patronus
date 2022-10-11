@@ -43,7 +43,14 @@ auto gen_F(std::function<R(A, B)> f)
 template <typename A, typename B, typename R>
 auto gen_F_div()
 {
-    return gen_F<A, B, R>([](A a, B b) { return (R)(a / b); });
+    return gen_F<A, B, R>([](A a, B b) {
+        if (unlikely(b == 0))
+        {
+            LOG(WARNING) << "[dataframe] get invalid data: divide by zero.";
+            return (R) 0;
+        }
+        return (R)((R) a / b);
+    });
 }
 template <typename A, typename B, typename R>
 auto gen_F_mul()

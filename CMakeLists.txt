@@ -10,7 +10,7 @@ option(SANITIZE "Turn on sanitization" OFF)
 
 # Compiler options
 set(CMAKE_C_FLAGS "-Wall -Wno-deprecated-declarations -Wsign-compare -Wno-address-of-packed-member")
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -Wextra -Werror")
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17 -g3 -Wall -Wextra -Werror -mavx")
 
 # turn on these later
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wcast-align -Wcast-qual -Wctor-dtor-privacy -Wdisabled-optimization -Wformat=2 -Winit-self -Wmissing-declarations -Wmissing-include-dirs -Woverloaded-virtual -Wredundant-decls -Wshadow -Wsign-promo -Wstrict-overflow=5 -Wswitch-default -Wundef -Werror -Wno-unused  -Wno-format-nonliteral")
