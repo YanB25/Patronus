@@ -26,6 +26,7 @@ constexpr static size_t kClientThreadNr = kMaxAppThread;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
 
 // constexpr static size_t kTestTimePerThread = 300_K;
+constexpr static size_t kTestTimePerThread = 1_K;
 // constexpr static size_t kTestTimePerThread = 100;
 
 std::vector<std::string> col_idx;
@@ -516,31 +517,35 @@ void benchmark(Patronus::pointer patronus,
     [[maybe_unused]] size_t key = 0;
     std::ignore = patronus;
 
-    size_t thread_nr = 32;
+    size_t thread_nr = 4;
     CHECK_LE(thread_nr, kMaxAppThread);
     // std::vector<BenchConfig> configs;
 
     for (bool use_mn : {true, false})
     {
-        // for (size_t coro_nr : {1, 16})
         // for (size_t coro_nr : {1, 8})
-        for (size_t coro_nr : {1, 8})
+        for (size_t coro_nr : {1})
         {
-            for (size_t linked_list_length : {1_K, 10_K, 50_K})
+            // for (size_t linked_list_length :
+            //      {(uint64_t) 1, (uint64_t) 100, 1_K, 10_K})
+            for (size_t linked_list_length : {1})
             {
                 // for (size_t entry_size : {8_B, 4_KB, 2_MB})
-                for (size_t entry_size : {8_B})
+                for (size_t entry_size : {8_B, 4_KB, 2_MB})
                 // for (size_t entry_size : {2_MB})
                 {
-                    // auto test_times = kTestTimePerThread * thread_nr / 1000;
-                    auto test_times = 1_M / linked_list_length;
-                    auto config = BenchConfig::get_conf("link",
-                                                        thread_nr,
-                                                        coro_nr,
-                                                        linked_list_length,
-                                                        entry_size,
-                                                        use_mn,
-                                                        test_times);
+                    auto test_times = kTestTimePerThread;
+                    // auto test_times = 1_M / linked_list_length;
+                    auto config = BenchConfig::get_conf(
+                        "link-" + std::to_string(linked_list_length) + "-" +
+                            std::to_string(entry_size) +
+                            (use_mn ? "-MN" : "-CN"),
+                        thread_nr,
+                        coro_nr,
+                        linked_list_length,
+                        entry_size,
+                        use_mn,
+                        test_times);
                     run_benchmark(
                         patronus, {config}, bar, is_client, is_master, key);
                     key++;
@@ -548,24 +553,26 @@ void benchmark(Patronus::pointer patronus,
             }
         }
     }
-
-    // for (bool use_mn : {true, true, true, false, false, false})
+    // for (bool use_mn : {true, false})
     // {
     //     for (size_t coro_nr : {1})
     //     {
     //         for (size_t linked_list_length : {1})
     //         {
-    //             for (size_t entry_size : {128_MB})
+    //             for (size_t entry_size : {2_MB})
     //             {
     //                 auto test_times =
     //                     2 * kTestTimePerThread * thread_nr / 500000;
-    //                 auto config = BenchConfig::get_conf("link",
-    //                                                     thread_nr,
-    //                                                     coro_nr,
-    //                                                     linked_list_length,
-    //                                                     entry_size,
-    //                                                     use_mn,
-    //                                                     test_times);
+    //                 auto config = BenchConfig::get_conf(
+    //                     "link-" + std::to_string(linked_list_length) + "-" +
+    //                         std::to_string(entry_size) +
+    //                         (use_mn ? "-MN" : "-CN"),
+    //                     thread_nr,
+    //                     coro_nr,
+    //                     linked_list_length,
+    //                     entry_size,
+    //                     use_mn,
+    //                     test_times);
     //                 run_benchmark(
     //                     patronus, {config}, bar, is_client, is_master, key);
     //                 key++;
@@ -720,22 +727,22 @@ int main(int argc, char *argv[])
                                               io_format::csv2);
     }
 
-    // {
-    //     StrDataFrame df;
-    //     df.load_index(std::move(col_lat_idx));
-    //     for (auto &[name, vec] : lat_data_)
-    //     {
-    //         df.load_column<uint64_t>(name.c_str(), std::move(vec));
-    //     }
+    {
+        StrDataFrame df;
+        df.load_index(std::move(col_lat_idx));
+        for (auto &[name, vec] : lat_data_)
+        {
+            df.load_column<uint64_t>(name.c_str(), std::move(vec));
+        }
 
-    //     std::map<std::string, std::string> info;
-    //     info.emplace("kind", "lat");
-    //     auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta,
-    //     info); df.write<std::ostream, std::string, size_t, double>(std::cout,
-    //                                                         io_format::csv2);
-    //     df.write<std::string, size_t, double>(filename.c_str(),
-    //                                           io_format::csv2);
-    // }
+        std::map<std::string, std::string> info;
+        info.emplace("kind", "lat");
+        auto filename = binary_to_csv_filename(argv[0], FLAGS_exec_meta, info);
+        df.write<std::ostream, std::string, size_t, double>(std::cout,
+                                                            io_format::csv2);
+        df.write<std::string, size_t, double>(filename.c_str(),
+                                              io_format::csv2);
+    }
 
     patronus->keeper_barrier("finished", 100ms);
     LOG(INFO) << "Exiting...";
