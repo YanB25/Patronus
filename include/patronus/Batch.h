@@ -129,7 +129,7 @@ public:
         DVLOG(V) << "[patronus] [batch] READ node_id: " << node_id
                  << ", dir_id: " << dir_id << ", source: " << (void *) source
                  << ", dest: " << (void *) dest << ", size: " << size
-                 << ", at idx: " << idx_;
+                 << " with rkey: " << rkey << ", at idx: " << idx_;
         trace.pin("prepare");
         return kOk;
     }
@@ -235,7 +235,8 @@ public:
 
             send_wrs_[i].wr_id = wr_id;
         }
-        DVLOG(V) << "[patronus][batch] commiting " << idx_ << " WRs.";
+        DVLOG(V) << "[patronus][batch] commiting " << idx_
+                 << " WR with wr_id: " << wr_id;
 
         auto ret = ibv_post_send(qp_, send_wrs_, &bad_wr_);
         if (unlikely(ret))

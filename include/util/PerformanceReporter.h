@@ -497,6 +497,47 @@ private:
     size_t size_{0};
 };
 
+template <typename T>
+class SequenceLimit
+{
+public:
+    SequenceLimit(size_t limit) : limit_(limit)
+    {
+    }
+    void push_back(const T &t)
+    {
+        q_.push_back(t);
+        if (unlikely(q_.size() > limit_))
+        {
+            q_.pop_front();
+        }
+    }
+    void push_back(T &&t)
+    {
+        q_.push_back(std::move(t));
+        if (unlikely(q_.size() > limit_))
+        {
+            q_.pop_front();
+        }
+    }
+    template <typename U>
+    friend std::ostream &operator<<(std::ostream &, const SequenceLimit<U> &);
+
+private:
+    size_t limit_;
+    std::deque<T> q_;
+};
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os, const SequenceLimit<T> &s)
+{
+    os << "{SequenceLimit: ";
+    std::for_each(
+        s.q_.begin(), s.q_.end(), [&os](const T &t) { os << t << ", "; });
+    os << "}";
+
+    return os;
+}
+
 // Accept any T that is an enum.
 template <typename T, std::enable_if_t<std::is_enum_v<T>, bool> = true>
 class EnumReporter

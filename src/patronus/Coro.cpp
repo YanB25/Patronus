@@ -52,7 +52,7 @@ bool ServerCoroBatchExecutionContext::commit(uint16_t prefix,
 
     while (!free_mws_.empty())
     {
-        auto *mw = free_mws_.top();
+        auto *mw = free_mws_.front();
         free_mws_.pop();
         patronus_->put_mw(dir_id_, mw);
     }
@@ -252,7 +252,7 @@ bool ServerCoroBatchExecutionContext::commit_with_mw_reuse_optimization(
         {
             // okay, here we reuse the unbind.
             DCHECK(!free_mws_.empty());
-            auto *reuse_mw = free_mws_.top();
+            auto *reuse_mw = free_mws_.front();
             free_mws_.pop();
             *task.o_mw = reuse_mw;
 
@@ -312,6 +312,39 @@ bool ServerCoroBatchExecutionContext::commit_with_mw_reuse_optimization(
             DCHECK(!(wr.send_flags & IBV_SEND_SIGNALED));
         }
     }
+
+    // LOG_IF(INFO, post_wr_nr > 0) << "Explaining binding MW...";
+    // {
+    //     // using BufferView = std::pair<char *, size_t>;
+    //     // std::map<ibv_mw *, BufferView> tmp;
+    //     if (post_wr_nr > 0)
+    //     {
+    //         ibv_send_wr *cur_wr = wrs;
+    //         while (cur_wr)
+    //         {
+    //             // LOG(INFO) << "WR: mw: " << (void *) cur_wr->bind_mw.mw
+    //             //           << ", addr: "
+    //             //           << (void *) cur_wr->bind_mw.bind_info.addr
+    //             //           << ", length: " <<
+    //             cur_wr->bind_mw.bind_info.length
+    //             //           << ". wr_id: " << cur_wr->wr_id;
+    //             // auto value =
+    //             //     BufferView((char *) cur_wr->bind_mw.bind_info.addr,
+    //             //                (size_t) cur_wr->bind_mw.bind_info.length);
+    //             // if (unlikely(tmp.count(cur_wr->bind_mw.mw)))
+    //             // {
+    //             //     LOG(FATAL) << "** Possible conflict detected. mw: "
+    //             //                << (void *) cur_wr->bind_mw.mw << ",
+    //             original
+    //             //                "
+    //             //                << util::pre_pair(tmp[cur_wr->bind_mw.mw])
+    //             //                << ", new: " << util::pre_pair(value);
+    //             // }
+    //             // tmp[cur_wr->bind_mw.mw] = value;
+    //             cur_wr = cur_wr->next;
+    //         }
+    //     }
+    // }
 
     auto [qp, thread_idx, machine_idx] = get_qp_rr();
 

@@ -11,12 +11,13 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 using namespace patronus;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
-// constexpr static size_t kClientThreadNr = 1;
+// constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
+constexpr static size_t kClientThreadNr = 4;
 
 static_assert(kClientThreadNr <= kMaxAppThread);
 static_assert(kServerThreadNr <= NR_DIRECTORY);
 constexpr static size_t kCoroCnt = 16;
+constexpr static size_t kMachineNr = 2;
 // constexpr static size_t kCoroCnt = 1;
 
 constexpr static uint64_t kMagic = 0xaabbccdd11223344;
@@ -24,7 +25,7 @@ constexpr static size_t kCoroStartKey = 1024;
 
 // constexpr static size_t kTestTime =
 //     Patronus::kMwPoolSizePerThread / kCoroCnt / NR_DIRECTORY / 2;
-constexpr static size_t kTestTime = 10_K;
+constexpr static size_t kTestTime = 1000_K;
 
 constexpr static size_t kWaitKey = 0;
 
@@ -78,8 +79,10 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
     LOG(INFO) << "[bench] tid " << tid << ", coro: " << ctx;
 
-    size_t coro_key = gen_coro_key(tid, coro_id);
-    size_t coro_magic = gen_magic(tid, coro_id);
+    // size_t coro_key = gen_coro_key(tid, coro_id);
+    // size_t coro_magic = gen_magic(tid, coro_id);
+
+    auto dsm = p->get_dsm();
 
     for (size_t time = 0; time < kTestTime; ++time)
     {
@@ -88,7 +91,9 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         client_comm.finish_all_task[coro_id] = false;
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to got lease ";
-        auto locate_offset = bench_locator(coro_key);
+        // auto locate_offset = bench_locator(coro_key);
+        auto locate_offset =
+            sizeof(Object) * fast_pseudo_rand_int(0, 2_GB / sizeof(Object));
         Lease lease = p->get_rlease(server_nid,
                                     dir_id,
                                     GlobalAddress(0, locate_offset),
@@ -113,6 +118,7 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
         DVLOG(2) << "[bench] client coro " << ctx << " start to read";
         CHECK_LE(sizeof(Object), rdma_buf.size);
+
         auto ec = p->read(lease,
                           rdma_buf.buffer,
                           sizeof(Object),
@@ -123,17 +129,20 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
         {
             CHECK(false) << "[bench] client READ failed. lease " << lease
                          << ", ctx: " << ctx << " at " << time
-                         << "-th. Failure: " << ec;
+                         << "-th. Failure: " << ec << ". Remote addr: "
+                         << (void *) dsm->gaddr_to_addr(
+                                GlobalAddress(0, lease.base_addr()))
+                         << ". " << ctx;
             continue;
         }
 
-        DVLOG(2) << "[bench] client coro " << ctx << " read finished";
-        Object magic_object = *(Object *) rdma_buf.buffer;
-        CHECK_EQ(magic_object.target, coro_magic)
-            << "coro_id " << ctx << ", Read at key " << coro_key
-            << " expect magic " << coro_magic
-            << ", lease.base: " << (void *) lease.base_addr()
-            << ", actual offset: " << bench_locator(coro_key);
+        // DVLOG(2) << "[bench] client coro " << ctx << " read finished";
+        // Object magic_object = *(Object *) rdma_buf.buffer;
+        // CHECK_EQ(magic_object.target, coro_magic)
+        //     << "coro_id " << ctx << ", Read at key " << coro_key
+        //     << " expect magic " << coro_magic
+        //     << ", lease.base: " << (void *) lease.base_addr()
+        //     << ", actual offset: " << bench_locator(coro_key);
 
         DVLOG(2) << "[bench] client coro " << ctx
                  << " start to relinquish lease ";
@@ -201,16 +210,20 @@ void client_master(Patronus::pointer p, CoroYield &yield)
 void client(Patronus::pointer p)
 {
     auto tid = p->get_thread_id();
-    LOG(INFO) << "I am client. tid " << tid;
-    for (size_t i = 0; i < kCoroCnt; ++i)
+    auto nid = p->get_node_id();
+    if (nid < kMachineNr)
     {
-        client_coro.workers[i] =
-            CoroCall([p, i](CoroYield &yield) { client_worker(p, i, yield); });
+        LOG(INFO) << "I am client. tid " << tid;
+        for (size_t i = 0; i < kCoroCnt; ++i)
+        {
+            client_coro.workers[i] = CoroCall(
+                [p, i](CoroYield &yield) { client_worker(p, i, yield); });
+        }
+        client_coro.master =
+            CoroCall([p](CoroYield &yield) { client_master(p, yield); });
+        client_coro.master();
+        LOG(INFO) << "[bench] thread " << tid << " going to leave client()";
     }
-    client_coro.master =
-        CoroCall([p](CoroYield &yield) { client_master(p, yield); });
-    client_coro.master();
-    LOG(INFO) << "[bench] thread " << tid << " going to leave client()";
 }
 
 void server(Patronus::pointer p)
@@ -218,6 +231,8 @@ void server(Patronus::pointer p)
     auto tid = p->get_thread_id();
 
     LOG(INFO) << "I am server. tid " << tid;
+
+    // p->set_configure_reuse_mw_opt(false);
 
     p->server_serve(kWaitKey);
 }
