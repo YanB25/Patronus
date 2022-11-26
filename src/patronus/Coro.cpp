@@ -124,6 +124,7 @@ bool ServerCoroBatchExecutionContext::commit_wo_mw_reuse_optimization(
             DCHECK_NE(task.o_mw, nullptr);
             if (unlikely(mw == nullptr))
             {
+                LOG(FATAL) << "** out of mw.";
                 if (task.o_status)
                 {
                     *task.o_status = AcquireRequestStatus::kNoMw;

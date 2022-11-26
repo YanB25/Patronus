@@ -8,6 +8,8 @@
 #include <stdexcept>
 
 #include "Common.h"
+#include "util/Util.h"
+
 void *hugePageAlloc(size_t size)
 {
     void *res = mmap(NULL,
@@ -24,6 +26,8 @@ void *hugePageAlloc(size_t size)
         }
         return nullptr;
     }
+
+    madvise(res, size, MADV_DONTDUMP);
 
     return res;
 }

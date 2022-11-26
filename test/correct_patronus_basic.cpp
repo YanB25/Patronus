@@ -11,8 +11,8 @@ DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 using namespace patronus;
 constexpr static size_t kServerThreadNr = NR_DIRECTORY;
-// constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
-constexpr static size_t kClientThreadNr = 4;
+constexpr static size_t kClientThreadNr = kMaxAppThread - 1;
+// constexpr static size_t kClientThreadNr = 4;
 
 static_assert(kClientThreadNr <= kMaxAppThread);
 static_assert(kServerThreadNr <= NR_DIRECTORY);
@@ -86,6 +86,8 @@ void client_worker(Patronus::pointer p, coro_t coro_id, CoroYield &yield)
 
     for (size_t time = 0; time < kTestTime; ++time)
     {
+        LOG_IF(INFO, time % 10_K == 0) << "tested " << time;
+
         client_comm.still_has_work[coro_id] = true;
         client_comm.finish_cur_task[coro_id] = false;
         client_comm.finish_all_task[coro_id] = false;
@@ -232,7 +234,7 @@ void server(Patronus::pointer p)
 
     LOG(INFO) << "I am server. tid " << tid;
 
-    // p->set_configure_reuse_mw_opt(false);
+    p->set_configure_reuse_mw_opt(true);
 
     p->server_serve(kWaitKey);
 }

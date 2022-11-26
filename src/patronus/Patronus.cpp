@@ -1508,7 +1508,7 @@ void Patronus::registerServerThread()
     {
         auto dsm = get_dsm();
         mw_pool_[dirID] = std::make_unique<MWPool>(
-            dsm, dirID, alloc_mw_nr, true /* enable locality optimization */);
+            dsm, dirID, alloc_mw_nr, false /* enable locality optimization */);
     }
 
     auto tid = get_thread_id();
