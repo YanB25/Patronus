@@ -1,5 +1,12 @@
 #include "AbstractMessageConnection.h"
 
+#include <glog/logging.h>
+
+#include "Common.h"
+#include "util/Pre.h"
+
+#define ADD_ROUND(x, n) ((x) = ((x) + 1) % (n))
+
 AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
                                                      uint16_t sendPadding,
                                                      uint16_t recvPadding,
@@ -17,14 +24,35 @@ AbstractMessageConnection::AbstractMessageConnection(ibv_qp_type type,
 
     send_cq = ibv_create_cq(ctx.ctx, 128, NULL, NULL, 0);
 
-    createQueuePair(&message, type, send_cq, cq, &ctx);
+    CHECK(type == IBV_QPT_UD) << "Only support UD here";
+    CHECK(createQueuePair(&message, type, send_cq, cq, &ctx, 128, 0, nullptr));
     modifyUDtoRTS(message, &ctx);
 
-    messagePool = hugePageAlloc(2 * messageNR * MESSAGE_SIZE);
+    messagePool = CHECK_NOTNULL(hugePageAlloc(2 * messageNR * MESSAGE_SIZE));
     messageMR = createMemoryRegion(
         (uint64_t) messagePool, 2 * messageNR * MESSAGE_SIZE, &ctx);
     sendPool = (char *) messagePool + messageNR * MESSAGE_SIZE;
     messageLkey = messageMR->lkey;
+
+    for (size_t i = 0; i < kBatchCount; ++i)
+    {
+        recvs[i] = nullptr;
+        recv_sgl[i] = nullptr;
+    }
+}
+
+void AbstractMessageConnection::destroy()
+{
+    CHECK(destroyMemoryRegion(messageMR));
+    CHECK(hugePageFree(messagePool, 2 * messageNR * MESSAGE_SIZE));
+    CHECK(destroyQueuePair(message));
+    CHECK(destroyCompleteQueue(send_cq));
+
+    for (int i = 0; i < kBatchCount; ++i)
+    {
+        delete[] recvs[i];
+        delete[] recv_sgl[i];
+    }
 }
 
 void AbstractMessageConnection::initRecv()
@@ -62,7 +90,7 @@ void AbstractMessageConnection::initRecv()
     {
         if (ibv_post_recv(message, &recvs[i][0], &bad))
         {
-            error("Receive failed.");
+            LOG(ERROR) << "Receive failed.";
         }
     }
 }
@@ -81,7 +109,7 @@ char *AbstractMessageConnection::getMessage()
                 &recvs[(curMessage / subNR - 1 + kBatchCount) % kBatchCount][0],
                 &bad))
         {
-            error("Receive failed.");
+            LOG(ERROR) << "Receive failed.";
         }
     }
 

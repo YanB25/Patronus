@@ -2,7 +2,10 @@
 
 #include "DSM.h"
 #include "Timer.h"
-#include "zipf.h"
+#include "gflags/gflags.h"
+#include "util/zipf.h"
+
+DEFINE_string(exec_meta, "", "The meta data of this execution");
 
 /*
 ./restartMemc.sh && /usr/local/openmpi/bin/mpiexec --allow-run-as-root -hostfile
@@ -30,7 +33,7 @@ void send_cas(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer();
+    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer().buffer;
     size_t buffer_size = sizeof(uint64_t) * kBucketPerThread;
 
     GlobalAddress gaddr;
@@ -78,7 +81,7 @@ void send_cas(int node_id, int thread_id)
     }
 }
 
-void send_skew_cas(int node_id, int thread_id)
+void send_skew_cas([[maybe_unused]] int node_id, int thread_id)
 {
     const int kCounterBucket = 4096;
     const uint64_t seed = time(nullptr);
@@ -91,7 +94,7 @@ void send_skew_cas(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer();
+    uint64_t *buffer = (uint64_t *) dsm->get_rdma_buffer().buffer;
     size_t buffer_size = sizeof(uint64_t) * kCounterBucket;
 
     GlobalAddress gaddr;
@@ -115,13 +118,15 @@ void send_skew_cas(int node_id, int thread_id)
         }
 
         gaddr.offset = mehcached_zipf_next(&state) * sizeof(uint64_t);
-        // + 1 * define::MB;
+        // + 1_MB;
 
         dsm->cas(gaddr,
                  0,
                  100,
                  buffer + gaddr.offset,
-                 (sendCounter & SIGNAL_BATCH) == 0);
+                 (sendCounter & SIGNAL_BATCH) == 0,
+                 0 /* wr_id */,
+                 nullptr);
 
         ++sendCounter;
     }
@@ -135,7 +140,7 @@ void send_write(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    char *buffer = dsm->get_rdma_buffer();
+    char *buffer = dsm->get_rdma_buffer().buffer;
     size_t buffer_size = kPacketSize * kDifferLocation;
 
     GlobalAddress gaddr;
@@ -196,18 +201,19 @@ void read_args(int argc, char **argv)
         kPacketSize = std::atoi(argv[5]);
     }
 
-    info(
-        "node_nr [%d], thread_nr [%d], zipfan [%.3f], cas sleep ns [%ld], "
-        "packsize [%d]",
-        node_nr,
-        thread_nr,
-        kZipfan,
-        cas_sleep_ns,
-        kPacketSize);
+    LOG(INFO) << "node_nr [" << node_nr << "], thread_nr [" << thread_nr
+              << "], zipfan [" << kZipfan << " << ], cas sleep ns ["
+              << cas_sleep_ns
+              << "] "
+                 "packsize ["
+              << kPacketSize << "]";
 }
 
 int main(int argc, char **argv)
 {
+    google::InitGoogleLogging(argv[0]);
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+
     bindCore(0);
 
     read_args(argc, argv);

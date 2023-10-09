@@ -1,6 +1,7 @@
 #include "Common.h"
 
 #include <arpa/inet.h>
+#include <glog/logging.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
@@ -16,7 +17,7 @@ void bindCore(uint16_t core)
     int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
     if (rc != 0)
     {
-        error("can't bind core %d!", core);
+        LOG(ERROR) << "can't bind core " << core;
     }
 }
 
@@ -26,7 +27,7 @@ char *getIP()
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
 
     ifr.ifr_addr.sa_family = AF_INET;
-    strncpy(ifr.ifr_name, "ib0", IFNAMSIZ - 1);
+    strncpy(ifr.ifr_name, kNICName, IFNAMSIZ - 1);
 
     ioctl(fd, SIOCGIFADDR, &ifr);
     close(fd);

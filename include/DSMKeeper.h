@@ -1,9 +1,15 @@
+#pragma once
 #ifndef __LINEAR_KEEPER__H__
 #define __LINEAR_KEEPER__H__
 
+#include <glog/logging.h>
+
+#include <unordered_map>
 #include <vector>
 
 #include "Keeper.h"
+#include "Timer.h"
+#include "umsg/UnreliableConnection.h"
 
 struct ThreadConnection;
 struct DirectoryConnection;
@@ -20,6 +26,12 @@ struct ExPerThread
     uint32_t dm_rkey;  // for directory on-chip memory
 } __attribute__((packed));
 
+struct ExUnreliable
+{
+    uint16_t lid;
+    uint8_t gid[16];
+    uint32_t qpn;
+} __attribute__((packed));
 /**
  * @brief an exchange data used in building connection for each `pair` of
  * machines in the system. Keep the struct POD to be memcpy-able
@@ -33,7 +45,7 @@ struct ExchangeMeta
     /**
      * ThreadConnection exchange data used by DirectoryConnection
      */
-    ExPerThread appTh[MAX_APP_THREAD];
+    ExPerThread appTh[kMaxAppThread];
     /***
      * DirectoryConnection exchange data used by ThreadConnection
      */
@@ -43,7 +55,7 @@ struct ExchangeMeta
      * @brief Unreliable Datagram QPN used in raw message transmission.
      * app QPN is used by @see DirectoryConnection
      */
-    uint32_t appUdQpn[MAX_APP_THREAD];
+    uint32_t appUdQpn[kMaxAppThread];
     /**
      * @brief Unreliable Datagram QPN used in raw message transmission.
      * dir QPN is used by @see ThreadConnection
@@ -54,66 +66,108 @@ struct ExchangeMeta
      * @brief Reliable Connection QPN used for each local ThreadConnection to
      * remote DirectoryConnetion
      */
-    uint32_t appRcQpn2dir[MAX_APP_THREAD][NR_DIRECTORY];
+    uint32_t appRcQpn2dir[kMaxAppThread][NR_DIRECTORY];
 
     /**
      * @brief Reliable Connection QPN used for each local DirectoryConnection to
      * remote ThreadConnetion
      */
-    uint32_t dirRcQpn2app[NR_DIRECTORY][MAX_APP_THREAD];
+    uint32_t dirRcQpn2app[NR_DIRECTORY][kMaxAppThread];
 
+    ExUnreliable umsgs[kMaxAppThread];
 } __attribute__((packed));
 
 class DSMKeeper : public Keeper
 {
 public:
     static std::unique_ptr<DSMKeeper> newInstance(
-        std::vector<ThreadConnection> &thCon,
-        std::vector<DirectoryConnection> &dirCon,
+        std::vector<std::unique_ptr<ThreadConnection>> &thCon,
+        std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
+        UnreliableConnection<kMaxAppThread> &umsg,
         std::vector<RemoteConnection> &remoteCon,
         uint32_t maxServer = 12)
     {
-        return future::make_unique<DSMKeeper>(
-            thCon, dirCon, remoteCon, maxServer);
+        return std::make_unique<DSMKeeper>(
+            thCon, dirCon, umsg, remoteCon, maxServer);
     }
 
-    DSMKeeper(std::vector<ThreadConnection> &thCon,
-              std::vector<DirectoryConnection> &dirCon,
+    DSMKeeper(std::vector<std::unique_ptr<ThreadConnection>> &thCon,
+              std::vector<std::unique_ptr<DirectoryConnection>> &dirCon,
+              UnreliableConnection<kMaxAppThread> &umsg,
               std::vector<RemoteConnection> &remoteCon,
-              uint32_t maxServer = 12)
-        : Keeper(maxServer), thCon(thCon), dirCon(dirCon), remoteCon(remoteCon)
-    {
-        dinfo("DSMKeeper::initLocalMeta()");
-        initLocalMeta();
+              uint32_t maxServer = MAX_MACHINE);
 
-        dinfo("DSMKeeper::connectMemcached");
-        if (!connectMemcached())
+    virtual ~DSMKeeper();
+    template <typename Duration>
+    void barrier(const std::string &barrierKey, Duration sleep_time)
+    {
+        auto nr = getServerNR();
+        auto nid = getMyNodeID();
+        bool is_master = (nid == 0);
+        return partial_barrier(barrierKey, nr, is_master, sleep_time);
+    }
+    template <typename Duration>
+    void partial_barrier(const std::string &barrierKey,
+                         size_t expect_nr,
+                         bool is_master,
+                         Duration sleep_time)
+    {
+        std::string key = std::string("__barrier:") + barrierKey;
+        auto nid = getMyNodeID();
+        if (is_master)
         {
-            panic("DSMKeeper:: unable to connect to memcached");
-            return;
+            memSet(key.c_str(), key.size(), "0", 1, sleep_time);
         }
-        serverEnter();
-
-        serverConnect();
-        connectMySelf();
-
-        initRouteRule();
+        memFetchAndAdd(key.c_str(), key.size(), sleep_time);
+        while (true)
+        {
+            auto *ret = memGet(
+                key.c_str(), key.size(), nullptr, sleep_time * (nid + 1));
+            uint64_t v = std::stoull(ret);
+            free(ret);
+            CHECK_LE(v, expect_nr)
+                << "[keeper] Got entered server_nr more than "
+                   "requested. Re-enter of barrier detected, which "
+                   " does not behave correctly. key: "
+                << barrierKey << ", nr: " << expect_nr;
+            if (v == expect_nr)
+            {
+                return;
+            }
+        }
     }
-
-    ~DSMKeeper()
-    {
-        disconnectMemcached();
-    }
-    void barrier(const std::string &barrierKey);
     uint64_t sum(const std::string &sum_key, uint64_t value);
+    void connectDir(DirectoryConnection &,
+                    int remoteID,
+                    int appID,
+                    const ExchangeMeta &exMeta);
+    void connectThread(ThreadConnection &,
+                       int remoteID,
+                       int dirID,
+                       const ExchangeMeta &exMeta);
+
+    void connectUnreliableMsg(UnreliableConnection<kMaxAppThread> &umsg,
+                              int remoteID);
+
+    void updateRemoteConnectionForDir(RemoteConnection &,
+                                      const ExchangeMeta &exMeta,
+                                      size_t dirID);
+
+    const ExchangeMeta &getExchangeMeta(uint16_t remoteID) const;
+    ExchangeMeta updateDirMetadata(const DirectoryConnection &dir,
+                                   size_t remoteID);
 
 private:
     static const char *OK;
     static const char *ServerPrefix;
 
-    std::vector<ThreadConnection> &thCon;
-    std::vector<DirectoryConnection> &dirCon;
+    std::vector<std::unique_ptr<ThreadConnection>> &thCon;
+    std::vector<std::unique_ptr<DirectoryConnection>> &dirCon;
+    UnreliableConnection<kMaxAppThread> &umsg;
     std::vector<RemoteConnection> &remoteCon;
+
+    // remoteID => remoteMetaData
+    std::unordered_map<uint16_t, ExchangeMeta> snapshot_remote_meta_;
 
     ExchangeMeta exchangeMeta;
 
@@ -142,6 +196,7 @@ private:
      * @param remoteID the remote machine to set with
      */
     void setExchangeMeta(uint16_t remoteID);
+    void snapshotConnectRemoteMeta(uint16_t remoteID, const ExchangeMeta &meta);
 
     /**
      * @brief This function does the real and dirty jobs to modify the QP state.

@@ -1,7 +1,13 @@
 #include "DSM.h"
+#include "gflags/gflags.h"
 
-int main()
+DEFINE_string(exec_meta, "", "The meta data of this execution");
+
+int main(int argc, char *argv[])
 {
+    google::InitGoogleLogging(argv[0]);
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+
     DSMConfig config;
     config.machineNR = 2;
     auto dsm = DSM::getInstance(config);

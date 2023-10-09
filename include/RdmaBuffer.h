@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_RDMA_BUFFER_H_)
 #define _RDMA_BUFFER_H_
 
@@ -6,7 +7,6 @@
 // abstract rdma registered buffer
 class RdmaBuffer
 {
-
 private:
     static const int kPageBufferCnt = 8;     // async, buffer safty
     static const int kSiblingBufferCnt = 8;  // async, buffer safty
@@ -41,21 +41,20 @@ public:
 
     void set_buffer(char *buffer)
     {
-
         // printf("set buffer %p\n", buffer);
 
         kPageSize = std::max(kLeafPageSize, kInternalPageSize);
         this->buffer = buffer;
-        cas_buffer = (uint64_t *)buffer;
-        unlock_buffer =
-            (uint64_t *)((char *)cas_buffer + sizeof(uint64_t) * kCasBufferCnt);
-        zero_64bit = (uint64_t *)((char *)unlock_buffer + sizeof(uint64_t));
-        page_buffer = (char *)zero_64bit + sizeof(uint64_t);
-        sibling_buffer = (char *)page_buffer + kPageSize * kPageBufferCnt;
-        entry_buffer = (char *)sibling_buffer + kPageSize * kSiblingBufferCnt;
+        cas_buffer = (uint64_t *) buffer;
+        unlock_buffer = (uint64_t *) ((char *) cas_buffer +
+                                      sizeof(uint64_t) * kCasBufferCnt);
+        zero_64bit = (uint64_t *) ((char *) unlock_buffer + sizeof(uint64_t));
+        page_buffer = (char *) zero_64bit + sizeof(uint64_t);
+        sibling_buffer = (char *) page_buffer + kPageSize * kPageBufferCnt;
+        entry_buffer = (char *) sibling_buffer + kPageSize * kSiblingBufferCnt;
         *zero_64bit = 0;
 
-        assert((char *)zero_64bit + 8 - buffer < define::kPerCoroRdmaBuf);
+        assert((char *) zero_64bit + 8 - buffer < define::kPerCoroRdmaBuf);
     }
 
     uint64_t *get_cas_buffer()

@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_TREE_H_)
 #define _TREE_H_
 
@@ -33,6 +34,7 @@ public:
     {
         return Request{};
     }
+    virtual ~RequstGen() = default;
 };
 
 using CoroFunc = std::function<RequstGen *(int, DSM *, int)>;
@@ -79,7 +81,7 @@ private:
     GlobalAddress root_ptr_ptr;  // the address which stores root pointer;
 
     // static thread_local int coro_id;
-    static thread_local CoroCall worker[define::kMaxCoro];
+    static thread_local CoroCall worker[define::kMaxCoroNr];
     static thread_local CoroCall master;
 
     LocalLockNode *local_locks[MAX_MACHINE];
@@ -255,8 +257,7 @@ constexpr int kLeafCardinality =
 class InternalPage
 {
 private:
-    union
-    {
+    union {
         uint32_t crc;
         uint64_t embedding_lock;
         uint64_t index_cache_freq;
@@ -266,7 +267,7 @@ private:
     Header hdr;
     InternalEntry records[kInternalCardinality];
 
-    uint8_t padding[4];
+    [[maybe_unused]] uint8_t padding[4];
     uint8_t rear_version;
 
     friend class Tree;
@@ -352,8 +353,7 @@ public:
 class LeafPage
 {
 private:
-    union
-    {
+    union {
         uint32_t crc;
         uint64_t embedding_lock;
     };
@@ -361,7 +361,7 @@ private:
     Header hdr;
     LeafEntry records[kLeafCardinality];
 
-    uint8_t padding[8];
+    [[maybe_unused]] uint8_t padding[8];
     uint8_t rear_version;
 
     friend class Tree;

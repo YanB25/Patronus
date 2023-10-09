@@ -21,6 +21,9 @@ BreakBeforeBraces: Allman
 DerivePointerAlignment: false
 FixNamespaceComments: true
 IncludeBlocks:   Regroup
+AlignTrailingComments: true
+# required clang-format 9
+# AllowShortLambdasOnASingleLine : false
 IncludeCategories:
   - Regex:           '^"pch.h"'
     Priority:        -1

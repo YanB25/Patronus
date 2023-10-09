@@ -2,10 +2,10 @@
 
 #include "DSM.h"
 #include "Timer.h"
-#include "zipf.h"
+#include "util/zipf.h"
 
 const int kMaxTestThread = 24;
-const int kBucketPerThread = 32;
+[[maybe_unused]] const int kBucketPerThread = 32;
 
 std::thread th[kMaxTestThread];
 uint64_t tp_write_counter[kMaxTestThread][8];
@@ -23,7 +23,7 @@ void send_write(int node_id, int thread_id)
     dsm->registerThread();
 
     uint64_t sendCounter = 0;
-    char *buffer = dsm->get_rdma_buffer();
+    char *buffer = dsm->get_rdma_buffer().buffer;
     size_t buffer_size = kPacketSize * kDifferLocation;
 
     GlobalAddress gaddr;
@@ -69,10 +69,8 @@ void read_args(int argc, char **argv)
     thread_nr = std::atoi(argv[2]);
     kPacketSize = std::atof(argv[3]);
 
-    info("node_nr [%d], thread_nr [%d], packsize [%d]\n",
-         node_nr,
-         thread_nr,
-         kPacketSize);
+    LOG(INFO) << "node_nr [" << node_nr << "], thread_nr [" << thread_nr
+              << "], packsize [" << kPacketSize << "]";
 }
 
 int main(int argc, char **argv)

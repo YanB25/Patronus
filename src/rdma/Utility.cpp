@@ -1,41 +1,67 @@
-#include "Debug.h"
+
+#include <glog/logging.h>
+
 #include "Rdma.h"
-#include "Util.h"
+#include "util/Util.h"
 
 int kMaxDeviceMemorySize = 0;
 
-void rdmaQueryQueuePair(ibv_qp *qp)
+void rdmaReportQueuePair2(ibv_qp *qp)
 {
     struct ibv_qp_attr attr;
     struct ibv_qp_init_attr init_attr;
-    ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr);
-    switch (attr.qp_state)
+    PLOG_IF(ERROR,
+            ibv_query_qp(qp,
+                         &attr,
+                         IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RNR_RETRY |
+                             IBV_QP_RETRY_CNT,
+                         &init_attr))
+        << "Failed to ibv_query_qp.";
+    LOG(INFO) << "qp state: " << (uint64_t) attr.qp_state
+              << ", qp_timeout: " << (uint64_t) attr.timeout
+              << ", rnr_retry: " << (uint64_t) attr.rnr_retry
+              << ", retry_cnt: " << (uint64_t) attr.retry_cnt;
+}
+
+void rdmaReportQueuePair(ibv_qp *qp)
+{
+    auto state = rdmaQueryQueuePair(qp);
+    switch (state)
     {
     case IBV_QPS_RESET:
-        printf("QP state: IBV_QPS_RESET\n");
+        printf("QP state: IBV_QPS_RESET. qp: %p\n", qp);
         break;
     case IBV_QPS_INIT:
-        printf("QP state: IBV_QPS_INIT\n");
+        printf("QP state: IBV_QPS_INIT. qp: %p\n", qp);
         break;
     case IBV_QPS_RTR:
-        printf("QP state: IBV_QPS_RTR\n");
+        printf("QP state: IBV_QPS_RTR. qp: %p\n", qp);
         break;
     case IBV_QPS_RTS:
-        printf("QP state: IBV_QPS_RTS\n");
+        printf("QP state: IBV_QPS_RTS. qp: %p\n", qp);
         break;
     case IBV_QPS_SQD:
-        printf("QP state: IBV_QPS_SQD\n");
+        printf("QP state: IBV_QPS_SQD. qp: %p\n", qp);
         break;
     case IBV_QPS_SQE:
-        printf("QP state: IBV_QPS_SQE\n");
+        printf("QP state: IBV_QPS_SQE. qp: %p\n", qp);
         break;
     case IBV_QPS_ERR:
-        printf("QP state: IBV_QPS_ERR\n");
+        printf("QP state: IBV_QPS_ERR. qp: %p\n", qp);
         break;
     case IBV_QPS_UNKNOWN:
-        printf("QP state: IBV_QPS_UNKNOWN\n");
+        printf("QP state: IBV_QPS_UNKNOWN. qp: %p\n", qp);
         break;
     }
+}
+
+ibv_qp_state rdmaQueryQueuePair(ibv_qp *qp)
+{
+    struct ibv_qp_attr attr;
+    struct ibv_qp_init_attr init_attr;
+    PLOG_IF(ERROR, ibv_query_qp(qp, &attr, IBV_QP_STATE, &init_attr))
+        << "Failed to ibv_query_qp.";
+    return attr.qp_state;
 }
 
 void checkDctSupported(struct ibv_context *ctx)
@@ -62,7 +88,6 @@ void checkDctSupported(struct ibv_context *ctx)
     else
     {
         kMaxDeviceMemorySize = attrs.max_dm_size;
-        info("NIC Device Memory is %s",
-             smart::smartSize(kMaxDeviceMemorySize).c_str());
+        LOG(INFO) << "NIC Device Memory is " << kMaxDeviceMemorySize;
     }
 }

@@ -1,38 +1,59 @@
+#include <glog/logging.h>
 #include <inttypes.h>
 
 #include <atomic>
+#include <chrono>
 
+#include "Common.h"
 #include "Rdma.h"
 
-int pollWithCQ(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
+int pollWithCQ(ibv_cq *cq,
+               int pollNumber,
+               struct ibv_wc *wc,
+               const WcErrHandler &err_handler,
+               const WcHandler &handler)
 {
     int count = 0;
-    dcheck(pollNumber > 0, "pollNumber should > 0, get %d", pollNumber);
+    DCHECK(pollNumber > 0) << "pollNumber should > 0, get " << pollNumber;
 
     do
     {
         int new_count = ibv_poll_cq(cq, 1, wc);
+        if (new_count == 1)
+        {
+            if (wc->status == IBV_WC_SUCCESS)
+            {
+                handler(wc);
+            }
+            else
+            {
+                PLOG(ERROR)
+                    << "[wc] Failed status " << ibv_wc_status_str(wc->status)
+                    << " (" << wc->status << ") for wr_id " << WRID(wc->wr_id)
+                    << " at QP: " << wc->qp_num
+                    << ". vendor err: " << wc->vendor_err;
+                err_handler(wc);
+                // it is a QP error, in addition to WC error.
+                // should report to the outer world
+                if (wc->status == IBV_WC_WR_FLUSH_ERR)
+                {
+                    return -1;
+                }
+            }
+        }
+        else if (new_count < 0)
+        {
+            LOG(ERROR) << "Poll Completion failed.";
+            // sleep(5);
+            return -1;
+        }
+        else if (new_count > 1)
+        {
+            LOG(FATAL) << "impossible return value from ibv_poll_cq";
+        }
         count += new_count;
 
     } while (count < pollNumber);
-
-    // TODO(yanbin): why count < 0?
-    if (count < 0)
-    {
-        error("Poll Completion failed.");
-        sleep(5);
-        return -1;
-    }
-
-    if (wc->status != IBV_WC_SUCCESS)
-    {
-        error("Failed status %s (%d) for wr_id %d",
-              ibv_wc_status_str(wc->status),
-              wc->status,
-              (int) wc->wr_id);
-        sleep(5);
-        return -1;
-    }
 
     return count;
 }
@@ -46,10 +67,8 @@ int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
     }
     if (wc->status != IBV_WC_SUCCESS)
     {
-        error("Failed status %s (%d) for wr_id %d",
-              ibv_wc_status_str(wc->status),
-              wc->status,
-              (int) wc->wr_id);
+        LOG(ERROR) << "[qp] failed status " << ibv_wc_status_str(wc->status)
+                   << " (" << wc->status << ") for wr_id " << wc->wr_id;
         return -1;
     }
     else
@@ -57,54 +76,6 @@ int pollOnce(ibv_cq *cq, int pollNumber, struct ibv_wc *wc)
         return count;
     }
 }
-/**
- * @brief fill SGE and WR and links the SGE to the WR
- */
-static inline void fillSgeWr(
-    ibv_sge &sg, ibv_send_wr &wr, uint64_t source, uint64_t size, uint32_t lkey)
-{
-    memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t) source;
-    sg.length = size;
-    sg.lkey = lkey;
-
-    memset(&wr, 0, sizeof(wr));
-    wr.wr_id = 0;
-    wr.sg_list = &sg;
-    wr.num_sge = 1;
-}
-
-static inline void fillSgeWr(
-    ibv_sge &sg, ibv_recv_wr &wr, uint64_t source, uint64_t size, uint32_t lkey)
-{
-    memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t) source;
-    sg.length = size;
-    sg.lkey = lkey;
-
-    memset(&wr, 0, sizeof(wr));
-    wr.wr_id = 0;
-    wr.sg_list = &sg;
-    wr.num_sge = 1;
-}
-
-static inline void fillSgeWr(ibv_sge &sg,
-                             ibv_exp_send_wr &wr,
-                             uint64_t source,
-                             uint64_t size,
-                             uint32_t lkey)
-{
-    memset(&sg, 0, sizeof(sg));
-    sg.addr = (uintptr_t) source;
-    sg.length = size;
-    sg.lkey = lkey;
-
-    memset(&wr, 0, sizeof(wr));
-    wr.wr_id = 0;
-    wr.sg_list = &sg;
-    wr.num_sge = 1;
-}
-
 // for UD and DC
 bool rdmaSend(ibv_qp *qp,
               uint64_t source,
@@ -112,7 +83,10 @@ bool rdmaSend(ibv_qp *qp,
               uint32_t lkey,
               ibv_ah *ah,
               uint32_t remoteQPN /* remote dct_number */,
-              bool isSignaled)
+              bool isSignaled,
+              bool isInlined,
+              uint64_t wr_id,
+              std::optional<uint32_t> imm)
 {
     struct ibv_sge sg;
     struct ibv_send_wr wr;
@@ -120,33 +94,54 @@ bool rdmaSend(ibv_qp *qp,
 
     fillSgeWr(sg, wr, source, size, lkey);
 
-    wr.opcode = IBV_WR_SEND;
+    if (imm.has_value())
+    {
+        wr.opcode = IBV_WR_SEND_WITH_IMM;
+        wr.imm_data = imm.value();
+    }
+    else
+    {
+        wr.opcode = IBV_WR_SEND;
+    }
 
     wr.wr.ud.ah = ah;
     wr.wr.ud.remote_qpn = remoteQPN;
     wr.wr.ud.remote_qkey = UD_PKEY;
+    wr.wr_id = wr_id;
+    wr.send_flags = 0;
 
     if (isSignaled)
     {
-        wr.send_flags = IBV_SEND_SIGNALED;
+        wr.send_flags |= IBV_SEND_SIGNALED;
+    }
+    if (isInlined)
+    {
+        wr.send_flags |= IBV_SEND_INLINE;
     }
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with RDMA_SEND failed.");
+        LOG(ERROR) << "Send with RDMA_SEND failed.";
         return false;
     }
     return true;
 }
 
 // for RC & UC
-bool rdmaSend(
-    ibv_qp *qp, uint64_t source, uint64_t size, uint32_t lkey, int32_t imm)
+bool rdmaSend(ibv_qp *qp,
+              uint64_t source,
+              uint64_t size,
+              uint32_t lkey,
+              bool signal,
+              bool inlined,
+              uint64_t wr_id,
+              int32_t imm)
 {
     struct ibv_sge sg;
     struct ibv_send_wr wr;
     struct ibv_send_wr *wrBad;
 
     fillSgeWr(sg, wr, source, size, lkey);
+    wr.send_flags = 0;
 
     if (imm != -1)
     {
@@ -157,11 +152,18 @@ bool rdmaSend(
     {
         wr.opcode = IBV_WR_SEND;
     }
+    if (signal)
+    {
+        wr.send_flags |= IBV_SEND_SIGNALED;
+    }
+    if (inlined)
+    {
+        wr.send_flags |= IBV_SEND_INLINE;
+    }
 
-    wr.send_flags = IBV_SEND_SIGNALED;
+    wr.wr_id = wr_id;
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with RDMA_SEND failed.");
         return false;
     }
     return true;
@@ -180,7 +182,7 @@ bool rdmaReceive(
 
     if (ibv_post_recv(qp, &wr, &wrBad))
     {
-        error("Receive with RDMA_RECV failed.");
+        LOG(ERROR) << "Receive with RDMA_RECV failed.";
         return false;
     }
     return true;
@@ -196,7 +198,7 @@ bool rdmaReceive(ibv_srq *srq, uint64_t source, uint64_t size, uint32_t lkey)
 
     if (ibv_post_srq_recv(srq, &wr, &wrBad))
     {
-        error("Receive with RDMA_RECV failed.");
+        LOG(ERROR) << "Receive with RDMA_RECV failed.";
         return false;
     }
     return true;
@@ -237,9 +239,14 @@ bool rdmaRead(ibv_qp *qp,
     wr.wr.rdma.rkey = remoteRKey;
     wr.wr_id = wrID;
 
+    DVLOG(::config::verbose::kRdmaOperation)
+        << "[READ] remote_addr: " << (void *) dest << ", size " << size
+        << ", rkey: " << remoteRKey << ", QPN: " << qp->qp_num
+        << ", signal: " << signal << ", wr_id: " << WRID(wrID);
+
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with RDMA_READ failed.");
+        LOG(ERROR) << "Send with RDMA_READ failed.";
         return false;
     }
     return true;
@@ -273,7 +280,7 @@ bool rdmaRead(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with RDMA_READ failed.");
+        LOG(ERROR) << "Send with RDMA_READ failed.";
         return false;
     }
     return true;
@@ -290,6 +297,8 @@ bool rdmaWrite(ibv_qp *qp,
                bool isSignaled,
                uint64_t wrID)
 {
+    DLOG_IF(INFO, config::kMonitorAddressConversion)
+        << "[addr] rdmaWrite: dest: " << dest << ", or " << (void *) dest;
     struct ibv_sge sg;
     struct ibv_send_wr wr;
     struct ibv_send_wr *wrBad;
@@ -315,10 +324,15 @@ bool rdmaWrite(ibv_qp *qp,
     wr.wr.rdma.rkey = remoteRKey;
     wr.wr_id = wrID;
 
+    DVLOG(::config::verbose::kRdmaOperation)
+        << "[WRITE] remote_addr: " << (void *) dest << ", size " << size
+        << ", rkey: " << remoteRKey << ", QPN: " << qp->qp_num
+        << ", signal: " << isSignaled << ", wr_id: " << WRID(wrID);
+
     if (ibv_post_send(qp, &wr, &wrBad) != 0)
     {
-        error("Send with RDMA_WRITE(WITH_IMM) failed.");
-        sleep(10);
+        LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";
+        // sleep(10);
         return false;
     }
     return true;
@@ -361,8 +375,8 @@ bool rdmaWrite(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad) != 0)
     {
-        error("Send with RDMA_WRITE(WITH_IMM) failed.");
-        sleep(5);
+        LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";
+        // sleep(5);
         return false;
     }
     return true;
@@ -391,7 +405,7 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with ATOMIC_FETCH_AND_ADD failed.");
+        LOG(ERROR) << "Send with ATOMIC_FETCH_AND_ADD failed.";
         return false;
     }
     return true;
@@ -432,7 +446,7 @@ bool rdmaFetchAndAddBoundary(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with MASK FETCH_AND_ADD failed.");
+        LOG(ERROR) << "Send with MASK FETCH_AND_ADD failed.";
         return false;
     }
     return true;
@@ -467,43 +481,118 @@ bool rdmaFetchAndAdd(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with ATOMIC_FETCH_AND_ADD failed.");
+        LOG(ERROR) << "Send with ATOMIC_FETCH_AND_ADD failed.";
         return false;
     }
     return true;
 }
+
+constexpr static uint32_t magic = 0b1010101010;
+constexpr static uint16_t mask = 0b1111111111;
 
 uint32_t rdmaAsyncBindMemoryWindow(ibv_qp *qp,
                                    ibv_mw *mw,
                                    struct ibv_mr *mr,
                                    uint64_t mm,
                                    uint64_t mmSize,
+                                   bool signal,
                                    uint64_t wrID,
                                    unsigned int mw_access_flag)
 {
+    // memory window is bound to PD.
+    // PD is bound to DirectoryConnection
+    // DirectoryConnection is bound to thread.
+    // so thread_local is okay.
+    // static thread_local std::atomic<size_t> id_{0};
+    static thread_local size_t id_{0};
+
+    DCHECK(qp->qp_type == IBV_QPT_RC || qp->qp_type == IBV_QPT_UC ||
+           qp->qp_type == IBV_QPT_XRC_SEND);
     struct ibv_mw_bind mw_bind;
     memset(&mw_bind, 0, sizeof(mw_bind));
 
+    if (signal)
+    {
+        mw_bind.send_flags |= IBV_SEND_SIGNALED;
+    }
     mw_bind.wr_id = wrID;
     mw_bind.bind_info.mr = mr;
     mw_bind.bind_info.addr = mm;
     mw_bind.bind_info.length = mmSize;
     mw_bind.bind_info.mw_access_flags = mw_access_flag;
 
-    if (ibv_bind_mw(qp, mw, &mw_bind))
+    // NOTE: can not use ibv_exp_bind_mw.
+    // libibverbs: Fatal: device doesn't support function.
+    // auto now = std::chrono::steady_clock::now();
+    int ret = ibv_bind_mw(qp, mw, &mw_bind);
+    // auto then = std::chrono::steady_clock::now();
+    // auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(then -
+    // now).count();
+    // LOG_FIRST_N(INFO, 200) << "[debug] bind mw latency: " << ns
+    // << " ns";
+    if (ret == EINVAL)
     {
-        perror("failed to bind memory window.");
-        error(
-            "failed to bind memory window: qp: %p, mw: %p, mr: %p, mr.lkey: %u, mm: %p, "
-            "size: %lu",
-            qp,
-            mw,
-            mr,
-            mr->lkey,
-            (char *) mm,
-            mmSize);
+        PLOG(ERROR)
+            << "failed to bind mw: maybe library not support TYPE_2 memory "
+               "window: errno "
+            << ret;
         return 0;
     }
+    if (ret == ENOMEM)
+    {
+        PLOG(FATAL) << "Failed to bind mw: Memory has been used up. errno: "
+                    << ret;
+    }
+    if (ret == ENOTSUP)
+    {
+        PLOG(FATAL)
+            << "Failed to bind mw: Operation not supported. Is it too large? "
+               "errno: "
+            << ret;
+    }
+    if (ret)
+    {
+        PLOG(ERROR) << "Failed to bind memory window. errno: " << ret
+                    << "< qp: " << qp << ", mw: " << mw << ", mr: " << mr
+                    << ", mr.lkey: " << mr->lkey << ", mm: " << (char *) mm
+                    << ", size: " << mmSize;
+        return 0;
+    }
+
+    // TODO(patronus), CRITICAL(patronus): I don't know how to handle this.
+    // size_t id = id_.fetch_add(1, std::memory_order_relaxed);
+    if constexpr (config::kEnableSkipMagicMw)
+    {
+        size_t id = id_++;
+        if ((id & mask) == magic)
+        {
+            if constexpr (debug())
+            {
+                LOG_FIRST_N(WARNING, 1)
+                    << "TODO: Strange bug: reallocate mw: " << mw
+                    << ", idx: " << id;
+            }
+            // TODO(patronus):
+            // set signal to false may have race condition:
+            // client R/W to dsm before the window take effects
+            // however, setting signal to true is difficult to do right for
+            // coroutines should be fixed later.
+            return rdmaAsyncBindMemoryWindow(qp,
+                                             mw,
+                                             mr,
+                                             mm,
+                                             mmSize,
+                                             false /* signal */,
+                                             wrID,
+                                             mw_access_flag);
+        }
+    }
+
+    DVLOG(::config::verbose::kRdmaOperation)
+        << "[BIND_MW] Binding addr " << (void *) mm << " size " << mmSize
+        << " to rkey " << mw->rkey << ", with QPN: " << qp->qp_num
+        << ", signal: " << signal << ", wr_id: " << WRID(wrID);
+
     return mw->rkey;
 }
 
@@ -537,10 +626,16 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
     wr.wr.atomic.swap = swap;
     wr.wr_id = wrID;
 
+    DCHECK_EQ((uint64_t) dest % 8, 0)
+        << "[Operation] CAS addr should be 8-byte aligned. Actual: " << dest
+        << " for QP: " << qp << ", source: " << source
+        << ", compare: " << compare << ", swap" << swap
+        << ", rkey: " << remoteRKey << ", wr_id: " << wrID;
+
     if (ibv_post_send(qp, &wr, &wrBad))
     {
-        error("Send with ATOMIC_CMP_AND_SWP failed.");
-        sleep(5);
+        LOG(ERROR) << "Send with ATOMIC_CMP_AND_SWP failed.";
+        // sleep(5);
         return false;
     }
     return true;
@@ -583,7 +678,7 @@ bool rdmaCompareAndSwapMask(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with MASK ATOMIC_CMP_AND_SWP failed.");
+        LOG(ERROR) << "Send with MASK ATOMIC_CMP_AND_SWP failed.";
         return false;
     }
     return true;
@@ -620,7 +715,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &wr, &wrBad))
     {
-        error("Send with ATOMIC_CMP_AND_SWP failed.");
+        LOG(ERROR) << "Send with ATOMIC_CMP_AND_SWP failed.";
         return false;
     }
     return true;
@@ -629,7 +724,7 @@ bool rdmaCompareAndSwap(ibv_qp *qp,
 bool rdmaWriteBatch(
     ibv_qp *qp, RdmaOpRegion *ror, int k, bool isSignaled, uint64_t wrID)
 {
-    dcheck(k < kOroMax, "overflow detected at k = %d", k);
+    DCHECK(k < kOroMax) << "overflow detected at k = " << k;
 
     struct ibv_sge sg[kOroMax];
     struct ibv_send_wr wr[kOroMax];
@@ -655,8 +750,8 @@ bool rdmaWriteBatch(
 
     if (ibv_post_send(qp, &wr[0], &wrBad) != 0)
     {
-        error("Send with RDMA_WRITE(WITH_IMM) failed.");
-        sleep(10);
+        LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";
+        // sleep(10);
         return false;
     }
     return true;
@@ -695,8 +790,8 @@ bool rdmaCasRead(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        error("Send with CAS_READs failed.");
-        sleep(10);
+        LOG(ERROR) << "Send with CAS_READs failed.";
+        // sleep(10);
         return false;
     }
     return true;
@@ -736,8 +831,8 @@ bool rdmaWriteFaa(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        error("Send with Write Faa failed.");
-        sleep(10);
+        LOG(ERROR) << "Send with Write Faa failed.";
+        // sleep(10);
         return false;
     }
     return true;
@@ -776,8 +871,8 @@ bool rdmaWriteCas(ibv_qp *qp,
 
     if (ibv_post_send(qp, &wr[0], &wrBad))
     {
-        error("Send with Write Cas failed.");
-        sleep(10);
+        LOG(ERROR) << "Send with Write Cas failed.";
+        // sleep(10);
         return false;
     }
     return true;
@@ -794,14 +889,14 @@ void rdmaQueryDevice()
     struct ibv_device **deviceList = ibv_get_device_list(&devicesNum);
     if (!deviceList)
     {
-        error("failed to get IB devices list");
+        LOG(ERROR) << "failed to get IB devices list";
         return;
     }
 
     // if there isn't any IB device in host
     if (!devicesNum)
     {
-        info("found %d device(s)", devicesNum);
+        LOG(INFO) << "found " << devicesNum << " device(s)";
         return;
     }
     // dinfo("Open IB Device");
@@ -818,7 +913,7 @@ void rdmaQueryDevice()
 
     if (devIndex >= devicesNum)
     {
-        error("ib device wasn't found");
+        LOG(ERROR) << "ib device wasn't found";
         return;
     }
 
@@ -826,7 +921,7 @@ void rdmaQueryDevice()
     ctx = ibv_open_device(dev);
     if (!ctx)
     {
-        error("failed to open device");
+        LOG(ERROR) << "failed to open device";
         return;
     }
 
@@ -834,7 +929,7 @@ void rdmaQueryDevice()
     memset(&attr, 0, sizeof(struct ibv_device_attr));
     if (ibv_query_device(ctx, &attr))
     {
-        perror("failed to query device attr");
+        PLOG(ERROR) << "failed to query device attr";
     }
     printf("======= device attr ========\n");
     printf("max_mr_size: %" PRIu64 "\n", attr.max_mr_size);
@@ -856,12 +951,42 @@ void rdmaQueryDevice()
     printf("atomic_cap: %d\n", attr.atomic_cap);
     printf("max_fmr: %d\n", attr.max_fmr);
     printf("IBV_DEVICE_MEM_WINDOW: %d\n",
-           attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW);
+           attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW ? 1 : 0);
     printf("IBV_DEVICE_MEM_WINDOW_TYPE_2A: %d\n",
            attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW_TYPE_2A ? 1 : 0);
     printf("IBV_DEVICE_MEM_WINDOW_TYPE_2B: %d\n",
            attr.device_cap_flags & IBV_DEVICE_MEM_WINDOW_TYPE_2B ? 1 : 0);
     printf("IBV_DEVICE_MEM_MGT_EXTENTIONS: %d\n",
            attr.device_cap_flags & IBV_DEVICE_MEM_MGT_EXTENSIONS ? 1 : 0);
+
+    struct ibv_exp_device_attr exp_attr;
+    memset(&exp_attr, 0, sizeof(exp_attr));
+    exp_attr.comp_mask =
+        IBV_EXP_DEVICE_ATTR_ODP | IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS |
+        IBV_EXP_DEVICE_ATTR_INLINE_RECV_SZ |
+        IBV_EXP_DEVICE_ATTR_TUNNELED_ATOMIC |
+        IBV_EXP_DEVICE_ATTR_TUNNEL_OFFLOADS_CAPS |
+        // TODO: I can query, but I can not find where's the bit.
+        IBV_EXP_DEVICE_ATTR_WITH_TIMESTAMP_MASK |
+        IBV_EXP_DEVICE_ATTR_WITH_HCA_CORE_CLOCK;
+    // size_t unknow_flag_1 = IBV_EXP_START_FLAG << 8;
+    // size_t unknow_flag_2 = IBV_EXP_START_FLAG << 9;
+    // size_t unknow_flag_3 = IBV_EXP_START_FLAG << 27;
+    PLOG_IF(ERROR, ibv_exp_query_device(ctx, &exp_attr))
+        << "failed to query device attr";
+
+    printf("IBV_EXP_DEVICE_ODP: %d\n",
+           exp_attr.exp_device_cap_flags & IBV_EXP_DEVICE_ODP ? 1 : 0);
+    printf("inline_recv_sz: %d\n", exp_attr.inline_recv_sz);
+    printf("IBV_EXP_TUNNELED_ATOMIC_SUPPORTED: %d\n",
+           exp_attr.tunneled_atomic_caps & IBV_EXP_TUNNELED_ATOMIC_SUPPORTED);
+    printf("timestamp_mask: %" PRIu64 "\n", exp_attr.timestamp_mask);
+    printf("hca_core_clock: %" PRIu64 "\n", exp_attr.hca_core_clock);
+    // printf("IBV_EXP_FLAGS unknown 1: %d, 2: %d, 3: %d\n",
+    //     exp_attr.exp_device_cap_flags & )
     printf("======= device attr end ====\n");
+
+    PLOG_IF(ERROR, ibv_close_device(ctx)) << "failed to close device";
+
+    ibv_free_device_list(deviceList);
 }

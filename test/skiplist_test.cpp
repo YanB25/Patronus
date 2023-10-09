@@ -6,8 +6,8 @@
  * @Description: In User Settings Edit
  * @FilePath: /Sherman/test/skiplist_test.cpp
  */
-#include "inlineskiplist.h"
 #include "Timer.h"
+#include "inlineskiplist.h"
 
 // Our test skip list stores 8-byte unsigned integers
 typedef uint64_t Key;
@@ -78,7 +78,7 @@ int main()
     for (uint64_t i = 0; i < Space; ++i)
     {
         auto buf = list.AllocateKey(sizeof(Key));
-        *(Key *)buf = i;
+        *(Key *) buf = i;
         list.InsertConcurrently(buf);
     }
 
@@ -87,7 +87,7 @@ int main()
     for (int i = 0; i < loop; ++i)
     {
         uint64_t k = rand() % Space;
-        iter.Seek((char *)&k);
+        iter.Seek((char *) &k);
     }
     t.end_print(loop);
 

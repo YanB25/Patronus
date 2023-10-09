@@ -1,3 +1,7 @@
+#pragma once
+#ifndef SHERMEM_STATISTICS_H_
+#define SHERMEM_STATISTICS_H_
+
 #include <cstdint>
 #include <iostream>
 
@@ -49,7 +53,6 @@ public:
 
     static void dispaly()
     {
-
         // std::cout << "dir recv " << (dirRecvDataCounter +
         // dirRecvControlCounter) << std::endl;
         // std::cout << "dir send " << (dirSendDataCounter +
@@ -68,3 +71,5 @@ public:
         // std::cout << "agentReadMissDirty: " << agentReadMissDirty << "\n";
     }
 };
+
+#endif

@@ -53,6 +53,40 @@
         "typeindex": "cpp",
         "typeinfo": "cpp",
         "string": "cpp",
-        "csignal": "cpp"
-    }
+        "csignal": "cpp",
+        "algorithm": "cpp",
+        "iterator": "cpp",
+        "map": "cpp",
+        "memory": "cpp",
+        "memory_resource": "cpp",
+        "optional": "cpp",
+        "random": "cpp",
+        "set": "cpp",
+        "string_view": "cpp",
+        "shared_mutex": "cpp",
+        "unordered_set": "cpp",
+        "variant": "cpp",
+        "*.ipp": "cpp",
+        "any": "cpp",
+        "codecvt": "cpp",
+        "filesystem": "cpp",
+        "*.def": "cpp",
+        "*.inc": "cpp",
+        "*.gen": "cpp",
+        "bit": "cpp"
+    },
+    "C_Cpp.default.compilerArgs": [
+        "--std=c++17"
+    ],
+    "editor.wordWrap": "wordWrapColumn",
+    "editor.wordWrapColumn": 160,
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/thirdparty/DataFrame/include",
+        "${workspaceFolder}/include",
+        "/usr/include/ImageMagick-6",
+        "/usr/include/x86_64-linux-gnu/ImageMagick-6",
+    ],
+    "editor.formatOnSave": true,
+    "cmake.configureOnOpen": true,
+    "C_Cpp.clang_format_path": "/usr/bin/clang-format"
 }

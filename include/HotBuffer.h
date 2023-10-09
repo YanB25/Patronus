@@ -1,9 +1,10 @@
+#pragma once
 #if !defined(_HOT_BUFFER_H_)
 #define _HOT_BUFFER_H_
 
-#include "Common.h"
-
 #include <atomic>
+
+#include "Common.h"
 
 enum class HotResult
 {
@@ -14,7 +15,6 @@ enum class HotResult
 
 class HotBuffer
 {
-
     const int kBufferSize = 10240;
 
 public:

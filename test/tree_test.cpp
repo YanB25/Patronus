@@ -32,10 +32,8 @@ int main()
 
     for (uint64_t i = 1; i < 10240; ++i)
     {
-        auto res = tree->search(i, v);
+        [[maybe_unused]] auto res = tree->search(i, v);
         assert(res && v == i * 3);
-        __maybe_unused(res);
-        // std::cout << "search result:  " << res << " v: " << v << std::endl;
     }
 
     for (uint64_t i = 10240 - 1; i >= 1; --i)
@@ -45,15 +43,12 @@ int main()
 
     for (uint64_t i = 1; i < 10240; ++i)
     {
-        auto res = tree->search(i, v);
+        [[maybe_unused]] auto res = tree->search(i, v);
         assert(!res);
-        __maybe_unused(res);
-        // std::cout << "search result:  " << res << " v: " << v << std::endl;
     }
 
-    auto res = tree->search(23333, v);
+    [[maybe_unused]] auto res = tree->search(23333, v);
     assert(!res);
-    __maybe_unused(res);
 
     printf("Hello\n");
 

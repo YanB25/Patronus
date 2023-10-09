@@ -1,10 +1,15 @@
 #include "HugePageAlloc.h"
-#include <stdexcept>
+
+#include <glog/logging.h>
 #include <memory.h>
 #include <sys/mman.h>
 
 #include <cstdint>
-#include "Debug.h"
+#include <stdexcept>
+
+#include "Common.h"
+#include "util/Util.h"
+
 void *hugePageAlloc(size_t size)
 {
     void *res = mmap(NULL,
@@ -15,10 +20,28 @@ void *hugePageAlloc(size_t size)
                      0);
     if (res == MAP_FAILED)
     {
-        error("%s mmap failed for size %lu\n", getIP(), size);
-        throw std::runtime_error("mmap failed to alloc");
-        exit(-1);
+        if constexpr (debug())
+        {
+            PLOG(WARNING) << getIP() << " mmap failed for size " << size;
+        }
+        return nullptr;
     }
 
+    madvise(res, size, MADV_DONTDUMP);
+
     return res;
+}
+
+bool hugePageFree(void *ptr, size_t size)
+{
+    size_t align = 2 * 1024 * 1024;
+    CHECK((uint64_t) ptr % align == 0);
+    size = ROUND_UP(size, align);
+    CHECK(size % align == 0);
+    if (munmap(ptr, size))
+    {
+        PLOG(ERROR) << "failed to free huge page";
+        return false;
+    }
+    return true;
 }

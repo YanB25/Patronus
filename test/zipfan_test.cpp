@@ -1,5 +1,5 @@
 #include "city.h"
-#include "zipf.h"
+#include "util/zipf.h"
 
 constexpr uint64_t MB = 1024ull * 1024;
 constexpr uint64_t kKeySpace = 1000 * MB;
@@ -10,7 +10,6 @@ void mehcached_test_zipf(double theta);
 
 int main()
 {
-
     mehcached_test_zipf(0.99);
 
     struct zipf_gen_state state;

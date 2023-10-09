@@ -1,0 +1,316 @@
+[-] Add API p->should_exit()
+[-] Add key_to_dsm_addr API for addressing.
+[-] Bench the performance / coroutine.
+
+[-] when QP fails, before recovery, we should wait for all the on-going contexts, and set result to false.
+[-] then, we should return all the onging coro ids. so that, the client_master will yield to these coroutines
+[-] then, all the worker will realize that they fail. so they all retries.
+[-] refactor: the API for client should combine into one.
+
+[-] implement relinquish, and let the server gc the memory window. so that I can bench for a looong time instead of several ms.
+[-] try to optimize the performance of single-thread patronus-basic (takes 2-3 days if lucky). actually: I got sick and sleep for 2-3 days =).
+[-] remember to measure the latency of each op, and the penalty of coroutine switching.
+
+[-] then, try the correctness and performance of multiple threads. should scale according to NR_DIRECTORY, I guess.
+
+[-] evaluate the maxinum bind_mw performance I can get:
+    - What if pipeline poll cq? for the bench_mw.cpp, advancely post several batch.
+    - What if totally does not poll? just try_poll and does not wait for anything.
+    - tune up the post-send-batch for bench_mw_post_send.
+
+[one day]
+Possible performance optimization:
+[-] performance of buffer pool? should be REALLY high: 52.6Mops for obj pool, 69.2Mops for buffer pool.
+[-] server can bind_mw in a batch (from one ibv_post_send call). There will be only one signal(, or every signal) and one interaction to NIC.
+    [-] server SHOULD NOT ASSUME that one server thread is bind to a DirectoryConnection.
+    [-] NOT WORK: but server DOES can batch post_send and get rid of coroutine
+    [-] NOT IMPL (feat/mw-server-not-use-coroutine): should test against the correctness of failed mw or failed r/w.
+    [-] NOT IMPL (feat/mw-server-not-use-coroutine): use prepare_handle_request_acquire, and commit_handle_request_acquire internal API. that would be easy to adopt the codes.
+
+[-] move the small function to patronus.h, I don't trust linker optimization so much.
+[-] API change: do not expose server coroutine scheduling to the outer world. 
+    [-] NOT WORK(no performance gain): Furthermore, no copy is required.
+[-] evaluation: bench the latency of the whole procedure. with various concurrency. NOTE: because of a bug, this really took me hours! And I am so reluctant to work today. The result is at Yuque.
+
+
+1st Three days DDL: 1/10-1/12
+[-] evaluation: test what happen if issue multiple mw into the same wr! that would be cooool, if the batching does not lower down performance!
+    - 1 mw get 1.5 Mops. 2 mw get 1.36 Mops. 4 mw get 1 Mops. 8 mw get 890 Kops.
+[-] WORK, PASSED: should be a quick test: see if rmsg can work correctly, if the QP is used by ONE thread, but not SAME thread.
+    if this luckly work well, then the design would be great: one client thread map to one server thread map to one Dir thread.
+[-] DONE measure the overhead of boost coroutine: especially for large stack (std::array<1024>), or deep stack (recursive calls)
+    - got 40 Mops.
+    - boost::coroutine is stackful. runtime overhead only contains registers load/store. will not copy the whole stack. GREAT
+[-] boost::coroutine is just DOES NOT WORK WITH ASAN. 
+[-] DONE: change to multiple threads. result: the scalability is not bad. 1 thread get 1.5 Mops per thread. 8 threads get 1.16 Mops.
+    - tune NR_DIRECTORY to 4. NOW: 8
+    - each client thread bind to one mid. (e.g. need 16 client threads)
+    - one server thread can handle multiple mid simultaneously. one server thread for one DirectoryConnnection (one-to-one mapping). Therefore, 4 server threads.
+[-] bench the performance. see if it is 4 times as one thread. RESULT: nearly 4 times. when thread = 8, got 77% performance of one thread.
+[-] use gperf or other tools to profile the program. DONE: nothing new. everywhere is not a hotspot. averagely spread to the Patronus APIs.
+[-] bench the latency of QP recoverying. RESULT: 1 ms for BOTH server and client. matches the previous result I get.
+[-] DONE: rename script to test_all.sh. support the correct.sh script. this should be easy. I have to fix all the correct_*.cpp files.
+    - for example, correct_nomem is wrong.
+    - remove all the unnecessary sleep. This kill the test phases.
+[-] Add the header into the design. That would require adding the swaping area, and makes everything works well.
+    - bind two mw, and return two mw to the user.
+    - think about how user will use the meta area of the ProtectionRegion
+
+Sorry I take one day off. Just too tired to work. Can not focus. 
+2nd Tree days DDL: 1/14-1/16
+[-] Won't Fix: See how to fix the frequency of the CPU. See if rdtsc() is stable. See if rdtsc() can map to real time (like ns).
+    - Won't Fix: std::chrono already has great performance: 25 ns to get time_point, and a uint64_t-like performance.
+    - and the std::chrono provides great API to compare and modify times.
+    - Won't consider rdtsc.
+[-] Won't Do: consider one dedicated core for gc
+    - If I need Task manager accord threads, I actually need lock free map / skiplist / priority queue
+    - Boost does not provide one, and folly doest. But folly is not buildable by clang (can workaround, but don't want to brother). Don't want to roll this proj back to using g++.
+    - Also the latest clang (with -stdlib=libc++) can not build folly (which use boost, which use removed std::bind1st), so cannot use folly::coro.
+    - It makes me reluctant to try folly's thread safe skip list. just too tired to try.
+[-] Test the performance of std::chrono::system_clock? because Lease actually relies on real time...
+    - great. system_clock has the same performance of steady_clock
+[-] Implement a task_manager
+    - could use single thread (per-thread) design, or a thread-safe queue design (let the master to do all the tasks)
+[-] feat: add a TimeSyncer to patronus, which is used to sync the time at the begin of the system.
+[-] DSM::get_rdma_buffer() return Buffer plz!
+[-] Change the acquire lease API, and add some flags into it. server could react according to the flags.
+    - so that, Server could know it is a bench_test (not automatically gc), or actual deploy (register gc task to the task manager).
+    - so that, we could let server know whether it needs to speculatively binds a longer lease for one-sided extends.
+    - DONE: currently add no-gc flag. Will add hint_extend.
+[-] Before everything: I need a correct_patronus_time to makes it works well.
+[-] handle memory leak. DONE: while (!should_exit() || !queue.empty()). Should test if queue is empty. Don't exit when queue has tasks.
+[-] Add the TIME concepts into patronus. Server should intervally see if any expired lease exists, and destroy them!
+    [-] Do not measure time by one or two calls. use OnePassMonitor to get the average. I think RDMA initially has performance penalty.
+    [-] also do not measure performance in DEBUG mode. Its performance means nothing.
+    [-] The timeout should work well: server will automatically gc the timeouted
+    [-] Client should refuse close-to-timeout R/W, and possibly do the one-sided extend (flag control)
+    [-] IMPORTANT: what if server speculatively gc the resource, then client requires the gc the resource, i.e. the ABA problem? The resource is currently owns by others.
+    [-] I think, should attach clientID to the on-going resource. If client requires to gc, see if 1) the resource is on-going (if gc-ed, will not do twice), and 2) the clientID matches (if not match, also skip.) DONE: now the lease_ctx has @valid and @cid fields. The lease is considered active ONLY when @valid is true AND @cid match.
+[-] Pass correctness tests. DONE: works pretty well and performance makes sense under Release mode.
+- Bench the performance and latency.
+    [-] Like bench_patronus_basic, but sets the @required_ns to 0. And client will issue relinquish.
+    [-] bench the latency tomorrow. DONE: If relinquish needs server to ibv_post_send, the latency seems to double (but various a lot). If do not need server to ibv_post_send, will be not difference.
+
+During the 3 days, 0.5 days attracted by surfing (so not working!).
+Does not quite satisfied by my efficiency. But really did a good job in progress of TimeSyncer.
+1/17 the whole day from Beijing to Guangdong.
+1/18 first day working at home. not bad, but not very high efficiency.
+
+FUTURES:
+- Carefully thinks about lock conflict, fairness, client synchronizations at swap area, ...
+[-] Implemente all the APIs in Patronus. Extend, upgrade would be the most important ones.
+
+3st Three days DDL: 1/20-1/22 (failed. Not feel great at home. Take off these days.)
+[-] get_{rlease,wlease} will also have lock semantics: If conflict, will return failure to the client
+    - basically okay. need correct_lease_lock.cpp
+[-] Add p->barrier(std::string)
+    - After all these time I finally realize that the ctor of DSM takes seconds (typically ~6s). This may cause unexpected bugs. Don't know. I'd like to fix this before moving on.
+    - WON'T FIX: Patronus can not support regular p->barrier, because when the thread is blocked and waiting in p->barrier(), no one can poll and recv the message from other node. Instead, implemented a internal_barrier(), which should be used only in the ctor of Patronus (use with care!)
+[-] See if rdtsc is consistent across cores. Modify the correct_rdtsc_stable.cpp tests.
+[-] Patronus adds extend API when client asked to do so. client can extend the lease by one-sided write.
+    [-] p->read/write/cas() add a flag: kWithAutoExtend
+    - add p->extend(lease) to manually extend the lease
+    [-] add magic number to the cur_unit_nr field to avoid the ABA problem!! the higher 32 bits will be rolling up each time!
+[-] test the correctness of Patronus write.
+[-] WONT FIX: not revelant. refactor TimeSyncer to use rdtsc instead of std::chrono.
+[-] WONT FIX: Client handles it. Support scope-based & lease-based gc. e.g., let p->relinquish(lease) be called automatically when out of scope.
+[-] Support cache. Will be critically important during evaluation.
+[-] WONT FIX: API conflict. The outer world determine whether it is valid or not. lease->valid() for checking if time within valid term.
+[-] The support of lease transfering within the same node
+    - Lease can be shared across threads (or tenant), as long as
+        - Don't access lease parallely. i.e., use a lock
+        - respect to lease.dir_id_. Any modify/query/ops hit to the original dir_id_.
+- The support of sync/async get_[rw]lease API, which supports fairness (request queuing)
+[-] The support of memory allocation. Better be interesting and relate to other guidelines/designs.
+[-] Bench: the time of registering S GB MR totally, with V each time.
+- Checking: What about the rdtsc of ARM core? Is it constant? Is it stable across core?
+- Is `Lease` thread-safe? Can I make it thread-safe?
+[-] Port RapidCSV or Dataframe into this proj.
+[-] What is the extreme throughput of bind_mw? What is the bottleneck? Is it really scalable according to CPU core? Should figure it out. Most important: The max throughput one machine can provide. I *think* the bottleneck should be on the NIC.
+
+2/11-2/16 go to Sanya. 2/17 write dairy and sync my photos. Not working.
+
+NO MORE. That should be easy.
+
+2/18-2/19 I think two days may be enough and safe.
+[-] read papers that @WQ has send to me.
+
+2/20 Talk to @WQ and starts to write the paper
+2/21-2/23 Write the basic story, time-sync and impls of the paper.
+
+[-] 20220322: many test cases from patronus seems to have problems. Fix them.
+[-] Patronus API modification: Add deallocation API
+    - alloc only, perm only, alloc + perm
+    - free only, rel only, free + rel
+    - Yes, alloc only and free only API makes sense.
+[-] correct_patronus_alloc: do the following tests
+    - One client get_rwlease by allocation semantics
+    - The client relinquish its lease, but not de-allocating the memory
+    - The client get_rwlease the second time: bind the memory directly and RW.
+    - The client finally free the memory
+- Make Lease only movable. Copying may be too expensive.
+[-] Can we remove the gc API of IRdmaAdaptor? Since HashTableHandle is already a state machine, we can store the temporal resource their. We can always keep tracks of all the allocated resources at HashTableHandle, and then clean up the resource at exit.
+[-] Enable batching API for Patronus: if needed!
+    - This feature may boost performance, because each op of hash table may need to call memory deallocation / relinquish when finished.
+    - rmsg should tune up the max buffer. I believe it have no performance penalty, just waste memory
+    - Patronus API should add *_batch() and commit() API. Maintain the context in a structure. Then the message can be issued at one time.
+[-] Patronus: add message API.
+[-] We could do the gc (the gc of kv_block for example) across client. Just let it gc-ed into slab allocator and skip the checking. I believe that will be okay. But this is not urgent, so postpone until really necessary.
+
+=== about extension ===
+always use one-sided extension of lease.
+The client tries to CAS the @cur_unit_nr field to make it double.
+If succeeded, the lease extends.
+If failed, especially because
+- @cur_unit_nr lower bits are zero: the server refuses further extending by setting it to 0.
+- @cur_unit_nr upper bits mismatch: ABA problem. The lease expired and the server has already granted the PR to other clients.
+- @cur_unit_nr lower bits mismatch (but upper bits match): BUG.
+
+===== CRITICAL BUG ======
+FAIL correct_time_syncer_rmsg_test.cpp
+[-] currently allow 50us abs_average drift and pass.
+- LATER: use rdtsc to re-impl the TimeSyncer. After that, time drift should not occur.
+
+[FAIL] correct_patronus_basic_lease_expire.cpp
+- FIXED
+
+[FAIL] correct_patronus_basic_lease_expire2.cpp
+- FIXED. If key out of dsm range, the server should response failure.
+
+FAIL correct_patronus_basic_lease_extend.cpp
+- LATER: because of time drift, client can not be protected from protection error. Witness 200 us drifts. See to it after finishing p->barrier()
+
+[FAIL] correct_patronus_lease_cas.cpp
+- protection_region->valid is false.
+- protection_region is not per-thread. Not per-thread at initialization.
+
+FAIL correct_patronus_basic_lease_expire.cpp
+- can not recover QP: invalid argument [22]
+
+std::chrono::system_clock and std::chrono::steady_clock and std::high_resolution_clock has a drift of 200+us/s (20us/s at best).
+It is not acceptable since I want a us-scale synchronization lease impl.
+I'd like to use rdtsc instead, because it is stable.
+Should add some tests.
+
+Serverless (mock):
+Just take a couple of data. do like quick sort, summing, etc.
+
+=========================
+
+[-] try to run a simple case for bench_race_rmda_op
+[-] try to run a simple case for multiple threads
+    - NOTE! carefully check "should_report", "first_enter", "server_leave" for the multi-threads cases. There are not justified.
+[-] try to add API rh::explain(), to print the number of slots, bucket, groups, subtables, ...
+[-] try to let the export excel work.
+[-] LATER UNTIL NEEDED: try to enable lazy_init to slab allocator. i.e. for race hashing kvblocks, only fills the batch when needed. this can greatly waste LESS unused kvblocks.
+[-] try to let the trace report latency
+[-] Enable patronus::batch_write/batch_read/batch_cas, etc
+[-] maybe rdma_ctx add API to enable more specific trace point? (and time)
+[-] See how resizing perform
+- STRANGE: Sometimes the performance is 4.3 Mops, sometimes 5 Mops, and just these two point. Various, but not variout within the range. So I guess it is due to CPU frequency? or RNIC policy? Don't know, but indeed is a problem.
+
+[-] try to review the code: did release mode include unnecessary overhead?
+[-] Is race hashing impl optimized? i.e. use std::vector with reserved instead of unordered_set
+
+====================================================================================================
+
+Small TODOs:
+- Track tail latency: add OnePassLatencyMonitor and track with buckets.
+- Talk about delaying unbinding PR for faster execution. The client could use ABA to avoid strayed CAS to PR.
+- UNTIL NECESSARY: patronus add API signals to let server handle special signals.
+    - p->send_signals
+    - p->reg_signal_handler
+
+Race Hashing Experiments: (**iPad have detailed discussion**)
+[-] The r/w throughput of RaceHashing over Patronus:
+    [-] Don't silently reinit directory. As I remember, if I alloc too many mws, will trigger failure and then reconnects. Print a warning when reinit happens.
+    [-] Disable migration. RO/WO/RW. Focus on the protection of KV Blocks
+        - WO: only insert, see how long it takes to fill the RH (load)
+        - RO: is RO
+        - RW: is RW
+    [-] The throughput: patronus v.s. MR v.s. unprotected
+    {-} Later until necessary. For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
+    {-} kvblock_size in {64_B, 4_KB}, rh in {small, large}
+        - 64_B and 4_KB not significantly difference. Maybe 1) Ops bounded, 2) success rate too low, so that kvblock size does not take effect, 3) MR binding 64_B and 4_KB nearly the same.
+[-] The latency of RaceHashing over Patronus:
+    [-] Disable migration, RO/WO/RW. Focus on the protection of KV Blocks
+    [-] The latency of each op: patronus v.s. MR v.s. unprotected
+    {-} For each kvblock & for batch allocation/binding (don't want to enable batching after doing the math)
+    [-] kvblock_size in {64_B, 4_KB}, rh in {small, large}
+- The latency of special cases:
+    {-} The latency of client bootstrap (break down)
+        - RHH constructs: bind & read directory, bind & read subtable, then issues a read.
+        - unprotected v.s. MR v.s. patronus
+        - The unprotected number is not accurate, because we did not skip binding subtable for the unprotected versions. I wanna fxxk myself for the arrangement of codes. I need to add an option to control the *bypass* of binding subtable. I need to *pass* kUseUniversalRkey to RdmaAdpt, which needs a hole, because RdmaAdpt API does not consider passing flag to r/w API. Fxxk up. A possible easy way would be creating a brand new RdmaAdpt, which skips any binding and pass kUniversalRKey to the Patronus. 
+    {-} Code ready, not generated archived. The latency of expansion: unprotected v.s. MW v.s. MR
+        [-] MR == MW == unprotected: this can be the case arguing patronus not harming performance but providing further safety
+        [-] Considering that MR 2MB takes only 200 us, which is far from enough for expansion
+        [-] This ex is the supplement of the expansion latency (fault tolerance one).
+    [-] The latency of fault tolerance:
+        - patronus detected (no overhead) v.s. patronus backup switching (low overhead, when, e.g., subtable is freed and client not aware) v.s. QP recovery (high overhead) v.s. Reinit connections.
+- The realtime throughput:
+    - The fast recoverying under shrinking
+        - RDMA protection error triggered
+        - patronus fast switch to backup v.s. wait for recovery (vanilla)
+        - client update dcache
+        - client going on
+    [-] The tolerance of crashed client under expansion
+        - The fault tolerance of RH: The locking of directory uses lease. When a client failed, the lock is automatically released, and the next client triggers and continues the expansion
+        - raw v.s. patronus
+{-} The effectness of auto time out: If the relinquish of kvblock is auto-ed (so we save one message RTT for relinquish). Can we boost the performance?
+    - Current result: better than patronus, but negligible. Should go back here and test.
+    - Should be more REAL: rhh should really use the allocated, time-sensitive handle, rather than the global, never-gc-ed handle.
+    - Test the latency? At least we got one RPC less for do-nothing-relinquish
+    - Enable rate wait-until-success? Now, for all the auto-gc lease, will enable wait-until-sucess for all of them. Maybe enable for half of them? Not need to be accurate. I think we have a deep QP queue.
+
+Serverless Experiments
+{-} The serverless experiments
+    - Cite some papers, talking about one-sided data structures, e.g. arrays
+    [-] Boot, binds large (e.g. 128_MB), do the SQL (summarize, filter, count_if, ...), returns
+    [-] no protection v.s. patronus v.s. MR
+    - Report the latency from bucket monitor.
+    - Test the effectiveness of lease
+    - Test the effectiveness of cache
+    - Test the effectiveness of lock
+
+Other possibilities
+- Lock conflict, fairness and lock transfering
+- The effective of caching
+
+==================================
+un-resolved BUGS:
+bench_race_rdma_tp, when benching 1, 2, 4, 8, 16 threads (i.e. test so many sub cases):
+will see an unexpected cases:
+- QP failed, recovering is triggered (happen randomly at sub-cases)
+- The phenomenon: RdmaAdaptor::acquire_perm => patronus::get_wlease() got a return release, which is NOT success with ::status == kReserved.
+- Added more checks at the handling path of response messages. Didnt catch any resp message with status == kReserved.
+- Fail to reproduce, and reproduce once may takes ~10 minutes
+- Decided to ignore this bug for now.
+
+==================================
+- bench_patronus_extend: not debug and not tested: get the results.
+- bench_patronus_concurrent: not debug and not tested: get the results.
+[-] try to pass all tests: now admin requests - some need resp, others not. may have bug because of this.
+[-] try to pass correct_patronus_rpc_basic, and modify to rpc_{read/write}
+- RACE hashing: let it report the RW cases.
+
+==============================
+[-] enable two-sided tests: don't know detail, but let rdma_adpt_->rdma_write(...) to be implemented by two-sided. then we can easily change config to bench the two-sided cases
+[-] rpc_extend experiments add another candidate: for a totally xx times lease, we need to acquire & relinquish n times. It would be even slower. Add that.
+[-] bench list and cqueue. get the throughput and latency numbers
+- refine the RACE hashing experiments. 
+    [-] Let the RW, RO and RO tests runnable. 
+        - recyclic allocator
+        - modify how handle determines whether a kvblock matches. e.g., force one of them to match
+    - Get the basic result of RW, RO and WO, for regular eval and mortgage eval
+    [-] implement batch allocation of insert/updates
+    [-] implement one huge RO handle for get operation
+    [-] Implement free: includes RPC but do nothing. In this case, performance is closer to the real case.
+    - See if performance gets better
+    [-] bench_race_rdma_mortgage supposes to use global kv block for the binding. Modify to make it do so.
+    - ** Try to run Lease eval. Make it works and see if performance gets better.
+    [-] refine the config setting.
+    [-] see if race hashing can be optimized. be like caching to_insert_node ?
+- implement wait_client_list in LeaseContext, so that we can use it to re-write the locks of cqueue
+
+AFTER all these implemented, try to run GAM and run some comparison experiments on that.

@@ -7,8 +7,8 @@
 std::shared_ptr<DSM> dsm;
 Tree *tree;
 
-extern uint64_t cache_miss[MAX_APP_THREAD][8];
-extern uint64_t cache_hit[MAX_APP_THREAD][8];
+extern uint64_t cache_miss[kMaxAppThread][8];
+extern uint64_t cache_hit[kMaxAppThread][8];
 extern bool enter_debug;
 
 const uint64_t kSpace = 1000024000ull;
@@ -23,7 +23,7 @@ void cal_hit()
 {
     uint64_t all = 0;
     uint64_t hit = 0;
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    for (int i = 0; i < kMaxAppThread; ++i)
     {
         all += (cache_hit[i][0] + cache_miss[i][0]);
         hit += cache_hit[i][0];
@@ -39,7 +39,7 @@ void run_warmup(int id)
     dsm->registerThread();
     for (uint64_t i = 1; i < kSpace; ++i)
     {
-        check(id >= 0, "id should be >= 0, get %d", id);
+        CHECK(id >= 0) << "id should be >= 0, get " << id;
         if (i % kThread == (uint64_t) id)
         {
             tree->insert(to_key(i), i * 2);

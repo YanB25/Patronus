@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __WRLOCK_H__
 #define __WRLOCK_H__
 
@@ -5,7 +6,6 @@
 
 class WRLock
 {
-
 private:
     std::atomic<uint16_t> l;
     const static uint16_t UNLOCKED = 0;

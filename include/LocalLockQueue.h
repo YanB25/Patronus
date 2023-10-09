@@ -1,3 +1,4 @@
+#pragma once
 #if !defined(_LOCAL_LOCK_QUEUE_H_)
 #define _LOCAL_LOCK_QUEUE_H_
 
@@ -6,9 +7,8 @@
 
 class LocalLockQueue
 {
-
-    const static int kMaxQueueSize = 256;
-    static_assert(kMaxQueueSize > MAX_APP_THREAD * define::kMaxCoro, "XX");
+    const static int kMaxQueueSize = 512;
+    static_assert(kMaxQueueSize > kMaxAppThread * define::kMaxCoroNr, "XX");
 
 public:
 private:

@@ -1,12 +1,13 @@
+#pragma once
 #if !defined(_INDEX_CACHE_H_)
 #define _INDEX_CACHE_H_
+
+#include <atomic>
 
 #include "CacheEntry.h"
 #include "HugePageAlloc.h"
 #include "Timer.h"
 #include "inlineskiplist.h"
-
-#include <atomic>
 
 extern bool enter_debug;
 
@@ -14,7 +15,6 @@ using CacheSkipList = InlineSkipList<CacheEntryComparator>;
 
 class IndexCache
 {
-
 public:
     IndexCache(int cache_size);
 
@@ -32,7 +32,7 @@ public:
     void bench();
 
 private:
-    uint64_t cache_size;  // MB;
+    [[maybe_unused]] uint64_t cache_size;  // MB;
     std::atomic<int64_t> free_page_cnt;
     std::atomic<int64_t> skiplist_node_cnt;
     int64_t all_page_cnt;
@@ -48,7 +48,7 @@ private:
 inline IndexCache::IndexCache(int cache_size) : cache_size(cache_size)
 {
     skiplist = new CacheSkipList(cmp, &alloc, 21);
-    uint64_t memory_size = define::MB * cache_size;
+    uint64_t memory_size = 1_MB * cache_size;
 
     all_page_cnt = memory_size / sizeof(InternalPage);
     free_page_cnt.store(all_page_cnt);
@@ -60,10 +60,9 @@ inline bool IndexCache::add_entry(const Key &from,
                                   const Key &to,
                                   InternalPage *ptr)
 {
-
     // TODO memory leak
     auto buf = skiplist->AllocateKey(sizeof(CacheEntry));
-    auto &e = *(CacheEntry *)buf;
+    auto &e = *(CacheEntry *) buf;
     e.from = from;
     e.to = to - 1;  // !IMPORTANT;
     e.ptr = ptr;
@@ -78,10 +77,10 @@ inline const CacheEntry *IndexCache::find_entry(const Key &from, const Key &to)
     CacheEntry e;
     e.from = from;
     e.to = to - 1;
-    iter.Seek((char *)&e);
+    iter.Seek((char *) &e);
     if (iter.Valid())
     {
-        auto val = (const CacheEntry *)iter.key();
+        auto val = (const CacheEntry *) iter.key();
         // while (val->ptr == nullptr) {
         //   iter.Next();
         //   if (!iter.Valid()) {
@@ -104,7 +103,7 @@ inline const CacheEntry *IndexCache::find_entry(const Key &k)
 
 inline bool IndexCache::add_to_cache(InternalPage *page)
 {
-    auto new_page = (InternalPage *)malloc(kInternalPageSize);
+    auto new_page = (InternalPage *) malloc(kInternalPageSize);
     memcpy(new_page, page, kInternalPageSize);
     new_page->index_cache_freq = 0;
 
@@ -128,7 +127,6 @@ inline bool IndexCache::add_to_cache(InternalPage *page)
             if (ptr == nullptr &&
                 __sync_bool_compare_and_swap(&(e->ptr), 0ull, new_page))
             {
-
                 // if (enter_debug) {
                 //   page->verbose_debug();
                 // }
@@ -155,7 +153,6 @@ inline const CacheEntry *IndexCache::search_from_cache(const Key &k,
 
     if (page && entry->from <= k && entry->to >= k)
     {
-
         // if (enter_debug) {
         //   page->verbose_debug();
         // }
@@ -169,7 +166,6 @@ inline const CacheEntry *IndexCache::search_from_cache(const Key &k,
         }
         else
         {
-
             bool find = false;
             for (int i = 1; i < cnt; ++i)
             {
@@ -186,7 +182,7 @@ inline const CacheEntry *IndexCache::search_from_cache(const Key &k,
             }
         }
 
-        compiler_barrier();
+        util::compiler_barrier();
         if (entry->ptr)
         {  // check if it is freed.
             // printf("Cache HIt\n");
@@ -222,14 +218,13 @@ inline void IndexCache::statistics()
 
 inline void IndexCache::bench()
 {
-
     Timer t;
     t.begin();
     const int loop = 100000;
 
     for (int i = 0; i < loop; ++i)
     {
-        uint64_t r = rand() % (5 * define::MB);
+        uint64_t r = rand() % (5_MB);
         this->find_entry(r);
     }
 

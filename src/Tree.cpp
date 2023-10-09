@@ -12,6 +12,7 @@
 #include "RdmaBuffer.h"
 #include "SimpleHT.h"
 #include "Timer.h"
+#include "util/Coro.h"
 
 bool enter_debug = false;
 
@@ -19,20 +20,36 @@ bool enter_debug = false;
 SimpleHT mapping;
 #endif
 
+#define LATENCY_WINDOWS 1000000
+
+// for store root pointer
+namespace define
+{
+constexpr uint64_t kRootPointerStoreOffest = define::kChunkSize / 2;
+static_assert(kRootPointerStoreOffest % sizeof(uint64_t) == 0, "XX");
+constexpr uint8_t kMaxHandOverTime = 8;
+// level of tree
+constexpr uint64_t kMaxLevelOfTree = 7;
+// number of locks
+constexpr uint64_t kNumOfLock = define::kLockChipMemSize / sizeof(uint64_t);
+
+constexpr int kIndexCacheSize = 1024;  // MB
+}  // namespace define
+
 HotBuffer hot_buf;
-uint64_t cache_miss[MAX_APP_THREAD][8];
-uint64_t cache_hit[MAX_APP_THREAD][8];
-uint64_t lock_fail[MAX_APP_THREAD][8];
-uint64_t pattern[MAX_APP_THREAD][8];
-uint64_t hierarchy_lock[MAX_APP_THREAD][8];
-uint64_t handover_count[MAX_APP_THREAD][8];
-uint64_t hot_filter_count[MAX_APP_THREAD][8];
-uint64_t latency[MAX_APP_THREAD][LATENCY_WINDOWS];
+uint64_t cache_miss[kMaxAppThread][8];
+uint64_t cache_hit[kMaxAppThread][8];
+uint64_t lock_fail[kMaxAppThread][8];
+uint64_t pattern[kMaxAppThread][8];
+uint64_t hierarchy_lock[kMaxAppThread][8];
+uint64_t handover_count[kMaxAppThread][8];
+uint64_t hot_filter_count[kMaxAppThread][8];
+uint64_t latency[kMaxAppThread][LATENCY_WINDOWS];
 volatile bool need_stop = false;
 
-thread_local CoroCall Tree::worker[define::kMaxCoro];
+thread_local CoroCall Tree::worker[define::kMaxCoroNr];
 thread_local CoroCall Tree::master;
-thread_local GlobalAddress path_stack[define::kMaxCoro]
+thread_local GlobalAddress path_stack[define::kMaxCoroNr]
                                      [define::kMaxLevelOfTree];
 
 // for coroutine schedule
@@ -148,7 +165,7 @@ void Tree::print_verbose()
     }
 }
 
-inline void Tree::before_operation(CoroContext *cxt, int coro_id)
+inline void Tree::before_operation(CoroContext *, int coro_id)
 {
     for (size_t i = 0; i < define::kMaxLevelOfTree; ++i)
     {
@@ -214,7 +231,8 @@ bool Tree::update_new_root(GlobalAddress left,
 
     new_root->set_consistent();
     dsm->write_sync(page_buffer, new_root_addr, kInternalPageSize, cxt);
-    if (dsm->cas_sync(root_ptr_ptr, old_root, new_root_addr, cas_buffer, cxt))
+    if (dsm->cas_sync(
+            root_ptr_ptr, old_root.val, new_root_addr.val, cas_buffer, cxt))
     {
         broadcast_new_root(new_root_addr, level);
         std::cout << "new root level " << level << " " << new_root_addr
@@ -297,6 +315,7 @@ next:
 
 GlobalAddress Tree::query_cache(const Key &k)
 {
+    std::ignore = k;
 #ifdef TEST_SINGLE_THREAD
     return mapping.get(k);
 #else
@@ -308,7 +327,7 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr,
                                 uint64_t tag,
                                 uint64_t *buf,
                                 CoroContext *cxt,
-                                int coro_id)
+                                [[maybe_unused]] int coro_id)
 {
     auto &pattern_cnt = pattern[dsm->getMyThreadID()][lock_addr.nodeID];
 
@@ -412,8 +431,8 @@ inline bool Tree::try_lock_addr(GlobalAddress lock_addr,
 }
 
 inline void Tree::unlock_addr(GlobalAddress lock_addr,
-                              uint64_t tag,
-                              uint64_t *buf,
+                              [[maybe_unused]] uint64_t tag,
+                              [[maybe_unused]] uint64_t *buf,
                               CoroContext *cxt,
                               int coro_id,
                               bool async)
@@ -1554,7 +1573,7 @@ void Tree::run_coroutine(CoroFunc func, int id, int coro_cnt)
 {
     using namespace std::placeholders;
 
-    assert(coro_cnt <= define::kMaxCoro);
+    assert(coro_cnt <= define::kMaxCoroNr);
     for (int i = 0; i < coro_cnt; ++i)
     {
         auto gen = func(i, dsm.get(), id);
@@ -1568,13 +1587,10 @@ void Tree::run_coroutine(CoroFunc func, int id, int coro_cnt)
 
 void Tree::coro_worker(CoroYield &yield, RequstGen *gen, int coro_id)
 {
-    CoroContext ctx;
-    ctx.coro_id = coro_id;
-    ctx.master = &master;
-    ctx.yield = &yield;
+    auto thread_id = dsm->getMyThreadID();
+    CoroContext ctx(thread_id, &yield, &master, coro_id);
 
     Timer coro_timer;
-    auto thread_id = dsm->getMyThreadID();
 
     while (true)
     {
@@ -1656,7 +1672,7 @@ inline bool Tree::acquire_local_lock(GlobalAddress lock_addr,
         if (cxt != nullptr)
         {
             hot_wait_queue.push(coro_id);
-            (*cxt->yield)(*cxt->master);
+            cxt->yield_to_master();
         }
 
         current = node.ticket_lock.load(std::memory_order_relaxed) >> 32;
@@ -1713,7 +1729,7 @@ void Tree::index_cache_statistics()
 
 void Tree::clear_statistics()
 {
-    for (int i = 0; i < MAX_APP_THREAD; ++i)
+    for (int i = 0; i < kMaxAppThread; ++i)
     {
         cache_hit[i][0] = 0;
         cache_miss[i][0] = 0;

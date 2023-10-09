@@ -11,6 +11,9 @@
 // when the allocator object is destroyed. See the Arena class for more info.
 
 #pragma once
+#ifndef SHERMAN_ALLOCATOR_H_
+#define SHERMAN_ALLOCATOR_H_
+
 #include <cerrno>
 #include <cstddef>
 class Allocator
@@ -20,8 +23,10 @@ public:
     {
         return AllocateAligned(bytes);
     }
-    char *AllocateAligned(size_t bytes, size_t huge_page_size = 0)
+    // bytes, huge_page_size
+    char *AllocateAligned(size_t bytes, size_t = 0)
     {
-        return (char *)aligned_alloc(8, bytes);
+        return (char *) aligned_alloc(8, bytes);
     }
 };
+#endif

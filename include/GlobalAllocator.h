@@ -1,10 +1,12 @@
+#pragma once
 #if !defined(_GLOBAL_ALLOCATOR_H_)
 #define _GLOBAL_ALLOCATOR_H_
+
+#include <glog/logging.h>
 
 #include <cstring>
 
 #include "Common.h"
-#include "Debug.h"
 #include "GlobalAddress.h"
 
 // global allocator for coarse-grained (chunck level) alloc
@@ -27,7 +29,7 @@ public:
     static std::unique_ptr<GlobalAllocator> newInstance(
         const GlobalAddress &start, size_t size)
     {
-        return future::make_unique<GlobalAllocator>(start, size);
+        return std::make_unique<GlobalAllocator>(start, size);
     }
 
     ~GlobalAllocator()
@@ -41,7 +43,7 @@ public:
         if (bitmap_tail >= bitmap_len)
         {
             assert(false);
-            warn("shared memory space run out");
+            LOG(WARNING) << "shared memory space run out";
         }
 
         if (bitmap[bitmap_tail] == false)
@@ -54,7 +56,7 @@ public:
         else
         {
             assert(false);
-            warn("TODO");
+            LOG(WARNING) << "TODO";
         }
 
         return res;
@@ -67,7 +69,7 @@ public:
 
 private:
     GlobalAddress start;
-    size_t size;
+    [[maybe_unused]] size_t size;
 
     bool *bitmap;
     size_t bitmap_len;

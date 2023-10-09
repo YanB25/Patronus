@@ -6,6 +6,7 @@
  * @Description: In User Settings Edit
  * @FilePath: /Sherman/include/RawMessageConnection.h
  */
+#pragma once
 #ifndef __RAWMESSAGECONNECTION_H__
 #define __RAWMESSAGECONNECTION_H__
 
@@ -31,7 +32,12 @@ struct RawMessage
 
     GlobalAddress addr;  // for malloc
     int level;
+    char inlined_buffer[32];
 } __attribute__((packed));
+
+static_assert(sizeof(RawMessage) < MESSAGE_SIZE, "failed");
+
+std::ostream &operator<<(std::ostream &, const RawMessage &msg);
 
 class RawMessageConnection : public AbstractMessageConnection
 {
@@ -42,6 +48,8 @@ public:
 
     void initSend();
     void sendRawMessage(RawMessage *m, uint32_t remoteQPN, ibv_ah *ah);
+    void syncSendRawMessage(RawMessage *m, uint32_t remoteQPN, ibv_ah *ah);
+    void destroy();
 };
 
 #endif /* __RAWMESSAGECONNECTION_H__ */

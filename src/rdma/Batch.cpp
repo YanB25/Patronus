@@ -1,3 +1,5 @@
+#include <glog/logging.h>
+
 #include "Rdma.h"
 
 // RC & UC
@@ -63,7 +65,7 @@ bool rdmaBatchSend(ibv_qp *qp,
     }
     if (ibv_post_send(qp, &send_wr[0], &wrBad))
     {
-        error("Send with RDMA_SEND failed");
+        LOG(ERROR) << "Send with RDMA_SEND failed";
         return false;
     }
     return true;
@@ -137,7 +139,7 @@ bool rdmaBatchSend(ibv_qp *qp,
     }
     if (ibv_exp_post_send(qp, &send_wr[0], &wrBad))
     {
-        error("Send with RDMA_SEND failed");
+        LOG(ERROR) << "Send with RDMA_SEND failed";
         return false;
     }
     return true;
@@ -164,7 +166,7 @@ bool rdmaBatchReceive(ibv_qp *qp,
     }
     if (ibv_post_recv(qp, &recv_wr[0], &bad_recv_wr))
     {
-        error("Receive failed.");
+        LOG(ERROR) << "Receive failed.";
         return false;
     }
     return true;
@@ -192,7 +194,7 @@ bool rdmaBatchReceive(ibv_srq *srq,
 
     if (ibv_post_srq_recv(srq, &recv_wr[0], &bad_recv_wr))
     {
-        error("Receive failed.");
+        LOG(ERROR) << "Receive failed.";
         return false;
     }
     return true;
@@ -253,7 +255,7 @@ bool rdmaBatchRead(ibv_qp *qp,
 
     if (ibv_post_send(qp, &send_wr[0], &wrBad))
     {
-        error("Send with RDMA_READ failed.");
+        LOG(ERROR) << "Send with RDMA_READ failed.";
         return false;
     }
     return true;
@@ -313,7 +315,7 @@ bool rdmaBatchRead(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &send_wr[0], &wrBad))
     {
-        error("Send with RDMA_READ failed.");
+        LOG(ERROR) << "Send with RDMA_READ failed.";
         return false;
     }
     return true;
@@ -376,7 +378,7 @@ bool rdmaBatchWrite(ibv_qp *qp,
 
     if (ibv_post_send(qp, &send_wr[0], &wrBad))
     {
-        error("Send with RDMA_WRITE(WITH_IMM) failed.");
+        LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";
         return false;
     }
     return true;
@@ -444,7 +446,7 @@ bool rdmaBatchWrite(ibv_qp *qp,
 
     if (ibv_exp_post_send(qp, &send_wr[0], &wrBad))
     {
-        error("Send with RDMA_WRITE(WITH_IMM) failed.");
+        LOG(ERROR) << "Send with RDMA_WRITE(WITH_IMM) failed.";
         return false;
     }
     return true;

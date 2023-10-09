@@ -1,0 +1,201 @@
+# Motivation
+- The latency of each permission modification algorithms
+    - QP recreate, MR rereg, MW
+- The overhead of QP recovery.
+
+# Microbench
+- Latency and throughput of get_[rw]lease
+- The scalability of lease (# of active leases)
+- the overhead of QP recovery and the backup QP in reaction to the recovery (time graph)
+- Sensitivity analysis 
+    - of lease term: should be okay even lower to us-scale.
+- The overhead of unbind (a comparison)
+- Performance boost with registering MR each time. Register one time as the theoretical performance bound.
+- The overhead of tree-liked time-sync algorithm. See how fast it converges.
+- Allocation with MR .v.s allocation with MW.
+- [may] Report the "lease unexpected expire" times.
+- [may] The converge of Tree based time sync?
+- [may] Report the data path latency. KRCore can report its datapath latency (which is trivial), so do I. 
+
+# Macrobench
+- The shrinking problem of RACE hashing.
+    - Original hash table does not support memory isolation. Thus shrinking may cause serious problem. The gap between read and CAS can always corrupt the memory.
+    - Patronus way: lease (amortize the overhead of querying) + backup QP (hide the QP recovery overhead) + MW (quick permission change)
+    - Not open-sourced. Should impl it on my own.
+    - The extender (or shrinker) acquires for a lease, instead of locking with CAS. Then, if the CN thread failed, other threads can help.
+    - The permission to the KV pool could also use lease.
+    - Report:
+        - a) close all the RDMA connections case
+        - b) rereg MR works, but will not report, because the motivation already rules out this.
+        - c) Do nothing: the theoretical performance bound
+        - d) Patronus management subtable allocations and deallocation.
+        - report the 1) regular performance, 2) shrink will not lower performance 3) expending is on the critical path, so report the expending latency!
+- Or CoRM, because it is open-sourced
+- From AIFM to AIFM-Patronus
+    - AIFM reports a 0.3 Mops for its syncthetic workload. Should be far enough for Patronus
+    - remoteable SPSC dynamic queue 
+        - Argue that AIFM does not and can not consider the multiple CN situations. Because when the queue expends the producer will access invalid memory.
+        - We impl a simple SPSC queue, which support expanding: use Patronus to revoke the access permission on the old small memory.
+    - AIFM's vector expending and shrinking, should be a good case.
+- workload for remote memory I. Showing that Patronus will not lower down perofrmance
+    - Workload of graph-analytics, inception, quicksort, in-memory-analytics, kmeans, xsbench
+    - The performance ratio of Patronus and register MR. The performance of Patronus v.s. FastSwap
+    - Varing local memory ratio
+    - ArXiv hardware-assisted trusted memory disaggregation for secure far memory. Figure 18.
+- [may] The performance of KV (So... what's the purpose of this experiment?)
+    - The index is accessible by anyone (because too fine-granularity for Patronus to offer high performance), or the privilige index thread (delegated)
+    - The actual KV pairs are accessed by worker threads, guarded by Patronus.
+    - Maybe a hand-writing one, maybe the passive KV on disaggregated memory.
+        - for Passive KV, the 4CN+4DN/8threads setting with YCSB A(50/50 R/W) gets only 5Mops. I think Patronus is able to reach that.
+    - So I can compare in this way. a) MN do the index searching + write, b) client do indexing searching, grant lease then write. c) totally one-sided.
+- [may] Compare with FaRM. Does it make sense to compare FaRM?
+    - Not open-sourced, should emulate it.
+
+# TODO
+[-] Find any serverless or container frameworks based on DM and C++: All the serverless platform is based on GoLang, which can not link with C++.
+- Is FastSwap, Infiniswap, AIFM crash tolerance?
+[-] HOW CoRM compares to FaRM: FaRM is not open-sourced, so CoRW emulated FaRM (including its cacheline consistency check) following the publicly available information.
+    - CoRM use the same consistency checking algorithm (per-cacheline version), so it compares to FaRM.
+
+# Some Results
+Register MR: 50us for 4KB from KRCore
+QP memory overhead: 292 sq, 257 comp_queue entries, sq entry takes 448B, cq takes 4 B. Each RCQP takes 159KB.
+
+## bench_allocator
+Memory Window binding:
+* Every request signal (no batching): 
+1.18 Mops per thread
+up to 19 Mops with 31 threads
+* Every request signal (no batching, 8 coroutines):
+2.56 Mops per thread
+up to 26 Mops with 16 threads (I think RNIC bounded)
+
+## bench_patronus_alloc
+One patronus->get_rlease() requires two binding: one for PR and one for buffer.
+
+* patronus->get_rlease(kNoBindAny):
+2.13 Mops per thread with 16 coroutines
+up to 25.5 Mops with 16 threads
+
+* patronus->get_rlease(kDebugNoBindPr):
+1.42 Mops per thread with 16 coroutines
+up to 17.8 Mops with 16 threads
+
+* patronus->get_rlease():
+1.32 Mops per thread with 16 coroutines
+up to 9.1 Mops with 8 threads
+
+* patronus->get_rlease(kTypeAlloc)
+1.2 Mops per thread with 16 coroutines 
+up to 14.9 Mops with 16 threads
+
+* patronus->get_rlease(kTypeAlloc | kRelinquishNoUnbind)
+1.5 Mops per thread with 16 coroutines
+up to 17. Mops with 16 threads
+
+# patronus->get_rlease(kTypeAlloc)
+
+I guess it is switching to rmsg bounded now. 
+TODO: Still not perfect results.
+- Expect: patronus->get_rlease(kDebugNoBindPr) can be close to bench_allocator reports (i.e. 26 Mops)
+- Expect: patronus->get_rlease() can be half of bench_allocator reports (i.e. 13 Mops)
+
+# Racehashing
+
+## ReadOnly
+
+The data is preliminary, may get better later.
+Thread = 8, Coco = 16, RO, RH<4, 16, 16>
+Got 4.3 Mops. ~30us
+
+=> enable batching for r/w/cas
+Thread = 8, Coro = 16, RO, RH<4, 16, 16>
+Got 5 Mops. ~25us
+
+So strange, sometimes 4.3 Mops, sometimes 5 Mops. It seems that at the start of the program, the performance is fixed. Maybe due to CPU frequency? or RNIC policy?
+
+## The effectness of MR & MW
+
+bench_race_rdma_op.2022-04-09.22:06:49.f65ccaa9.csv
+unprot: 4.9 & 5.2 Mop
+patronus: 4.0 & 4.5 Mops
+MR: 609 & 473 Kops
+
+## About the success rate
+
+Insert fail by nomem (insert can be tested by individual experiments: load with initial subtables)
+Query fail by not found (already zip 0.99, can change max_key if needed)
+Delete fail by not found (same as query)
+At least: make sense
+
+```
+[bench] insert: succ: 657, retry: 115, nomem: 7199, del: succ: 139, retry: 125, not found: 7136, get: succ: 3586, not found: 62382. executed: 81339, take: 2352721033 ns. ctx: {Coro T(3) 3}
+[bench] insert: succ: 606, retry: 130, nomem: 6752, del: succ: 135, retry: 107, not found: 6520, get: succ: 3595, not found: 57179. executed: 75024, take: 2213821922 ns. ctx: {Coro T(2) 8}
+```
+
+## Auto-gc
+
+Now auto-gc have better performance, but negligible. Should be more significant, like 10% boost.
+The reason (I guess) is that, 
+1. The patronus version will skip binding PR, but the auto-gc version have to. That would be unfair I guess. 
+2. Also auto-gc version has to unbind PR. 
+3. The auto-gc version requires every unbind to be signal. Instead, we could let every N of one signal.
+
+The auto-gc's latency is worse. But at least it is runnable.
+
+## bench_patronus_fast_recovery
+Don't know, but I got the number I want.
+The fast recovery can not reach us(s) latency, because we need at least ~600us to detect the fault.
+But we could achieve 1/3 latency compared to the naive recovering solution, which is great.
+
+Querying QP status: needs ~60us, too slow to be applicable.
+No way to optimize querying QP status: at least didn't find
+No way to make the failed wc occurs faster: at least didn't find
+
+## About the overhead of DDL Manager and Unbind
+I with auto-gc can be fast, because it saves one RPC for p->relinquish. However, I find that it is not as fast as I expect.
+
+3 Clients, 1 Server, 32 client threads, proper coroutine. 4 server threads, 32 coroutine.
+bench_patronus_basic.2022-06-02.19:13:18.a1fb0260 and several neibour csv.
+
+Pure Message: 10Mops
+No DDL-manager (run task_gc_lease directly), No unbind: 6.2 Mops
+No DDL-manager (run task_gc_lease directly), unbind: 5.9 Mops (unbind low overhead)
+With DDL-manager, No unbind: 5.1 Mops (DDL-manager has higher impact on performance)
+With DDL-manager, unbind: 3.7 Mops (DDL-manager with unbind has great impact on performance)
+
+## cqueue
+mw v.s. rpc
+When client threads are seldom (<= 8), mw better than rpc, because lower RPC overheads.
+T 1 2 4 8
+mw 576Kops, 1.05Mops, 1.72Mops, 1.74Mops
+rpc 326Kops, 611Kops, 1.08 Mops, 1.73Mops
+
+When threads are more, rpc better than mw, because RDMA FAA bottleneck. RDMA FAA needs two PCIe transaction to read and than add, while RPC enables batching.
+T 16 32
+mw 1.78Mops, 1.75Mops
+rpc 22.6Mops, 23.7Mops
+
+# bench_clone
+with 4 cores (NR_DIRECTORY)
+
+size (1 coro/8 coro), MN vs CN
+8B 6.7Mops/7.2Mops vs 15.4Mops/35Mops x4.8
+4KB 3.1Mops/same vs 2.8Mops/same x1.1
+2_MB 8.6Kops/7.6Kops vs 5.5Kops/4.7Kops x1.56
+128MB 46 vs 37 x1.24
+Conclusion: copy once, MN favours larger buffer while CN favours smaller one.
+
+length with 8B (1coro/8coro)
+1 6.9Mops/7.3Mops vs 17.3Mops/63Mops
+64 356Kops vs 270Kops/994Kops
+1024 23Kops vs 16.9Kops/59Kops
+10K 2.3Kops vs 1.3Kops
+20K 198 vs 77
+Conclusion: CN always better with < 10K length, because ~60Mops is so huge that MN can not keep pace with.
+
+length with 2MB
+1 8.8Kops vs 5.2Kops
+64 153 vs 86
+256 38 vs 21
+Conclusion: meaningless

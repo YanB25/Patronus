@@ -21,6 +21,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <string.h>
+
 #include <cstdio>
 #include <string>
 
@@ -39,13 +40,13 @@ public:
     }
 
     // Create a slice that refers to d[0,n-1].
-    Slice(const char* d, size_t n) : data_(d), size_(n)
+    Slice(const char *d, size_t n) : data_(d), size_(n)
     {
     }
 
     // Create a slice that refers to the contents of "s"
     /* implicit */
-    Slice(const std::string& s) : data_(s.data()), size_(s.size())
+    Slice(const std::string &s) : data_(s.data()), size_(s.size())
     {
     }
 
@@ -59,17 +60,17 @@ public:
 
     // Create a slice that refers to s[0,strlen(s)-1]
     /* implicit */
-    Slice(const char* s) : data_(s)
+    Slice(const char *s) : data_(s)
     {
         size_ = (s == nullptr) ? 0 : strlen(s);
     }
 
     // Create a single slice from SliceParts using buf as storage.
     // buf must exist as long as the returned Slice exists.
-    Slice(const struct SliceParts& parts, std::string* buf);
+    Slice(const struct SliceParts &parts, std::string *buf);
 
     // Return a pointer to the beginning of the referenced data
-    const char* data() const
+    const char *data() const
     {
         return data_;
     }
@@ -134,31 +135,31 @@ public:
     // (e.g not coming from Slice::ToString(true)) DecodeHex returns false.
     // This slice is expected to have an even number of 0-9A-F characters
     // also accepts lowercase (a-f)
-    bool DecodeHex(std::string* result) const;
+    bool DecodeHex(std::string *result) const;
 
     // Three-way comparison.  Returns value:
     //   <  0 iff "*this" <  "b",
     //   == 0 iff "*this" == "b",
     //   >  0 iff "*this" >  "b"
-    int compare(const Slice& b) const;
+    int compare(const Slice &b) const;
 
     // Return true iff "x" is a prefix of "*this"
-    bool starts_with(const Slice& x) const
+    bool starts_with(const Slice &x) const
     {
         return ((size_ >= x.size_) && (memcmp(data_, x.data_, x.size_) == 0));
     }
 
-    bool ends_with(const Slice& x) const
+    bool ends_with(const Slice &x) const
     {
         return ((size_ >= x.size_) &&
                 (memcmp(data_ + size_ - x.size_, x.data_, x.size_) == 0));
     }
 
     // Compare two slices and returns the first byte where they differ
-    size_t difference_offset(const Slice& b) const;
+    size_t difference_offset(const Slice &b) const;
 
     // private: make these public for rocksdbjni access
-    const char* data_;
+    const char *data_;
     size_t size_;
 
     // Intentionally copyable
@@ -168,7 +169,7 @@ public:
 // to an array of Slices.  The number of elements in the array is 'num_parts'.
 struct SliceParts
 {
-    SliceParts(const Slice* _parts, int _num_parts)
+    SliceParts(const Slice *_parts, int _num_parts)
         : parts(_parts), num_parts(_num_parts)
     {
     }
@@ -176,22 +177,22 @@ struct SliceParts
     {
     }
 
-    const Slice* parts;
+    const Slice *parts;
     int num_parts;
 };
 
-inline bool operator==(const Slice& x, const Slice& y)
+inline bool operator==(const Slice &x, const Slice &y)
 {
     return ((x.size() == y.size()) &&
             (memcmp(x.data(), y.data(), x.size()) == 0));
 }
 
-inline bool operator!=(const Slice& x, const Slice& y)
+inline bool operator!=(const Slice &x, const Slice &y)
 {
     return !(x == y);
 }
 
-inline int Slice::compare(const Slice& b) const
+inline int Slice::compare(const Slice &b) const
 {
     assert(data_ != nullptr && b.data_ != nullptr);
     const size_t min_len = (size_ < b.size_) ? size_ : b.size_;
@@ -206,7 +207,7 @@ inline int Slice::compare(const Slice& b) const
     return r;
 }
 
-inline size_t Slice::difference_offset(const Slice& b) const
+inline size_t Slice::difference_offset(const Slice &b) const
 {
     size_t off = 0;
     const size_t len = (size_ < b.size_) ? size_ : b.size_;

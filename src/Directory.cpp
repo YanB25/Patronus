@@ -16,7 +16,7 @@ std::shared_ptr<Directory> Directory::newInstance(
     uint64_t dirID,
     uint16_t nodeID)
 {
-    return future::make_shared<Directory>(
+    return std::make_shared<Directory>(
         dCon, remoteInfo, machineNR, dirID, nodeID);
 }
 
@@ -49,8 +49,9 @@ Directory::~Directory()
 
 void Directory::dirThread()
 {
+    CHECK(false) << "TODO:";
     bindCore(23 - dirID);
-    info("dir %d launch!\n", dirID);
+    LOG(INFO) << "dir " << dirID << " launch!\n";
 
     while (true)
     {
