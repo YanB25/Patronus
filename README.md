@@ -132,3 +132,20 @@ cd script
 ```
 
 After running the codes, the cluster-wise logs are stored in `script/fetched/` directory. You can check the logs.
+
+## Citation
+
+```
+@inproceedings {285738,
+author = {Bin Yan and Youyou Lu and Qing Wang and Minhui Xie and Jiwu Shu},
+title = {Patronus: {High-Performance} and Protective Remote Memory},
+booktitle = {21st USENIX Conference on File and Storage Technologies (FAST 23)},
+year = {2023},
+isbn = {978-1-939133-32-8},
+address = {Santa Clara, CA},
+pages = {315--330},
+url = {https://www.usenix.org/conference/fast23/presentation/yan},
+publisher = {USENIX Association},
+month = feb
+}
+```
