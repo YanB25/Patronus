@@ -4,16 +4,16 @@ Patronus is a high-performance RDMA framework with access protection semantics (
 
 For more details, please refer to our [paper](https://www.usenix.org/conference/fast23/presentation/yan):
 
-[FAST'23] Patronus: High-Performance and Protective Remote Memory.
+**[FAST'23]** Patronus: High-Performance and Protective Remote Memory.
 
 ## System Requirements
 - Mellanox ConnectX-5 NICs and above (other versions are not tested).
-- RDMA Driver: MLNX_OFED_LINUX-4.* (If you use MLNX_OFED_LINUX-5**, you should modify codes to resolve interface incompatibility)
+- RDMA Driver: `MLNX_OFED_LINUX-4.*` (If you use `MLNX_OFED_LINUX-5.*`, you should modify codes to resolve interface incompatibility)
 - memcached (to exchange QP information)
 
 ## API
 
-See [Patronus.h](include/patronus/Patronus.h).
+See the comments in [Patronus.h](include/patronus/Patronus.h).
 
 ``` c++
 // Access permission (lease) management
@@ -46,30 +46,26 @@ inline RetCode read(Lease &lease,
                     size_t size,
                     size_t offset,
                     flag_t flag /* RWFlag */,
-                    CoroContext *ctx,
-                    TraceView = util::nulltrace);
+                    CoroContext *ctx);
 inline RetCode write(Lease &lease,
                     const char *ibuf,
                     size_t size,
                     size_t offset,
                     flag_t flag /* RWFlag */,
-                    CoroContext *ctx,
-                    TraceView = util::nulltrace);
+                    CoroContext *ctx);
 inline RetCode cas(Lease &lease,
                     char *iobuf,
                     size_t offset,
                     uint64_t compare,
                     uint64_t swap,
                     flag_t flag /* RWFlag */,
-                    CoroContext *ctx,
-                    TraceView = util::nulltrace);
+                    CoroContext *ctx);
 inline RetCode faa(Lease &lease,
                     char *iobuf,
                     size_t offset,
                     int64_t value,
                     flag_t flag /* RWFlag */,
-                    CoroContext *ctx,
-                    TraceView = util::nulltrace);
+                    CoroContext *ctx);
 
 ```
 
